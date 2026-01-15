@@ -120,7 +120,7 @@ async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]
         await _seleccionar_archivos(popup, archivos)
         await _adjuntar_y_continuar(popup)
         try:
-            await popup.wait_for_event("close", timeout=5000)
+            await popup.wait_for_event("close", timeout=500)
         except TimeoutError:
             try:
                 await popup.evaluate("() => window.close()")

@@ -1,0 +1,647 @@
+<html lang="ca" class="no-js" data-insuit-uuid="e042eb34-d92e-440d-bdb9-c270201caea6"><head>
+	<title>Llistat Tràmits Multes i Sancions</title>
+	<link rel="shortcut icon" type="image/vnd.microsoft.icon" href="../../../../comuns/favicon.ico">
+	<meta name="description" content="Lorem ipsum dolor sit amet, consectetur adipiscing elit.">
+	<meta charset="utf-8">
+	<meta http-equiv="X-UA-Compatible" content="IE=edge">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<link rel="stylesheet" href="../../../../comuns/css/base.css">
+	<meta name="robots" content="index,follow">
+	<meta name="keywords" content="">
+	<style>
+	#x-insuit-tab {
+	top: 50% !important;
+	}
+	</style>
+	<script async="async" type="text/javascript" src="https://www-pre--base--cat.insuit.net/i4tservice/insuit-app.js"></script><script type="text/javascript" src="https://cdn.insuit.net/i4tservice/i18nservice/texts.js?V9.6.0-88-000" class="insuit-script"></script><script type="text/javascript" async="" crossorigin="anonymous" src="https://www-pre--base--cat.insuit.net/i4tproject/www.base.cat/resources.js?version=01.00.07&amp;V9.6.0-88-000" class="insuit-script"></script><link type="text/css" rel="stylesheet" media="screen, print" href="https://cdn.insuit.net/i4tservice/css/insuit-page.css?V9.6.0-88-000" crossorigin="anonymous"><link type="text/css" rel="stylesheet" media="screen, print" href="https://cdn.insuit.net/i4tservice/css/insuit-page.css?V9.6.0-88-000" crossorigin="anonymous"></head>
+
+<body class="i4t-desktop">
+
+<div id="x-insuit-shadow-container" class="skiptranslate insuit-tab"></div><header role="banner" aria-label="Capçalera de la página" data-insuit-uuid="a8e188f1-db3a-4ea0-a4c0-b4833cede714">
+    <div class="header-top">
+    	<div class="container">
+    	    <a href="http://www.dipta.cat" target="_blank" role="link" aria-label="Diputació Tarragona." data-insuit-uuid="2ed73b4d-02ca-43eb-833e-3c7db4eb1edb">
+    		    <img src="../../../../recursos/imatges/comu/ca/marca_dipta.gif" alt="Logotip Diputació de Tarragona">
+    		</a>
+    	</div>
+    </div>
+    
+    <div id="main-header" class="header">
+    	<div class="container">
+    		<div class="row">
+    			<div class="col-xs-7 col-sm-5">
+    				<button id="menu-trigger" class="menu-trigger visible-xs-inline-block visible-sm-inline-block" aria-hidden="true" tabindex="-1" aria-controls="mobile-menu" aria-label="Menu principal" data-insuit-uuid="00703066-e695-4e02-8b45-f583790f2ab1"><span class="icon-menu"></span><span class="open">Menú</span><span class="close">Tancar</span></button>
+    				<a href="../../../../ciutada/ca/home.html" class="logo" title="Logotip BASE" role="link" aria-label="Pàgina d'inici" data-insuit-uuid="c0da16d3-c4d1-4a4e-8026-d6fadbb445de"><img src="../../../../recursos/imatges/comu/ca/logo_base.jpg" alt="Logotip BASE"></a>
+							&nbsp;&nbsp;
+							<img src="../../../../recursos/imatges/home/BASE_30a.png" alt="Icona de BASE 30 anys" height="50px">	
+						<ul class="header-menu header-menu-mbl" aria-hidden="true" tabindex="-1">
+    					<li>
+    						<div class="dropdown">
+    					    <button id="lang" type="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" class="no-focus-outline i4t-listeners" aria-controls="i4t-id-dtzh93yv6" aria-label="Desplegar menú d'idiomes: CAT
+" tabindex="-1">CAT<span class="caret"></span>
+</button>
+<ul class="dropdown-menu" id="i4t-id-dtzh93yv6" role="menu" aria-label="Menú d'idiomes" aria-orientation="vertical">
+<li role="menuitem" aria-label="Espanyol" class="i4t-listeners"><a href="../../../../ciutada/es/tramits/multes-i-sancions/multes-i-sancions.html" tabindex="-1">ES</a></li><li role="menuitem" aria-label="Anglès" class="i4t-listeners"><a href="../../../../ciutada/en/tramits/multes-i-sancions/multes-i-sancions.html" tabindex="-1">EN</a></li></ul>
+    						</div>
+    					</li>
+    				</ul>    
+    			</div>
+    			<div class="col-xs-12 col-sm-5">
+    				<div class="search-form clearfix" role="search" aria-label="Reserca" data-insuit-visibility="true" id="i4t-search-form" data-insuit-uuid="17b7f265-646e-434e-accf-5400fcf2032a">
+    					<label for="search-header" class="sr-only" aria-hidden="true" tabindex="-1">Introdueix la teva cerca</label>
+    					<input id="search-header" type="search" placeholder="Introdueix la teva cerca" data-insuit-uuid="4509652d-3c53-4783-8935-5d98dd621922">
+    					<button type="button" onclick="searchForm()" id="search-btn" aria-label="Cerca." data-insuit-uuid="1e19634e-51bb-4186-b8c7-63d43b81aa85"><i class="icon-search"></i><span class="sr-only" aria-hidden="true" tabindex="-1">Cerca</span></button>
+    				</div>
+    				<script>
+    				    var input = document.getElementById("search-header");
+            			input.addEventListener("keypress", function(event) {
+            				if (event.key === "Enter") {
+            					event.preventDefault();
+            					document.getElementById("search-btn").click();
+            				}
+            			});
+    				    function searchForm(){
+							var cerca = document.getElementById("search-header").value;
+							var url = '../../../../ciutada/ca/cerca/resultats.html?search-header='+cerca;
+							window.location.href = url;
+						}
+    				</script>
+    				<ul class="header-menu header-menu-dtp">
+    					<li>
+    						<div class="dropdown">
+    						    <button id="lang" type="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" class="no-focus-outline i4t-listeners" aria-controls="i4t-id-df215tqqq" aria-label="Desplegar menú d'idiomes: CAT" data-insuit-uuid="93a81024-135c-422c-a2ae-7420762bdb3b">CAT<span class="caret"></span>
+</button>
+<ul class="dropdown-menu" id="i4t-id-df215tqqq" role="menu" aria-label="Menú d'idiomes" aria-orientation="vertical" data-insuit-uuid="770a83fe-cf9e-4bfb-9883-1adaa28f9c69">
+<li role="menuitem" aria-label="Espanyol" class="i4t-listeners" data-insuit-uuid="29a34b0c-b77b-47d3-9c42-4f9d0006d0a1"><a href="../../../../ciutada/es/tramits/multes-i-sancions/multes-i-sancions.html" data-insuit-uuid="0a77b249-b5e3-4bbc-978f-768506ed82be">ES</a></li><li role="menuitem" aria-label="Anglès" class="i4t-listeners" data-insuit-uuid="35a6aa14-9d1b-41f3-8602-60faaec90f14"><a href="../../../../ciutada/en/tramits/multes-i-sancions/multes-i-sancions.html" data-insuit-uuid="8b3193a5-9866-477e-8f40-6c2542a920c4">EN</a></li></ul>
+    						</div>
+    					</li>
+    				</ul>
+    			</div>
+    			<button id="search-trigger" class="btn-icon visible-xs" aria-hidden="true" tabindex="-1" data-insuit-uuid="95c0a038-ce2e-42c1-862e-ee4a3748d028">
+    				<span class="icon-search"></span>
+    				<span class="sr-only" aria-hidden="true" tabindex="-1">Cerca</span>
+    			</button>
+    			<a href="https://www.base.cat/sav/valid" class="logo_text" data-insuit-uuid="49d09886-c1f1-4580-8cff-7f086cf0b37d">
+    				<span class="icon-online"></span>
+    				<span>Base On-line</span>
+    			</a>
+    		</div>
+    	</div>
+    	<nav id="mobile-menu" class="hidden-md hidden-lg" role="menu" aria-label="Menu principal" aria-orientation="vertical" data-insuit-uuid="d0adcb0c-c1bd-4f03-9504-2753b77c19ec" aria-owns="i4t-id-k2gwq3hkf i4t-id-fuheibhls i4t-id-anb15g296 i4t-id-03wke0cs8 i4t-id-kpmff7mwf i4t-id-taw7leak4 i4t-id-nwifb1k1j i4t-id-ifhrwmvuo">
+    <ul class="first-level">
+        <li class="active" role="none"><a href="../../../../ciutada/ca/tramits/la-meva-carpeta/la-meva-carpeta.html" role="menuitem" aria-controls="i4t-id-lmxe8con2" class="i4t-listeners" title="Tràmits: la-meva-carpeta" data-insuit-uuid="ac71ce01-bffa-4a90-9522-4339af37c3b6" id="i4t-id-k2gwq3hkf"><span class="menu-mobile-icon icon-tramits"></span>Tràmits</a>
+            <ul class="submenu" role="menu" id="i4t-id-lmxe8con2" aria-orientation="vertical" data-insuit-uuid="51946221-b9f0-4a3a-9e68-c95fd1e9683c" aria-owns="i4t-id-nzkv39698 i4t-id-gi76evsr7 i4t-id-7vcepqn09 i4t-id-9u51okfih i4t-id-4ugqsjdxx i4t-id-9o4lctni9 i4t-id-jhoe3o5f3">
+                        <li class="la-meva-carpeta" role="none"><a href="../../../../ciutada/ca/tramits/la-meva-carpeta/la-meva-carpeta.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="711c4006-eca2-4e95-86de-afec5c166761" id="i4t-id-nzkv39698"><span class="menu-mobile-icon icon-dades"></span>La meva carpeta</a></li>
+                        <li class="pagaments" role="none"><a href="../../../../ciutada/ca/tramits/pagaments/pagaments.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="6a73e67f-5f8b-4a55-b4bc-a9dadce15e9a" id="i4t-id-gi76evsr7"><span class="menu-mobile-icon icon-pagaments"></span>Pagaments i justificants</a></li>
+                        <li class="tributs" role="none"><a href="../../../../ciutada/ca/tramits/tributs/tributs.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="8d833606-45fc-4486-a66c-34a9a8c540d5" id="i4t-id-7vcepqn09"><span class="menu-mobile-icon icon-tributs"></span>Tributs</a></li>
+                        <li class="taxes" role="none"><a href="../../../../ciutada/ca/tramits/taxes/taxes.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="ebe5e455-7738-46d9-9ff4-1bc4b15c48db" id="i4t-id-9u51okfih"><span class="menu-mobile-icon icon-taxes"></span>Taxes</a></li>
+                        <li class="active" role="none"><a href="../../../../ciutada/ca/tramits/multes-i-sancions/multes-i-sancions.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="0ceebf7e-d901-45f6-a86b-36fd127cd9a5" id="i4t-id-4ugqsjdxx"><span class="menu-mobile-icon icon-multes"></span>Multes i sancions</a></li>
+                        <li class="recursos" role="none"><a href="../../../../ciutada/ca/tramits/recursos/recursos.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="cb8ae5c1-1fbe-4cc5-a49d-b9eb557896cf" id="i4t-id-9o4lctni9"><span class="menu-mobile-icon icon-recursos"></span>Recursos</a></li>
+                        <li class="altres-tramits" role="none"><a href="../../../../ciutada/ca/tramits/altres-tramits/altres-tramits.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="822f9aa3-cfd1-48f1-adec-cb09d70f62c7" id="i4t-id-jhoe3o5f3"><span class="menu-mobile-icon icon-tramits"></span>Altres tràmits</a></li>
+            </ul>
+        </li>
+        <li class="serveis" role="none"><a href="../../../../ciutada/ca/serveis/cita-previa/cita-previa.html" role="menuitem" aria-controls="i4t-id-d1xy8j4eo" class="i4t-listeners" data-insuit-uuid="cf6e7a05-9aa4-4dff-be69-f47fb2ddf7ac" id="i4t-id-fuheibhls"><span class="menu-mobile-icon icon-serveis"></span>Cita prèvia i altres serveis</a>
+            <ul class="submenu" role="menu" id="i4t-id-d1xy8j4eo" aria-orientation="vertical" data-insuit-uuid="f2e4fd05-aeb5-411b-99ad-a88018708082" aria-owns="i4t-id-frfi7cuaz i4t-id-76680wcwk i4t-id-ffsq9tib4 i4t-id-l768l5glo i4t-id-pmpinriyp i4t-id-4jsiq0qas">
+                        <li class="cita-previa" role="none"><a href="../../../../ciutada/ca/serveis/cita-previa/cita-previa.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="013b93b7-5ac2-4e1a-aa65-a053bf4003c6" id="i4t-id-frfi7cuaz"><span class="menu-mobile-icon icon-cita"></span>Cita prèvia</a></li>
+                        <li class="validacio" role="none"><a href="../../../../ciutada/ca/serveis/validacio/validacio.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="e70a0ec2-a20e-425c-adf4-e9a99fc53bee" id="i4t-id-76680wcwk"><span class="menu-mobile-icon icon-validacio"></span>Validació de Documents</a></li>
+                        <li class="notificacions" role="none"><a href="../../../../ciutada/ca/serveis/notificacions/notificacions.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="4cc38bdd-7617-449b-85ed-02e98ad27c8d" id="i4t-id-ffsq9tib4"><span class="menu-mobile-icon icon-notificacions"></span>Notificacions i publicacions edictals</a></li>
+                        <li class="agencia" role="none"><a href="../../../../ciutada/ca/serveis/agencia/agencia.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="7389835c-376b-4b94-ad9f-a719f59b5ea1" id="i4t-id-l768l5glo"><span class="menu-mobile-icon icon-agencia"></span>Agència tributària (ATC)</a></li>
+                        <li class="facturacio" role="none"><a href="../../../../ciutada/ca/serveis/facturacio/facturacio.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="c72f65d2-44ac-497f-a43e-ceee7fd9b430" id="i4t-id-pmpinriyp"><span class="menu-mobile-icon icon-facturacio"></span>Facturació electrònica</a></li>
+                        <li class="perfil" role="none"><a href="../../../../ciutada/ca/serveis/perfil/perfil.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="6947b17b-87cc-41ec-b0c1-8095c01fb81b" id="i4t-id-4jsiq0qas"><span class="menu-mobile-icon icon-perfil"></span>Perfil del contractant</a></li>
+            </ul>
+        </li>
+        <li class="municipi" role="none"><a href="../../../../ciutada/ca/municipi/municipis.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="e0d4fe78-ab88-45d7-a462-6bae91931100" id="i4t-id-anb15g296"><span class="menu-mobile-icon icon-municipi"></span>El teu municipi</a>
+        </li>
+        <li class="xarxa" role="none"><a href="../../../../ciutada/ca/xarxa/xarxes.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="f7436ef9-ba6a-4709-8ff1-f4ba3cd1a99f" id="i4t-id-03wke0cs8"><span class="menu-mobile-icon icon-xarxa"></span>Xarxa d'oficines</a>
+        </li>
+        <li class="base" role="none"><a href="../../../../ciutada/ca/base/presentacio/presentacio.html" role="menuitem" aria-controls="i4t-id-exktqawxv" class="i4t-listeners" data-insuit-uuid="86917be2-aaea-4e44-a366-82c2822c2166" id="i4t-id-kpmff7mwf"><span class="menu-mobile-icon icon-base"></span>BASE</a>
+            <ul class="submenu" role="menu" id="i4t-id-exktqawxv" aria-orientation="vertical" data-insuit-uuid="47dd45ac-97ea-45bf-a531-dcff46e4c7d3" aria-owns="i4t-id-x11sk2hn9 i4t-id-bu0qg290t i4t-id-0330kp9at i4t-id-0c2p4xdvc i4t-id-uu1ovv8uy i4t-id-749vvpcwe i4t-id-6z0jb44kt i4t-id-hrl9av2oc">
+                        <li class="presentacio" role="none"><a href="../../../../ciutada/ca/base/presentacio/presentacio.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="6788fc7e-1903-41f3-ba38-fb83e7f036e7" id="i4t-id-x11sk2hn9"><span class="menu-mobile-icon icon-presentacio"></span>Presentació</a></li>
+                        <li class="principis" role="none"><a href="../../../../ciutada/ca/base/principis/principis.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="a527ae50-1b06-4a5e-9dba-cb055353826a" id="i4t-id-bu0qg290t"><span class="menu-mobile-icon icon-principis"></span>Principis estratègics</a></li>
+                        <li class="competencies" role="none"><a href="../../../../ciutada/ca/base/competencies/competencies.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="45b748d8-a3ab-46bd-8827-ec90391fd814" id="i4t-id-0330kp9at"><span class="menu-mobile-icon icon-competencies"></span>Competències delegades</a></li>
+                        <li class="convocatories" role="none"><a href="../../../../ciutada/ca/base/convocatories/convocatories.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="82d0295d-a2e2-4b8a-8791-f510b521f160" id="i4t-id-0c2p4xdvc"><span class="menu-mobile-icon icon-convocatories"></span>Convocatòries de personal</a></li>
+                        <li class="centres" role="none"><a href="../../../../ciutada/ca/base/centres/centres.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="ef682a66-0da4-4440-af0a-6dfff1a7e393" id="i4t-id-uu1ovv8uy"><span class="menu-mobile-icon icon-centres"></span>Centres</a></li>
+                        <li class="proteccio-dades-personals" role="none"><a href="../../../../ciutada/ca/base/proteccio-dades-personals/proteccio-dades-personals.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="8c5cbb7c-368b-4e0a-b5f2-8b3a85734350" id="i4t-id-749vvpcwe"><span class="menu-mobile-icon icon-proteccio"></span>Protecció de dades personals</a></li>
+                        <li class="entitats" role="none"><a href="../../../../ciutada/ca/base/entitats/entitats.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="49b57930-639a-4dc0-86ff-e6fb12d04884" id="i4t-id-6z0jb44kt"><span class="menu-mobile-icon icon-entitat"></span>Entitats col.laboradores</a></li>
+                        <li class="premsa" role="none"><a href="../../../../ciutada/ca/base/premsa/premsa.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="32ef46a7-bb0f-44bb-9f0a-f75a9266a06e" id="i4t-id-hrl9av2oc"><span class="menu-mobile-icon icon-prensa"></span>Sala de premsa</a></li>
+            </ul>
+        </li>
+        <li class="" role="none"><a href="http://www.dipta.cat/ca/transparencia" target="_blank" role="menuitem" class="i4t-listeners" data-insuit-uuid="1f316528-000e-4a1c-bb11-085cb69e4fb7" id="i4t-id-taw7leak4"><span class="menu-mobile-icon icon-transparencia"></span>Transparència</a>
+        </li>
+        <li class="atencio" role="none"><a href="../../../../ciutada/ca/atencio/dades/dades.html" role="menuitem" aria-controls="i4t-id-d092c8ygw" class="i4t-listeners" data-insuit-uuid="ae961d03-bf8f-46e4-b321-dce74efb553c" id="i4t-id-nwifb1k1j"><span class="menu-mobile-icon icon-atencio"></span>Atenció ciutadana</a>
+            <ul class="submenu" role="menu" id="i4t-id-d092c8ygw" aria-orientation="vertical" data-insuit-uuid="2b29bd5b-3334-4cf1-bd9a-bfab16acc2ac" aria-owns="i4t-id-u4zp5hb9n i4t-id-h7ct7uucj">
+                        <li class="dades" role="none"><a href="../../../../ciutada/ca/atencio/dades/dades.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="07f14a92-02a9-4811-9285-3cb68aa20e31" id="i4t-id-u4zp5hb9n"><span class="menu-mobile-icon icon-govern"></span>Dades de contacte</a></li>
+                        <li class="coneix" role="none"><a href="../../../../ciutada/ca/atencio/coneix/coneix.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="aff04d78-e180-4658-b895-6f7387c2ab88" id="i4t-id-h7ct7uucj"><span class="menu-mobile-icon icon-coneix"></span>Coneix més sobre...</a></li>
+            </ul>
+        </li>
+        <li class="base-online" role="none"><a href="../../../../ciutada/ca/base-online/base-online.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="d9217fdf-b715-4db4-8235-cbf9f2512ad1" id="i4t-id-ifhrwmvuo"><span class="menu-mobile-icon icon-online-bw"></span>BASE On-line</a>
+        </li>
+    </ul>
+</nav>
+    </div>
+</header>
+<main data-insuit-top="+1px" aria-label="Contingut principal." id="insuit-main" data-insuit-uuid="e8860072-e40a-4ce6-bdc9-89ca1c3fd739" role="main">
+	
+<div class="section-title" style="background-image: url('../../../../recursos/imatges/tramits/ca/tramits.jpg');">
+    <div class="container">
+        <h2 class="h1"><span class="icon-tramits"></span>Tràmits</h2>
+    </div>
+</div>    
+    <nav id="distributor" class="menu submenu-opened" role="menubar" aria-live="polite" aria-label="Menu principal" aria-orientation="horizontal" data-insuit-uuid="1436cb18-0dc0-4982-8c91-b07287403405" aria-owns="i4t-id-zkmb6wfg4 i4t-id-73agvcea4 i4t-id-wkb3di1e4 i4t-id-2jgdjnzvz i4t-id-8c14z88xf i4t-id-libkbrc04 i4t-id-veyg7r4yr i4t-id-i91vi9oev">
+    <div class="container">
+        <div class="menu-content">
+            <ul class="first-level" role="none">
+								
+                <li class="active" role="none">
+									<a href="../../../../ciutada/ca/tramits/la-meva-carpeta/la-meva-carpeta.html" role="menuitem" class="i4t-listeners" aria-controls="i4t-id-uiun12b4a" data-insuit-uuid="bad37c57-a3d5-4685-973f-99115bc1b34e" id="i4t-id-zkmb6wfg4">
+										<span class="icon-tramits"></span>
+										Tràmits
+										<span class="sr-only" aria-hidden="true" tabindex="-1">Obre una nova finestra</span>
+									</a>
+									<ul class="submenu" role="menu" aria-orientation="horizontal" id="i4t-id-uiun12b4a" data-insuit-uuid="b532b535-5e56-44b7-b182-4d9441f0e5a6" aria-owns="i4t-id-gho53g5ii i4t-id-iseqke0j6 i4t-id-nhlo5a5gr i4t-id-62oqo3gta i4t-id-bvxdgldt1 i4t-id-qmico6al3 i4t-id-ysrhm8bq4">
+										<li class="la-meva-carpeta" role="none">
+											<a href="../../../../ciutada/ca/tramits/la-meva-carpeta/la-meva-carpeta.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="9be1a47a-88df-4217-a5c0-8bdfd364250f" id="i4t-id-gho53g5ii">
+												<span class="icon-dades"></span>
+												La meva carpeta
+											</a>
+										</li>      
+										<li class="pagaments" role="none">
+											<a href="../../../../ciutada/ca/tramits/pagaments/pagaments.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="7aa62b65-d5ce-41f8-894e-ec24b5e59dc6" id="i4t-id-iseqke0j6">
+												<span class="icon-pagaments"></span>
+												Pagaments i justificants
+											</a>
+										</li>      
+										<li class="tributs" role="none">
+											<a href="../../../../ciutada/ca/tramits/tributs/tributs.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="f5f9291e-e097-49da-8a35-7151fba47a02" id="i4t-id-nhlo5a5gr">
+												<span class="icon-tributs"></span>
+												Tributs
+											</a>
+										</li>      
+										<li class="taxes" role="none">
+											<a href="../../../../ciutada/ca/tramits/taxes/taxes.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="0f7d25af-01d6-45b1-a1cb-bb4d9815d0b6" id="i4t-id-62oqo3gta">
+												<span class="icon-taxes"></span>
+												Taxes
+											</a>
+										</li>      
+										<li class="active" role="none">
+											<a href="../../../../ciutada/ca/tramits/multes-i-sancions/multes-i-sancions.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="d13aabdc-a553-45f8-983b-a6070cea1479" id="i4t-id-bvxdgldt1">
+												<span class="icon-multes"></span>
+												Multes i sancions
+											</a>
+										</li>      
+										<li class="recursos" role="none">
+											<a href="../../../../ciutada/ca/tramits/recursos/recursos.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="fc18b2e8-ce8d-47bb-a678-6318db3bba29" id="i4t-id-qmico6al3">
+												<span class="icon-recursos"></span>
+												Recursos
+											</a>
+										</li>      
+										<li class="altres-tramits" role="none">
+											<a href="../../../../ciutada/ca/tramits/altres-tramits/altres-tramits.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="ef34f623-2dc7-4e61-af54-db9214f5e5b5" id="i4t-id-ysrhm8bq4">
+												<span class="icon-tramits"></span>
+												Altres tràmits
+											</a>
+										</li>      
+									</ul>
+                </li>
+								
+                <li class="serveis" role="none">
+									<a href="../../../../ciutada/ca/serveis/cita-previa/cita-previa.html" role="menuitem" class="i4t-listeners" aria-controls="i4t-id-aklqym60l" data-insuit-uuid="d7321f94-50bf-4cd6-9ee6-23c98b2bfcb9" id="i4t-id-73agvcea4">
+										<span class="icon-serveis"></span>
+										Cita prèvia i altres serveis
+										<span class="sr-only" aria-hidden="true" tabindex="-1">Obre una nova finestra</span>
+									</a>
+									<ul class="submenu" role="menu" aria-orientation="horizontal" id="i4t-id-aklqym60l" data-insuit-uuid="2a38c04c-1ba7-48e8-935d-1d20413844ec" aria-owns="i4t-id-wkpipyykt i4t-id-1v6okye48 i4t-id-uayniytkr i4t-id-mvu7s9dc9 i4t-id-6oxjnkg9c i4t-id-59bbk0uud">
+										<li class="cita-previa" role="none">
+											<a href="../../../../ciutada/ca/serveis/cita-previa/cita-previa.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="389578e7-d9df-4e15-b9d3-528dc491d8fa" id="i4t-id-wkpipyykt">
+												<span class="icon-cita"></span>
+												Cita prèvia
+											</a>
+										</li>      
+										<li class="validacio" role="none">
+											<a href="../../../../ciutada/ca/serveis/validacio/validacio.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="2675bf5f-3263-485d-871d-29a817015b7a" id="i4t-id-1v6okye48">
+												<span class="icon-validacio"></span>
+												Validació de Documents
+											</a>
+										</li>      
+										<li class="notificacions" role="none">
+											<a href="../../../../ciutada/ca/serveis/notificacions/notificacions.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="055a3e0c-aaaa-4d71-8a9a-69935c31ca96" id="i4t-id-uayniytkr">
+												<span class="icon-notificacions"></span>
+												Notificacions i publicacions edictals
+											</a>
+										</li>      
+										<li class="agencia" role="none">
+											<a href="../../../../ciutada/ca/serveis/agencia/agencia.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="3056ef4f-b9ba-4a3d-aeb3-6dbd8bcd1860" id="i4t-id-mvu7s9dc9">
+												<span class="icon-agencia"></span>
+												Agència tributària (ATC)
+											</a>
+										</li>      
+										<li class="facturacio" role="none">
+											<a href="../../../../ciutada/ca/serveis/facturacio/facturacio.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="d7c602b0-0dfd-4e59-8227-136fedff048c" id="i4t-id-6oxjnkg9c">
+												<span class="icon-facturacio"></span>
+												Facturació electrònica
+											</a>
+										</li>      
+										<li class="perfil" role="none">
+											<a href="../../../../ciutada/ca/serveis/perfil/perfil.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="4abefff0-8dcc-4443-9703-62005876f2dd" id="i4t-id-59bbk0uud">
+												<span class="icon-perfil"></span>
+												Perfil del contractant
+											</a>
+										</li>      
+									</ul>
+                </li>
+								
+                <li class="municipi" role="none">
+									<a href="../../../../ciutada/ca/municipi/municipis.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="07b88ea2-477a-4058-9ab0-40571da63caa" id="i4t-id-wkb3di1e4">
+										<span class="icon-municipi"></span>
+										El teu municipi
+										<span class="sr-only" aria-hidden="true" tabindex="-1">Obre una nova finestra</span>
+									</a>
+                </li>
+								
+                <li class="xarxa" role="none">
+									<a href="../../../../ciutada/ca/xarxa/xarxes.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="8c2f6eb4-fd87-4367-936d-846533580a9d" id="i4t-id-2jgdjnzvz">
+										<span class="icon-xarxa"></span>
+										Xarxa d'oficines
+										<span class="sr-only" aria-hidden="true" tabindex="-1">Obre una nova finestra</span>
+									</a>
+                </li>
+								
+                <li class="base" role="none">
+									<a href="../../../../ciutada/ca/base/presentacio/presentacio.html" role="menuitem" class="i4t-listeners" aria-controls="i4t-id-laimn7950" data-insuit-uuid="f2127475-f5bd-421d-bd31-7f8dcd4c70a8" id="i4t-id-8c14z88xf">
+										<span class="icon-base"></span>
+										BASE
+										<span class="sr-only" aria-hidden="true" tabindex="-1">Obre una nova finestra</span>
+									</a>
+									<ul class="submenu" role="menu" aria-orientation="horizontal" id="i4t-id-laimn7950" data-insuit-uuid="9a3e30c5-ee07-4132-8c21-a77828ca3597" aria-owns="i4t-id-cc4swq2ha i4t-id-hy77mjqxu i4t-id-uzbf98y6n i4t-id-kwrpwe6i3 i4t-id-sm7aek9ny i4t-id-wp4s4ct97 i4t-id-6spqnksse i4t-id-al5w1xqtk">
+										<li class="presentacio" role="none">
+											<a href="../../../../ciutada/ca/base/presentacio/presentacio.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="d298beeb-9e9d-418c-be14-4b88e11cb149" id="i4t-id-cc4swq2ha">
+												<span class="icon-presentacio"></span>
+												Presentació
+											</a>
+										</li>      
+										<li class="principis" role="none">
+											<a href="../../../../ciutada/ca/base/principis/principis.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="00da549f-51ca-417d-93af-8c734f315b21" id="i4t-id-hy77mjqxu">
+												<span class="icon-principis"></span>
+												Principis estratègics
+											</a>
+										</li>      
+										<li class="competencies" role="none">
+											<a href="../../../../ciutada/ca/base/competencies/competencies.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="7136d34e-1c0f-4af7-a491-59fb90212566" id="i4t-id-uzbf98y6n">
+												<span class="icon-competencies"></span>
+												Competències delegades
+											</a>
+										</li>      
+										<li class="convocatories" role="none">
+											<a href="../../../../ciutada/ca/base/convocatories/convocatories.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="7a646b0c-fc64-4bb3-8bc8-67fa5278fe72" id="i4t-id-kwrpwe6i3">
+												<span class="icon-convocatories"></span>
+												Convocatòries de personal
+											</a>
+										</li>      
+										<li class="centres" role="none">
+											<a href="../../../../ciutada/ca/base/centres/centres.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="066e9779-0043-453c-92c2-7f3e0f371824" id="i4t-id-sm7aek9ny">
+												<span class="icon-centres"></span>
+												Centres
+											</a>
+										</li>      
+										<li class="proteccio-dades-personals" role="none">
+											<a href="../../../../ciutada/ca/base/proteccio-dades-personals/proteccio-dades-personals.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="431c881c-89dd-469a-b65d-f3bf4f7b9992" id="i4t-id-wp4s4ct97">
+												<span class="icon-proteccio"></span>
+												Protecció de dades personals
+											</a>
+										</li>      
+										<li class="entitats" role="none">
+											<a href="../../../../ciutada/ca/base/entitats/entitats.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="d3d3bea5-0a18-4914-9055-562d2d4776b3" id="i4t-id-6spqnksse">
+												<span class="icon-entitat"></span>
+												Entitats col.laboradores
+											</a>
+										</li>      
+										<li class="premsa" role="none">
+											<a href="../../../../ciutada/ca/base/premsa/premsa.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="188bee1a-044c-4130-9936-1549af2c5ced" id="i4t-id-al5w1xqtk">
+												<span class="icon-prensa"></span>
+												Sala de premsa
+											</a>
+										</li>      
+									</ul>
+                </li>
+								
+                <li class="" role="none">
+									<a href="http://www.dipta.cat/ca/transparencia" target="_blank" role="menuitem" class="i4t-listeners" data-insuit-uuid="561453ee-3bf3-4ae1-b5cb-aa6a5c544d87" id="i4t-id-libkbrc04">
+										<span class="icon-transparencia"></span>
+										Transparència
+										<span class="sr-only" aria-hidden="true" tabindex="-1">Obre una nova finestra</span>
+									</a>
+                </li>
+								
+                <li class="atencio" role="none">
+									<a href="../../../../ciutada/ca/atencio/dades/dades.html" role="menuitem" class="i4t-listeners" aria-controls="i4t-id-b46cv4gzx" data-insuit-uuid="f7297de3-aeb3-4fee-933a-045d11989f7f" id="i4t-id-veyg7r4yr">
+										<span class="icon-atencio"></span>
+										Atenció ciutadana
+										<span class="sr-only" aria-hidden="true" tabindex="-1">Obre una nova finestra</span>
+									</a>
+									<ul class="submenu" role="menu" aria-orientation="horizontal" id="i4t-id-b46cv4gzx" data-insuit-uuid="afa6e84a-d061-49de-a150-96d98fc5643e" aria-owns="i4t-id-akfd8rpkp i4t-id-dbkyw9vgk">
+										<li class="dades" role="none">
+											<a href="../../../../ciutada/ca/atencio/dades/dades.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="e01efdca-0cd4-4e61-bb7b-0870639a8109" id="i4t-id-akfd8rpkp">
+												<span class="icon-govern"></span>
+												Dades de contacte
+											</a>
+										</li>      
+										<li class="coneix" role="none">
+											<a href="../../../../ciutada/ca/atencio/coneix/coneix.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="f9d24bd6-b9da-4a71-85af-a94d9df640fc" id="i4t-id-dbkyw9vgk">
+												<span class="icon-coneix"></span>
+												Coneix més sobre...
+											</a>
+										</li>      
+									</ul>
+                </li>
+								
+                <li class="base-online" role="none">
+									<a href="../../../../ciutada/ca/base-online/base-online.html" role="menuitem" class="i4t-listeners" data-insuit-uuid="f5c8f000-9d7b-49e8-9397-c85cb7cb0f68" id="i4t-id-i91vi9oev">
+										<span class="icon-online-bw"></span>
+										BASE On-line
+										<span class="sr-only" aria-hidden="true" tabindex="-1">Obre una nova finestra</span>
+									</a>
+                </li>
+            </ul>        
+        </div>
+    </div>
+</nav>
+    
+    <div class="breadcrumb-container" role="navigation" aria-label="Ruta de Navegació." data-insuit-uuid="23b29052-e1f8-4e8d-89b0-9d7bd3587331">
+    	<div class="container">
+    		<h2 class="breadcrumb-path">Estàs a:</h2>
+    		<ol class="breadcrumb">
+			    <li><a href="../../../../ciutada/ca/home.html" data-insuit-uuid="b5c7df5d-a2fc-477d-816e-f3044dda0f3b">Home</a><span class="icon-arrow-right"></span></li>
+			
+			        <li><a href="../la-meva-carpeta/la-meva-carpeta.html" title="Tràmits: la-meva-carpeta" data-insuit-uuid="69f41813-d249-4aa1-b5c3-4f46262814a4">Tràmits</a><span class="icon-arrow-right"></span></li>
+			    <li class="active">Multes i sancions</li>
+		    </ol>
+    	</div>
+    </div>
+    
+    <div class="container" role="region" aria-labelledby="i4t-id-p740v18dz" data-insuit-uuid="a3522724-0164-4015-ab34-fd062db3e6d6">
+        <div class="page-title clearfix">
+            <h3 class="h2" style="margin:0.63em 0;" id="i4t-id-p740v18dz"><span class="icon-multes"></span>Multes i sancions</h3>
+    	    <div class="actions" data-insuit-left="-20px" role="navigation" data-insuit-width="+20px" aria-label="Accions" data-insuit-uuid="e9788042-f595-4e88-8269-f5d73a972026">
+	<a href="#" onclick="bookmarkme();" class="btn-icon" title="Afegeix a destacats" data-insuit-uuid="7ef50bb5-dacd-4977-bc32-2c6e46111880"><i class="icon-star"></i></a>
+	<a href="#" onclick="printMe();" class="btn-icon" title="Imprimir" data-insuit-uuid="b75fbb73-0d37-452d-bbc4-0d53d189fa9e"><i class="icon-print"></i></a>
+</div>
+
+<script>
+function bookmarkme() {  
+    // Add to bookmarks	
+	if (window.sidebar && window.sidebar.addPanel) { // Mozilla Firefox Bookmark
+		window.sidebar.addPanel(document.title, window.location.href, '');
+	} else if (window.external && ('AddFavorite' in window.external)) { // IE Favorite
+		//window.external.AddFavorite(location.href, document.title); Cal descomentar aquesta part un cop pujada a PRE
+		alert('Premi ' + (navigator.userAgent.toLowerCase().indexOf('mac') != -1 ? 'Command/Cmd' : 'CTRL') + ' + D per afegir als destacats aquesta pàgina.');
+	} else if (window.opera && window.print) { // Opera Hotlist
+		this.title = document.title;
+		return true;
+	} else { // webkit - safari/chrome
+		alert('Premi ' + (navigator.userAgent.toLowerCase().indexOf('mac') != -1 ? 'Command/Cmd' : 'CTRL') + ' + D per afegir als destacats aquesta pàgina.');
+	}	
+}
+// Imprimir
+function printMe() {
+    //alert("print!!");
+    var print = $("main div.container").last().html();
+    //alert("print : "$("main div.container").last().html());
+    var ventimp = window.open('','popimpr');
+    ventimp.document.write(print);
+    ventimp.document.close();
+    ventimp.print();
+    ventimp.close();
+}
+</script>
+        </div>
+    	<div class="table-responsive">
+    		<table class="table table-striped">
+    			<thead>
+    			    <tr>
+        				<th>Tràmit</th>
+        				<th>Presencial</th>
+        				<th>Model</th>
+        				<th>Telemàtic</th>
+        				<th>Observacions</th>
+        			</tr>
+    			</thead>
+    			<tbody>
+        			    <tr>
+        					<td><a href="../../../../ciutada/ca/tramits/multes-i-sancions/identificacio-conductor.html" data-insuit-uuid="9c863a99-a87e-4cf3-9bc9-e9f1077db15a">Identificació del conductor</a></td>
+        					
+<td>
+    Sí
+</td>
+<td>
+    <a href="../../../../recursos/pdf/Models/Sol.licituds/Model_250.pdf" title="Doc: Model_250" data-insuit-uuid="0954c7bd-076a-41cc-a0cc-11d48d36fc8a">Doc</a>
+</td>
+<td>
+    <a href="https://www.base.cat/sav/valid" target="_blank" data-insuit-uuid="8e382887-6993-4b06-807d-32ae0bf4bfc6">Sí</a>
+</td>
+	<td></td>
+
+        				</tr>
+        			    <tr>
+        					<td><a href="../../../../ciutada/ca/tramits/multes-i-sancions/multes-alegacions.html" data-insuit-uuid="d3ec7532-e59a-4b97-847e-d614b7a0c763">Al·legacions en el procediment sancionador o recurs de reposició contra la resolució en matèria de trànsit</a></td>
+        					
+<td>
+    Sí
+</td>
+<td>
+    <a href="../../../../recursos/pdf/Models/Sol.licituds/Model_203.pdf" title="Doc: Model_203" data-insuit-uuid="aefd0ec0-bacd-496b-b35a-667c30fb6d18">Doc</a>
+</td>
+<td>
+    <a href="https://www.base.cat/sav/valid" target="_blank" data-insuit-uuid="17c3442e-a369-4af8-981e-a5a587289dd4">Sí</a>
+</td>
+	<td></td>
+
+        				</tr>
+        			    <tr>
+        					<td><a href="../../../../ciutada/ca/tramits/multes-i-sancions/multes-duplicat.html" data-insuit-uuid="4dfe7b19-33b5-4a99-b43d-c8fe7622fe2f">Duplicat d'una notificació de pagament de multes de trànsit</a></td>
+        					
+<td>
+    Sí
+</td>
+<td>
+</td>
+<td>
+   No
+</td>
+	<td></td>
+
+        				</tr>
+        			    <tr>
+        					<td><a href="../../../../ciutada/ca/tramits/multes-i-sancions/multes-certificat.html" data-insuit-uuid="d04130ff-20cc-46b3-a207-9cb82915a95f">Certificat de pagament de multes de trànsit</a></td>
+        					
+<td>
+    Sí
+</td>
+<td>
+</td>
+<td>
+   No
+</td>
+	<td></td>
+
+        				</tr>
+        			    <tr>
+        					<td><a href="../../../../ciutada/ca/tramits/multes-i-sancions/multes-expedients.html" data-insuit-uuid="17ec9d6e-ce94-4ede-b7dd-3f669b5ca839">Consulta d'expedients de multes</a></td>
+        					
+<td>
+    Sí
+</td>
+<td>
+</td>
+<td>
+   No
+</td>
+	<td></td>
+
+        				</tr>
+        			    <tr>
+        					<td><a href="../../../../ciutada/ca/tramits/multes-i-sancions/multes-anulacio.html" data-insuit-uuid="c29f3d69-e10a-4dba-9544-67a697d32519">Anul·lació d'una denúncia de les àrees d'aparcament (zones blava i verda)</a></td>
+        					
+<td>
+    No
+</td>
+<td>
+</td>
+<td>
+   No
+</td>
+	<td></td>
+
+        				</tr>
+    			</tbody>
+    		</table>
+    	</div>
+    </div>
+</main>
+
+
+
+<footer role="contentinfo" aria-label="Peu de pàgina" data-insuit-uuid="dd6ced39-64ba-4ba9-8a53-f7c70398fdbe">
+    <div class="footer-top">
+    	<div class="container">
+    		<div class="row">
+    			<div class="col-sm-6 man">
+    		    	<img src="../../../../recursos/imatges/comu/ca/ma_tel.png" alt="Atenció ciutadana">
+    				<dl>
+    					<dt>Atenció ciutadana:</dt>
+							<dd style="cursor:pointer;" onclick="location.href='../../../../ciutada/ca/atencio/dades/dades.html';">977 25 34 00</dd>
+    				</dl>
+    			</div>
+    			
+    			<div class="col-sm-6 premi">
+    				<img src="../../../../recursos/imatges/comu/ca/premi.png" alt="Certificats i Premis">
+    				<h4>Certificats i Premis</h4>
+    				<p></p><p><a href="../../../../ciutada/ca/base/presentacio/presentacio.html" data-insuit-uuid="79b0f66b-9be3-4750-a5ce-4d824257a8ed">Certificats i Premis de BASE</a>.</p><p></p>
+    			</div>
+    		</div>
+    	</div>
+    </div>
+    <div class="footer-middle">
+    	<div class="container">
+    		<div class="row">
+    			<div class="col-sm-3">
+    				<img src="../../../../recursos/imatges/comu/ca/logo_small.png" alt="Logotip BASE">
+    			</div>
+    			<div class="col-sm-9">
+    	    	<ul class="clearfix" role="region" aria-label="Menu principal" aria-owns="i4t-id-zokjrv5aq i4t-id-9klfvxyf0 i4t-id-vo9ff7fdc i4t-id-bv392tzt6 i4t-id-u7p5ebmgu i4t-id-g5a0238ws i4t-id-ck1zs2xuo i4t-id-jcp7b9hiv" data-insuit-uuid="7942abf4-8f37-4e49-befd-3316dbfe8e34">
+		        	<li role="navigation" aria-labelledby="i4t-id-l1139n4bv" id="i4t-id-zokjrv5aq" data-insuit-uuid="a39aa5e7-5afa-44db-a892-9d8f12e59990"><strong id="i4t-id-l1139n4bv">Tràmits</strong>
+		          	<br>
+		              <a href="../../../../ciutada/ca/tramits/la-meva-carpeta/la-meva-carpeta.html" data-insuit-uuid="8358b12e-a9de-46ae-9f67-6e19f22f3e13">La meva carpeta</a><br>
+		              <a href="../../../../ciutada/ca/tramits/pagaments/pagaments.html" data-insuit-uuid="9ac994ed-137a-4afd-875f-81ae68ad3605">Pagaments i justificants</a><br>
+		              <a href="../../../../ciutada/ca/tramits/tributs/tributs.html" data-insuit-uuid="8f2fc676-ffd2-403f-8cb9-b0319da69a74">Tributs</a><br>
+		              <a href="../../../../ciutada/ca/tramits/taxes/taxes.html" data-insuit-uuid="4189c6cc-b583-4e7d-a5db-efc58b25b322">Taxes</a><br>
+		              <a href="../../../../ciutada/ca/tramits/multes-i-sancions/multes-i-sancions.html" data-insuit-uuid="04833c10-c193-41fb-9d30-13dc207cf85a">Multes i sancions</a><br>
+		              <a href="../../../../ciutada/ca/tramits/recursos/recursos.html" data-insuit-uuid="fbcb5bfc-cadc-4848-b0f2-6f9cebc717b3">Recursos</a><br>
+		              <a href="../../../../ciutada/ca/tramits/altres-tramits/altres-tramits.html" data-insuit-uuid="a1cf560e-8dd8-4f8e-b262-af654af2b32f">Altres tràmits</a><br>
+		          </li>
+		        	<li role="navigation" aria-labelledby="i4t-id-7202hx94b" id="i4t-id-9klfvxyf0" data-insuit-uuid="c4290e17-2e53-4ba1-84c1-8b306e283e0b"><strong id="i4t-id-7202hx94b">Cita prèvia i altres serveis</strong>
+		          	<br>
+		              <a href="../../../../ciutada/ca/serveis/cita-previa/cita-previa.html" data-insuit-uuid="fed9ceae-ee9e-4316-85f9-30b17039e45d">Cita prèvia</a><br>
+		              <a href="../../../../ciutada/ca/serveis/validacio/validacio.html" data-insuit-uuid="0634f35c-bdd5-4f4c-b7df-631e129025f1">Validació de documents</a><br>
+		              <a href="../../../../ciutada/ca/serveis/notificacions/notificacions.html" data-insuit-uuid="fd942a57-00ad-40bf-9001-5461bee9e7b6">Notificacions i publicacions edictals</a><br>
+		              <a href="../../../../ciutada/ca/serveis/agencia/agencia.html" data-insuit-uuid="340a0dd9-fddb-4935-8294-aa468a8eb304">Agència tributària (ATC)</a><br>
+		              <a href="../../../../ciutada/ca/serveis/facturacio/facturacio.html" data-insuit-uuid="fcdfb61e-769b-4fa1-b692-3e0027ed28b0">Facturació electrònica</a><br>
+		              <a href="../../../../ciutada/ca/serveis/perfil/perfil.html" data-insuit-uuid="11a01390-5bb4-4e12-b602-b540988e3f5c">Perfil del contractant</a><br>
+		          </li>
+		        	<li role="navigation" aria-labelledby="i4t-id-so3h4nxzo" id="i4t-id-vo9ff7fdc" data-insuit-uuid="1dbe5901-a5ae-4113-b1ab-cb60bbbbc631"><strong id="i4t-id-so3h4nxzo">BASE</strong>
+		          	<br>
+		              <a href="../../../../ciutada/ca/base/presentacio/presentacio.html" data-insuit-uuid="3d53b598-a353-440e-8c16-d6ac8955bdc8">Presentació</a><br>
+		              <a href="../../../../ciutada/ca/base/principis/principis.html" data-insuit-uuid="18b32c7a-1e77-4f50-88d9-7451866b7450">Principis estratègics</a><br>
+		              <a href="../../../../ciutada/ca/base/competencies/competencies.html" data-insuit-uuid="79a6eab6-79b1-40fb-8303-4beb94a340af">Competències delegades</a><br>
+		              <a href="../../../../ciutada/ca/base/convocatories/convocatories.html" data-insuit-uuid="32aa29ed-5d0c-4f38-b52e-c9b14681aa82">Convocatòries de personal</a><br>
+		              <a href="../../../../ciutada/ca/base/centres/centres.html" data-insuit-uuid="39a612d6-05b5-4c59-811a-7731ce441185">Centres</a><br>
+		              <a href="../../../../ciutada/ca/base/proteccio-dades-personals/proteccio-dades-personals.html" data-insuit-uuid="f25145cc-14f0-4a40-88f6-e9403af6b7f2">Protecció de dades personals</a><br>
+		              <a href="../../../../ciutada/ca/base/entitats/entitats.html" data-insuit-uuid="c67a9b73-6233-464a-8b89-c15579bc3ae2">Entitats col·laboradores</a><br>
+		              <a href="../../../../ciutada/ca/base/premsa/premsa.html" data-insuit-uuid="e5f19369-041d-44d5-a93c-c94e4df02d95">Sala de premsa</a><br>
+		          </li>
+	          	<li role="navigation" aria-labelledby="i4t-id-bbq3bcmfo" id="i4t-id-bv392tzt6" data-insuit-top="+60" data-insuit-height="-80" data-insuit-uuid="b7b30d50-a217-4b3c-8519-dc20e213ec7e">
+		              	<span style="cursor:pointer;" onclick="window.open('http://www.dipta.cat/ca/transparencia');" id="i4t-id-u7p5ebmgu" role="link" tabindex="0" data-insuit-uuid="8117710a-ec05-4034-8d27-07f25a71491a">
+		            <strong>Transparència</strong>
+		                </span>
+		            <br>
+		                <span style="cursor:pointer;" onclick="location.href='../../../../ciutada/ca/municipi/municipis.html';" id="i4t-id-g5a0238ws" role="link" tabindex="0" data-insuit-uuid="cc764d05-f4db-4396-ad3d-7b46ba313685">
+		            <strong>El teu municipi</strong>
+		                </span>
+		            <br>
+		                <span style="cursor:pointer;" onclick="location.href='../../../../ciutada/ca/xarxa/xarxes.html';" id="i4t-id-ck1zs2xuo" role="link" tabindex="0" data-insuit-uuid="c94fca95-521f-4277-a8f3-efe3fbeabbfa">
+		            <strong>Xarxa Oficines</strong>
+		                </span>
+		            <br>
+		            <strong id="i4t-id-bbq3bcmfo">Atenció ciutadana</strong>
+		            <br>
+		                  <a href="../../../../ciutada/ca/atencio/dades/dades.html" data-insuit-uuid="aea2af07-098f-42a0-8c38-d9e9ac54bc3e">Dades de contacte</a><br>
+		                  <a href="../../../../ciutada/ca/atencio/coneix/coneix.html" data-insuit-uuid="e7b3e6ae-025a-4020-bc24-914550f296fa">Coneix més sobre...</a><br>
+		                <span style="cursor:pointer;" onclick="location.href='../../../../ciutada/ca/base-online/base-online.html';" id="i4t-id-jcp7b9hiv" role="link" tabindex="0" data-insuit-uuid="97c0be5f-5285-4b1e-a7d6-b06afa6afbf7">
+		            <strong>BASE On-line</strong>
+		                </span>
+		            <br>
+	            </li>
+	          </ul>
+    			</div>
+    		</div>
+    	</div>
+    </div>
+    <div class="footer-bottom">
+    	<div class="container">
+    		<p>© 2023, BASE-Gestió d'Ingressos. Tots els drets reservats</p>
+        	<ul role="navigation" aria-label="Menú del peu de pàgina" data-insuit-uuid="2b7c336d-26d4-43f3-a92f-10d4bb71eb62">
+	          <li role="none"><a href="../../../../ciutada/ca/avis/avis.html" data-insuit-uuid="8f409657-1609-4dd4-845d-e0edcb17edea">Avís legal</a></li>
+	          <li role="none"><a href="../../../../ciutada/ca/accessibilitat/accessibilitat.html" data-insuit-uuid="188fba5f-7b83-446f-be57-8a5ace39a923">Accessibilitat</a></li>
+	        </ul>
+    	</div>
+    </div>
+</footer>
+
+<script>
+    function keyHandler(event, type, url) {
+    switch (event.which) {
+        case KEY_SPACE: {
+            event.stopPropagation;
+            switch (type.which) {
+                case 1: {
+                    localtion.href = url;
+                }    
+                case 2: {
+                    window.open(url);
+                }
+            }
+            break;
+        }
+    }
+    return true;
+}
+</script>
+
+<script src="../../../../comuns/js/jquery-3.2.1.min.js"></script>
+<script src="../../../../comuns/js/bootstrap.min.js"></script>
+<script src="../../../../comuns/js/ofi.min.js"></script>
+<script>document.createElement('picture');</script>
+<script src="../../../../comuns/js/picturefill.min.js"></script>
+<script src="../../../../comuns/js/base.js"></script>
+
+
+</body></html>
