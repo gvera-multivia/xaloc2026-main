@@ -13,10 +13,10 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(encoding='utf-8')
 
 async def realizar_login_guiado(config: Config):
-    """Lógica para grabar la sesión pulsando el botón de certificado."""
-    print("\n" + "!" * 70)
-    print(" INICIANDO LOGIN GUIADO - SELECCIÓN DE CERTIFICADO ".center(70, "!"))
-    print("!" * 70 + "\n")
+    """Lógica mejorada para capturar el popup de la AOC y el botón #btnCert."""
+    print("\n" + "!" * 75)
+    print(" INICIANDO GRABACIÓN DE SESIÓN (MODO POPUP) ".center(75, "!"))
+    print("!" * 75 + "\n")
     
     async with async_playwright() as p:
         browser = await p.chromium.launch(
@@ -24,59 +24,93 @@ async def realizar_login_guiado(config: Config):
             channel=config.navegador.canal,
             args=config.navegador.args,
         )
+        # Importante: No cargamos auth aquí, queremos una sesión limpia
         context = await browser.new_context(ignore_https_errors=True)
         page = await context.new_page()
 
-        logging.info("1. Navegando a %s...", config.url_base)
+        logging.info("1. Navegando a la web de Xaloc...")
         await page.goto(config.url_base, wait_until="domcontentloaded")
 
-        # Aceptar cookies si aparecen
+        # Aceptar cookies
         try:
             await page.get_by_role("button", name="Acceptar").click(timeout=3000)
         except: pass
 
-        # Ir a la pasarela
-        logging.info("2. Pulsando 'Tramitació en línia'...")
-        enlace = page.get_by_role("link", name="Tramitació en línia").first
-        await enlace.click()
-
-        # ESPERAR A LA PASARELA VÀLid (AOC)
-        logging.info("3. Esperando a que cargue la pasarela VÀLid (AOC)...")
+        # Capturar la apertura de la nueva pestaña
+        logging.info("2. Pulsando 'Tramitació en línia' y esperando nueva pestaña...")
+        async with page.expect_popup() as popup_info:
+            await page.get_by_role("link", name="Tramitació en línia").first.click()
         
-        # Aquí es donde estaba el fallo: hay que esperar y pulsar el botón de certificado
+        # Esta es la página de la AOC (VÀLid)
+        aoc_page = await popup_info.value
+        await aoc_page.wait_for_load_state("domcontentloaded")
+        logging.info(f"3. Pasarela detectada: {aoc_page.url}")
+
         try:
-            # Buscamos el botón por ID (btnCert) o por texto
-            btn_cert = page.locator("#btnCert")
+            # Ahora buscamos el botón DENTRO de la página AOC
+            logging.info("4. Buscando botón #btnCert en la pasarela...")
+            btn_cert = aoc_page.locator("#btnCert")
             await btn_cert.wait_for(state="visible", timeout=10000)
             
-            logging.info("4. Pulsando el botón 'Certificat digital' (#btnCert)...")
-            
-            # Al pulsar aquí es cuando el navegador lanza el popup del sistema
-            async with page.expect_popup(timeout=10000) as popup_info:
-                await btn_cert.click()
-            
-            target_page = await popup_info.value
-            logging.info("✅ Pasarela de certificado abierta.")
+            # Al pulsar aquí, saldrá el cuadro de diálogo del sistema (Windows)
+            # Playwright no puede ver ese cuadro, por eso aquí paramos.
+            await btn_cert.click()
+            logging.info("5. Botón pulsado. El navegador debería pedirte el certificado ahora.")
         except Exception as e:
-            logging.warning(f"No se pudo interactuar con #btnCert automáticamente: {e}")
-            print("Por favor, haz click tú mismo en 'Certificat Digital' si no se ha pulsado.")
+            logging.warning(f"No se pudo pulsar #btnCert automáticamente: {e}")
+            print("PULSA TÚ MISMO EN 'Certificat Digital' en la ventana del navegador.")
 
         print("\n" + "="*75)
-        print(" ACCIÓN MANUAL REQUERIDA ".center(75, " "))
+        print(" ESPERANDO FINALIZACIÓN MANUAL ".center(75, " "))
         print("-" * 75)
-        print(" 1. Selecciona tu CERTIFICADO en la ventana emergente del sistema.")
-        print(" 2. Introduce el PIN si es necesario.")
-        print(" 3. Navega hasta que veas el formulario de Xaloc (donde pones el DNI).")
+        print(" 1. Selecciona tu certificado y pon el PIN si hace falta.")
+        print(" 2. Espera a que la página cargue el formulario de Xaloc.")
+        print(" 3. IMPORTANTE: No cierres ninguna pestaña.")
         print("="*75 + "\n")
         
-        input(">>> CUANDO ESTÉS DENTRO DEL FORMULARIO DE XALOC, PULSA ENTER AQUÍ...")
+        input(">>> CUANDO ESTÉS DENTRO DEL FORMULARIO FINAL (STA), PULSA ENTER AQUÍ...")
 
-        # Guardar el estado después de la interacción manual
+        # Guardamos el estado de TODO el contexto (incluye las cookies de la nueva pestaña)
         config.dir_auth.mkdir(exist_ok=True)
         await context.storage_state(path=str(config.auth_state_path))
-        logging.info("💾 Estado guardado en: %s", config.auth_state_path)
+        logging.info(f"✅ Sesión guardada en: {config.auth_state_path}")
         
         await browser.close()
+
+async def main():
+    config = Config()
+    
+    # Si el archivo no existe o está vacío, grabamos
+    if not config.auth_state_path.exists() or config.auth_state_path.stat().st_size < 100:
+        await realizar_login_guiado(config)
+    
+    datos = DatosMulta(
+        email="test@example.com",
+        num_denuncia="DEN/2024/001",
+        matricula="1234ABC",
+        num_expediente="EXP/2024/001",
+        motivos="Texto de prueba.",
+        archivo_adjunto=None
+    )
+    
+    print("\n🚀 Iniciando automatización con sesión guardada...")
+    
+    async with XalocAsync(config) as bot:
+        try:
+            # Si el bot está bien configurado, al navegar a la URL con las cookies,
+            # debería saltarse la AOC y aparecer directamente en el formulario.
+            screenshot_path = await bot.ejecutar_flujo_completo(datos)
+            print(f"\n✅ PROCESO COMPLETADO: {screenshot_path}")
+        except Exception as e:
+            print(f"\n❌ Error en ejecución: {e}")
+            print("Sugerencia: Borra la carpeta 'auth' e inténtalo de nuevo.")
+        finally:
+            input("\nPresiona ENTER para salir...")
+
+if __name__ == "__main__":
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    asyncio.run(main())
 
 async def main():
     config = Config()
