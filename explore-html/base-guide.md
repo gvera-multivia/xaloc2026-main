@@ -31,3 +31,36 @@ Una vez clicado, usamos el pyautogui de forma paralela con playwright y ya estar
 
 En esta 3ª pantalla nos encontramos con una nueva url que es:
 `https://www.baseonline.cat/commons-desktop/index.html`
+
+Aqui econtramos el contenido que se muestra en `base-common.html `
+Pero de todo el contenido de las tablas, lo unico relevante es:
+
+P1- El acceso al formulario de identificación de conductor
+
+```
+<a href="/pst/flow/formulari?tramit=M250" title="Sol·licitud d'identificació de conductor"><span><span>Sol·licitud d'identificació de conductor</span></span></a>
+```
+
+P2- El acceso al formulario de alegaciones
+
+```
+<a href="/pst/flow/formulari?tramit=M203" title="Al·legacions en el procediment sancionador en matèria de trànsit"><span><span>Al·legacions en el procediment sancionador en matèria de trànsit</span></span></a>
+```
+
+P3- El acceso al formulario de reposición
+
+```
+<a href="/gir-ciutada/flow/recursTelematic" title="Recurs de reposició">Recurs de reposició</a>
+```
+
+Esto es muy importante, porque en esta web, cuando estamos en esta pagina NECESITAMOS especificar el protocolo concreto ya sea P1, P2 o P3.
+Dependiendo de ello, seleccionaremos un formulario u otro, es decir, que este es un punto de ramificación del workflow en funcion del protocolo.
+Como veremos a continuación cada uno de los formularios tiene diferentes datos y procesos.
+
+
+## 4 - Ramificaciones
+
+Como hemos dicho, debemos permitir diferentes posibles rutas de acceso.
+
+### 4.1 - Formulario de Reposición (P3)
+

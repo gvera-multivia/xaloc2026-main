@@ -24,6 +24,11 @@ SITES: dict[str, SiteDefinition] = {
         automation_path="sites.xaloc_girona.automation:XalocGironaAutomation",
         controller_path="sites.xaloc_girona.controller:get_controller",
     ),
+    "base_online": SiteDefinition(
+        site_id="base_online",
+        automation_path="sites.base_online.automation:BaseOnlineAutomation",
+        controller_path="sites.base_online.controller:get_controller",
+    ),
 }
 
 
