@@ -35,9 +35,22 @@ async def _aceptar_cookies_si_aparece(page: Page) -> None:
 
 
 async def _esperar_dom_estable(page: Page, timeout_ms: int = 2000) -> None:
-    """Espera a que el DOM esté estable (sin modificaciones de INSUIT u otros scripts)."""
-    await page.wait_for_load_state("domcontentloaded")
-    await page.wait_for_load_state("networkidle")
+    """
+    Espera a que el DOM esté estable.
+    
+    NOTA: No usamos 'networkidle' porque los scripts de INSUIT (accesibilidad)
+    hacen peticiones de red constantes y nunca se alcanza el estado idle.
+    """
+    try:
+        await page.wait_for_load_state("domcontentloaded", timeout=5000)
+    except PlaywrightTimeout:
+        logging.warning("Timeout esperando domcontentloaded, continuando...")
+    
+    try:
+        await page.wait_for_load_state("load", timeout=10000)
+    except PlaywrightTimeout:
+        logging.warning("Timeout esperando load completo, continuando...")
+    
     # Espera adicional para scripts dinámicos como INSUIT
     await page.wait_for_timeout(timeout_ms)
 
@@ -51,30 +64,31 @@ async def _localizar_enlace_base_online(page: Page, config: BaseOnlineConfig):
     2. Selector CSS desde config
     3. Selector por href directo
     """
+    logging.info("[FASE 1.2] Buscando enlace 'Base On-line'...")
+    
     estrategias = [
-        # Estrategia 1: Por rol y texto (más robusto)
-        lambda: page.get_by_role("link", name=re.compile(r"Base\s+On-?line", re.IGNORECASE)).first,
-        # Estrategia 2: Selector CSS configurado
-        lambda: page.locator(config.base_online_link_selector).first,
-        # Estrategia 3: Selector por href directo
-        lambda: page.locator("a[href*='/sav/valid']").first,
-        # Estrategia 4: Por clase y contenido de texto
-        lambda: page.locator("a.logo_text:has-text('Base On-line')").first,
+        ("Por rol y texto", lambda: page.get_by_role("link", name=re.compile(r"Base\s+On-?line", re.IGNORECASE)).first),
+        ("Selector CSS config", lambda: page.locator(config.base_online_link_selector).first),
+        ("Por href /sav/valid", lambda: page.locator("a[href*='/sav/valid']").first),
+        ("Por clase logo_text", lambda: page.locator("a.logo_text:has-text('Base On-line')").first),
     ]
     
-    for i, estrategia in enumerate(estrategias, 1):
+    for nombre, estrategia in estrategias:
         try:
+            logging.debug(f"[FASE 1.2] Probando estrategia: {nombre}")
             enlace = estrategia()
-            # Verificar que el elemento existe y es visible
-            if await enlace.count() > 0:
+            count = await enlace.count()
+            logging.debug(f"[FASE 1.2] Estrategia '{nombre}': encontrados {count} elementos")
+            
+            if count > 0:
                 await enlace.wait_for(state="visible", timeout=5000)
-                logging.info(f"Enlace 'Base On-line' encontrado con estrategia {i}")
+                logging.info(f"[FASE 1.2] ✓ Enlace encontrado con '{nombre}'")
                 return enlace
         except PlaywrightTimeout:
-            logging.debug(f"Estrategia {i} no encontró el enlace visible")
+            logging.warning(f"[FASE 1.2] Estrategia '{nombre}': elemento no visible en 5s")
             continue
         except Exception as e:
-            logging.debug(f"Estrategia {i} falló: {e}")
+            logging.warning(f"[FASE 1.2] Estrategia '{nombre}' falló: {e}")
             continue
     
     raise RuntimeError("No se pudo localizar el enlace 'Base On-line' con ninguna estrategia")
@@ -85,6 +99,8 @@ async def _click_enlace_robusto(page: Page, enlace, url_destino: str) -> Page:
     Intenta hacer click en el enlace con múltiples estrategias.
     Si todos los clicks fallan, navega directamente a la URL destino.
     """
+    logging.info("[FASE 1.3] Intentando click en enlace...")
+    
     # Asegurar que el elemento está en el viewport
     try:
         await enlace.scroll_into_view_if_needed()
@@ -93,33 +109,38 @@ async def _click_enlace_robusto(page: Page, enlace, url_destino: str) -> Page:
         pass
     
     # Intentar capturar popup si el enlace abre una nueva ventana
+    logging.debug("[FASE 1.3] Método 1: Click con captura de popup")
     try:
         async with page.expect_popup(timeout=3000) as popup_info:
             await enlace.click()
         popup = await popup_info.value
         await popup.wait_for_load_state("domcontentloaded")
-        logging.info("Click exitoso - popup capturado")
+        logging.info("[FASE 1.3] ✓ Click exitoso - popup capturado")
         return popup
     except PlaywrightTimeout:
         # No hubo popup, el click pudo haber funcionado en la misma página
         await page.wait_for_load_state("domcontentloaded")
+        logging.debug(f"[FASE 1.3] Sin popup, URL actual: {page.url}")
         if "/sav/valid" in page.url or "valid.aoc.cat" in page.url:
-            logging.info("Click exitoso - navegación en misma página")
+            logging.info("[FASE 1.3] ✓ Click exitoso - navegación en misma página")
             return page
     except Exception as e:
-        logging.warning(f"Click normal falló: {e}")
+        logging.warning(f"[FASE 1.3] Método 1 falló: {e}")
     
     # Intentar click forzado (ignora overlays)
+    logging.debug("[FASE 1.3] Método 2: Click forzado (force=True)")
     try:
         await enlace.click(force=True)
         await page.wait_for_load_state("domcontentloaded")
+        logging.debug(f"[FASE 1.3] URL después de click forzado: {page.url}")
         if "/sav/valid" in page.url or "valid.aoc.cat" in page.url:
-            logging.info("Click forzado exitoso")
+            logging.info("[FASE 1.3] ✓ Click forzado exitoso")
             return page
     except Exception as e:
-        logging.warning(f"Click forzado falló: {e}")
+        logging.warning(f"[FASE 1.3] Método 2 falló: {e}")
     
     # Intentar click via JavaScript
+    logging.debug("[FASE 1.3] Método 3: Click via JavaScript")
     try:
         await page.evaluate("""
             const enlace = document.querySelector("a.logo_text[href*='/sav/valid']") 
@@ -127,41 +148,59 @@ async def _click_enlace_robusto(page: Page, enlace, url_destino: str) -> Page:
             if (enlace) enlace.click();
         """)
         await page.wait_for_load_state("domcontentloaded")
+        logging.debug(f"[FASE 1.3] URL después de JS click: {page.url}")
         if "/sav/valid" in page.url or "valid.aoc.cat" in page.url:
-            logging.info("Click via JavaScript exitoso")
+            logging.info("[FASE 1.3] ✓ Click via JavaScript exitoso")
             return page
     except Exception as e:
-        logging.warning(f"Click JavaScript falló: {e}")
+        logging.warning(f"[FASE 1.3] Método 3 falló: {e}")
     
     # Último recurso: navegar directamente
-    logging.warning("Todos los clicks fallaron, navegando directamente a VÀLid")
-    await page.goto(url_destino, wait_until="networkidle")
-    logging.info(f"Navegación directa a {url_destino}")
+    logging.warning("[FASE 1.3] Todos los clicks fallaron, navegando directamente a VÀLid")
+    await page.goto(url_destino, wait_until="domcontentloaded")
+    logging.info(f"[FASE 1.3] Navegación directa completada: {url_destino}")
     return page
 
 
 async def ejecutar_login_base(page: Page, config: BaseOnlineConfig) -> Page:
-    logging.info(f"Navegando a {config.url_base}")
-    await page.goto(config.url_base, wait_until="networkidle")
-
-    # Esperar a que el DOM esté completamente cargado y estable
-    await _esperar_dom_estable(page, timeout_ms=1500)
+    logging.info(f"[FASE 1.1] Navegando a landing: {config.url_base}")
+    
+    # IMPORTANTE: Usamos 'domcontentloaded' en lugar de 'networkidle'
+    # porque los scripts de INSUIT (accesibilidad) hacen peticiones constantes
+    # y 'networkidle' nunca se alcanza
+    try:
+        await page.goto(config.url_base, wait_until="domcontentloaded", timeout=30000)
+        logging.info(f"[FASE 1.1] DOM cargado, URL actual: {page.url}")
+    except PlaywrightTimeout:
+        logging.error(f"[FASE 1.1] Timeout al cargar la página. Verificar conexión a internet.")
+        raise
+    
+    # Esperar un momento para que los scripts dinámicos terminen
+    logging.info("[FASE 1.1] Esperando estabilización del DOM...")
+    await _esperar_dom_estable(page, timeout_ms=2000)
 
     await _aceptar_cookies_si_aparece(page)
 
-    logging.info("Localizando enlace 'Base On-line'...")
     enlace = await _localizar_enlace_base_online(page, config)
 
-    logging.info("Abriendo VÀLid...")
     page = await _click_enlace_robusto(
         page, 
         enlace, 
         url_destino="https://www.base.cat/sav/valid"
     )
 
-    logging.info("Esperando el botón de certificado...")
+    logging.info("[FASE 1.4] Esperando el botón de certificado...")
+    logging.debug(f"[FASE 1.4] URL actual: {page.url}")
+    logging.debug(f"[FASE 1.4] Selector botón certificado: {config.cert_button_selector}")
+    
     boton_cert = page.locator(config.cert_button_selector).first
-    await boton_cert.wait_for(state="visible", timeout=20000)
+    try:
+        await boton_cert.wait_for(state="visible", timeout=20000)
+        logging.info("[FASE 1.4] ✓ Botón de certificado visible")
+    except PlaywrightTimeout:
+        logging.error("[FASE 1.4] ✗ Botón de certificado no encontrado en 20s")
+        logging.error(f"[FASE 1.4] URL actual: {page.url}")
+        raise
 
     def _resolver_popup_windows() -> None:
         esperar_y_aceptar_certificado(delay_inicial=2.0)
@@ -169,12 +208,13 @@ async def ejecutar_login_base(page: Page, config: BaseOnlineConfig) -> Page:
     thread_popup = threading.Thread(target=_resolver_popup_windows, daemon=True)
     thread_popup.start()
 
-    logging.info("Pulsando botón de certificado...")
+    logging.info("[FASE 1.5] Pulsando botón de certificado...")
     await boton_cert.click()
     thread_popup.join(timeout=10)
 
-    logging.info("Esperando acceso a Common Desktop...")
+    logging.info("[FASE 1.6] Esperando acceso a Common Desktop...")
+    logging.debug(f"[FASE 1.6] Patrón URL esperado: {config.url_post_login}")
     await page.wait_for_url(config.url_post_login, timeout=config.timeouts.login)
-    logging.info("Login completado - Common Desktop cargado")
+    logging.info(f"[FASE 1.6] ✓ Login completado - URL: {page.url}")
     return page
 
