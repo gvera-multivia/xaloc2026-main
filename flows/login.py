@@ -69,32 +69,16 @@ async def ejecutar_login(page: Page, config: Config) -> None:
     try:
         boton_cert = valid_page.locator(selector_boton).first
         
-        # Esperar a que sea visible (importante para evitar errores de interatividad)
+        # Esperar a que sea visible
         await boton_cert.wait_for(state="visible", timeout=15000)
         
         logging.info("✅ Botón detectado. Pulsando para iniciar identificación...")
         await boton_cert.click()
         
-        # NAVEGACIÓN DEL POPUP NATIVO DE CERTIFICADO
-        # El popup del sistema no es controlable por Playwright directamente,
-        # pero podemos enviar teclas al sistema operativo
-        logging.info("⌨️ Navegando popup de certificado con teclado...")
-        
-        # Esperar a que aparezca el popup del sistema
-        await valid_page.wait_for_timeout(1500)
-        
-        # Secuencia de navegación:
-        # Shift+Tab x2 para llegar al certificado, luego Enter para aceptar
-        await valid_page.keyboard.press("Shift+Tab")
-        await valid_page.wait_for_timeout(200)
-        await valid_page.keyboard.press("Shift+Tab")
-        await valid_page.wait_for_timeout(200)
-        await valid_page.keyboard.press("Enter")
-        
-        logging.info("✅ Secuencia Shift+Tab×2 + Enter enviada al popup")
-        
-        # Esperar un momento para que el sistema procese
-        await valid_page.wait_for_timeout(1000)
+        # Nota: El popup de certificado del sistema operativo aparecerá aquí.
+        # Si el perfil persistente tiene el certificado guardado, se seleccionará
+        # automáticamente. Si no, el usuario necesita ejecutar --setup primero.
+        logging.info("⏳ Esperando selección de certificado (popup del sistema)...")
         
     except Exception as e:
         logging.error(f"❌ No se pudo interactuar con el botón en la nueva pestaña: {e}")
