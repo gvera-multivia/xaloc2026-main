@@ -11,17 +11,28 @@ from pathlib import Path
 from playwright.async_api import Page, TimeoutError
 
 
+async def _wait_mask_hidden(page: Page) -> None:
+    mask = page.locator("#mask")
+    try:
+        if await mask.count() > 0:
+            await mask.wait_for(state="hidden", timeout=30000)
+    except Exception:
+        pass
+
+
 async def _check_lopd(page: Page) -> None:
+    await page.wait_for_selector("#lopdok", state="attached", timeout=60000)
     checkbox = page.locator("#lopdok").first
     await checkbox.wait_for(state="visible", timeout=30000)
     await checkbox.scroll_into_view_if_needed()
 
     for _ in range(3):
+        await _wait_mask_hidden(page)
         try:
-            await checkbox.check(timeout=5000)
+            await checkbox.check(timeout=10000)
         except Exception:
             try:
-                await checkbox.click(timeout=2000)
+                await checkbox.check(timeout=5000, force=True)
             except Exception:
                 pass
 
@@ -30,7 +41,20 @@ async def _check_lopd(page: Page) -> None:
 
         await page.wait_for_timeout(500)
 
-    raise TimeoutError("No se pudo marcar el checkbox LOPD (#lopdok)")
+    # Último recurso: forzar estado por JS + disparar eventos (onclick/onchange) para que aparezca "Continuar".
+    ok = await page.evaluate(
+        """() => {
+            const cb = document.getElementById('lopdok');
+            if (!cb) return false;
+            cb.checked = true;
+            cb.dispatchEvent(new Event('click', { bubbles: true }));
+            cb.dispatchEvent(new Event('change', { bubbles: true }));
+            if (typeof window.checkContinuar === 'function') window.checkContinuar(cb);
+            return cb.checked === true;
+        }"""
+    )
+    if not ok:
+        raise TimeoutError("No se pudo marcar el checkbox LOPD (#lopdok)")
 
 
 async def _wait_boton_continuar(page: Page) -> None:
@@ -54,6 +78,7 @@ async def confirmar_tramite(page: Page, screenshots_dir: Path) -> str:
     """
 
     logging.info("Marcando aceptación LOPD")
+    await _wait_mask_hidden(page)
     await _check_lopd(page)
 
     await _wait_boton_continuar(page)
@@ -81,4 +106,3 @@ async def confirmar_tramite(page: Page, screenshots_dir: Path) -> str:
     logging.warning("Botón 'Enviar' NO pulsado (modo testing)")
 
     return str(screenshot_path)
-
