@@ -54,14 +54,31 @@ async def _click_link(popup: Page, patron: str) -> None:
     await link.click()
 
 
+async def _wait_upload_ok(popup: Page) -> None:
+    # En popup.html el estado se escribe en <div id="uploadResultado">... Document adjuntat</div>
+    try:
+        await popup.wait_for_function(
+            """() => {
+                const el = document.getElementById('uploadResultado');
+                if (!el) return false;
+                return /Document\\s+adjuntat/i.test(el.textContent || '');
+            }""",
+            timeout=60000,
+        )
+    except Exception:
+        # Fallback suave: si no existe el div (variantes), no bloqueamos indefinidamente.
+        await popup.wait_for_timeout(500)
+
+
 async def _adjuntar_y_continuar(popup: Page) -> None:
     # En popup.html el CTA es un <a> con texto "Clicar per adjuntar"
     await _click_link(popup, r"^Clicar per adjuntar")
-    await popup.wait_for_load_state("networkidle")
+    await _wait_upload_ok(popup)
 
     # Tras adjuntar, aparece "Continuar"
     await _click_link(popup, r"^Continuar$")
-    await popup.wait_for_load_state("networkidle")
+    # Normalmente el popup se cierra al continuar; no esperamos "networkidle" (puede colgarse por trackers/iframes).
+    await popup.wait_for_load_state("domcontentloaded")
 
 
 async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]) -> None:
@@ -103,11 +120,14 @@ async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]
         await _seleccionar_archivos(popup, archivos)
         await _adjuntar_y_continuar(popup)
         try:
-            await popup.wait_for_event("close", timeout=15000)
+            await popup.wait_for_event("close", timeout=5000)
         except TimeoutError:
+            try:
+                await popup.evaluate("() => window.close()")
+            except Exception:
+                pass
             await popup.close()
 
-    await page.wait_for_timeout(1000)
-    await page.wait_for_load_state("networkidle")
+    # Espera corta a que el STA reciba el resultado del uploader (evitamos 'networkidle', suele ser lento).
+    await page.wait_for_timeout(250)
     logging.info("Documentos subidos")
-
