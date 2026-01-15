@@ -39,7 +39,14 @@ class DatosMulta:
     num_expediente: str
     motivos: str
     archivos_adjuntos: Optional[List[Path]] = None
-    archivo_adjunto: Optional[Path] = None
+
+    @property
+    def archivos_para_subir(self) -> List[Path]:
+        """
+        Unifica los archivos adjuntos en una sola lista para Playwright.
+        Devuelve una lista vacía si no hay nada.
+        """
+        return self.archivos_adjuntos if self.archivos_adjuntos else []
 
 
 @dataclass

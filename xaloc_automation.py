@@ -114,17 +114,16 @@ class XalocAsync:
             await rellenar_formulario(self.page, datos)
             
             # Fase 3: Documentos
-            archivos = None
-            if getattr(datos, "archivos_adjuntos", None):
-                archivos = datos.archivos_adjuntos
-            elif getattr(datos, "archivo_adjunto", None):
-                archivos = datos.archivo_adjunto
+            archivos = datos.archivos_para_subir
 
             if archivos:
                 logging.info("\n" + "="*50)
-                logging.info("FASE 3: SUBIDA DE DOCUMENTOS")
+                logging.info(f"FASE 3: SUBIDA DE {len(archivos)} DOCUMENTO(S)")
                 logging.info("="*50)
+                # Pasamos la lista directamente
                 await subir_documento(self.page, archivos)
+            else:
+                logging.info("Fase 3: Saltada (no hay archivos adjuntos)")
             
             # Fase 4: Confirmación
             logging.info("\n" + "="*50)

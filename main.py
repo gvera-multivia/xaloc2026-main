@@ -15,14 +15,19 @@ async def main():
     """Ejecuta la automatización completa."""
     config = Config()
     
+    # Simplemente define tus rutas aquí
+    archivos_a_enviar = [
+        Path("pdfs-prueba") / "test1.pdf",
+        # Path("pdfs-prueba") / "test2.pdf" 
+    ]
+
     datos = DatosMulta(
         email="test@example.com",
         num_denuncia="DEN/2024/001",
         matricula="1234ABC",
         num_expediente="EXP/2024/001",
         motivos="Alegación de prueba.",
-        archivos_adjuntos=None,
-        archivo_adjunto=Path("pdfs-prueba") / "test1.pdf"
+        archivos_adjuntos=archivos_a_enviar
     )
 
     print("\n" + "="*60)
