@@ -47,6 +47,10 @@ class XalocAsync:
         policy = '{"pattern":"*","filter":{}}'
         args.append(f'--auto-select-certificate-for-urls=[{policy}]')
         
+        # Deshabilitar popup de traducción (simplifica navegación por Tab)
+        args.append('--lang=ca')  # Catalán, idioma nativo de la web
+        args.append('--disable-features=TranslateUI')
+        
         # Usar perfil persistente - permite acceso a certificados del sistema
         # y recuerda selecciones previas del usuario
         user_data_dir = str(self.config.navegador.perfil_path.absolute())
