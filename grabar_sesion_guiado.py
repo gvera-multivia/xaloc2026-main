@@ -1,87 +1,99 @@
-"""
-Grabación guiada de sesión para Xaloc Automation.
-
-Motivación:
-- Las pasarelas OAuth2/OIDC (VÀLid/AOC) requieren un flujo de navegación con contexto.
-- Este script navega automáticamente hasta VÀLid y se detiene para que el usuario
-  seleccione el certificado. Después guarda el `storage_state` en `auth/auth_state.json`.
-"""
-
 import asyncio
 import logging
 import sys
-
 from playwright.async_api import async_playwright
-
 from config import Config
 
-
+# Configuración de Logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 
-
 async def grabar_sesion_guiada() -> None:
     config = Config()
-
     auth_file = config.auth_state_path
+    
+    # Asegurar que el directorio existe
     config.dir_auth.mkdir(exist_ok=True)
 
     async with async_playwright() as p:
         logging.info("Iniciando navegador para grabación guiada...")
 
+        # Lanzamos el navegador con la configuración de tu config.py
         browser = await p.chromium.launch(
             headless=False,
             channel=config.navegador.canal,
             args=config.navegador.args,
         )
 
-        context = await browser.new_context(ignore_https_errors=True)
+        # Creamos un contexto limpio
+        context = await browser.new_context(
+            ignore_https_errors=True,
+            viewport={'width': 1280, 'height': 720}
+        )
         page = await context.new_page()
 
-        logging.info("Navegando a %s", config.url_base)
-        await page.goto(config.url_base, wait_until="networkidle")
+        logging.info("Navegando a la URL base: %s", config.url_base)
+        await page.goto(config.url_base, wait_until="domcontentloaded")
 
+        # 1. Manejo de Cookies (igual que en el flujo principal)
         try:
             boton_cookies = page.get_by_role("button", name="Acceptar")
             if await boton_cookies.count() > 0:
-                await boton_cookies.first.click(timeout=1500)
-                await page.wait_for_timeout(500)
+                await boton_cookies.first.click(timeout=3000)
+                logging.info("Cookies aceptadas.")
         except Exception:
-            pass
+            logging.info("No se detectó banner de cookies o ya fue aceptado.")
 
-        logging.info("Pulsando 'Tramitació en línia'...")
+        # 2. Localizar el enlace de 'Tramitació en línia'
+        logging.info("Buscando botón 'Tramitació en línia'...")
         enlace = page.get_by_role("link", name="Tramitació en línia").first
+        
         await enlace.wait_for(state="visible", timeout=config.timeouts.general)
         await enlace.scroll_into_view_if_needed()
 
+        # 3. Flujo de Click y Captura de Popup (El "fix" que mencionas)
+        logging.info("Haciendo click para abrir la pasarela VÀLid...")
         try:
-            async with page.expect_popup(timeout=7000) as popup_info:
+            async with page.expect_popup(timeout=10000) as popup_info:
                 await enlace.click()
-            valid_page = await popup_info.value
-            await valid_page.wait_for_load_state("domcontentloaded")
-        except Exception:
-            await enlace.click()
-            await page.wait_for_load_state("domcontentloaded")
-            valid_page = page
+            
+            # Cambiamos el foco a la nueva página (la de VÀLid/AOC)
+            target_page = await popup_info.value
+            await target_page.wait_for_load_state("domcontentloaded")
+            logging.info("Pasarela detectada con éxito: %s", target_page.url)
+        
+        except Exception as e:
+            logging.warning("No se detectó popup, intentando continuar en la página actual: %s", e)
+            target_page = page
 
-        logging.info("Pasarela detectada: %s", valid_page.url)
+        # 4. Instrucciones manuales
+        print("\n" + "!" * 75)
+        print(" ACCIÓN MANUAL REQUERIDA ".center(75, "="))
+        print("1. En la ventana del navegador, selecciona tu CERTIFICADO DIGITAL.")
+        print("2. Si se te solicita, introduce el PIN.")
+        print("3. Una vez veas el formulario de Xaloc (donde se rellenan los datos),")
+        print("   vuelve aquí y pulsa ENTER.")
+        print("!" * 75 + "\n")
 
-        print("\n" + "!" * 72)
-        print("MANUAL: Selecciona tu certificado en la ventana del navegador.")
-        print("MANUAL: Completa el login hasta ver el formulario STA (Xaloc).")
-        print("!" * 72 + "\n")
-        input("Pulsa ENTER aquí cuando ya estés dentro para GUARDAR LA SESIÓN...")
+        input(">>> Pulsa ENTER aquí para GUARDAR LA SESIÓN una vez estés logueado...")
 
-        logging.info("Guardando estado de sesión en %s", auth_file)
+        # 5. Guardar el estado
+        logging.info("Guardando storage_state en %s", auth_file)
         await context.storage_state(path=str(auth_file))
 
-        logging.info("Sesión guardada correctamente.")
+        logging.info("✅ Sesión guardada correctamente. Ya puedes usar main.py.")
+        
+        # Cerramos con un pequeño delay
+        await asyncio.sleep(1)
         await browser.close()
-
 
 if __name__ == "__main__":
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-    asyncio.run(grabar_sesion_guiada())
+    
+    try:
+        asyncio.run(grabar_sesion_guiada())
+    except KeyboardInterrupt:
+        pass
