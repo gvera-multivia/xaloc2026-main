@@ -68,27 +68,43 @@ async def realizar_login_guiado(config: Config):
         print(" 3. Espera a que el navegador cargue el formulario real de Xaloc.")
         print("!" * 75 + "\n")
 
-        # FIX DETECCIÓN: No miramos solo la URL, buscamos el campo DNI real
-        # Esto elimina falsos positivos cuando la URL de destino aparece como parámetro
+        # DETECCIÓN DEL FORMULARIO
+        # Primero esperamos URL correcta, luego buscamos cualquier campo de formulario
         intentos = 0
-        max_intentos = 300  # 5 minutos de margen (300 * 1 segundo)
+        max_intentos = 120  # 2 minutos de margen
+        formulario_detectado = False
         
         while intentos < max_intentos:
-            # Comprobamos si existe el campo DNI (típico del formulario STA de Xaloc)
-            dni_field = aoc_page.locator("input#f_dni, input[name='f_dni']")
+            url_actual = aoc_page.url
             
             # Verificamos que la URL sea de la sede Y NO de valid.aoc
-            # Esto evita el falso positivo cuando 'seu.xalocgirona.cat' aparece como redirect_uri
-            url_actual = aoc_page.url
             es_url_sede = "seu.xalocgirona.cat" in url_actual
             no_es_pasarela = "valid.aoc.cat" not in url_actual
             url_correcta = es_url_sede and no_es_pasarela
             
-            if await dni_field.count() > 0 and url_correcta:
-                print(f"\n✨ FORMULARIO DETECTADO CORRECTAMENTE")
-                print(f"   Campo DNI encontrado: ✅")
-                print(f"   URL verificada: {url_actual}")
-                break
+            if url_correcta:
+                # Buscamos cualquier campo de formulario típico
+                campos_posibles = aoc_page.locator(
+                    "input[type='text'], input[type='email'], textarea, "
+                    "input#f_dni, input[name='f_dni'], input#dni, "
+                    "form input:not([type='hidden'])"
+                )
+                
+                if await campos_posibles.count() > 0:
+                    print(f"\n✨ FORMULARIO DETECTADO CORRECTAMENTE")
+                    print(f"   Campos encontrados: {await campos_posibles.count()}")
+                    print(f"   URL verificada: {url_actual}")
+                    formulario_detectado = True
+                    break
+                else:
+                    # Si la URL es correcta pero no hay campos, igual aceptamos
+                    # (puede ser que los campos tarden en renderizar)
+                    await asyncio.sleep(2)
+                    if await campos_posibles.count() > 0 or intentos > 30:
+                        print(f"\n✨ FORMULARIO DETECTADO (por URL)")
+                        print(f"   URL verificada: {url_actual}")
+                        formulario_detectado = True
+                        break
             
             if intentos % 10 == 0:
                 logging.info(f"Esperando formulario... (URL actual: {url_actual[:60]}...)")
@@ -96,7 +112,7 @@ async def realizar_login_guiado(config: Config):
             await asyncio.sleep(1)
             intentos += 1
         
-        if intentos >= max_intentos:
+        if not formulario_detectado:
             logging.error("❌ Tiempo máximo excedido esperando el formulario.")
             await browser.close()
             return
