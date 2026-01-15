@@ -19,6 +19,7 @@ La base se debe de detectar con un regex igual que previamente en xaloc, ya que 
 `https://valid.aoc.cat/o/oauth2/auth?client_id=tramits.base.cat&redirect_uri=https://www.baseonline.cat/sav/code&state=/commons-desktop&scope=autenticacio_usuari&response_type=code&access_type=offline&approval_prompt=auto`
 
 En este caso el proceso es el mismo que en el caso de xaloc. Por tanto podemos replicar el proceso en `flows\login.py`Se debe de accionar el boton:
+
 ```
 <button id="btnContinuaCert" data-testid="certificate-btn" data-toggle="modal" class="btn btn-opc btn-certificatDigital">
     <span class="txt">Certificat digital:</span>
@@ -64,3 +65,50 @@ Como hemos dicho, debemos permitir diferentes posibles rutas de acceso.
 
 ### 4.1 - Formulario de Reposición (P3)
 
+El contenido copiado del original está en `base-reposicion-form.html`
+Pero lo relevante es el contenido del formulario y los datos especificos que necesitamos tratar como variables para enviarlos al formulario.
+
+Y esos trozos importantes son:
+
+1 - Los inputs de tipo radio
+
+```
+<div class="fieldset-in">
+	<div class="inputs-container">
+		<div class="input-item info">
+			<p>Cada tipus d'objecte requereix una dada específica que l'identifica i que heu d'indicar en el camp <strong>Dades específiques</strong>. A més, en cas d'existir un rebut relacionat amb la vostra sol·licitud us agrairem que ens faciliteu la seva clau de cobrament. Recordeu també que en cas de que es practiqui una devolució també ens heu d'informar del vostre <strong>número de compte</strong>. 
+				</p>
+			</div><span class=""><input id="form0:tipusObjecteHidden" type="hidden" name="form0:tipusObjecteHidden" value="1">
+					<div class="input-item ">
+						<input type="radio" id="radio1" name="radiooo" class="input" onclick="setTipusObjecte('1')"><strong>IBI</strong> - Referència cadastral del immoble - <strong>xxxxxxxxx</strong>
+					</div>
+					<div class="input-item ">
+						<input type="radio" id="radio2" name="radiooo" class="input" onclick="setTipusObjecte('2')"><strong>IVTM</strong> - Matrícula del vehícle - <strong>xxx-YYY</strong>
+					</div>
+					<div class="input-item ">
+						<input type="radio" id="radio3" name="radiooo" class="input" onclick="setTipusObjecte('3')"><strong>Expedient Executiu</strong> - Número d'expedient - <strong>xxxx/yyyy</strong>
+					</div>
+					<div class="input-item ">
+						<input type="radio" id="radio4" name="radiooo" class="input" onclick="setTipusObjecte('4')"><strong>Altres</strong> - Número fix - <strong>xxxxxxxxx</strong>
+					</div>
+				
+				<script type="text/javascript">
+					function setTipusObjecte(valor) {
+						document.getElementById("form0:tipusObjecteHidden").value = valor;
+							document.getElementById("radio1").checked = valor === '1';
+							document.getElementById("radio2").checked = valor === '2';
+							document.getElementById("radio3").checked = valor === '3';
+							document.getElementById("radio4").checked = valor === '4';
+					};
+					setTipusObjecte('1');
+				</script></span>
+				
+				
+				<div class="input-item ">
+					<label for="dades"> Dades específiques: <span class="required">*</span></label><br><textarea id="form0:dades" name="form0:dades" class="input" cols="70" rows="5"></textarea>
+				</div>								
+			</div>
+		</div>
+```
+
+El valor del parametro que se enviará para esto en concreto sera el número que identifique al input que se marque en el radio button.
