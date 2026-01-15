@@ -58,7 +58,7 @@ class XalocAsync:
         
         if self.config.auth_state_path.exists():
             logging.info(f"📂 Cargando estado de sesión desde: {self.config.auth_state_path}")
-            context_options["storage_state"] = self.config.auth_state_path
+            context_options["storage_state"] = str(self.config.auth_state_path)
         else:
             logging.warning("⚠️ No se encontró archivo de sesión. Se iniciará sin credenciales.")
             
