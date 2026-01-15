@@ -75,10 +75,12 @@ async def ejecutar_login(page: Page, config: Config) -> None:
         logging.info("✅ Botón detectado. Pulsando para iniciar identificación...")
         await boton_cert.click()
         
-        # Nota: El popup de certificado del sistema operativo aparecerá aquí.
-        # Si el perfil persistente tiene el certificado guardado, se seleccionará
-        # automáticamente. Si no, el usuario necesita ejecutar --setup primero.
-        logging.info("⏳ Esperando selección de certificado (popup del sistema)...")
+        # AUTOMATIZACIÓN DEL POPUP DE WINDOWS
+        # El popup de certificado es nativo del SO, usamos pyautogui para controlarlo
+        from utils.windows_popup import esperar_y_aceptar_certificado
+        
+        logging.info("🖥️ Enviando teclas al popup de Windows con pyautogui...")
+        esperar_y_aceptar_certificado(delay_inicial=2.0)
         
     except Exception as e:
         logging.error(f"❌ No se pudo interactuar con el botón en la nueva pestaña: {e}")
