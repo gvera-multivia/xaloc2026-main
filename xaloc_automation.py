@@ -35,53 +35,53 @@ class XalocAsync:
         )
     
     async def __aenter__(self):
-        """Inicializa el navegador con estado de autenticación si existe"""
-        logging.info("🚀 Iniciando navegador...")
+        """Inicializa el navegador usando perfil persistente para acceso a certificados"""
+        logging.info("🚀 Iniciando navegador con perfil persistente...")
         
         self.playwright = await async_playwright().start()
         
         # Preparar argumentos del navegador
         args = self.config.navegador.args.copy()
         
-        # AUTO-SELECCIÓN DE CERTIFICADO: Aceptar automáticamente cualquier certificado
-        # Esto evita el popup nativo del SO que Playwright no puede controlar
+        # AUTO-SELECCIÓN DE CERTIFICADO
         policy = '{"pattern":"*","filter":{}}'
         args.append(f'--auto-select-certificate-for-urls=[{policy}]')
-        logging.info("🔐 Auto-selección de certificado activada (modo automático)")
         
-        # Opciones de lanzamiento
-        launch_options = {
-            "headless": self.config.navegador.headless,
-            "channel": self.config.navegador.canal,
-            "args": args
-        }
+        # Usar perfil persistente - permite acceso a certificados del sistema
+        # y recuerda selecciones previas del usuario
+        user_data_dir = str(self.config.navegador.perfil_path.absolute())
         
-        self.browser = await self.playwright.chromium.launch(**launch_options)
+        logging.info(f"📂 Usando perfil persistente: {user_data_dir}")
         
-        # Configurar contexto (con o sin estado guardado)
-        context_options = {
-            "base_url": self.config.url_base,
-            # Ignorar errores de certificado si es necesario
-            "ignore_https_errors": True
-        }
+        # launch_persistent_context combina browser + context en uno
+        # Esto es CLAVE para acceder a los certificados del sistema
+        self.context = await self.playwright.chromium.launch_persistent_context(
+            user_data_dir=user_data_dir,
+            channel=self.config.navegador.canal,
+            headless=self.config.navegador.headless,
+            args=args,
+            ignore_https_errors=True,
+            accept_downloads=True
+        )
         
-        if self.config.auth_state_path.exists():
-            logging.info(f"📂 Cargando estado de sesión desde: {self.config.auth_state_path}")
-            context_options["storage_state"] = str(self.config.auth_state_path)
+        # El contexto persistente ya tiene una página, o creamos una nueva
+        if self.context.pages:
+            self.page = self.context.pages[0]
         else:
-            logging.warning("⚠️ No se encontró archivo de sesión. Se iniciará sin credenciales.")
+            self.page = await self.context.new_page()
             
-        self.context = await self.browser.new_context(**context_options)
-        self.page = await self.context.new_page()
         self.page.set_default_timeout(self.config.timeouts.general)
         
-        logging.info("✅ Navegador iniciado")
+        # Nota: No usamos storage_state con persistent_context porque
+        # el perfil ya mantiene su propio estado de sesión
+        
+        logging.info("✅ Navegador iniciado con perfil persistente")
         return self
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Cierra el navegador"""
-        if self.browser:
-            await self.browser.close()
+        """Cierra el navegador (persistent_context)"""
+        if self.context:
+            await self.context.close()
         if self.playwright:
             await self.playwright.stop()
         logging.info("🔚 Navegador cerrado")
