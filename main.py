@@ -4,7 +4,7 @@ import logging
 
 from config import Config, DatosMulta
 from xaloc_automation import XalocAsync
-
+from pathlib import Path
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 
 if sys.platform == "win32":
@@ -22,7 +22,7 @@ async def main():
         num_expediente="EXP/2024/001",
         motivos="Alegación de prueba.",
         archivos_adjuntos=None,
-        archivo_adjunto=None
+        archivo_adjunto=Path("pdfs-prueba") / "test1.pdf"
     )
 
     print("\n" + "="*60)
