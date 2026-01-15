@@ -26,21 +26,29 @@ async def _check_lopd(page: Page) -> None:
     await checkbox.wait_for(state="visible", timeout=30000)
     await checkbox.scroll_into_view_if_needed()
 
-    for _ in range(3):
-        try:
-            # Con adjuntos a veces queda un overlay (#mask) unos segundos; `force=True` evita esperar a que sea clickable.
-            await checkbox.check(timeout=2000, force=True)
-        except Exception:
-            try:
-                await _wait_mask_hidden(page)
-                await checkbox.check(timeout=5000)
-            except Exception:
-                pass
-
+    # Primero intentar click directo (caso rápido sin overlay)
+    try:
+        await checkbox.check(timeout=500)
         if await checkbox.is_checked():
             return
+    except Exception:
+        pass
 
-        await page.wait_for_timeout(500)
+    # Si hay overlay (#mask), esperar a que desaparezca y reintentar
+    await _wait_mask_hidden(page, timeout_ms=3000)
+    
+    try:
+        await checkbox.check(timeout=1000)
+        if await checkbox.is_checked():
+            return
+    except Exception:
+        # Forzar el click si sigue bloqueado
+        try:
+            await checkbox.check(timeout=500, force=True)
+            if await checkbox.is_checked():
+                return
+        except Exception:
+            pass
 
     # Último recurso: forzar estado por JS + disparar eventos (onclick/onchange) para que aparezca "Continuar".
     ok = await page.evaluate(
