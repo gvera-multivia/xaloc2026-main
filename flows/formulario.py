@@ -4,55 +4,65 @@ Flujo de rellenado del formulario STA
 from playwright.async_api import Page
 import logging
 from config import DatosMulta
-
-
 async def rellenar_formulario(page: Page, datos: DatosMulta) -> None:
-    """
-    Rellena el formulario STA de alegación
-    
-    Args:
-        page: Página de Playwright
-        datos: Datos de la multa a rellenar
-    """
-    
-    logging.info("📝 Rellenando formulario de alegación")
-    
-    # IMPORTANTE: Esperar a que la página cargue completamente para evitar errores
-    await page.wait_for_load_state("networkidle")
-    
-    # Campo Email
-    email_input = page.locator("#contact21")
-    await email_input.wait_for(state="visible", timeout=30000)
-    logging.info(f"  → Email: {datos.email}")
-    await email_input.fill(datos.email)
-    
-    # Campo Nº Denuncia
-    denuncia_input = page.locator("#DinVarNUMDEN")
-    await denuncia_input.wait_for(state="visible")
-    logging.info(f"  → Nº Denuncia: {datos.num_denuncia}")
-    await denuncia_input.fill(datos.num_denuncia)
-    
-    # Campo Matrícula
-    matricula_input = page.locator("#DinVarMATRICULA")
-    await matricula_input.wait_for(state="visible")
-    logging.info(f"  → Matrícula: {datos.matricula}")
-    await matricula_input.fill(datos.matricula)
-    
-    # Campo Nº Expediente
-    expediente_input = page.locator("#DinVarNUMEXP")
-    await expediente_input.wait_for(state="visible")
-    logging.info(f"  → Nº Expediente: {datos.num_expediente}")
-    await expediente_input.fill(datos.num_expediente)
-    
-    # Campo TinyMCE (dentro de iframe)
-    logging.info("📝 Rellenando editor de motivos (TinyMCE)")
-    
-    # Esperar a que el iframe exista
-    frame_loc = page.frame_locator("#DinVarMOTIUS_ifr")
-    # Esperar al body dentro del iframe
-    body_loc = frame_loc.locator("body#tinymce")
-    await body_loc.wait_for(state="visible", timeout=30000)
-    
-    await body_loc.fill(datos.motivos)
-    
-    logging.info("✅ Formulario completado")
+    logging.info("📝 Iniciando rellenado del formulario STA")
+
+    try:
+        # 1. Esperar a que el formulario sea visible (usamos el email como referencia)
+        # Aumentamos el timeout por si la web es lenta
+        await page.wait_for_selector("#contact21", state="visible", timeout=20000)
+
+        # 2. Función auxiliar para rellenar con seguridad
+        async def rellenar_con_fuerza(selector, valor):
+            locator = page.locator(selector)
+            await locator.scroll_into_view_if_needed() # Asegura que el campo esté en pantalla
+            await locator.click() # Simula clic para ganar el foco
+            # Usamos press_sequentially en lugar de fill. 
+            # Esto simula pulsaciones de teclas una a una (más humano).
+            await locator.press_sequentially(str(valor), delay=30) 
+            await locator.press("Tab") # Salir del campo para disparar eventos 'change' o 'blur'
+
+        # Rellenar campos principales
+        logging.info(f"  → Email: {datos.email}")
+        await rellenar_con_fuerza("#contact21", datos.email)
+
+        logging.info(f"  → Denuncia: {datos.num_denuncia}")
+        await rellenar_con_fuerza("#DinVarNUMDEN", datos.num_denuncia)
+
+        logging.info(f"  → Matrícula: {datos.matricula}")
+        await rellenar_con_fuerza("#DinVarMATRICULA", datos.matricula)
+
+        logging.info(f"  → Expediente: {datos.num_expediente}")
+        await rellenar_con_fuerza("#DinVarNUMEXP", datos.num_expediente)
+
+        # 3. Rellenar el TinyMCE (dentro de su Iframe)
+        logging.info("📝 Rellenando motivos en el Iframe...")
+        
+        # Localizamos el iframe por el ID que me has pasado
+        iframe_motivos = page.frame_locator("#DinVarMOTIUS_ifr")
+        body_editor = iframe_motivos.locator("body#tinymce")
+
+        # Esperar a que el cuerpo del editor sea editable
+        await body_editor.wait_for(state="visible", timeout=10000)
+        await body_editor.click()
+        
+        # En TinyMCE a veces el texto se resiste. 
+        # Probamos primero con fill, y si no, usamos JavaScript.
+        await body_editor.fill(datos.motivos)
+        
+        # Verificación de seguridad para el editor:
+        contenido_actual = await body_editor.inner_text()
+        if not contenido_actual.strip():
+            logging.warning("⚠️ El fill falló en TinyMCE, intentando vía JavaScript...")
+            await body_editor.evaluate(
+                "(el, texto) => el.innerHTML = '<p>' + texto + '</p>'", 
+                datos.motivos
+            )
+
+        logging.info("✅ Formulario completado con éxito")
+
+    except Exception as e:
+        logging.error(f"❌ Error durante el rellenado: {str(e)}")
+        # Hacemos una captura para ver qué falló exactamente
+        await page.screenshot(path="fallo_formulario.png")
+        raise e
