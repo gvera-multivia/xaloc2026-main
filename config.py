@@ -4,7 +4,7 @@ Configuración del proyecto Xaloc Automation
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, List
-
+import os
 
 @dataclass
 class ConfigNavegador:
