@@ -13,14 +13,19 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(encoding='utf-8')
 
 async def realizar_login_guiado(config: Config):
-    """Graba la sesión imitando el comportamiento exacto del bot."""
+    """Graba la sesión con detección robusta del formulario real."""
     print("\n" + "="*75)
-    print(" CONFIGURACIÓN DE SESIÓN INICIAL ".center(75, " "))
+    print(" 🛠️ REPARACIÓN DE SESIÓN ".center(75, " "))
     print("="*75 + "\n")
     
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False, channel=config.navegador.canal)
-        context = await browser.new_context(ignore_https_errors=True)
+        # Forzamos canal 'chrome' o 'msedge' para acceso a certificados del sistema
+        browser = await p.chromium.launch(
+            headless=False, 
+            channel=config.navegador.canal or "chrome",
+            args=["--start-maximized"]
+        )
+        context = await browser.new_context(ignore_https_errors=True, no_viewport=True)
         page = await context.new_page()
 
         logging.info("1. Navegando a Xaloc...")
@@ -28,53 +33,85 @@ async def realizar_login_guiado(config: Config):
         
         # Aceptar cookies
         try:
-            await page.get_by_role("button", name="Acceptar").click(timeout=2000)
+            await page.get_by_role("button", name="Acceptar").click(timeout=3000)
         except: pass
 
-        logging.info("2. Esperando click en 'Tramitació en línia'...")
-        # Usamos el mismo método que el bot
+        logging.info("2. Abriendo pasarela AOC...")
         async with page.expect_popup() as popup_info:
             await page.get_by_role("link", name="Tramitació en línia").first.click()
         
         aoc_page = await popup_info.value
         await aoc_page.wait_for_load_state("domcontentloaded")
 
-        # 3. INTENTO DE CLICK EN BOTÓN AZUL (Mismo método que el bot)
-        logging.info("3. Intentando pulsar 'Certificat Digital' (#btnCert)...")
+        # FIX CLICK: Intentamos varias formas para el botón de certificado
+        logging.info("3. Intentando disparar botón de certificado...")
         try:
+            # Opción 1: Selector ID con hover previo (simula comportamiento humano)
             btn = aoc_page.locator("#btnCert")
-            await btn.wait_for(state="visible", timeout=8000)
-            # Pequeña pausa para evitar detección de bot
-            await asyncio.sleep(1) 
+            await btn.wait_for(state="visible", timeout=5000)
+            await btn.hover()  # Simula movimiento humano - algunos botones lo requieren
+            await asyncio.sleep(0.5)
             await btn.click()
-            logging.info("✅ Botón de certificado pulsado.")
-        except Exception as e:
-            logging.warning("⚠️ No se pudo pulsar automáticamente. PULSALO TÚ EN EL NAVEGADOR.")
+            logging.info("✅ Click enviado con éxito.")
+        except Exception:
+            # Opción 2: Buscar por texto si el ID falla
+            try:
+                await aoc_page.get_by_text("Certificat digital").click(timeout=3000)
+                logging.info("✅ Click enviado mediante texto.")
+            except Exception:
+                logging.warning("⚠️ El script no pudo clicar. POR FAVOR, HAZ CLICK MANUAL EN EL BOTÓN AZUL.")
 
         print("\n" + "!" * 75)
-        print(" ACCIÓN REQUERIDA EN EL NAVEGADOR ".center(75, "!"))
-        print(" 1. Selecciona tu certificado y pon el PIN.")
-        print(" 2. Navega hasta que veas el FORMULARIO DE XALOC (DNI, Nombre...).")
-        print(" 3. NO CIERRES NADA.")
+        print(" ESPERANDO LOGIN COMPLETO ".center(75, "!"))
+        print(" 1. Selecciona tu certificado en la ventana de Windows.")
+        print(" 2. Rellena el PIN si te lo pide.")
+        print(" 3. Espera a que el navegador cargue el formulario real de Xaloc.")
         print("!" * 75 + "\n")
 
-        # Bucle de espera inteligente: detectamos cuándo llegas al destino
-        print("Esperando a que la URL cambie a la Sede Electrónica de Xaloc...")
-        while "seu.xalocgirona.cat/sta" not in aoc_page.url:
-            await asyncio.sleep(1)
+        # FIX DETECCIÓN: No miramos solo la URL, buscamos el campo DNI real
+        # Esto elimina falsos positivos cuando la URL de destino aparece como parámetro
+        intentos = 0
+        max_intentos = 300  # 5 minutos de margen (300 * 1 segundo)
         
-        print(f"\n✅ Formulario detectado en: {aoc_page.url}")
-        input(">>> Pulsa ENTER aquí para guardar esta sesión permanentemente...")
+        while intentos < max_intentos:
+            # Comprobamos si existe el campo DNI (típico del formulario STA de Xaloc)
+            dni_field = aoc_page.locator("input#f_dni, input[name='f_dni']")
+            
+            # Verificamos que la URL sea de la sede Y NO de valid.aoc
+            # Esto evita el falso positivo cuando 'seu.xalocgirona.cat' aparece como redirect_uri
+            url_actual = aoc_page.url
+            es_url_sede = "seu.xalocgirona.cat" in url_actual
+            no_es_pasarela = "valid.aoc.cat" not in url_actual
+            url_correcta = es_url_sede and no_es_pasarela
+            
+            if await dni_field.count() > 0 and url_correcta:
+                print(f"\n✨ FORMULARIO DETECTADO CORRECTAMENTE")
+                print(f"   Campo DNI encontrado: ✅")
+                print(f"   URL verificada: {url_actual}")
+                break
+            
+            if intentos % 10 == 0:
+                logging.info(f"Esperando formulario... (URL actual: {url_actual[:60]}...)")
+            
+            await asyncio.sleep(1)
+            intentos += 1
+        
+        if intentos >= max_intentos:
+            logging.error("❌ Tiempo máximo excedido esperando el formulario.")
+            await browser.close()
+            return
+
+        print(f"\nURL Final confirmada: {aoc_page.url}")
+        input("\n>>> PULSA ENTER AQUÍ PARA GUARDAR LA SESIÓN DEFINITIVA...")
 
         # GUARDAR ESTADO Y URL FINAL
         config.dir_auth.mkdir(exist_ok=True)
         await context.storage_state(path=str(config.auth_state_path))
         
-        # Guardamos la URL del formulario, no la de la pasarela
         with open(config.dir_auth / "last_url.txt", "w") as f:
             f.write(aoc_page.url)
             
-        logging.info(f"💾 Sesión guardada en {config.auth_state_path}")
+        logging.info(f"✅ Sesión guardada en {config.auth_state_path}")
         await browser.close()
 
 async def main():
