@@ -29,15 +29,19 @@ def esperar_y_aceptar_certificado(timeout: float = 10.0, delay_inicial: float = 
     Returns:
         True si se envió Enter, False si hubo error
     """
-    logging.info(f"⏳ Esperando {delay_inicial}s para que aparezca el popup de Windows...")
-    time.sleep(delay_inicial)
-    
-    try:
-        # El popup de certificados de Windows generalmente:
-        # 1. Tiene el primer certificado seleccionado por defecto
-        # 2. El botón "Aceptar" tiene el focus
-        # Por tanto, solo necesitamos pulsar Enter
+try:
+        # 1. Espera crucial: da tiempo a que el popup se dibuje y gane foco
+        logging.info("⏳ Esperando 2 segundos a que aparezca el popup...")
+        time.sleep(2) 
         
+        # 2. Navegar por el popup
+        # Usamos hotkey para combinaciones de teclas
+        logging.info("⌨️ Navegando por el diálogo con Shift+Tab...")
+        pyautogui.hotkey('shift', 'tab')
+        time.sleep(0.5) # Pequeña pausa entre pulsaciones para mayor estabilidad
+        pyautogui.hotkey('shift', 'tab')
+        
+        # 3. Confirmar
         logging.info("⌨️ Enviando ENTER al popup de Windows...")
         pyautogui.press('enter')
         
@@ -45,7 +49,7 @@ def esperar_y_aceptar_certificado(timeout: float = 10.0, delay_inicial: float = 
         return True
         
     except Exception as e:
-        logging.error(f"❌ Error al enviar teclas: {e}")
+        logging.error(f"❌ Error al interactuar con el popup: {e}")
         return False
 
 
