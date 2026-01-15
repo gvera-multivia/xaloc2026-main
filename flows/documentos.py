@@ -1,10 +1,11 @@
 """
-Flujo de subida de documentos (adjuntos)
+Flujo de subida de documentos (adjuntos) vía popup uploader.
 """
 
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import List, Optional, Sequence, Union
 
@@ -25,27 +26,41 @@ def _validar_extension(archivo: Path) -> None:
         raise ValueError(f"Extensión no permitida: {archivo.name} (solo jpg, jpeg, pdf)")
 
 
-async def _subir_en_popup(popup: Page, archivo: Path) -> None:
-    input_file = popup.locator("#fichero, input[type='file']").first
-    await input_file.wait_for(state="visible", timeout=20000)
-    await input_file.set_input_files(archivo)
-
-    posibles_botones = [
-        popup.get_by_role("button", name="Adjuntar"),
-        popup.get_by_role("button", name="Aceptar"),
-        popup.get_by_role("button", name="Enviar"),
-        popup.get_by_role("button", name="Subir"),
-        popup.locator("input[type='submit']"),
-        popup.locator("button[type='submit']"),
-    ]
-    for boton in posibles_botones:
+async def _siguiente_input_vacio(popup: Page) -> Optional[int]:
+    inputs = popup.locator("input[type='file']")
+    count = await inputs.count()
+    for i in range(count):
         try:
-            if await boton.count() > 0:
-                await boton.first.click(timeout=1500)
-                break
+            vacio = await inputs.nth(i).evaluate("(el) => !el.files || el.files.length === 0")
+            if vacio:
+                return i
         except Exception:
             continue
+    return None
 
+
+async def _seleccionar_archivos(popup: Page, archivos: List[Path]) -> None:
+    await popup.wait_for_selector("input[type='file']", state="attached", timeout=20000)
+    for archivo in archivos:
+        idx = await _siguiente_input_vacio(popup)
+        if idx is None:
+            raise RuntimeError("No hay más inputs de archivo libres en el popup.")
+        await popup.locator("input[type='file']").nth(idx).set_input_files(archivo)
+
+
+async def _click_link(popup: Page, patron: str) -> None:
+    link = popup.get_by_role("link", name=re.compile(patron, re.IGNORECASE)).first
+    await link.wait_for(state="visible", timeout=20000)
+    await link.click()
+
+
+async def _adjuntar_y_continuar(popup: Page) -> None:
+    # En popup.html el CTA es un <a> con texto "Clicar per adjuntar"
+    await _click_link(popup, r"^Clicar per adjuntar")
+    await popup.wait_for_load_state("networkidle")
+
+    # Tras adjuntar, aparece "Continuar"
+    await _click_link(popup, r"^Continuar$")
     await popup.wait_for_load_state("networkidle")
 
 
@@ -53,9 +68,8 @@ async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]
     """
     Sube uno o varios documentos adjuntos al trámite.
 
-    Args:
-        page: Página de Playwright (STA)
-        archivo: `Path` o lista de `Path` (opcional)
+    Para múltiples documentos: selecciona cada archivo en el siguiente "Tria el fitxer"
+    (siguiente input <type=file> vacío), y solo al final pulsa "Clicar per adjuntar".
     """
 
     archivos = _normalizar_archivos(archivo)
@@ -68,31 +82,32 @@ async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]
             raise FileNotFoundError(str(a))
         _validar_extension(a)
 
-    for a in archivos:
-        logging.info(f"Subiendo: {a.name}")
+    logging.info(f"Adjuntando {len(archivos)} documento(s)")
 
-        docs_link = page.locator("a.docs").first
-        popup: Optional[Page] = None
+    docs_link = page.locator("a.docs").first
+    popup: Optional[Page] = None
+    try:
+        async with page.expect_popup(timeout=7000) as popup_info:
+            await docs_link.click()
+        popup = await popup_info.value
+    except TimeoutError:
+        popup = None
+
+    if popup is None:
+        # Fallback: si no hay popup, intentamos en la misma página.
+        await page.wait_for_timeout(500)
+        await _seleccionar_archivos(page, archivos)
+        await _adjuntar_y_continuar(page)
+    else:
+        await popup.wait_for_load_state("domcontentloaded")
+        await _seleccionar_archivos(popup, archivos)
+        await _adjuntar_y_continuar(popup)
         try:
-            async with page.expect_popup(timeout=7000) as popup_info:
-                await docs_link.click()
-            popup = await popup_info.value
+            await popup.wait_for_event("close", timeout=15000)
         except TimeoutError:
-            popup = None
+            await popup.close()
 
-        if popup is None:
-            await page.wait_for_timeout(500)
-            await _subir_en_popup(page, a)
-        else:
-            await popup.wait_for_load_state("domcontentloaded")
-            await _subir_en_popup(popup, a)
-            try:
-                await popup.wait_for_event("close", timeout=15000)
-            except TimeoutError:
-                await popup.close()
-
-        await page.wait_for_timeout(1000)
-        await page.wait_for_load_state("networkidle")
-
+    await page.wait_for_timeout(1000)
+    await page.wait_for_load_state("networkidle")
     logging.info("Documentos subidos")
 
