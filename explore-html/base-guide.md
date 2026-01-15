@@ -111,4 +111,60 @@ Y esos trozos importantes son:
 		</div>
 ```
 
-El valor del parametro que se enviará para esto en concreto sera el número que identifique al input que se marque en el radio button.
+El valor del parametro que se enviará para esto en concreto será:
+
+``IBI``, ``IVTM``, ``Expediente Ejecutivo`` u `Otros`
+
+2- Datos especificos
+
+Aqui tenemos que poner el dato que corresponde a la opcion seleccionada en el radio buttons.
+
+El codigo que lo identifica es:
+
+```
+<textarea id="form0:dades" name="form0:dades" class="input" cols="70" rows="5"></textarea>
+```
+
+3- Tipo de solicitud
+Esta concretamente en esta zona del .html, es un select en el cual tenemos que poder seleccionar cualquiera de ellos
+```
+<select name="form0:j_id124" size="1">	<option value="">Seleccioneu un tipus</option>
+	<option value="100">No classificat</option>
+	<option value="15">Reclamació econòmica administrativa</option>
+	<option value="3">Al·legació al tràmit d'audiència</option>
+	<option value="14">Decret d'Ajuntament</option>
+	<option value="8">Escrit de revisió d'ofici</option>
+	<option value="1">Recurs de reposició</option>
+	<option value="6">Recurs extraordinari de revisió</option>
+	<option value="7">Sol·licitud de compensació</option>
+	<option value="10">Sol·licitud de devolució d'aval</option>
+	<option value="2">Sol·licitud de devolució d'ingressos</option>
+	<option value="11">Sol·licitud de devolució de costes de garanties</option>
+	<option value="4">Sol·licitud de rectificació d'errors</option>
+	<option value="5">Sol·licitud de suspensió</option>
+	<option value="9">Terceria de domini</option>
+</select>
+```
+
+4- Exposición
+
+Es una caja de texto con la concreta parte del html:
+```
+<textarea id="form0:exposo" name="form0:exposo" class="input" cols="70" rows="10"></textarea>
+```
+
+5- Solicitud
+
+Es otra caja de texto muy parecida a la anterior con la forma tal que:
+```
+<textarea id="form0:solicito" name="form0:solicito" class="input" cols="70" rows="10"></textarea>
+```
+
+6- Boton de continuar.
+
+El ultimo paso de esta pagina que es la 1/3 antes de subir los documentos es darle al boton de continuar que tiene el html:
+´´´
+<div class="right"><input type="submit" name="form0:j_id130" value="Continuar" onclick="fof('adressaCompletaSortida').readOnly=false;filtrarCaracters()" class="button default">
+	</div>
+´´´
+

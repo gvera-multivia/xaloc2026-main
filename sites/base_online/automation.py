@@ -5,7 +5,7 @@ from pathlib import Path
 from core.base_automation import BaseAutomation
 from sites.base_online.config import BaseOnlineConfig
 from sites.base_online.data_models import BaseOnlineTarget
-from sites.base_online.flows import ejecutar_login_base, navegar_a_rama
+from sites.base_online.flows import ejecutar_login_base, navegar_a_rama, rellenar_formulario_p3
 
 
 class BaseOnlineAutomation(BaseAutomation):
@@ -27,6 +27,12 @@ class BaseOnlineAutomation(BaseAutomation):
             self.logger.info("FASE 2: RAMIFICACION (P1/P2/P3)")
             self.logger.info("=" * 50)
             await navegar_a_rama(self.page, datos)
+
+            if datos.protocol.upper() == "P3":
+                self.logger.info("\n" + "=" * 50)
+                self.logger.info("FASE 3: FORMULARIO P3 (REPOSICION)")
+                self.logger.info("=" * 50)
+                await rellenar_formulario_p3(self.page, self.config)
 
             filename = f"base_online_{datos.protocol.lower()}.png"
             path = self.config.dir_screenshots / filename
