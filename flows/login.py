@@ -72,15 +72,29 @@ async def ejecutar_login(page: Page, config: Config) -> None:
         # Esperar a que sea visible
         await boton_cert.wait_for(state="visible", timeout=15000)
         
-        logging.info("✅ Botón detectado. Pulsando para iniciar identificación...")
-        await boton_cert.click()
+        logging.info("✅ Botón detectado. Preparando automatización del popup...")
         
-        # AUTOMATIZACIÓN DEL POPUP DE WINDOWS
-        # El popup de certificado es nativo del SO, usamos pyautogui para controlarlo
+        # IMPORTANTE: El click de Playwright bloqueará hasta que el popup se cierre.
+        # Por eso lanzamos pyautogui en un thread ANTES del click.
+        import threading
         from utils.windows_popup import esperar_y_aceptar_certificado
         
-        logging.info("🖥️ Enviando teclas al popup de Windows con pyautogui...")
-        esperar_y_aceptar_certificado(delay_inicial=2.0)
+        def enviar_teclas_popup():
+            """Thread que envía teclas al popup de Windows"""
+            esperar_y_aceptar_certificado(delay_inicial=2.0)
+        
+        # Lanzar el thread que enviará teclas
+        thread_popup = threading.Thread(target=enviar_teclas_popup)
+        thread_popup.start()
+        logging.info("🖥️ Thread de pyautogui iniciado (esperará 2s y enviará Shift+Tab x2 + Enter)")
+        
+        # Ahora hacemos el click - esto bloqueará hasta que el popup se cierre
+        logging.info("🔘 Pulsando botón de certificado...")
+        await boton_cert.click()
+        
+        # Esperar a que el thread termine
+        thread_popup.join(timeout=10)
+        logging.info("✅ Click completado y popup procesado")
         
     except Exception as e:
         logging.error(f"❌ No se pudo interactuar con el botón en la nueva pestaña: {e}")
