@@ -105,7 +105,7 @@ class XalocAsync:
             logging.info("\n" + "="*50)
             logging.info("FASE 1: AUTENTICACIÓN")
             logging.info("="*50)
-            await ejecutar_login(self.page, self.config)
+            self.page = await ejecutar_login(self.page, self.config)
             
             # Fase 2: Formulario
             logging.info("\n" + "="*50)

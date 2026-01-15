@@ -10,7 +10,7 @@ import os
 class ConfigNavegador:
     """Configuración del navegador Playwright"""
     headless: bool = False
-    perfil_path: Path = Path("profiles/Perfil 1")
+    perfil_path: Path = Path("profiles/edge")
     canal: str = "msedge"
     # Common Name del certificado digital (dejar vacío para selección manual)
    

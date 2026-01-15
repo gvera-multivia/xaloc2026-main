@@ -137,7 +137,7 @@ from playwright.async_api import Page, TimeoutError
 import logging
 from config import Config
 
-async def ejecutar_login(page: Page, config: Config) -> None:
+async def ejecutar_login(page: Page, config: Config) -> Page:
     """Flujo completo de acceso a Xaloc via VÀLid"""
     
     logging.info(f"🌐 Navegando a {config.url_base}")

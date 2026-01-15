@@ -2,12 +2,16 @@
 Flujo de autenticación VÀLid para Xaloc.
 """
 
+from __future__ import annotations
+
 import logging
 import re
+import threading
 
-from playwright.async_api import Page, TimeoutError
+from playwright.async_api import Page
 
 from config import Config
+from utils.windows_popup import esperar_y_aceptar_certificado
 
 
 async def _aceptar_cookies_si_aparece(page: Page) -> None:
@@ -30,87 +34,47 @@ async def _aceptar_cookies_si_aparece(page: Page) -> None:
             continue
 
 
-async def ejecutar_login(page: Page, config: Config) -> None:
-    logging.info(f"🌐 Navegando a {config.url_base}")
+async def ejecutar_login(page: Page, config: Config) -> Page:
+    logging.info(f"Navegando a {config.url_base}")
     await page.goto(config.url_base, wait_until="networkidle")
-    
-    # 0. Gestionar cookies (si aparecen)
+
     await _aceptar_cookies_si_aparece(page)
 
-    # 1. Localizar enlace de trámite
-    logging.info("🔗 Localizando enlace 'Tramitació en línia'...")
+    logging.info("Localizando enlace 'Tramitació en línia'...")
     enlace = page.get_by_role(
-        "link", 
-        name=re.compile(r"Tramitaci[oó] en l[ií]nia", re.IGNORECASE)
+        "link",
+        name=re.compile(
+            r"Tramitaci[oó] en l[ií]nia|Tramitaci[oó]n en l[ií]nea",
+            re.IGNORECASE,
+        ),
     ).first
     await enlace.wait_for(state="visible", timeout=10000)
 
-    # 2. CAPTURA DE NUEVA PESTAÑA (La solución clave)
-    logging.info("🚀 Pulsando enlace y esperando nueva pestaña de VÀLid...")
-    try:
-        async with page.expect_popup() as popup_info:
-            await enlace.click()
-        
-        # 'valid_page' es ahora nuestro objeto de control para la pasarela
-        valid_page = await popup_info.value
-        await valid_page.wait_for_load_state("domcontentloaded")
-        logging.info(f"✅ Pestaña detectada: {valid_page.url}")
+    logging.info("Pulsando enlace y esperando nueva pestaña de VÀLid...")
+    async with page.expect_popup() as popup_info:
+        await enlace.click()
 
-    except Exception as e:
-        logging.error(f"❌ Error crítico: No se abrió la pasarela de autenticación: {e}")
-        await page.screenshot(path="error_apertura_pasarela.png")
-        return
+    valid_page = await popup_info.value
+    await valid_page.wait_for_load_state("domcontentloaded")
+    logging.info(f"Pestaña detectada: {valid_page.url}")
 
-    # 3. INTERACCIÓN EN LA NUEVA PESTAÑA
-    logging.info("⏳ Esperando el botón de certificado...")
-    # Usamos un selector combinado para asegurar que lo encuentre por ID o por Test-ID
-    selector_boton = "#btnContinuaCert, [data-testid='certificate-btn']"
-    
-    try:
-        boton_cert = valid_page.locator(selector_boton).first
-        
-        # Esperar a que sea visible
-        await boton_cert.wait_for(state="visible", timeout=15000)
-        
-        logging.info("✅ Botón detectado. Preparando automatización del popup...")
-        
-        # IMPORTANTE: El click de Playwright bloqueará hasta que el popup se cierre.
-        # Por eso lanzamos pyautogui en un thread ANTES del click.
-        import threading
-        from utils.windows_popup import esperar_y_aceptar_certificado
-        
-        def enviar_teclas_popup():
-            """Thread que envía teclas al popup de Windows"""
-            esperar_y_aceptar_certificado(delay_inicial=2.0)
-        
-        # Lanzar el thread que enviará teclas
-        thread_popup = threading.Thread(target=enviar_teclas_popup)
-        thread_popup.start()
-        logging.info("🖥️ Thread de pyautogui iniciado (esperará 2s y enviará Shift+Tab x2 + Enter)")
-        
-        # Ahora hacemos el click - esto bloqueará hasta que el popup se cierre
-        logging.info("🔘 Pulsando botón de certificado...")
-        await boton_cert.click()
-        
-        # Esperar a que el thread termine
-        thread_popup.join(timeout=10)
-        logging.info("✅ Click completado y popup procesado")
-        
-    except Exception as e:
-        logging.error(f"❌ No se pudo interactuar con el botón en la nueva pestaña: {e}")
-        await valid_page.screenshot(path="error_boton_valid.png")
-        return
+    logging.info("Esperando el botón de certificado...")
+    boton_cert = valid_page.locator("#btnContinuaCert, [data-testid='certificate-btn']").first
+    await boton_cert.wait_for(state="visible", timeout=15000)
 
-    # 4. ESPERAR REDIRECCIÓN FINAL AL FORMULARIO
-    # Una vez pulsado el certificado, la pestaña valid_page nos llevará al formulario STA
-    logging.info("⏳ Esperando retorno al formulario STA...")
-    try:
-        await valid_page.wait_for_url(
-            "**/seu.xalocgirona.cat/sta/**", 
-            timeout=config.timeouts.login
-        )
-        logging.info("✅ Login completado con éxito - Formulario STA cargado")
-    except Exception as e:
-        logging.error(f"❌ Tiempo excedido esperando el formulario final: {e}")
-        await valid_page.screenshot(path="error_timeout_sta.png")
+    def _resolver_popup_windows() -> None:
+        esperar_y_aceptar_certificado(delay_inicial=2.0)
+
+    thread_popup = threading.Thread(target=_resolver_popup_windows, daemon=True)
+    thread_popup.start()
+
+    logging.info("Pulsando botón de certificado...")
+    await boton_cert.click()
+    thread_popup.join(timeout=10)
+
+    logging.info("Esperando retorno al formulario STA...")
+    await valid_page.wait_for_url("**/seu.xalocgirona.cat/sta/**", timeout=config.timeouts.login)
+    logging.info("Login completado con éxito - Formulario STA cargado")
+
+    return valid_page
 
