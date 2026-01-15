@@ -11,11 +11,11 @@ from pathlib import Path
 from playwright.async_api import Page, TimeoutError
 
 
-async def _wait_mask_hidden(page: Page) -> None:
+async def _wait_mask_hidden(page: Page, timeout_ms: int = 8000) -> None:
     mask = page.locator("#mask")
     try:
         if await mask.count() > 0:
-            await mask.wait_for(state="hidden", timeout=30000)
+            await mask.wait_for(state="hidden", timeout=timeout_ms)
     except Exception:
         pass
 
@@ -27,12 +27,13 @@ async def _check_lopd(page: Page) -> None:
     await checkbox.scroll_into_view_if_needed()
 
     for _ in range(3):
-        await _wait_mask_hidden(page)
         try:
-            await checkbox.check(timeout=10000)
+            # Con adjuntos a veces queda un overlay (#mask) unos segundos; `force=True` evita esperar a que sea clickable.
+            await checkbox.check(timeout=2000, force=True)
         except Exception:
             try:
-                await checkbox.check(timeout=5000, force=True)
+                await _wait_mask_hidden(page)
+                await checkbox.check(timeout=5000)
             except Exception:
                 pass
 
@@ -78,7 +79,6 @@ async def confirmar_tramite(page: Page, screenshots_dir: Path) -> str:
     """
 
     logging.info("Marcando aceptación LOPD")
-    await _wait_mask_hidden(page)
     await _check_lopd(page)
 
     await _wait_boton_continuar(page)
