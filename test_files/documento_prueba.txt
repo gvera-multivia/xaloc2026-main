@@ -1,0 +1,15 @@
+# Archivo de ejemplo para testing
+Este es un documento de prueba para el sistema de subida de archivos.
+
+## Información del Documento
+
+- **Tipo:** Documento de prueba
+- **Propósito:** Testing de automatización
+- **Fecha:** 2024-01-14
+
+## Contenido
+
+Este archivo se utiliza para probar la funcionalidad de subida de documentos
+en el sistema STA de Xaloc Girona.
+
+**NOTA:** Este es un archivo de prueba y no contiene información real.

@@ -1,0 +1,48 @@
+# .gitignore para Xaloc Automation
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+
+# Playwright
+.pytest_cache/
+
+# Logs
+logs/*.log
+*.log
+
+# Screenshots (pueden contener datos sensibles)
+screenshots/*.png
+screenshots/*.jpg
+
+# Perfiles de navegador (contienen certificados)
+profiles/
+
+# Archivos de prueba con datos reales
+test_files/*.pdf
+test_files/*.doc
+test_files/*.docx
+
+# Mantener archivos de ejemplo
+!test_files/documento_prueba.txt
+!test_files/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Configuración local
+config_local.py
