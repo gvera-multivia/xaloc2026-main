@@ -160,7 +160,7 @@ mkdir profiles screenshots logs test_files
 
 1. Ejecuta el script una vez para crear el perfil:
    ```bash
-   python main.py
+   python main.py --site xaloc_girona
    ```
 
 2. Cuando llegue a la pantalla de VÀLid, selecciona tu certificado manualmente
@@ -213,14 +213,20 @@ class Timeouts:
 ### Ejecución Básica
 
 ```bash
-python main.py
+python main.py --site xaloc_girona
+
+### Selección de sitio y headless
+
+```bash
+python main.py --site xaloc_girona --headless
+```
 ```
 
 ### Ejecución con Logging Detallado
 
 El logging está activado por defecto. Los logs se guardan en:
 - **Consola:** Salida estándar
-- **Archivo:** `logs/xaloc_automation.log`
+- **Archivo:** `logs/xaloc_girona.log` (por sitio: `logs/<site_id>.log`)
 
 ### Modo Headless
 
@@ -274,6 +280,10 @@ FASE 2: RELLENADO DE FORMULARIO
 
 ```
 xaloc2026-main/
+core/                        # Núcleo reusable (Playwright + config base + registry)
+sites/                       # Un paquete por sitio (flujos independientes)
+  xaloc_girona/              # Implementación actual migrada
+(legacy) config.py, flows/, xaloc_automation.py  # Compat: re-export al sitio
 ├── main.py                      # Punto de entrada
 ├── config.py                    # Configuración y dataclasses
 ├── xaloc_automation.py          # Orquestador principal
