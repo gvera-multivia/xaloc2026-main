@@ -83,13 +83,15 @@ async def ejecutar_login(page: Page, config: Config) -> None:
         # Esperar a que aparezca el popup del sistema
         await valid_page.wait_for_timeout(1500)
         
-        # El popup de certificados de Windows tiene el focus en "Aceptar" por defecto
-        # Si el certificado ya está seleccionado (único certificado), solo Enter
-        # Si hay múltiples certificados, el primero ya está seleccionado
-        
-        # Enviar Enter para aceptar el certificado seleccionado
+        # Secuencia de navegación:
+        # Shift+Tab x2 para llegar al certificado, luego Enter para aceptar
+        await valid_page.keyboard.press("Shift+Tab")
+        await valid_page.wait_for_timeout(200)
+        await valid_page.keyboard.press("Shift+Tab")
+        await valid_page.wait_for_timeout(200)
         await valid_page.keyboard.press("Enter")
-        logging.info("✅ Enter enviado al popup de certificado")
+        
+        logging.info("✅ Secuencia Shift+Tab×2 + Enter enviada al popup")
         
         # Esperar un momento para que el sistema procese
         await valid_page.wait_for_timeout(1000)
