@@ -43,12 +43,11 @@ class XalocAsync:
         # Preparar argumentos del navegador
         args = self.config.navegador.args.copy()
         
-        # AUTO-SELECCIÓN DE CERTIFICADO: Si está configurado, añadir política
-        if self.config.navegador.certificado_cn:
-            # Formato JSON: {"pattern":"URL","filter":{"SUBJECT":{"CN":"NOMBRE"}}}
-            policy = f'{{"pattern":"https://valid.aoc.cat","filter":{{"SUBJECT":{{"CN":"{self.config.navegador.certificado_cn}"}}}}}}'
-            args.append(f'--auto-select-certificate-for-urls=[{policy}]')
-            logging.info(f"🔐 Auto-selección de certificado activada: {self.config.navegador.certificado_cn}")
+        # AUTO-SELECCIÓN DE CERTIFICADO: Aceptar automáticamente cualquier certificado
+        # Esto evita el popup nativo del SO que Playwright no puede controlar
+        policy = '{"pattern":"*","filter":{}}'
+        args.append(f'--auto-select-certificate-for-urls=[{policy}]')
+        logging.info("🔐 Auto-selección de certificado activada (modo automático)")
         
         # Opciones de lanzamiento
         launch_options = {
