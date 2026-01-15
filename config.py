@@ -38,6 +38,7 @@ class DatosMulta:
     matricula: str
     num_expediente: str
     motivos: str
+    archivos_adjuntos: Optional[List[Path]] = None
     archivo_adjunto: Optional[Path] = None
 
 

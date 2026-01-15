@@ -21,6 +21,7 @@ async def main():
         matricula="1234ABC",
         num_expediente="EXP/2024/001",
         motivos="Alegación de prueba.",
+        archivos_adjuntos=None,
         archivo_adjunto=None
     )
 
