@@ -40,11 +40,21 @@ class XalocAsync:
         
         self.playwright = await async_playwright().start()
         
+        # Preparar argumentos del navegador
+        args = self.config.navegador.args.copy()
+        
+        # AUTO-SELECCIÓN DE CERTIFICADO: Si está configurado, añadir política
+        if self.config.navegador.certificado_cn:
+            # Formato JSON: {"pattern":"URL","filter":{"SUBJECT":{"CN":"NOMBRE"}}}
+            policy = f'{{"pattern":"https://valid.aoc.cat","filter":{{"SUBJECT":{{"CN":"{self.config.navegador.certificado_cn}"}}}}}}'
+            args.append(f'--auto-select-certificate-for-urls=[{policy}]')
+            logging.info(f"🔐 Auto-selección de certificado activada: {self.config.navegador.certificado_cn}")
+        
         # Opciones de lanzamiento
         launch_options = {
             "headless": self.config.navegador.headless,
             "channel": self.config.navegador.canal,
-            "args": self.config.navegador.args
+            "args": args
         }
         
         self.browser = await self.playwright.chromium.launch(**launch_options)

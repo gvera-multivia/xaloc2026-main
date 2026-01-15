@@ -19,11 +19,21 @@ async def realizar_login_guiado(config: Config):
     print("="*75 + "\n")
     
     async with async_playwright() as p:
+        # Preparar argumentos del navegador
+        args = ["--start-maximized"]
+        
+        # AUTO-SELECCIÓN DE CERTIFICADO: Si está configurado, añadir política
+        if config.navegador.certificado_cn:
+            # Formato JSON: {"pattern":"URL","filter":{"SUBJECT":{"CN":"NOMBRE"}}}
+            policy = f'{{"pattern":"https://valid.aoc.cat","filter":{{"SUBJECT":{{"CN":"{config.navegador.certificado_cn}"}}}}}}'
+            args.append(f'--auto-select-certificate-for-urls=[{policy}]')
+            logging.info(f"🔐 Auto-selección de certificado activada: {config.navegador.certificado_cn}")
+        
         # Forzamos canal 'chrome' o 'msedge' para acceso a certificados del sistema
         browser = await p.chromium.launch(
             headless=False, 
             channel=config.navegador.canal or "chrome",
-            args=["--start-maximized"]
+            args=args
         )
         context = await browser.new_context(ignore_https_errors=True, no_viewport=True)
         page = await context.new_page()

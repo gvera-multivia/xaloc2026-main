@@ -12,6 +12,9 @@ class ConfigNavegador:
     headless: bool = False
     perfil_path: Path = Path("profiles/edge_xaloc")
     canal: str = "msedge"
+    # Common Name del certificado digital (dejar vacío para selección manual)
+   
+    certificado_cn: str = os.getenv("certificado_cn", "")
     args: List[str] = field(default_factory=lambda: [
         "--start-maximized",
         "--disable-blink-features=AutomationControlled"
