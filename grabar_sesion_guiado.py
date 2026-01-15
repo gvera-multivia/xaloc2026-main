@@ -43,12 +43,29 @@ async def grabar_sesion_guiada() -> None:
         logging.info("Navegando a %s", config.url_base)
         await page.goto(config.url_base, wait_until="networkidle")
 
-        logging.info("Pulsando 'Tramitació en línia' (esperando popup)...")
-        async with page.expect_popup() as popup_info:
-            await page.get_by_role("link", name="Tramitació en línia").click()
+        try:
+            boton_cookies = page.get_by_role("button", name="Acceptar")
+            if await boton_cookies.count() > 0:
+                await boton_cookies.first.click(timeout=1500)
+                await page.wait_for_timeout(500)
+        except Exception:
+            pass
 
-        valid_page = await popup_info.value
-        await valid_page.wait_for_load_state("domcontentloaded")
+        logging.info("Pulsando 'Tramitació en línia'...")
+        enlace = page.get_by_role("link", name="Tramitació en línia").first
+        await enlace.wait_for(state="visible", timeout=config.timeouts.general)
+        await enlace.scroll_into_view_if_needed()
+
+        try:
+            async with page.expect_popup(timeout=7000) as popup_info:
+                await enlace.click()
+            valid_page = await popup_info.value
+            await valid_page.wait_for_load_state("domcontentloaded")
+        except Exception:
+            await enlace.click()
+            await page.wait_for_load_state("domcontentloaded")
+            valid_page = page
+
         logging.info("Pasarela detectada: %s", valid_page.url)
 
         print("\n" + "!" * 72)
@@ -68,4 +85,3 @@ if __name__ == "__main__":
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
     asyncio.run(grabar_sesion_guiada())
-
