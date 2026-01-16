@@ -60,3 +60,10 @@ class MadridConfig(BaseConfig):
     # Evitar networkidle, usar domcontentloaded + esperas específicas
     default_timeout: int = 30000  # 30 segundos
     navigation_timeout: int = 60000  # 60 segundos para navegaciones con certificado
+    
+    # Configuración del navegador
+    # Forzar idioma español para evitar popup de traductor de Edge
+    lang: str = "es"
+    # Deshabilitar explícitamente la UI de traducción de Edge
+    disable_translate_ui: bool = True
+

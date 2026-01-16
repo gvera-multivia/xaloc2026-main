@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import threading
 from typing import TYPE_CHECKING
 
@@ -16,6 +17,71 @@ if TYPE_CHECKING:
     from sites.madrid.config import MadridConfig
 
 logger = logging.getLogger(__name__)
+
+
+async def _aceptar_cookies_si_aparece(page: Page) -> None:
+    """
+    Intenta aceptar el banner de cookies si aparece.
+    Busca múltiples variantes de textos de botones de aceptación.
+    """
+    posibles = [
+        r"Aceptar",
+        r"Acceptar",
+        r"Aceptar todo",
+        r"Aceptar todas",
+        r"Accept all",
+        r"Accept",
+        r"Acepto",
+        r"Permitir todo",
+        r"Permitir todas",
+        r"OK",
+    ]
+    
+    for patron in posibles:
+        try:
+            boton = page.get_by_role("button", name=re.compile(patron, re.IGNORECASE))
+            if await boton.count() > 0:
+                await boton.first.click(timeout=1500)
+                logger.info(f"  → Cookies aceptadas (botón: {patron})")
+                await page.wait_for_timeout(500)
+                return
+        except Exception:
+            continue
+    
+    # También intentar con enlaces (algunos sitios usan <a> en lugar de <button>)
+    for patron in posibles:
+        try:
+            enlace = page.get_by_role("link", name=re.compile(patron, re.IGNORECASE))
+            if await enlace.count() > 0:
+                await enlace.first.click(timeout=1500)
+                logger.info(f"  → Cookies aceptadas (enlace: {patron})")
+                await page.wait_for_timeout(500)
+                return
+        except Exception:
+            continue
+    
+    logger.debug("  → No se detectó banner de cookies o ya estaba aceptado")
+
+
+async def _esperar_dom_estable(page: Page, timeout_ms: int = 2000) -> None:
+    """
+    Espera a que el DOM esté estable.
+    
+    NOTA: No usamos 'networkidle' porque puede haber scripts que hacen
+    peticiones constantes y nunca se alcanza el estado idle.
+    """
+    try:
+        await page.wait_for_load_state("domcontentloaded", timeout=5000)
+    except PlaywrightTimeoutError:
+        logger.warning("Timeout esperando domcontentloaded, continuando...")
+    
+    try:
+        await page.wait_for_load_state("load", timeout=10000)
+    except PlaywrightTimeoutError:
+        logger.warning("Timeout esperando load completo, continuando...")
+    
+    # Espera adicional para scripts dinámicos
+    await page.wait_for_timeout(timeout_ms)
 
 
 async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
@@ -50,6 +116,12 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
     await page.goto(config.url_base, wait_until="domcontentloaded", timeout=config.navigation_timeout)
     logger.info(f"  → URL cargada: {page.url}")
     
+    # Esperar estabilización del DOM
+    await _esperar_dom_estable(page, timeout_ms=2000)
+    
+    # Aceptar cookies si aparecen
+    await _aceptar_cookies_si_aparece(page)
+    
     # Esperar y clickar el botón "Tramitar en línea"
     await page.wait_for_selector(config.boton_tramitar_selector, state="visible", timeout=config.default_timeout)
     await page.click(config.boton_tramitar_selector)
@@ -70,6 +142,9 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
         await page.click(config.registro_electronico_selector)
     
     logger.info(f"  → Navegado a: {page.url}")
+    
+    # Aceptar cookies en nuevo dominio si aparecen
+    await _aceptar_cookies_si_aparece(page)
     
     # ========================================================================
     # PASO 3: Click primer "Continuar"
@@ -93,6 +168,9 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
     
     logger.info(f"  → Navegado a pantalla de login: {page.url}")
     
+    # Aceptar cookies en dominio de login si aparecen
+    await _aceptar_cookies_si_aparece(page)
+    
     # ========================================================================
     # PASO 5: Click "DNIe / Certificado"
     # ========================================================================
@@ -104,13 +182,16 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
     # ========================================================================
     logger.info("PASO 6: Preparando manejo de popup de certificado Windows")
     
-    # Importar utilidad de manejo de popup
-    from utils.windows_popup import auto_accept_certificate_popup
+    # Importar utilidad de manejo de popup (nombre correcto)
+    from utils.windows_popup import esperar_y_aceptar_certificado
+    
+    # Función wrapper para el thread
+    def _resolver_popup_windows() -> None:
+        esperar_y_aceptar_certificado(delay_inicial=2.0)
     
     # Lanzar thread para manejar el popup
     popup_thread = threading.Thread(
-        target=auto_accept_certificate_popup,
-        args=(2,),  # Esperar 2 segundos antes de presionar Enter
+        target=_resolver_popup_windows,
         daemon=True
     )
     popup_thread.start()
@@ -119,6 +200,9 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
     # Click en el enlace de certificado (dispara el popup)
     await page.click(config.certificado_login_selector)
     logger.info("  → Click en 'DNIe / Certificado'")
+    
+    # Esperar a que el thread termine (con timeout)
+    popup_thread.join(timeout=10)
     
     # Esperar a que la autenticación complete
     # Estrategia: esperar a que cambie la URL o aparezca el siguiente botón
