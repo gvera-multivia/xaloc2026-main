@@ -65,7 +65,7 @@ Como hemos dicho, debemos permitir diferentes posibles rutas de acceso.
 
 ### 4.1 - Formulario de Reposición (P3)
 
-El contenido copiado del original está en `base-reposicion-form.html`
+El contenido copiado del original está en `base-p3-form1.html`
 Pero lo relevante es el contenido del formulario y los datos especificos que necesitamos tratar como variables para enviarlos al formulario.
 
 Y esos trozos importantes son:
@@ -217,13 +217,194 @@ Entonces, haremos click en el boton de continuar:
 
 8- Aceptar y Firmar
 
-El último paso del Protocolo 3 (p3) será aceptar y firmar, el contenido copiado del html está en el archivo `base-reposicion-form-confirm.html`
+El último paso del Protocolo 3 (p3) será aceptar y firmar, el contenido copiado del html está en el archivo `base-p3-form3.html`
 Aqui solo tenemos que usar el botón que poner Signar i Presentar con el codigo html:
 ```
 <input type="button" class="button default" value="Signar i Presentar" onclick="javascript:peticioDeSignatura();return false;">
 ```
 
 Sin embargo, bloquearemos en este caso la activación del boton, ya que no queremos enviar datos de prueba, igual que en xaloc, simplemente no accionamos el boton aunque tengamos preparado el codigo para poder realizarlo.
+
+
+## 4.2 - Formulario de identificación del conductor(P1)
+
+El contenido de la pagina copiada se encuentra en `base-p1-form1.html`
+Para todos los elemento por id quiero que busques si hay id repetida a la hora de implementar el codigo, si hay id repetida, haz uso de la que este present o visible, con .first, tal como hemos hecho en el protocolo 3
+
+1- Llenar los campos de datos de contacto
+
+Se deben llenar en este paso los campos que se muestran a continuación, los cuales puedes contrastar en el html que se ha especificado en este apartado 4.2
+
+> El telefono movil
+```
+<input id="form:telefon-alternatiu" type="text" name="form:telefon-alternatiu" value="" class="input" size="25" style="">
+```
+> El telefono fijo
+```
+<input id="form:telefon" type="text" name="form:telefon" value="" class="input" size="25" style="">
+```
+> El correo electronico
+```
+<input id="form:mail_interessat" type="text" name="form:mail_interessat" value="" class="input" size="50" style=""></div>
+```
+
+Es importante recalcar que no se tienen que rellenar el telefono movil y el fijo simultaneamente, se tiene que dar o uno u otro, a especificar cual. Se pueden poner ambos, de hecho quiero que permitas que se pongan ambos, pero solo es obligatorio que este uno de los dos.
+El correo además es opcional.
+
+2- Pasar a la siguiente pantalla con el click al boton para continuar
+
+```
+<input type="submit" name="form:j_id20" value="Continuar" style="font-weight:bold;" class="button default">
+```
+
+3- Rellenar el formulario de la nueva pantalla
+Este formulario podemos encontrar la version copiada en `base-p1-form2.html`
+En este caso todos los campos son obligatorio y son los siguientes:
+
+3.1- En primer lugar, el numero de expediente, que esta partido en 3 campos que son los siguientes:
+
+```
+<input id="form:clau_expedient_id_ens" type="text" name="form:clau_expedient_id_ens" value="" class="input" onchange="javascript:actualitzarClauExpedientclau_expedient();" size="5">
+```
+
+```
+<input id="form:clau_expedient_any_exp" type="text" name="form:clau_expedient_any_exp" value="" class="input" onchange="javascript:actualitzarClauExpedientclau_expedient();" size="8">
+```
+
+```
+<input id="form:clau_expedient_num_exp" type="text" name="form:clau_expedient_num_exp" value="" class="input" onchange="javascript:actualitzarClauExpedientclau_expedient();" size="8">
+```
+
+El formato que nos dan de ejemplo es:
+
+43150-2017/1596-GIM Pero para nosotros nos importa solo que el primer campo es para poner la parte previa al primer guión, es decir,el la parte del ejemplo que contiene 43150, el segundo campo es para poner la parte respectiva a lo posterior al primer guion y previo a la barra, es decir lo que corresponde en el ejmplo a 2017 y el tercer campo que es lo posterior a la barra y previo al ultimo guion que en el ejemplo es 1596. La prat de -GIM no nos interesa porque ya esta completada de base en la pagina.
+
+3.2- Campo de numero de boletín
+
+El html correspondiente es:
+```
+<input id="form:num_butlleti" type="text" name="form:num_butlleti" value="" class="input" size="20">
+```
+
+3.3- Fecha de denuncia
+
+El html correspondiente es:
+
+```
+<input id="form:data_denuncia" type="text" name="form:data_denuncia" value="" class="input" size="10">
+```
+Y el formato de fecha a seguir es dd/mm/YYYY -> ejemplo: 21/03/2017
+
+3.4- Matrícula de vehículo
+
+Con html:
+```
+<input id="form:matricula" type="text" name="form:matricula" value="" class="input" size="12">
+```
+
+3.5- DNI, NIE ó PASAPORTE
+
+Puede pasarse cualqueira de los 3, pero solo uno de ellos. Y el html del campo es:
+
+```
+<input id="form:identificacio" type="text" name="form:identificacio" value="" class="input" size="20">
+```
+
+3.6- Numero de permiso/Licencia de conducir
+
+Con html:
+
+```
+<input id="form:llicencia_conduccio" type="text" name="form:llicencia_conduccio" value="" class="input" size="20">
+```
+
+3.7- Nombre y apellidos
+
+Con html:
+
+```
+<input id="form:nom_complet" type="text" name="form:nom_complet" value="" class="input" size="80">
+```
+
+3.8- Dirección
+
+Tenemos que hacer click en el boton con la imagen de la lpa que tiene el html:
+
+```
+<img id="imgBuscar" onclick="javascript:assistentAdreca();" src="/commons-resources/imatges/icon-search-24.gif">
+```
+
+Pero esto tiene truco porque resulta que la pantalla del popup que salta es un iframe, y por politica de navegador estamos bloqueando estos eventos y la redirección si no tratamos esto será a about:blank
+
+Vamos a seguir la siguiente guia para poder evitar estancarnos ahi:
+
+Para solucionar el problema del `about:blank` causado por la detección de automatización en Chromium, aquí tienes el resumen técnico desde la opción más limpia hasta el desbloqueo total:
+
+### 1. Opción Recomendada: Desbloqueo de "Stealth" (Inyectado)
+
+Es la más quirúrgica. Elimina la marca de "automatizado" solo para la página, permitiendo que el script `assistentAdreca()` funcione sin ser bloqueado.
+
+```python
+# Se añade al crear el contexto (antes de navegar)
+await context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+
+```
+
+---
+
+### 2. Opciones Quirúrgicas (Con Timeouts)
+
+Si la opción anterior no es suficiente por la latencia del servidor de BASE, usa estos métodos con control de tiempo:
+
+**A. Captura Directa del Popup (Si abre ventana nueva):**
+
+```python
+try:
+    async with page.expect_popup(timeout=10000) as popup_info: # Timeout de 10s
+        await page.locator("#imgBuscar").click()
+    popup = await popup_info.value
+    await popup.wait_for_load_state("networkidle", timeout=15000)
+except:
+    logging.error("El popup de dirección no cargó a tiempo.")
+
+```
+
+**B. Disparo por Evaluación de Script (Si es un Iframe interno):**
+
+```python
+# Salta el evento físico y lanza la lógica directamente
+await page.evaluate("window.assistentAdreca()")
+await page.wait_for_timeout(2000) # Tiempo de cortesía para el renderizado
+
+```
+
+---
+
+### 3. Fallback Final: Desbloqueo General (Nivel Navegador)
+
+Si todo lo anterior falla, debes desactivar las protecciones de Chromium en el momento del lanzamiento (Controller/Config). Esto quita el aviso de "Software de prueba" y las restricciones de seguridad de ventanas.
+
+```python
+# Argumentos de lanzamiento del navegador
+browser = await playwright.chromium.launch(
+    headless=False,
+    args=[
+        "--disable-blink-features=AutomationControlled", # Clave para evitar about:blank
+        "--disable-popup-blocking",                      # Desbloqueo total de ventanas
+        "--no-sandbox"                                   # Menos restricciones de proceso
+    ]
+)
+
+```
+
+---
+
+**Resumen de uso:**
+
+1. Usa la **Opción 1** por defecto; no rompe nada y suele bastar.
+2. Si el popup se abre pero sigue blanco, usa la **Opción 2A**.
+3. Si el botón ni siquiera parece reaccionar, usa la **Opción 3** como último recurso.
+
 
 
 

@@ -5,7 +5,7 @@ from pathlib import Path
 from core.base_automation import BaseAutomation
 from sites.base_online.config import BaseOnlineConfig
 from sites.base_online.data_models import BaseOnlineTarget
-from sites.base_online.flows import ejecutar_login_base, navegar_a_rama, rellenar_formulario_p3
+from sites.base_online.flows import ejecutar_login_base, navegar_a_rama, ejecutar_p1, ejecutar_p3
 
 
 class BaseOnlineAutomation(BaseAutomation):
@@ -28,13 +28,22 @@ class BaseOnlineAutomation(BaseAutomation):
             self.logger.info("=" * 50)
             await navegar_a_rama(self.page, datos)
 
+            if datos.protocol.upper() == "P1":
+                self.logger.info("\n" + "=" * 50)
+                self.logger.info("FASE 3: FORMULARIO P1 (IDENTIFICACION)")
+                self.logger.info("=" * 50)
+                if not datos.p1:
+                    raise ValueError("Faltan datos de P1.")
+                await ejecutar_p1(self.page, datos.p1)
+
             if datos.protocol.upper() == "P3":
                 self.logger.info("\n" + "=" * 50)
                 self.logger.info("FASE 3: FORMULARIO P3 (REPOSICION)")
                 self.logger.info("=" * 50)
-                if not datos.reposicion:
-                    raise ValueError("Faltan datos de reposición (P3).")
-                await rellenar_formulario_p3(self.page, self.config, datos.reposicion)
+                p3_data = datos.p3 or datos.reposicion
+                if not p3_data:
+                    raise ValueError("Faltan datos de P3.")
+                await ejecutar_p3(self.page, self.config, p3_data)
 
             filename = f"base_online_{datos.protocol.lower()}.png"
             path = self.config.dir_screenshots / filename

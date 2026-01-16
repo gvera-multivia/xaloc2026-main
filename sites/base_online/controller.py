@@ -3,7 +3,13 @@ import logging
 from pathlib import Path
 
 from sites.base_online.config import BaseOnlineConfig
-from sites.base_online.data_models import BaseOnlineReposicionData, BaseOnlineTarget
+from sites.base_online.data_models import (
+    BaseOnlineP1ContactData,
+    BaseOnlineP1Data,
+    BaseOnlineP1IdentificacionData,
+    BaseOnlineReposicionData,
+    BaseOnlineTarget,
+)
 
 class BaseOnlineController:
     site_id = "base_online"
@@ -18,6 +24,19 @@ class BaseOnlineController:
         self,
         *,
         protocol: str | None = None,
+        p1_telefon_mobil: str | None = None,
+        p1_telefon_fix: str | None = None,
+        p1_correu: str | None = None,
+        p1_expedient_id_ens: str | None = None,
+        p1_expedient_any: str | None = None,
+        p1_expedient_num: str | None = None,
+        p1_num_butlleti: str | None = None,
+        p1_data_denuncia: str | None = None,
+        p1_matricula: str | None = None,
+        p1_identificacio: str | None = None,
+        p1_llicencia_conduccio: str | None = None,
+        p1_nom_complet: str | None = None,
+        p1_adreca: str | None = None,
         p3_tipus_objecte: str | None = None,
         p3_dades_especifiques: str | None = None,
         p3_tipus_solicitud_value: str | None = None,
@@ -27,6 +46,29 @@ class BaseOnlineController:
     ) -> BaseOnlineTarget:
         protocol_norm = (protocol or "P1").upper().strip()
         reposicion = None
+        p1 = None
+        p3 = None
+
+        if protocol_norm == "P1":
+            p1 = BaseOnlineP1Data(
+                contacte=BaseOnlineP1ContactData(
+                    telefon_mobil=p1_telefon_mobil or "600123123",
+                    telefon_fix=p1_telefon_fix,
+                    correu=p1_correu or "test@example.com",
+                ),
+                identificacio=BaseOnlineP1IdentificacionData(
+                    expedient_id_ens=p1_expedient_id_ens or "43150",
+                    expedient_any=p1_expedient_any or "2017",
+                    expedient_num=p1_expedient_num or "1596",
+                    num_butlleti=p1_num_butlleti or "BUT/2026/001",
+                    data_denuncia=p1_data_denuncia or "21/03/2017",
+                    matricula=p1_matricula or "1234ABC",
+                    identificacio=p1_identificacio or "12345678Z",
+                    llicencia_conduccio=p1_llicencia_conduccio or "LIC123456",
+                    nom_complet=p1_nom_complet or "Nombre Apellidos",
+                    adreca=p1_adreca or "Carrer de prova, 1 - 43001 Tarragona",
+                ),
+            )
         
         if protocol_norm == "P3":
             # Procesamos los archivos: si viene uno solo en string, lo metemos en lista.
@@ -47,7 +89,8 @@ class BaseOnlineController:
                 solicito=p3_solicito or "Solicitud de prueba para el recurso.",
                 archivos_adjuntos=archivos_paths, # Ahora es una lista
             )
-        return BaseOnlineTarget(protocol=protocol_norm, reposicion=reposicion)
+            p3 = reposicion
+        return BaseOnlineTarget(protocol=protocol_norm, p1=p1, p3=p3, reposicion=reposicion)
 
 def get_controller() -> BaseOnlineController:
     return BaseOnlineController()

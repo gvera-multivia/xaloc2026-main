@@ -76,7 +76,7 @@ async def main() -> None:
         p3_tipus_solicitud_value=args.p3_tipus_solicitud,
         p3_exposo=args.p3_exposo,
         p3_solicito=args.p3_solicito,
-        p3_archivo=args.p3_file,
+        p3_archivos=args.p3_file,
     )
 
     print("\n" + "=" * 60)
