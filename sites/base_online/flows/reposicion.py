@@ -26,44 +26,46 @@ def _normalizar_tipus_objecte(raw: str) -> str:
         return "OTROS"
     raise ValueError(f"tipus_objecte inválido: {raw}. Usa IBI, IVTM, Expediente Ejecutivo u Otros.")
 
+async def _subir_documentos_p3(page: Page, archivos: list[Path]) -> None:
+    # Limitamos a un máximo de 5 archivos según requerimiento
+    archivos_a_subir = archivos[:5]
+    logging.info(f"[P3] Iniciando subida de {len(archivos_a_subir)} archivo(s)...")
 
-async def _subir_documento_p3(page: Page, archivo: Path) -> None:
-    if not archivo.exists():
-        raise FileNotFoundError(f"No existe el archivo a adjuntar: {archivo}")
+    for i, archivo in enumerate(archivos_a_subir, 1):
+        if not archivo.exists():
+            logging.error(f"[P3] Archivo no encontrado: {archivo}")
+            continue
 
-    logging.info("[P3] Abriendo popup de carga de fichero...")
-    await page.get_by_role("button", name=re.compile(r"Carregar\s+Fitxer", re.IGNORECASE)).first.click()
+        logging.info(f"[P3] Subiendo archivo {i}/{len(archivos_a_subir)}: {archivo.name}")
 
-    # Usamos .first para el modal por si también estuviera duplicado
-    modal = page.locator("#fitxer").first
-    await modal.wait_for(state="visible", timeout=15000)
+        # 1. Abrir popup (Botón en página principal)
+        await page.get_by_role("button", name=re.compile(r"Carregar\s+Fitxer", re.IGNORECASE)).first.click()
 
-    # CORRECCIÓN: Usamos '>> n=0' o seleccionamos el primer frame para evitar la violación de strict mode
-    # Esto selecciona el primer iframe con ese ID, ignorando el que está 'about:blank'
-    frame = page.frame_locator("#contingut_fitxer").first
-    
-    file_input = frame.locator("input[type='file'][name='qqfile']").first
-    await file_input.wait_for(state="attached", timeout=20000)
+        # 2. Localizar Modal e Iframe
+        modal = page.locator("#fitxer").first
+        await modal.wait_for(state="visible", timeout=15000)
+        frame = page.frame_locator("#contingut_fitxer").first
 
-    logging.info(f"[P3] Adjuntando archivo: {archivo.name}")
-    await file_input.set_input_files(str(archivo.resolve()))
+        # 3. Seleccionar archivo (Seleccionar fitxer)
+        file_input = frame.locator("input[type='file'][name='qqfile']").first
+        await file_input.wait_for(state="attached", timeout=20000)
+        await file_input.set_input_files(str(archivo.resolve()))
 
-    logging.info("[P3] Pulsando botón 'Carregar' para procesar el archivo...")
-    await frame.locator("#penjar_fitxers").first.click()
+        # 4. Pulsar botón 'Carregar' (penjar_fitxers)
+        logging.info(f"[P3] ({i}) Procesando subida...")
+        await frame.locator("#penjar_fitxers").first.click()
 
-    success_text = frame.locator("#textSuccess").first
-    await success_text.wait_for(state="visible", timeout=30000)
-    texto = (await success_text.inner_text()).strip()
-    
-    if archivo.name.lower() not in texto.lower():
-        if "correctament" not in texto.lower():
-            raise RuntimeError(f"[P3] Upload no confirmado. textSuccess='{texto}'")
+        # 5. Esperar éxito
+        success_text = frame.locator("#textSuccess").first
+        await success_text.wait_for(state="visible", timeout=30000)
+        
+        # 6. Cerrar popup (Botón Continuar del popup)
+        logging.info(f"[P3] ({i}) Confirmado. Cerrando popup...")
+        await frame.locator("#continuar").first.click()
 
-    logging.info("[P3] Upload confirmado, pulsando 'Continuar' del popup...")
-    await frame.locator("#continuar").first.click()
-
-    await modal.wait_for(state="hidden", timeout=15000)
-    await page.wait_for_timeout(500)
+        # Esperamos a que el modal desaparezca antes de ir a por el siguiente
+        await modal.wait_for(state="hidden", timeout=15000)
+        await page.wait_for_timeout(1000) # Pausa de seguridad entre archivos
 
 
 async def _avanzar_a_presentacion_p3(page: Page) -> None:
@@ -106,15 +108,16 @@ async def rellenar_formulario_p3(page: Page, config: BaseOnlineConfig, data: Bas
     logging.info("[P3] Introduciendo solicitud...")
     await page.locator(config.p3_textarea_solicito).first.fill(data.solicito)
 
-    # 6. Botón Continuar
+    # 6. Botón Continuar (Página 1 -> Página Documentos)
     logging.info("[P3] Pulsando el botón de continuar...")
     await page.locator(config.p3_button_continuar).first.click()
-
     await page.wait_for_load_state("domcontentloaded")
-    logging.info(f"[P3] Paso 1 completado. URL actual: {page.url}")
 
-    # 7. Subida de documentos (corregido frame duplicado)
-    await _subir_documento_p3(page, data.archivo_adjunto)
+    # 7. Subida de múltiples documentos (Bucle de popups)
+    if data.archivos_adjuntos:
+        await _subir_documentos_p3(page, data.archivos_adjuntos)
+    else:
+        logging.warning("[P3] No hay archivos adjuntos para subir.")
 
-    # 8. Continuar a pantalla de firma
+    # 8. Paso final de confirmación (Llegar hasta el botón de firma)
     await _avanzar_a_presentacion_p3(page)
