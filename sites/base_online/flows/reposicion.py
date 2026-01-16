@@ -48,6 +48,9 @@ async def _subir_documento_p3(page: Page, archivo: Path) -> None:
     logging.info(f"[P3] Adjuntando archivo: {archivo.name}")
     await file_input.set_input_files(str(archivo.resolve()))
 
+    logging.info("[P3] Pulsando botón 'Carregar' para procesar el archivo...")
+    await frame.locator("#penjar_fitxers").first.click()
+
     success_text = frame.locator("#textSuccess").first
     await success_text.wait_for(state="visible", timeout=30000)
     texto = (await success_text.inner_text()).strip()
