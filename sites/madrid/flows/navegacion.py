@@ -84,6 +84,81 @@ async def _esperar_dom_estable(page: Page, timeout_ms: int = 2000) -> None:
     await page.wait_for_timeout(timeout_ms)
 
 
+async def _cerrar_pestanas_extra(page: Page) -> None:
+    """
+    Cierra todas las pestañas/popups excepto la página principal.
+    Útil para eliminar pestañas abiertas por widgets sociales (Facebook, Twitter, etc.).
+    """
+    context = page.context
+    pages = context.pages
+    
+    if len(pages) > 1:
+        logger.info(f"  → Detectadas {len(pages)} pestañas, cerrando las extras...")
+        for p in pages:
+            if p != page:
+                try:
+                    url = p.url
+                    await p.close()
+                    logger.info(f"  → Pestaña cerrada: {url[:50]}...")
+                except Exception as e:
+                    logger.warning(f"  → Error al cerrar pestaña: {e}")
+
+
+def _configurar_bloqueo_popups(page: Page) -> None:
+    """
+    Configura un handler para cerrar automáticamente cualquier popup
+    que se abra durante la navegación (redes sociales, anuncios, etc.).
+    """
+    context = page.context
+    
+    def on_page_opened(new_page):
+        """Handler que cierra popups no deseados automáticamente."""
+        async def cerrar_popup():
+            try:
+                url = new_page.url
+                # Lista de dominios a bloquear
+                dominios_bloqueados = [
+                    "facebook.com",
+                    "twitter.com",
+                    "x.com",
+                    "instagram.com",
+                    "linkedin.com",
+                    "youtube.com",
+                    "whatsapp.com",
+                    "telegram.org",
+                    "pinterest.com",
+                    "tiktok.com",
+                ]
+                
+                # Verificar si es un popup de redes sociales
+                for dominio in dominios_bloqueados:
+                    if dominio in url:
+                        logger.info(f"  → Bloqueando popup de {dominio}: {url[:50]}...")
+                        await new_page.close()
+                        return
+                
+                # Si es about:blank, esperar un momento y verificar de nuevo
+                if url == "about:blank":
+                    await new_page.wait_for_timeout(1000)
+                    url = new_page.url
+                    for dominio in dominios_bloqueados:
+                        if dominio in url:
+                            logger.info(f"  → Bloqueando popup de {dominio}: {url[:50]}...")
+                            await new_page.close()
+                            return
+                
+                logger.warning(f"  → Popup inesperado abierto: {url[:80]}")
+            except Exception as e:
+                logger.debug(f"  → Error procesando popup: {e}")
+        
+        # Ejecutar el cierre de forma asíncrona
+        asyncio.create_task(cerrar_popup())
+    
+    # Registrar el handler
+    context.on("page", on_page_opened)
+    logger.debug("  → Handler de bloqueo de popups configurado")
+
+
 async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
     """
     Ejecuta la navegación completa desde la página base hasta el formulario.
@@ -108,6 +183,16 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
     Returns:
         Page: Página de Playwright en el formulario final
     """
+    
+    # ========================================================================
+    # CONFIGURACIÓN INICIAL: Bloqueo de popups de redes sociales
+    # ========================================================================
+    # Configurar handler para cerrar automáticamente popups de Facebook, etc.
+    _configurar_bloqueo_popups(page)
+    logger.info("  → Bloqueo de popups de redes sociales activado")
+    
+    # Cerrar cualquier pestaña extra que pueda haber quedado de ejecuciones anteriores
+    await _cerrar_pestanas_extra(page)
     
     # ========================================================================
     # PASO 1: Navegar a URL base y click "Tramitar en línea"
