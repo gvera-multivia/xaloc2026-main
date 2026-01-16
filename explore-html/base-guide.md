@@ -126,7 +126,7 @@ El codigo que lo identifica es:
 ```
 
 3- Tipo de solicitud
-Esta concretamente en esta zona del .html, es un select en el cual tenemos que poder seleccionar cualquiera de ellos
+Esta concretamente en esta zona del .html, es un select en el cual tenemos que poder seleccionar cualquiera de ellos, para ello debemos especificar como parametro los valores exactos seleccionables del select, debemos pasar exactamente el que queremos
 ```
 <select name="form0:j_id124" size="1">	<option value="">Seleccioneu un tipus</option>
 	<option value="100">No classificat</option>
@@ -167,4 +167,63 @@ El ultimo paso de esta pagina que es la 1/3 antes de subir los documentos es dar
 <div class="right"><input type="submit" name="form0:j_id130" value="Continuar" onclick="fof('adressaCompletaSortida').readOnly=false;filtrarCaracters()" class="button default">
 	</div>
 ´´´
+
+7- Subida de documentos
+
+A continuación, el paso a considerar es, clicar sobre el boton "Carregar Fitxer":
+
+```
+<button class="button2" type="button" onclick="pujarFitxerFuncioCallbackModal('GIR','A123','fitxerCallback',0)">
+	Carregar Fitxer
+</button>
+```
+
+Donde una vez clicado se podran adjuntar documentos de los tipos txt, pdf, xls, xlsx, csv, doc, docx, jpg, rtf, odt i ods.
+En este portal solo podemos adjuntar un documento, no nos permite poner más.
+Para ello, usaremos el boton que nos sale en el popup:
+
+```
+<input qq-button-id="9a589230-1924-4c65-b1ac-c9863f55f89d" title="file input" type="file" name="qqfile" style="position: absolute; right: 0px; top: 0px; font-family: Arial; font-size: 118px; margin: 0px; padding: 0px; cursor: pointer; opacity: 0; height: 100%;">
+```
+
+Tras activarlo se nos mostrará el explorador de archivos y podremos adjuntar uno con un maximo de hasta 10MB.
+
+Una vez adjuntado el archivo, debemos esperar al texto de succes que es:
+
+```
+<div id="success" class="success" style="">
+	<p>
+		<span id="textSuccess">Carregat correctament "test3.pdf" (12.67 KB)</span>
+		<br>Per finalitzar el procés i tornar al procediment orígen, feu clic al botó 'Continuar'.  
+	</p>
+</div>
+```
+
+Y cuando eso suceda, clicaremos en el boton de continuar del popup que es:
+
+```
+<div id="botonsFinals" class="right" style="">
+	<input type="button" id="continuar" name="continuar" class="button" value="Continuar" onclick="javascript:finalitzar();">
+</div>
+```
+
+Tras ello se cerrará el popup y debemos considerar un tiempo pequeño para que se cierre el popup, muy pequeño, o bien podemos esperar en el dom mirando cuando se cierra, o bien podemos poner un tiempo de 1 segundo de espera.
+
+Entonces, haremos click en el boton de continuar:
+
+```
+<input type="submit" name="form0:j_id66" value="Continuar" class="button default">
+```
+
+8- Aceptar y Firmar
+
+El último paso del Protocolo 3 (p3) será aceptar y firmar, el contenido copiado del html está en el archivo `base-reposicion-form-confirm.html`
+Aqui solo tenemos que usar el botón que poner Signar i Presentar con el codigo html:
+```
+<input type="button" class="button default" value="Signar i Presentar" onclick="javascript:peticioDeSignatura();return false;">
+```
+
+Sin embargo, bloquearemos en este caso la activación del boton, ya que no queremos enviar datos de prueba, igual que en xaloc, simplemente no accionamos el boton aunque tengamos preparado el codigo para poder realizarlo.
+
+
 

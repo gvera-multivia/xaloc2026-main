@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from sites.base_online.config import BaseOnlineConfig
 from sites.base_online.data_models import BaseOnlineReposicionData, BaseOnlineTarget
 
@@ -22,6 +24,7 @@ class BaseOnlineController:
         p3_tipus_solicitud_value: str | None = None,
         p3_exposo: str | None = None,
         p3_solicito: str | None = None,
+        p3_archivo: str | None = None,
     ) -> BaseOnlineTarget:
         protocol_norm = (protocol or "P1").upper().strip()
         reposicion = None
@@ -32,6 +35,7 @@ class BaseOnlineController:
                 tipus_solicitud_value=str(p3_tipus_solicitud_value or "1"),
                 exposo=p3_exposo or "Exposición de motivos de prueba para el recurso.",
                 solicito=p3_solicito or "Solicitud de prueba para el recurso.",
+                archivo_adjunto=Path(p3_archivo) if p3_archivo else Path("pdfs-prueba/test3.pdf"),
             )
         return BaseOnlineTarget(protocol=protocol_norm, reposicion=reposicion)
 

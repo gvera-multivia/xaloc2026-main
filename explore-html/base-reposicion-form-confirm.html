@@ -1,0 +1,447 @@
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:c="http://java.sun.com/jsp/jstl/core"><head>
+	<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+	<link rel="shortcut icon" type="image/vnd.microsoft.icon" href="/commons-resources/imatges/favicon.ico">
+	<meta http-equiv="X-UA-Compatible" content="IE=edge">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+	<meta name="mobile-web-app-capable" content="yes">
+	
+	<title>BASE on-line -Recurs o Devolució d'Ingressos</title>
+
+	<link rel="stylesheet" type="text/css" href="/commons-resources/components/bootstrap/css/bootstrap.css">
+	<link rel="stylesheet" type="text/css" href="/commons-resources/components/bootstrap/datatables/dataTables.bootstrap.css">
+	<link rel="stylesheet" type="text/css" href="/commons-resources/components/datatables/extensions/Responsive/css/dataTables.responsive.css">
+
+	<script type="text/javascript" src="/commons-resources/components/datatables/media/js/jquery.js"></script>
+	<script type="text/javascript" src="/commons-resources/components/datatables/media/js/jquery-migrate-1.3.min.js"></script>
+	<script type="text/javascript" src="/commons-resources/components/datatables/media/js/jquery-ui.js"></script>
+	
+	<script type="text/javascript" src="/commons-resources/javascript/jquery.cookie.js"></script>
+	<script type="text/javascript" src="/commons-resources/javascript/jquery.treeview.js"></script>
+	<script type="text/javascript" src="/commons-resources/javascript/functions.js"></script>
+	<script type="text/javascript" src="/commons-resources/javascript/controls.js"></script>
+	<script type="text/javascript" src="/commons-resources/javascript/general.js"></script>
+
+	<script type="text/javascript" src="/commons-resources/javascript/filtreCaracters.js"></script>
+	<script type="text/javascript" src="/commons-resources/javascript/validadorCaracters.js"></script>
+
+	<script type="text/javascript" src="/commons-resources/components/datatables/media/js/jquery.dataTables.min.js"></script>
+	<script type="text/javascript" src="/commons-resources/components/datatables/extensions/Responsive/js/dataTables.responsive.min.js"></script>
+	<script type="text/javascript" src="/commons-resources/components/bootstrap/datatables/dataTables.bootstrap.min.js"></script>
+	
+	<script type="text/javascript" src="/commons-resources/components/bootstrap/js/bootstrap.js"></script>
+
+	<script type="text/javascript" src="/commons-resources/components/bootstrap/js/respond.min.js"></script>
+	<script type="text/javascript" src="/commons-resources/components/datatables/media/js/ua-parser-min.js"></script>
+	
+	<script type="text/javascript">
+		var isMobile = {
+		    Android: function() {
+		        return navigator.userAgent.match(/Android/i);
+		    },
+		    BlackBerry: function() {
+		        return navigator.userAgent.match(/BlackBerry/i);
+		    },
+		    iOS: function() {
+		        return navigator.userAgent.match(/iPhone|iPad|iPod/i);
+		    },
+		    Opera: function() {
+		        return navigator.userAgent.match(/Opera Mini/i);
+		    },
+		    Windows: function() {
+		        return navigator.userAgent.match(/IEMobile/i);
+		    },
+		    any: function() {
+		        return (isMobile.Android() || isMobile.BlackBerry() || isMobile.iOS() || isMobile.Opera() || isMobile.Windows());
+		    },
+		    iPad: function(){
+		    	return navigator.userAgent.match(/iPad/i);
+		    }
+		};
+
+		var uaParser = new UAParser();
+		
+		jQuery(document).ready(function() {
+			if (isMobile.any()){
+				jQuery("#head").hide();
+				jQuery("#footer").hide();
+				jQuery('#contingut_responsive').css('padding-top','50px');
+				jQuery("#capcalera_mobil").show();
+			}else{
+				jQuery("#capcalera_mobil").hide();
+				jQuery("#head").show();
+				jQuery("#footer").show();
+				jQuery("#sidebar").show();
+				jQuery("#navegadora").show();
+			}
+
+			if (!isMobile.any()){
+				jQuery('head').append('<link charset="UTF-8" rel="stylesheet" type="text/css" media="screen" href="/commons-resources/css/style_escriptori.css" />');
+				jQuery('head').append('<link charset="UTF-8" rel="stylesheet" type="text/css" media="screen" href="/commons-resources/css/reset_escriptori.css" />');
+				jQuery('head').append('<link charset="UTF-8" rel="stylesheet" type="text/css" media="screen" href="/commons-resources/css/style_treball.css" />');
+
+				jQuery('head').append('<!--[if IE]><link charset="UTF-8" rel="stylesheet" type="text/css" media="screen" href="/commons-resources/css/ie_escriptori.css" /><![endif]-->');
+
+				jQuery('head').append('<link charset="UTF-8" rel="stylesheet" type="text/css" media="screen" href="/commons-resources/css/tablas_treball.css" />');
+				jQuery('head').append('<link charset="UTF-8" rel="stylesheet" type="text/css" media="screen" href="/commons-resources/css/forms_treball.css" />');
+				jQuery('head').append('<link charset="UTF-8" rel="stylesheet" type="text/css" media="screen" href="/commons-resources/css/detalle_treball.css" />');
+
+				jQuery('head').append('<!--[if IE]><link charset="UTF-8" rel="stylesheet" type="text/css" media="screen" href="/commons-resources/css/ie_treball.css" /><![endif]-->');
+
+				jQuery('head').append('<link charset="ISO-8859-15" rel="stylesheet" type="text/css" media="print" href="/commons-resources/css/print_bol.css" />');
+				jQuery('head').append('<link charset="UTF-8" rel="stylesheet" type="text/css" media="screen" href="/commons-resources/css/base_richfaces.css" />');
+				jQuery('head').append('<link charset="UTF-8" rel="stylesheet" type="text/css" media="screen" href="/commons-resources/css/jquery.treeview.css" />');
+
+				jQuery('head').append('<link charset="ISO-8859-15" rel="stylesheet" type="text/css" media="screen" href="/commons-resources/css/responsive.css" />');
+ 			}else{
+ 				jQuery('head').append('<link charset="ISO-8859-15" rel="stylesheet" type="text/css" media="screen" href="/commons-resources/css/responsive_mobile.css" />');
+ 			}
+		});
+	</script>
+	<style> 
+        #loader { 
+            border: 12px solid #f3f3f3; 
+            border-radius: 50%; 
+            border-top: 12px solid #444444; 
+            width: 70px; 
+            height: 70px; 
+            animation: spin 1s linear infinite; 
+        } 
+          
+        @keyframes spin { 
+            100% { 
+                transform: rotate(360deg); 
+            } 
+        } 
+          
+        .center_loading { 
+            position: absolute; 
+            top: 0; 
+            bottom: 0; 
+            left: 0; 
+            right: 0; 
+            margin: auto; 
+        } 
+    </style>
+	<script type="text/javascript" src="/commons-resources/javascript/assistents/as_adreces.js"></script>
+	<script type="text/javascript" src="/microportasignatures/js/microportasignaturesModal.js"></script>
+<link charset="UTF-8" rel="stylesheet" type="text/css" media="screen" href="/commons-resources/css/style_escriptori.css"><link charset="UTF-8" rel="stylesheet" type="text/css" media="screen" href="/commons-resources/css/reset_escriptori.css"><link charset="UTF-8" rel="stylesheet" type="text/css" media="screen" href="/commons-resources/css/style_treball.css"><!--[if IE]><link charset="UTF-8" rel="stylesheet" type="text/css" media="screen" href="/commons-resources/css/ie_escriptori.css" /><![endif]--><link charset="UTF-8" rel="stylesheet" type="text/css" media="screen" href="/commons-resources/css/tablas_treball.css"><link charset="UTF-8" rel="stylesheet" type="text/css" media="screen" href="/commons-resources/css/forms_treball.css"><link charset="UTF-8" rel="stylesheet" type="text/css" media="screen" href="/commons-resources/css/detalle_treball.css"><!--[if IE]><link charset="UTF-8" rel="stylesheet" type="text/css" media="screen" href="/commons-resources/css/ie_treball.css" /><![endif]--><link charset="ISO-8859-15" rel="stylesheet" type="text/css" media="print" href="/commons-resources/css/print_bol.css"><link charset="UTF-8" rel="stylesheet" type="text/css" media="screen" href="/commons-resources/css/base_richfaces.css"><link charset="UTF-8" rel="stylesheet" type="text/css" media="screen" href="/commons-resources/css/jquery.treeview.css"><link charset="ISO-8859-15" rel="stylesheet" type="text/css" media="screen" href="/commons-resources/css/responsive.css"></head>
+
+		<body style="margin-bottom: 20px; visibility: visible; font-size: 0.65em;">
+			<div id="loader" class="center_loading" style="visibility: visible; display: none;"></div> 
+			<div id="wrap">
+				<div id="head" class="clearfix"><h1><a href="/commons-desktop/index.htm" title=""><span class="replaced">Base on-line <em>Sempre on ets tu</em></span></a></h1>
+<ul id="tabs">
+<li class="selected"><a href="/commons-desktop/pestanya.htm?idPest=5" title="" accesskey="">Carpeta ciutadana</a></li>
+<li><a href="/commons-desktop/pestanya.htm?idPest=6" title="" accesskey="">Ajuda</a></li>
+</ul>
+<ul id="user-tools" class="tools script"><li>MULTIVIA NEGOCIADO Y DEF ADMIN Y JURIDICA</li>
+<li>Empresa - <a href="/commons-desktop/valid?role=personal">Particular</a></li>
+<li class="nosep"><a href="/commons-desktop?logout=true" title="Tancar sessió">Tancar sessió</a></li>
+</ul>
+<ul id="page-tools" class="tools script"><ul id="resizer"><li><a href="#" class="normal"><span class="replaced">a</span></a></li><li><a href="#" class="large"><span class="replaced">a</span></a></li></ul><li id="help"><a href="/commons-help/web_prv/ca/ciutadans/Ajuda/Ajuda.html" title=""><span class="replaced">Ajuda</span></a></li></ul>
+
+		        </div>
+		        
+	            <div id="capcalera_mobil" style="display:none">
+					<nav class="navbar navbar-default navbar-fixed-top" style="background-color: #DFECF9;">
+					</nav>
+				</div>
+
+				<div id="content">
+
+					<ul id="sidebar" class="container" style=""><li><h2>Menú</h2></li>
+<li class="rounded greybox clearfix"><span class="corner tl"></span><span class="corner tr"></span>
+<ul id="tree-nav" class="no-visible treeview">
+<li class="expandable lastExpandable"><div class="hitarea expandable-hitarea lastExpandable-hitarea"></div>
+<span>Menú</span>
+<ul style="display: none;">
+<li class="expandable"><div class="hitarea expandable-hitarea"></div>
+<span>Posició Global</span>
+<ul style="display: none;">
+<li><a href="/gpt/flow/consultaDeutes">Deutes i Sancions</a></li>
+<li><a href="/gpt/flow/consultaObjectes">Objectes tributaris, taxes i consums</a></li>
+<li><a href="/gpt/flow/detallTramits">Tràmits</a></li>
+<li class="last"><a href="https://usuari.enotum.cat/webCiutada/login?codiOrganisme=8004333033&amp;codiDepartament=8004333033" target="_blank" "="">Notificacions electròniques</a></li>
+</ul>
+</li>
+<li class="expandable"><div class="hitarea expandable-hitarea"></div>
+<span>Dades Personals</span>
+<ul style="display: none;">
+<li><a href="/tip-ciutada/">Modificar dades personals i la gestió de la relació electrònica amb BASE-Gestió d'Ingressos</a></li>
+<li class="last"><a href="https://representa.cat/representa/ciutada?codi=8004333033" target="_blank">Registre electrònic d'apoderaments (Representa)</a></li>
+</ul>
+</li>
+<li class="expandable"><div class="hitarea expandable-hitarea"></div>
+<span>Pagaments</span>
+<ul style="display: none;">
+<li><a href="/gpp/flow/cercaPagamentPersonalitzat">Compte Pagament Personalitzat</a></li>
+<li><a href="/gpt/flow/consultaDeutes">Modificació domiciliació del Compte de Pagament Personalitzat</a></li>
+<li><a href="/gpt/flow/consultaObjectes">Domiciliació d'objectes tributaris</a></li>
+<li><a href="/gpt/flow/consultaDeutes">Domiciliació per subjecte</a></li>
+<li><a href="/gpt/flow/consultaDeutes">Pagament per TPV</a></li>
+<li><a href="/pst/flow/formulari?tramit=M106">Sol·licitud d'ajornament o fraccionament en període voluntari</a></li>
+<li><a href="/pst/flow/formulari?tramit=M107">Sol·licitud d'ajornament o fraccionament en període executiu de deutes de BASE</a></li>
+<li><a href="/pst/flow/formulari?tramit=M122">Sol·licitud d'ajornament o fraccionament en període executiu de deutes de l'ATC</a></li>
+<li><a href="/pst/flow/formulari?tramit=M124">Sol·licitud de modificació del fraccionament o ajornament sol·licitat</a></li>
+<li><a href="/pst/flow/formulari?tramit=M125">Sol·licitud de cancel·lació del fraccionament o ajornament sol·licitat</a></li>
+<li class="last"><a href="/pst/flow/formulari?tramit=M123">Contestar requeriment i/o presentar documentació relacionada amb el fraccionament/ajornament sol·licitat</a></li>
+</ul>
+</li>
+<li class="expandable"><div class="hitarea expandable-hitarea"></div>
+<span>Immobles</span>
+<ul style="display: none;">
+<li><a href="/pst/flow/formulari?tramit=M112">Sol·licitud de divisió de l'IBI entre cotitulars</a></li>
+<li><a href="/pst/flow/formulari?tramit=M120">Sol·licitud de beneficis fiscals de l'IBI</a></li>
+<li class="last"><a href="https://www.sedecatastro.gob.es/Accesos/SECAccProcedimientos.aspx?Dest=35" target="_blank" "="">Declaracions alteracions cadastrals i canvis de titularitats (Seu Electrònica del Cadastre)</a></li>
+</ul>
+</li>
+<li class="expandable"><div class="hitarea expandable-hitarea"></div>
+<span>Vehicles</span>
+<ul style="display: none;">
+<li><a href="/pst/flow/formulari?tramit=M110">Sol·licitud de beneficis fiscals de l'IVTM</a></li>
+<li><a href="/pst/flow/formulari?tramit=M121">Sol·licitud de prorrateig del vehicle</a></li>
+<li><a href="/pst/flow/formulari?tramit=M118">Contestar requeriment i/o presentar documentació relacionada amb el prorrateig del vehicle</a></li>
+<li class="last"><a href="/pst/flow/formulari?tramit=M018">Autoliquidació IVTM - Alta del vehicle</a></li>
+</ul>
+</li>
+<li class="expandable"><div class="hitarea expandable-hitarea"></div>
+<span>Taxes</span>
+<ul style="display: none;">
+<li class="last"><a href="/pst/flow/formulari?tramit=M117">Contestar requeriment i/o presentar documentació relacionada amb la devolució d'ingressos indeguts en la taxa de subministrament d'aigua</a></li>
+</ul>
+</li>
+<li class="expandable"><div class="hitarea expandable-hitarea"></div>
+<span>Empreses i activitats econòmiques</span>
+<ul style="display: none;">
+<li><a href="/pst/flow/formulari?tramit=M016">Declaració IAE</a></li>
+<li class="expandable lastExpandable"><div class="hitarea expandable-hitarea lastExpandable-hitarea"></div>
+<span>Taxa utilització privativa o aprofitament especial domini públic local per empreses de subministrament</span>
+<ul style="display: none;">
+<li><a href="/pst/flow/formulari?tramit=M017">Tramitació declaració i autoliquidació trimestral de la taxa</a></li>
+<li class="last"><a href="/pst/flow/formulari?tramit=M629">Presentació altres documents per empreses de subministrament referits a la taxa (declaracions mensuals, declaracions anuals, etc)</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="expandable"><div class="hitarea expandable-hitarea"></div>
+<span>Multes i sancions</span>
+<ul style="display: none;">
+<li><a href="/pst/flow/formulari?tramit=M250">Sol·licitud d'identificació de conductor</a></li>
+<li class="last"><a href="/pst/flow/formulari?tramit=M203">Al·legacions en el procediment sancionador en matèria de trànsit</a></li>
+</ul>
+</li>
+<li class="expandable"><div class="hitarea expandable-hitarea"></div>
+<span>Recursos</span>
+<ul style="display: none;">
+<li><a href="/gir-ciutada/flow/recursTelematic">Recurs de reposició</a></li>
+<li><a href="/gir-ciutada/flow/recursTelematic">Sol·licitud de devolució d'ingressos</a></li>
+<li><a href="/gir-ciutada/flow/recursTelematic">Sol·licitud de rectificació d'errors</a></li>
+<li><a href="/gir-ciutada/flow/recursTelematic">Sol·licitud de suspensió</a></li>
+<li><a href="/gir-ciutada/flow/recursTelematic">Recurs extraordinari de revisió</a></li>
+<li><a href="/gir-ciutada/flow/recursTelematic">Sol·licitud de compensació</a></li>
+<li><a href="/gir-ciutada/flow/recursTelematic">Escrit de revisió d'ofici</a></li>
+<li><a href="/gir-ciutada/flow/recursTelematic">Reclamació de terceria de domini</a></li>
+<li><a href="/gir-ciutada/flow/recursTelematic">Sol·licitud de devolució d'aval</a></li>
+<li class="last"><a href="/gir-ciutada/flow/recursTelematic">Sol·licitud de devolució de costes de garanties</a></li>
+</ul>
+</li>
+<li class="expandable"><div class="hitarea expandable-hitarea"></div>
+<span>Inspecció i Comprovació</span>
+<ul style="display: none;">
+<li><a href="/pst/flow/formulari?tramit=M811">Contestar requeriments i/o presentar documentació relacionada amb el procediment d'inspecció o comprovació</a></li>
+<li><a href="/pst/flow/formulari?tramit=M812">Efectuar al·legacions o presentar un recurs de reposició al procediment sancionador tributari</a></li>
+<li class="last"><a href="/pst/flow/formulari?tramit=M813">Efectuar al·legacions o presentar un recurs de reposició al procediment d'inspecció o comprovació</a></li>
+</ul>
+</li>
+<li class="expandable"><div class="hitarea expandable-hitarea"></div>
+<span>Certificats</span>
+<ul style="display: none;">
+<li class="last"><a href="/pst/flow/formulari?tramit=M103">Sol·licitud de certificat</a></li>
+</ul>
+</li>
+<li class="expandable"><div class="hitarea expandable-hitarea"></div>
+<span>Protecció de dades</span>
+<ul style="display: none;">
+<li><a href="/pst/flow/formulari?tramit=M108">Sol·licitud per exercir els drets d'accés, supressió o oblit, oposició i portabilitat de les dades personals</a></li>
+<li class="last"><a href="/pst/flow/formulari?tramit=M109">Sol·licitud per exercir els dret de rectificació de les dades personals</a></li>
+</ul>
+</li>
+<li class="expandable"><div class="hitarea expandable-hitarea"></div>
+<span>Embargaments</span>
+<ul style="display: none;">
+<li><a href="/ess">Pagament embargament sous i salari</a></li>
+<li><a href="/ess">Contestar requeriment i/o presentar documentació relacionada amb la DILIGÈNCIA d'embargament de sous i salari</a></li>
+<li><a href="/pst/flow/formulari?tramit=M301">Contestar requeriment i/o presentar documentació relacionada amb el requeriment d'informació de sous i salaris</a></li>
+<li><a href="/pst/flow/formulari?tramit=M304">Contestar requeriment i/o presentar documentació relacionada amb el procediment d'embargament de vehicles</a></li>
+<li><a href="/pst/flow/formulari?tramit=M305">Contestar requeriment i/o presentar documentació relacionada amb el procediment d'embargament de béns immobles</a></li>
+<li><a href="/pst/flow/formulari?tramit=M306">Contestar requeriment i/o presentar documentació relacionada amb el procediment de subhastes</a></li>
+<li class="last"><a href="/pst/flow/formulari?tramit=M307">Contestar requeriment i/o presentar documentació relacionada amb el procediment d'altres embargaments</a></li>
+</ul>
+</li>
+<li class="expandable"><div class="hitarea expandable-hitarea"></div>
+<span>Derivacions</span>
+<ul style="display: none;">
+<li><a href="/gir-ciutada/flow/recursTelematic">Recurs de reposició</a></li>
+<li><a href="/gir-ciutada/flow/recursTelematic">Al·legació a la notificació de l'acord d'inici</a></li>
+<li class="last"><a href="/pst/flow/formulari?tramit=M303">Contestar requeriments i/o presentar documentació relacionada amb el procediment de fallits i derivacions</a></li>
+</ul>
+</li>
+<li class="expandable lastExpandable"><div class="hitarea expandable-hitarea lastExpandable-hitarea"></div>
+<span>Altres</span>
+<ul style="display: none;">
+<li><a href="/gst/flow/solicitudGenerica">Sol·licitud Genèrica</a></li>
+<li class="last"><a href="/gst/flow/solicitudConsultes">Queixa, suggeriment o agraïment</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<span class="corner bl"></span><span class="corner br"></span></li>
+
+					</ul>
+					<div id="main" class="container">
+						<div id="navegadora" style=""><ul id="breadcrumb" class="rounded"><span class="corner tl"></span><span class="corner tr"></span>
+<li>Pàgina actual</li><li id="current">Presentació de Recursos Telemàtics</li>
+<span class="corner bl"></span><span class="corner br"></span></ul>
+
+						</div>
+						<div id="contingut_responsive">
+	<script type="text/javascript">
+		function peticioDeSignatura(){
+			signarEnvelopedModal();
+		}
+	</script>
+				
+	<h2>Recurs o Devolució d'Ingressos</h2>
+	<div id="superior">
+		<a href="cercaRecursos">Catàleg de tràmits</a> 
+	</div><br>
+<form id="form0" name="form0" method="post" action="/gir-ciutada/flow/recursTelematic?execution=e1s5" class="baseform" enctype="application/x-www-form-urlencoded">
+<input type="hidden" name="form0" value="form0">
+
+
+	<ol class="steps">
+		<li><a href="#"><span class="step-number">1</span>
+			<span class="step">Primer pas</span>Dades sol·licitud</a></li>
+		<li><a href="#"><span class="step-number">2</span>
+			<span class="step">Segon pas</span>Documents adjunts</a></li>
+		<li class="actual"><a href="#"><span class="step-number">3</span>
+			<span class="step">Tercer pas</span>Presentar sol·licitud</a></li>
+		<li class="last"><a href="#"><span class="step-number">4</span>
+			<span class="step">Quart pas</span>Confirmació</a></li>
+	</ol>
+	<br>
+
+	<div class="info">
+		<p>Per presentar la sol·licitud, l'aplicació us demanarà que prèviament la signeu.</p>
+	</div>											
+
+	<table cellpadding="0" cellspacing="0">
+	<caption>Dades sol·licitant</caption>
+	<tbody>
+		<tr>
+		<th>Identificació</th>
+		<th>Adreça</th>
+		</tr>
+		<tr>
+		<td>B62798210 - MULTIVIA NEGOCIADO Y DEF ADMIN Y JURIDICA</td>
+		<td>RD GENERAL MITRE, 169-171
+08022 BARCELONA
+BARCELONA</td>
+		</tr>
+	</tbody>
+	</table>
+
+	<table cellpadding="0" cellspacing="0">
+	<caption>Dades sol·licitud</caption>
+	<tbody>
+		<tr>
+		<th>Tipus sol·licitud</th>
+		<th>Objecte</th>
+		<th>Dades específiques</th>
+		</tr>
+		<tr>
+		<td>Recurs de reposició</td>
+		<td><strong>IVTM</strong> - Matrícula del vehícle - <strong>xxx-YYY</strong></td>
+		<td>1234-ABC (Matrícula de prueba)</td>
+		</tr>
+
+		<tr>
+		<th colspan="3">Exposo</th>
+		</tr>
+		<tr>
+		<td colspan="3">Exposición de motivos de prueba para el recurso.
+		</td>
+		</tr>
+		<tr>
+		<th colspan="3">Sol·licito</th>
+		</tr>
+		<tr>
+		<td colspan="3">Solicitud de prueba para el recurso.
+		</td>
+		</tr>
+	</tbody>
+	</table>
+	
+	<table cellpadding="0" cellspacing="0">
+		<caption>Documents adjuntats</caption>
+		<tbody>
+			<tr><th>Llista de documents</th></tr>
+			<tr>
+				<td>
+					<ul>
+						<li>
+<script type="text/javascript" language="Javascript">function dpf(f) {var adp = f.adp;if (adp != null) {for (var i = 0;i < adp.length;i++) {f.removeChild(adp[i]);}}};function apf(f, pvp) {var adp = new Array();f.adp = adp;var i = 0;for (k in pvp) {var p = document.createElement("input");p.type = "hidden";p.name = k;p.value = pvp[k];f.appendChild(p);adp[i++] = p;}};function jsfcljs(f, pvp, t) {apf(f, pvp);var ft = f.target;if (t) {f.target = t;}f.submit();f.target = ft;dpf(f);};</script>
+<a href="#" onclick="if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('form0'),{'form0:j_id50:0:j_id52':'form0:j_id50:0:j_id52','id':'1244743','nom':'GIR_20260116_08-17-18-792.pdf'},'doc');}return false">
+								GIR_20260116_08-17-18-792.pdf</a>
+						</li>
+					</ul>
+				</td>
+			</tr>
+		</tbody>
+	</table>
+	
+	
+	<h3>Clàusules Legals</h3>
+	<ul>
+		<li>Si aquesta sol·licitud no conté els requisits que exigeixen les normes que li són d'aplicació, se us requerirà per tal que esmeneu aquesta omissió en el termini de deu dies, amb l'apercebiment que de no fer-ho se us tindrà per desistit de la vostra petició.</li>
+		<li>Informació sobre protecció de dades. En compliment de la normativa aplicable en matèria de protecció de dades de caràcter personal (Reglament (UE) 2016/679 del Parlament i del Consell, de 27 d'abril de 2016, relatiu a la protecció de les persones físiques pel que fa al tractament de dades personals i a la lliure circulació d'aquestes dades i la Llei orgànica 3/2018, de 5 de desembre, de protecció de dades personals i garantia dels drets digitals) i en relació al tractament de les vostres dades, se us INFORMA del següent:</li>
+		<li>Les dades obtingudes amb aquest imprès seran tractades de forma confidencial i exclusivament per a la seva finalitat.</li>
+		<li>Responsable del tractament: BASE-Gestió d'Ingressos. Adreça postal: Pere Martell, 2 43001 Tarragona. Telèfon: 977253400. Seu electrònica: https://www.base.cat. Correu electrònic: info@base.cat. La persona interessada té dret a sol·licitar al responsable del tractament l'accés a les seves dades personals, la rectificació o supressió, la limitació i l'oposició al tractament, i en el seu cas, la portabilitat de les dades, dirigint-se a l'adreça electrònica https://www.base.cat/protecciodades, enviant un escrit amb la seva sol·licitud a BASE-Gestió d'Ingressos. c/ Pere Martell, 2 43001 Tarragona o bé presentar la seva sol·licitud a qualsevol de les oficines de BASE-Gestió d'Ingressos.</li>
+		<li>Lloc on ampliar aquesta informació: https://www.base.cat/protecciodades</li>
+	</ul>
+
+	<div class="right">
+		<input type="button" class="button default" value="Signar i Presentar" onclick="javascript:peticioDeSignatura();return false;"><input type="submit" name="form0:j_id63" value="Anterior" class="button">
+	</div>
+</form>
+						</div>
+						<script type="text/javascript">
+  							jQuery(FORM).submit(function() {
+    							return validarCaracters();
+  							});
+						</script>
+					</div>
+				</div>
+				<div id="footer" class="clearfix rounded" style=""><span class="corner tl"></span><span class="corner tr"></span><ul><li class="nosep"><strong>Telèfon d'atenció ciutadana:</strong> 977 253 400</li>
+</ul>
+
+				<span class="corner bl"></span><span class="corner br"></span></div>
+			</div>
+			<script> 
+				document.onreadystatechange = function() { 
+					if (document.readyState !== "complete") { 
+						document.querySelector( 
+						  "body").style.visibility = "hidden"; 
+						document.querySelector( 
+						  "#loader").style.visibility = "visible"; 
+					} else { 
+						document.querySelector( 
+						  "#loader").style.display = "none"; 
+						document.querySelector( 
+						  "body").style.visibility = "visible"; 
+					} 
+				}; 
+			</script> 
+		
+<div id="signatura" class="modal fade" tabindex="-1" role="dialog" aria-labelledby="modalSignatura" aria-hidden="true" data-keyboard="false" data-backdrop="static"><div id="signaturaDialog" class="modal-dialog modal-lg" style="height:800px"><div class="modal-content"><div class="modal-body"><iframe id="contingut_signatura" src="about:blank" width="100%" height="800px" style="border:none"></iframe></div></div></div></div></body></html>
