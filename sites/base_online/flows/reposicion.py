@@ -32,29 +32,39 @@ async def _subir_documento_p3(page: Page, archivo: Path) -> None:
         raise FileNotFoundError(f"No existe el archivo a adjuntar: {archivo}")
 
     logging.info("[P3] Abriendo popup de carga de fichero...")
-    await page.get_by_role("button", name=re.compile(r"Carregar\s+Fitxer", re.IGNORECASE)).click()
+    # Se añade .first para evitar conflictos si el botón también estuviera duplicado
+    await page.get_by_role("button", name=re.compile(r"Carregar\s+Fitxer", re.IGNORECASE)).first.click()
 
-    modal = page.locator("#fitxer")
+    # CORRECCIÓN: Usamos .first para resolver la ambigüedad del ID duplicado #fitxer
+    modal = page.locator("#fitxer").first
     await modal.wait_for(state="visible", timeout=15000)
 
+    # Localizamos el iframe dentro del modal
     frame = page.frame_locator("#contingut_fitxer")
+    
+    # Localizamos el input de tipo file. Usamos .first por seguridad
     file_input = frame.locator("input[type='file'][name='qqfile']").first
     await file_input.wait_for(state="attached", timeout=20000)
 
     logging.info(f"[P3] Adjuntando archivo: {archivo.name}")
     await file_input.set_input_files(str(archivo.resolve()))
 
+    # Espera del mensaje de éxito
     success_text = frame.locator("#textSuccess").first
     await success_text.wait_for(state="visible", timeout=30000)
+    
     texto = (await success_text.inner_text()).strip()
     if archivo.name.lower() not in texto.lower():
-        raise RuntimeError(f"[P3] Upload no confirmado. textSuccess='{texto}'")
+        # Verificación alternativa si el nombre del archivo se trunca en el mensaje
+        if "correctament" not in texto.lower():
+            raise RuntimeError(f"[P3] Upload no confirmado. textSuccess='{texto}'")
 
     logging.info("[P3] Upload confirmado, pulsando 'Continuar' del popup...")
     await frame.locator("#continuar").first.click()
 
-    await modal.wait_for(state="hidden", timeout=15000)
-    await page.wait_for_timeout(500)
+    # Esperamos a que el modal desaparezca (usando .first de nuevo)
+    await page.locator("#fitxer").first.wait_for(state="hidden", timeout=15000)
+    await page.wait_for_timeout(1000)
 
 
 async def _avanzar_a_presentacion_p3(page: Page) -> None:
@@ -62,6 +72,7 @@ async def _avanzar_a_presentacion_p3(page: Page) -> None:
     await page.locator("input[type='submit'][name='form0:j_id66'][value='Continuar']").first.click()
     await page.wait_for_load_state("domcontentloaded")
 
+    # Localizamos el botón final pero NO lo pulsamos según instrucciones (modo demo)
     boton_firma = page.locator("input[type='button'][value='Signar i Presentar']").first
     await boton_firma.wait_for(state="visible", timeout=20000)
     logging.info("[P3] Pantalla 'Signar i Presentar' detectada (no se pulsa en modo demo).")
@@ -85,7 +96,7 @@ async def rellenar_formulario_p3(page: Page, config: BaseOnlineConfig, data: Bas
     logging.info("[P3] Introduciendo datos específicos...")
     await page.locator(config.p3_textarea_dades).first.fill(data.dades_especifiques)
 
-    # 3. Tipo de solicitud (value del <select>)
+    # 3. Tipo de solicitud
     logging.info(f"[P3] Seleccionando tipo de solicitud: value={data.tipus_solicitud_value}")
     await page.locator(config.p3_select_tipus).first.select_option(value=str(data.tipus_solicitud_value))
 
@@ -104,8 +115,8 @@ async def rellenar_formulario_p3(page: Page, config: BaseOnlineConfig, data: Bas
     await page.wait_for_load_state("domcontentloaded")
     logging.info(f"[P3] Paso 1 completado. URL actual: {page.url}")
 
-    # 7. Subida de documentos (popup + iframe)
+    # 7. Subida de documentos (corregido para IDs duplicados)
     await _subir_documento_p3(page, data.archivo_adjunto)
 
-    # 7b. Continuar (paso Documentos -> Presentar solicitud)
+    # 8. Llegar hasta la pantalla final (sin firmar)
     await _avanzar_a_presentacion_p3(page)
