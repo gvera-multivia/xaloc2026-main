@@ -13,6 +13,29 @@ class BaseOnlineP1ContactData:
 
 
 @dataclass(frozen=True)
+class BaseOnlineAddressData:
+    """
+    Dirección estructurada (4.2.Especial).
+    """
+
+    sigla: str
+    calle: str
+    numero: str
+    letra: str | None = None
+    escala: str | None = None
+    piso: str | None = None
+    puerta: str | None = None
+    ampliacion_calle: str | None = None
+    codigo_postal: str | None = None
+
+    municipio: str | None = None
+    ampliacion_municipio: str | None = None
+
+    provincia: str | None = None  # España
+    pais: str | None = None  # fuera de España
+
+
+@dataclass(frozen=True)
 class BaseOnlineP1IdentificacionData:
     expedient_id_ens: str
     expedient_any: str
@@ -23,13 +46,21 @@ class BaseOnlineP1IdentificacionData:
     identificacio: str  # DNI/NIE/PASAPORTE
     llicencia_conduccio: str
     nom_complet: str
-    adreca: str
+    adreca: str | None = None
+    adreca_detall: BaseOnlineAddressData | None = None
 
 
 @dataclass(frozen=True)
 class BaseOnlineP1Data:
     contacte: BaseOnlineP1ContactData
     identificacio: BaseOnlineP1IdentificacionData
+
+
+@dataclass(frozen=True)
+class BaseOnlineP2Data:
+    nif: str
+    rao_social: str
+    contacte: BaseOnlineP1ContactData
 
 
 @dataclass(frozen=True)
@@ -54,6 +85,7 @@ class BaseOnlineTarget:
 
     protocol: str  # "P1" | "P2" | "P3"
     p1: BaseOnlineP1Data | None = None
+    p2: BaseOnlineP2Data | None = None
     p3: BaseOnlineReposicionData | None = None
     # Compat (arquitectura anterior)
     reposicion: BaseOnlineReposicionData | None = None

@@ -406,5 +406,159 @@ browser = await playwright.chromium.launch(
 3. Si el botón ni siquiera parece reaccionar, usa la **Opción 3** como último recurso.
 
 
+#### 4.2.Especial- Cuadro de direccón
+A continuación proseguimos con la implementación del uso del popup que aparece al darle uso al boton que lo hace saltar.
+Debemos de seleccionar una ubicación.
+Puede ser en españa o fuera de españa, en otro país. Hay un par de radio buttons que nos permie seleccionar si es españa u otro país. De base esta seleccionado España.
+En españa debemos concretar más las cosas. 
+
+Primero te voy a mostrar la estructura que se sigue:
+
+SIGLA calle, Número, Letra, Escalera, Piso, Puerta, (Ampliación calle)
+CP MUNICIPIO (AMPLIACIÓN MUNICIPIO)
+PROVINCIA
+
+Te pongo un caso de ejemplo de España, usando Tarragona:
+
+AG CALLE PRUEBA, Numero prueba, A, B, C, D AMPLIACIÓN CALLE
+43815 AIGUAMÚRCIA AMPLICACIÓN MUNICIPIO
+TARRAGONA
+
+Y te pongo un ejemplo de fuera de españa:
+
+RM CALLE PRUEBA, Numero prueba, A, B, C, D AMPLIACIÓN CALLE
+43815 AMPLICACIÓN MUNICIPIO
+AFGHANISTAN
 
 
+Si te fijas la estructura es extremadamente similar, pero varia un poco.
+Para dentro y fuera de españa se comparten los siguientes puntos:
+
+SIGLA calle, Número, Letra, Escalera, Piso, Puerta, Ampliación calle
+CP (AMPLIACIÓN MUNICIPIO)
+
+Es decir que en caso de España, entre CP y AMPLIACIÓN MUNICIPIO tenemos un atributo addicional, que es el municipio
+Además el campo PROVINCIA, para España es una provincia y para fuera de España es el País.
+
+Además los siguientes campos son obligatorios en España:
+
+Sigla, Calle, Numero, Municipio, Codigo Postal
+
+Pero son fuera de españa son obligatorios unos diferentes, que són los mismos cambiando Municipio por ampliacion municipio, es decir:
+
+Sigla, Calle, Numero, Municipio, Codigo Postal
+
+Y para continuar, es importante que algunos campos tengan una estructura concreta validada. En conreto el campo de SIgla tiene que ser uno de los siguientes:
+	AG
+	AL
+	AP
+	AR
+	AU
+	AV
+	AY
+	BJ
+	BO
+	BR
+	CA
+	CG
+	CH
+	CI
+	CJ
+	CL
+	CM
+	CN
+	CO
+	CP
+	CR
+	CS
+	CT
+	CU
+	DE
+	DP
+	DS
+	ED
+	EM
+	EN
+	ER
+	ES
+	EX
+	FC
+	FN
+	GL
+	GR
+	GV
+	HT
+	JR
+	LD
+	LG
+	MC
+	ML
+	MN
+	MS
+	MT
+	MZ
+	PB
+	PD
+	PJ
+	PQ
+	PR
+	PS
+	PT
+	PZ
+	QT
+	RB
+	RC
+	RD
+	RM
+	RP
+	RR
+	RU
+	SA
+	SD
+	SL
+	SN
+	SU
+	TN
+	TO
+	TR
+	UR
+	VR
+	ZN
+
+Además los textos de municipio, país y provincia deben de estar en mayusculas.
+
+La estructura de la direccion debe respetarse siempre en la escritura dentro del cuadro de texto usando las comas o espacios segun de ha mostrado en los ejemplo asi como los saltos de linea.
+
+
+## 4.3 - Formulario de Alegaciones (P2)
+
+La version copia de la primera parte del formulario se encuentra visible en `base-p2-form1.html`
+
+1- Completar el formulario
+
+Se debe llenar el campo apra el NIF que tiene el html:
+```
+<input id="form:nif" type="text" name="form:nif" value="" class="input" size="30" style="">
+```
+
+A continuación se debe de completar el campo de Nombre/razón social el cual tiene el siguiente html:
+
+```
+<input id="form:rao_social" type="text" name="form:rao_social" value="" class="input" size="80" style="">
+```
+
+Los siguientes campos son el telefono mobil, telefono fijo y correo.
+Resultan tener la misma estructura y uso que en su version especificada en el protocolo 1, revisa si las ids y datos que usamos para identificar los campos y usarlos son los mismos que en p1, de ser así, reestructura esa logica para poder usar ambos de la misma fuente y asi no repetir codigo, de ser inviable o no ser la misma identificacion, simplemente, usemos una estructura similar a la de antes pero con las modificaciones pertinentes, te adjunto a continuación el html correspondiente a los htmls de los campos a rellenar:
+
+Telefoo mobil
+```
+<input id="form:telefon-alternatiu" type="text" name="form:telefon-alternatiu" value="" class="input" size="25" style="">
+```
+Telefono fijo
+```
+<input id="form:telefon" type="text" name="form:telefon" value="" class="input" size="25" style="">
+```
+Correo
+```
+<input id="form:mail_interessat" type="text" name="form:mail_interessat" value="" class="input" size="50" style="">
+```

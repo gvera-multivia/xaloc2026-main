@@ -72,6 +72,12 @@ class BaseAutomation:
             accept_downloads=True,
         )
 
+        if self.config.stealth_disable_webdriver:
+            try:
+                await self.context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            except Exception:
+                pass
+
         if self.context.pages:
             self.page = self.context.pages[0]
         else:
@@ -97,4 +103,3 @@ class BaseAutomation:
         except Exception:
             return None
         return path
-

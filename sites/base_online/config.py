@@ -20,6 +20,7 @@ class BaseOnlineConfig(BaseConfig):
     # Login / VÀLid
     cert_button_selector: str = "#btnContinuaCert, [data-testid='certificate-btn']"
     url_post_login: str = "**/commons-desktop/index.*"
+    stealth_disable_webdriver: bool = True
 
     # Formulario P3 (Recurs de reposició)
     p3_radio_ibi: str = "#radio1"
@@ -31,4 +32,3 @@ class BaseOnlineConfig(BaseConfig):
     p3_textarea_exposo: str = "#form0\\:exposo"
     p3_textarea_solicito: str = "#form0\\:solicito"
     p3_button_continuar: str = "input[type='submit'][value='Continuar']"
-

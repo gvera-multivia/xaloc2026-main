@@ -5,7 +5,7 @@ from pathlib import Path
 from core.base_automation import BaseAutomation
 from sites.base_online.config import BaseOnlineConfig
 from sites.base_online.data_models import BaseOnlineTarget
-from sites.base_online.flows import ejecutar_login_base, navegar_a_rama, ejecutar_p1, ejecutar_p3
+from sites.base_online.flows import ejecutar_login_base, navegar_a_rama, ejecutar_p1, ejecutar_p2, ejecutar_p3
 
 
 class BaseOnlineAutomation(BaseAutomation):
@@ -35,6 +35,14 @@ class BaseOnlineAutomation(BaseAutomation):
                 if not datos.p1:
                     raise ValueError("Faltan datos de P1.")
                 await ejecutar_p1(self.page, datos.p1)
+
+            if datos.protocol.upper() == "P2":
+                self.logger.info("\n" + "=" * 50)
+                self.logger.info("FASE 3: FORMULARIO P2 (ALEGACIONES)")
+                self.logger.info("=" * 50)
+                if not datos.p2:
+                    raise ValueError("Faltan datos de P2.")
+                await ejecutar_p2(self.page, datos.p2)
 
             if datos.protocol.upper() == "P3":
                 self.logger.info("\n" + "=" * 50)

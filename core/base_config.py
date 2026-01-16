@@ -57,9 +57,9 @@ class BaseConfig:
     disable_translate_ui: bool = True
     auto_select_certificate: bool = True
     auto_select_certificate_pattern: str = "*"
+    stealth_disable_webdriver: bool = False
 
     def ensure_directories(self) -> None:
         self.dir_screenshots.mkdir(exist_ok=True)
         self.dir_logs.mkdir(exist_ok=True)
         self.navegador.perfil_path.mkdir(parents=True, exist_ok=True)
-

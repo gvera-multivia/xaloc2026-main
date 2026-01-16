@@ -4,8 +4,10 @@ from pathlib import Path
 
 from sites.base_online.config import BaseOnlineConfig
 from sites.base_online.data_models import (
+    BaseOnlineP2Data,
     BaseOnlineP1ContactData,
     BaseOnlineP1Data,
+    BaseOnlineAddressData,
     BaseOnlineP1IdentificacionData,
     BaseOnlineReposicionData,
     BaseOnlineTarget,
@@ -43,11 +45,14 @@ class BaseOnlineController:
         p3_exposo: str | None = None,
         p3_solicito: str | None = None,
         p3_archivos: str | list[str] | None = None, # Cambiado a plural para claridad
+        p2_nif: str | None = None,
+        p2_rao_social: str | None = None,
     ) -> BaseOnlineTarget:
         protocol_norm = (protocol or "P1").upper().strip()
         reposicion = None
         p1 = None
         p3 = None
+        p2 = None
 
         if protocol_norm == "P1":
             p1 = BaseOnlineP1Data(
@@ -66,7 +71,28 @@ class BaseOnlineController:
                     identificacio=p1_identificacio or "12345678Z",
                     llicencia_conduccio=p1_llicencia_conduccio or "LIC123456",
                     nom_complet=p1_nom_complet or "Nombre Apellidos",
-                    adreca=p1_adreca or "Carrer de prova, 1 - 43001 Tarragona",
+                    adreca=p1_adreca,
+                    adreca_detall=BaseOnlineAddressData(
+                        sigla="CL",
+                        calle="CALLE PRUEBA",
+                        numero="1",
+                        codigo_postal="43001",
+                        municipio="TARRAGONA",
+                        provincia="TARRAGONA",
+                        ampliacion_municipio="AMPLIACION MUNICIPIO",
+                        ampliacion_calle="AMPLIACION CALLE",
+                    ),
+                ),
+            )
+
+        if protocol_norm == "P2":
+            p2 = BaseOnlineP2Data(
+                nif=p2_nif or "12345678Z",
+                rao_social=p2_rao_social or "Nombre/Razón social",
+                contacte=BaseOnlineP1ContactData(
+                    telefon_mobil=p1_telefon_mobil or "600123123",
+                    telefon_fix=p1_telefon_fix,
+                    correu=p1_correu or "test@example.com",
                 ),
             )
         
@@ -90,7 +116,7 @@ class BaseOnlineController:
                 archivos_adjuntos=archivos_paths, # Ahora es una lista
             )
             p3 = reposicion
-        return BaseOnlineTarget(protocol=protocol_norm, p1=p1, p3=p3, reposicion=reposicion)
+        return BaseOnlineTarget(protocol=protocol_norm, p1=p1, p2=p2, p3=p3, reposicion=reposicion)
 
 def get_controller() -> BaseOnlineController:
     return BaseOnlineController()
