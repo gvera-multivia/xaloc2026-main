@@ -32,7 +32,9 @@ class BaseOnlineAutomation(BaseAutomation):
                 self.logger.info("\n" + "=" * 50)
                 self.logger.info("FASE 3: FORMULARIO P3 (REPOSICION)")
                 self.logger.info("=" * 50)
-                await rellenar_formulario_p3(self.page, self.config)
+                if not datos.reposicion:
+                    raise ValueError("Faltan datos de reposición (P3).")
+                await rellenar_formulario_p3(self.page, self.config, datos.reposicion)
 
             filename = f"base_online_{datos.protocol.lower()}.png"
             path = self.config.dir_screenshots / filename
@@ -41,4 +43,3 @@ class BaseOnlineAutomation(BaseAutomation):
         except Exception:
             await self.capture_error_screenshot("base_online_error.png")
             raise
-

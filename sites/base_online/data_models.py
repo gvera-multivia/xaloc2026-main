@@ -4,6 +4,15 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
+class BaseOnlineReposicionData:
+    tipus_objecte: str
+    dades_especifiques: str
+    tipus_solicitud_value: str
+    exposo: str
+    solicito: str
+
+
+@dataclass(frozen=True)
 class BaseOnlineTarget:
     """
     Punto de ramificación en Common Desktop.
@@ -14,4 +23,4 @@ class BaseOnlineTarget:
     """
 
     protocol: str  # "P1" | "P2" | "P3"
-
+    reposicion: BaseOnlineReposicionData | None = None

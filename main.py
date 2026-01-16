@@ -54,6 +54,11 @@ async def main() -> None:
         default=None,
         help="Solo para site 'base_online': rama del workflow (P1, P2 o P3).",
     )
+    parser.add_argument("--p3-tipus-objecte", default=None, help="Solo P3: IBI | IVTM | Expediente Ejecutivo | Otros")
+    parser.add_argument("--p3-dades", default=None, help="Solo P3: Dades especifiques")
+    parser.add_argument("--p3-tipus-solicitud", default=None, help="Solo P3: value del tipo de solicitud (p.ej. 1)")
+    parser.add_argument("--p3-exposo", default=None, help="Solo P3: texto de exposición")
+    parser.add_argument("--p3-solicito", default=None, help="Solo P3: texto de solicitud")
     args = parser.parse_args()
 
     site_id = args.site or _prompt_site_id()
@@ -62,7 +67,15 @@ async def main() -> None:
 
     controller = get_site_controller(site_id)
     config = _call_with_supported_kwargs(controller.create_config, headless=args.headless, protocol=args.protocol)
-    datos = _call_with_supported_kwargs(controller.create_demo_data, protocol=args.protocol)
+    datos = _call_with_supported_kwargs(
+        controller.create_demo_data,
+        protocol=args.protocol,
+        p3_tipus_objecte=args.p3_tipus_objecte,
+        p3_dades_especifiques=args.p3_dades,
+        p3_tipus_solicitud_value=args.p3_tipus_solicitud,
+        p3_exposo=args.p3_exposo,
+        p3_solicito=args.p3_solicito,
+    )
 
     print("\n" + "=" * 60)
     print(f"INICIANDO AUTOMATIZACION: {site_id}")
