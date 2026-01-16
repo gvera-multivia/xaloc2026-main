@@ -60,6 +60,8 @@ async def main() -> None:
     parser.add_argument("--p3-exposo", default=None, help="Solo P3: texto de exposición")
     parser.add_argument("--p3-solicito", default=None, help="Solo P3: texto de solicitud")
     parser.add_argument("--p3-file", default=None, help="Solo P3: ruta del PDF a adjuntar")
+    parser.add_argument("--p1-file", default=None, help="Solo P1: ruta del PDF a adjuntar")
+    parser.add_argument("--p2-file", default=None, help="Solo P2: ruta del PDF a adjuntar")
     args = parser.parse_args()
 
     site_id = args.site or _prompt_site_id()
@@ -77,6 +79,8 @@ async def main() -> None:
         p3_exposo=args.p3_exposo,
         p3_solicito=args.p3_solicito,
         p3_archivos=args.p3_file,
+        p1_archivos=args.p1_file,
+        p2_archivos=args.p2_file,
     )
 
     print("\n" + "=" * 60)

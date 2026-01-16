@@ -54,6 +54,7 @@ class BaseOnlineP1IdentificacionData:
 class BaseOnlineP1Data:
     contacte: BaseOnlineP1ContactData
     identificacio: BaseOnlineP1IdentificacionData
+    archivos_adjuntos: List[Path] | None = None
 
 
 @dataclass(frozen=True)
@@ -61,6 +62,13 @@ class BaseOnlineP2Data:
     nif: str
     rao_social: str
     contacte: BaseOnlineP1ContactData
+    expedient_id_ens: str | None = None
+    expedient_any: str | None = None
+    expedient_num: str | None = None
+    butlleti: str | None = None
+    exposo: str = ""
+    solicito: str = ""
+    archivos_adjuntos: List[Path] | None = None
 
 
 @dataclass(frozen=True)

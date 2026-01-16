@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from playwright.async_api import Page
 
 from sites.base_online.data_models import BaseOnlineAddressData, BaseOnlineP1Data
 from sites.base_online.flows.common import rellenar_contacto
+from sites.base_online.flows.upload import subir_archivos_por_modal
 
 
 _SIGLES_PERMESES = {
@@ -192,6 +194,16 @@ async def _rellenar_identificacion_conductor(page: Page, data: BaseOnlineP1Data)
     logging.info("[P1] Formulario 2 rellenado; avanzando al siguiente paso...")
     await page.locator("input[type='submit'][name='form:j_id24'][value='Continuar']").first.click()
     await page.wait_for_load_state("domcontentloaded")
+
+    archivos = data.archivos_adjuntos or [Path("pdfs-prueba/test1.pdf")]
+    await subir_archivos_por_modal(page, list(archivos), max_archivos=1)
+
+    await page.locator("input[type='submit'][name='form:j_id29'][value='Continuar']").first.click()
+    await page.wait_for_load_state("domcontentloaded")
+
+    boton_firma = page.locator("input[type='button'][value='Signar i Presentar']").first
+    if await boton_firma.count() > 0:
+        logging.info("[P1] Pantalla 'Signar i Presentar' detectada (no se pulsa en modo demo).")
 
 
 async def ejecutar_p1(page: Page, data: BaseOnlineP1Data) -> None:

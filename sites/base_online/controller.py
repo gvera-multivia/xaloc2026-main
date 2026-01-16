@@ -39,6 +39,7 @@ class BaseOnlineController:
         p1_llicencia_conduccio: str | None = None,
         p1_nom_complet: str | None = None,
         p1_adreca: str | None = None,
+        p1_archivos: str | list[str] | None = None,
         p3_tipus_objecte: str | None = None,
         p3_dades_especifiques: str | None = None,
         p3_tipus_solicitud_value: str | None = None,
@@ -47,6 +48,7 @@ class BaseOnlineController:
         p3_archivos: str | list[str] | None = None, # Cambiado a plural para claridad
         p2_nif: str | None = None,
         p2_rao_social: str | None = None,
+        p2_archivos: str | list[str] | None = None,
     ) -> BaseOnlineTarget:
         protocol_norm = (protocol or "P1").upper().strip()
         reposicion = None
@@ -55,6 +57,12 @@ class BaseOnlineController:
         p2 = None
 
         if protocol_norm == "P1":
+            lista_raw_p1 = []
+            if p1_archivos:
+                lista_raw_p1 = [p1_archivos] if isinstance(p1_archivos, str) else p1_archivos
+            else:
+                lista_raw_p1 = ["pdfs-prueba/test1.pdf"]
+
             p1 = BaseOnlineP1Data(
                 contacte=BaseOnlineP1ContactData(
                     telefon_mobil=p1_telefon_mobil or "600123123",
@@ -83,9 +91,16 @@ class BaseOnlineController:
                         ampliacion_calle="AMPLIACION CALLE",
                     ),
                 ),
+                archivos_adjuntos=[Path(a) for a in lista_raw_p1],
             )
 
         if protocol_norm == "P2":
+            lista_raw_p2 = []
+            if p2_archivos:
+                lista_raw_p2 = [p2_archivos] if isinstance(p2_archivos, str) else p2_archivos
+            else:
+                lista_raw_p2 = ["pdfs-prueba/test1.pdf"]
+
             p2 = BaseOnlineP2Data(
                 nif=p2_nif or "12345678Z",
                 rao_social=p2_rao_social or "Nombre/Razón social",
@@ -94,6 +109,13 @@ class BaseOnlineController:
                     telefon_fix=p1_telefon_fix,
                     correu=p1_correu or "test@example.com",
                 ),
+                expedient_id_ens="43150",
+                expedient_any="2017",
+                expedient_num="1596",
+                butlleti="BUT/2026/001",
+                exposo="Exposición de prueba.",
+                solicito="Solicitud de prueba.",
+                archivos_adjuntos=[Path(a) for a in lista_raw_p2],
             )
         
         if protocol_norm == "P3":

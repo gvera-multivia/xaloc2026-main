@@ -1,17 +1,17 @@
 """
-Flujo para el formulario de Recurso de Reposición (P3) - paso 1/3.
+Flujo para el formulario de Recurso de Reposición (P3).
 """
 
 from __future__ import annotations
 
 import logging
 from pathlib import Path
-import re
 
 from playwright.async_api import Page
 
 from sites.base_online.config import BaseOnlineConfig
 from sites.base_online.data_models import BaseOnlineReposicionData
+from sites.base_online.flows.upload import subir_archivos_por_modal
 
 
 def _normalizar_tipus_objecte(raw: str) -> str:
@@ -25,47 +25,6 @@ def _normalizar_tipus_objecte(raw: str) -> str:
     if valor in {"OTROS", "ALTRES"}:
         return "OTROS"
     raise ValueError(f"tipus_objecte inválido: {raw}. Usa IBI, IVTM, Expediente Ejecutivo u Otros.")
-
-async def _subir_documentos_p3(page: Page, archivos: list[Path]) -> None:
-    # Limitamos a un máximo de 5 archivos según requerimiento
-    archivos_a_subir = archivos[:5]
-    logging.info(f"[P3] Iniciando subida de {len(archivos_a_subir)} archivo(s)...")
-
-    for i, archivo in enumerate(archivos_a_subir, 1):
-        if not archivo.exists():
-            logging.error(f"[P3] Archivo no encontrado: {archivo}")
-            continue
-
-        logging.info(f"[P3] Subiendo archivo {i}/{len(archivos_a_subir)}: {archivo.name}")
-
-        # 1. Abrir popup (Botón en página principal)
-        await page.get_by_role("button", name=re.compile(r"Carregar\s+Fitxer", re.IGNORECASE)).first.click()
-
-        # 2. Localizar Modal e Iframe
-        modal = page.locator("#fitxer").first
-        await modal.wait_for(state="visible", timeout=15000)
-        frame = page.frame_locator("#contingut_fitxer").first
-
-        # 3. Seleccionar archivo (Seleccionar fitxer)
-        file_input = frame.locator("input[type='file'][name='qqfile']").first
-        await file_input.wait_for(state="attached", timeout=20000)
-        await file_input.set_input_files(str(archivo.resolve()))
-
-        # 4. Pulsar botón 'Carregar' (penjar_fitxers)
-        logging.info(f"[P3] ({i}) Procesando subida...")
-        await frame.locator("#penjar_fitxers").first.click()
-
-        # 5. Esperar éxito
-        success_text = frame.locator("#textSuccess").first
-        await success_text.wait_for(state="visible", timeout=30000)
-        
-        # 6. Cerrar popup (Botón Continuar del popup)
-        logging.info(f"[P3] ({i}) Confirmado. Cerrando popup...")
-        await frame.locator("#continuar").first.click()
-
-        # Esperamos a que el modal desaparezca antes de ir a por el siguiente
-        await modal.wait_for(state="hidden", timeout=15000)
-        await page.wait_for_timeout(1000) # Pausa de seguridad entre archivos
 
 
 async def _avanzar_a_presentacion_p3(page: Page) -> None:
@@ -113,11 +72,11 @@ async def rellenar_formulario_p3(page: Page, config: BaseOnlineConfig, data: Bas
     await page.locator(config.p3_button_continuar).first.click()
     await page.wait_for_load_state("domcontentloaded")
 
-    # 7. Subida de múltiples documentos (Bucle de popups)
-    if data.archivos_adjuntos:
-        await _subir_documentos_p3(page, data.archivos_adjuntos)
-    else:
-        logging.warning("[P3] No hay archivos adjuntos para subir.")
+    # 7. Subida de documentos (modal + iframe)
+    archivos = data.archivos_adjuntos or []
+    archivos_paths: list[Path] = list(archivos)
+    await subir_archivos_por_modal(page, archivos_paths, max_archivos=1)
 
-    # 8. Paso final de confirmación (Llegar hasta el botón de firma)
+    # 8. Confirmación (llegar hasta la pantalla de firma)
     await _avanzar_a_presentacion_p3(page)
+

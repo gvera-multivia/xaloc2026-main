@@ -529,6 +529,40 @@ Además los textos de municipio, país y provincia deben de estar en mayusculas.
 
 La estructura de la direccion debe respetarse siempre en la escritura dentro del cuadro de texto usando las comas o espacios segun de ha mostrado en los ejemplo asi como los saltos de linea.
 
+#### 4.2.Subida de archivos
+
+En esta pagina tenemos que hacer exactamente lo mismo que haciamos en el protocolo 3 para subir archivos, puedes comprobar si es factible refactorizar la logica para poder modularizar la subida de archivos usando el mismo codigo en un archivo accesible para ambos o mas en un futuro para no tener que repeitir codigo.
+Te adjunto el codigo html para que convengas si es factible (comparalo con el de p3)
+
+```
+<button class="button2" type="button" onclick="pujarFitxerFuncioCallbackModal('RES',           '1.3.1', 'fitxerCallback', 4, 'txt,pdf,xls,xlsx,csv,doc,docx,jpg,rtf,odt,ods,xml,xsig,png,zip', '10000000')">
+								Carregar fitxer
+							</button>
+```
+
+```
+<input qq-button-id="e3ace4a9-80bd-41f6-82e6-17d3126f9a81" title="file input" type="file" name="qqfile" style="position: absolute; right: 0px; top: 0px; font-family: Arial; font-size: 118px; margin: 0px; padding: 0px; cursor: pointer; opacity: 0; height: 100%;">
+```
+
+```
+<input type="button" id="penjar_fitxers" name="penjar_fitxers" class="button" value="Carregar">
+```
+
+```
+<p>
+						<span id="textSuccess">Carregat correctament "test3.pdf" (12.67 KB)</span>
+						<br>Per finalitzar el procés i tornar al procediment orígen, feu clic al botó 'Continuar'.  
+					</p>
+
+```
+
+```
+<input type="button" id="continuar" name="continuar" class="button" value="Continuar" onclick="javascript:finalitzar();">
+```
+
+```
+<input type="submit" name="form:j_id29" value="Continuar" style="font-weight:bold;" class="button default">
+```
 
 ## 4.3 - Formulario de Alegaciones (P2)
 
@@ -562,3 +596,54 @@ Correo
 ```
 <input id="form:mail_interessat" type="text" name="form:mail_interessat" value="" class="input" size="50" style="">
 ```
+
+#### 4.3.Aportar Alegaciones
+
+Se tienen los siguientes campos:
+
+```
+<input id="form:clau_expedient_id_ens" type="text" name="form:clau_expedient_id_ens" value="" class="input" onchange="javascript:actualitzarClauExpedientclau_expedient();" size="5" style="">
+
+```
+```
+<input id="form:clau_expedient_any_exp" type="text" name="form:clau_expedient_any_exp" value="" class="input" onchange="javascript:actualitzarClauExpedientclau_expedient();" size="8" style="">
+```
+```
+<input id="form:clau_expedient_num_exp" type="text" name="form:clau_expedient_num_exp" value="" class="input" onchange="javascript:actualitzarClauExpedientclau_expedient();" size="8" style="">
+```
+
+```
+<input id="form:butlleti" type="text" name="form:butlleti" value="" class="input" size="30" style="">
+
+```
+```
+<textarea id="form:exposo" name="form:exposo" class="input" cols="80" rows="10" style=""></textarea>
+
+```
+
+```
+<textarea id="form:solicito" name="form:solicito" class="input" cols="80" rows="10" style=""></textarea>
+
+
+```
+
+
+Es obligatorio indicar el Núm. Expedient o el Núm. Butlletí.
+
+Ademas como te habras dado cuenta el numero de expediente sigue la misma estructura que se implementó en un apartado anterior, con la explicacion que era:
+
+
+El formato que nos dan de ejemplo es:
+
+43150-2017/1596-GIM Pero para nosotros nos importa solo que el primer campo es para poner la parte previa al primer guión, es decir,el la parte del ejemplo que contiene 43150, el segundo campo es para poner la parte respectiva a lo posterior al primer guion y previo a la barra, es decir lo que corresponde en el ejmplo a 2017 y el tercer campo que es lo posterior a la barra y previo al ultimo guion que en el ejemplo es 1596. La prat de -GIM no nos interesa porque ya esta completada de base en la pagina.
+
+Y clicamos en el boton para pasar al siguiente paso del formulario:
+
+```
+<input type="submit" name="form:j_id24" value="Continuar" style="font-weight:bold;" class="button default">
+```
+
+
+#### 4.3.Subir documentos
+
+Aqui vamos a replicar lo que hemos hecho en el protocolo 1 y 3, en los cuales hemos hecho que la subida de archivos se pueda hacer de manera centralizada para todos. Trata de hacer que tambien funcione aqui
