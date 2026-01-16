@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional, List
 
 
 @dataclass(frozen=True)
@@ -11,7 +12,7 @@ class BaseOnlineReposicionData:
     tipus_solicitud_value: str
     exposo: str
     solicito: str
-    archivo_adjunto: Path = Path("pdfs-prueba/test3.pdf")
+    archivos_adjuntos: Optional[List[Path]]
 
 
 @dataclass(frozen=True)
