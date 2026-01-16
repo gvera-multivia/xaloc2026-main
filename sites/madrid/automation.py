@@ -9,7 +9,7 @@ from pathlib import Path
 from core.base_automation import BaseAutomation
 from sites.madrid.config import MadridConfig
 from sites.madrid.data_models import MadridTarget
-from sites.madrid.flows import ejecutar_navegacion_madrid
+from sites.madrid.flows import ejecutar_navegacion_madrid, ejecutar_formulario_madrid
 
 
 class MadridAutomation(BaseAutomation):
@@ -28,9 +28,9 @@ class MadridAutomation(BaseAutomation):
         
         Fases implementadas:
         - FASE 1: Navegación hasta el formulario (11 pasos)
+        - FASE 2: Rellenado del formulario (8 secciones)
         
         Fases futuras:
-        - FASE 2: Rellenado del formulario
         - FASE 3: Subida de documentos
         - FASE 4: Confirmación y envío
         
@@ -58,13 +58,24 @@ class MadridAutomation(BaseAutomation):
             self.logger.info("=" * 80)
             
             # ================================================================
-            # FASE 2: RELLENADO DEL FORMULARIO (FUTURO)
+            # FASE 2: RELLENADO DEL FORMULARIO
             # ================================================================
-            # TODO: Implementar cuando se capture el HTML del formulario real
-            # self.logger.info("\n" + "=" * 80)
-            # self.logger.info("FASE 2: RELLENADO DEL FORMULARIO")
-            # self.logger.info("=" * 80)
-            # await ejecutar_formulario_madrid(self.page, self.config, datos.form_data)
+            if datos.form_data:
+                self.logger.info("\n" + "=" * 80)
+                self.logger.info("FASE 2: RELLENADO DEL FORMULARIO")
+                self.logger.info("=" * 80)
+                
+                self.page = await ejecutar_formulario_madrid(
+                    self.page, 
+                    self.config, 
+                    datos.form_data
+                )
+                
+                self.logger.info("\n" + "=" * 80)
+                self.logger.info("FORMULARIO COMPLETADO - Pantalla de adjuntos alcanzada")
+                self.logger.info("=" * 80)
+            else:
+                self.logger.info("\n⚠ Sin datos de formulario, saltando FASE 2")
             
             # ================================================================
             # FASE 3: SUBIDA DE DOCUMENTOS (FUTURO)
@@ -88,7 +99,7 @@ class MadridAutomation(BaseAutomation):
             # ================================================================
             # CAPTURA DE SCREENSHOT FINAL
             # ================================================================
-            filename = "madrid_navegacion_completa.png"
+            filename = "madrid_formulario_completo.png"
             path = self.config.dir_screenshots / filename
             await self.page.screenshot(path=path, full_page=True)
             self.logger.info(f"\n✓ Screenshot guardado: {path}")
