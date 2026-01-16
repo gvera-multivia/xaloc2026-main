@@ -29,6 +29,11 @@ SITES: dict[str, SiteDefinition] = {
         automation_path="sites.base_online.automation:BaseOnlineAutomation",
         controller_path="sites.base_online.controller:get_controller",
     ),
+    "madrid": SiteDefinition(
+        site_id="madrid",
+        automation_path="sites.madrid.automation:MadridAutomation",
+        controller_path="sites.madrid.controller:get_controller",
+    ),
 }
 
 
