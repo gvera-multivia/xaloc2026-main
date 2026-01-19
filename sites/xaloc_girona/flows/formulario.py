@@ -10,6 +10,7 @@ import sys
 from playwright.async_api import Page
 
 from sites.xaloc_girona.data_models import DatosMulta
+from sites.xaloc_girona.flows.documentos import subir_documento
 
 DELAY_MS = 500
 
@@ -92,7 +93,14 @@ async def rellenar_formulario(page: Page, datos: DatosMulta) -> None:
         logging.info("Rellenando motivos (TinyMCE)...")
         await _rellenar_tinymce_motius(page, str(datos.motivos))
 
-        # Check LOPD if present
+        # --- FASE SUBIDA DE ARCHIVOS (Integrada) ---
+        if datos.archivos_para_subir:
+             logging.info("Iniciando subida de documentos dentro del formulario...")
+             await subir_documento(page, datos.archivos_para_subir)
+        else:
+             logging.info("No hay archivos para subir.")
+
+        # --- FASE LOPD ---
         try:
             logging.info("Verificando checkbox LOPD (#lopdok)...")
             lopd = page.locator("#lopdok")
@@ -100,13 +108,33 @@ async def rellenar_formulario(page: Page, datos: DatosMulta) -> None:
                 await lopd.wait_for(state="visible", timeout=5000)
                 await lopd.scroll_into_view_if_needed()
                 await lopd.check()
+                # Breve pausa para que se procese el evento onchange
+                await page.wait_for_timeout(500)
                 logging.info("Checkbox LOPD marcado.")
             else:
-                logging.info("Checkbox LOPD no encontrado en esta fase.")
+                logging.info("Checkbox LOPD no encontrado (¿ya marcado?).")
         except Exception as e:
             logging.warning(f"No se pudo interactuar con LOPD: {e}")
 
-        logging.info("Formulario completado con éxito")
+        # --- FASE CONTINUAR ---
+        logging.info("Buscando botón 'Continuar' (onSave)...")
+        # Selector para <a ... onclick="javascript:onSave();">Continuar >></a>
+        # Usamos un selector robusto combinando texto y onclick si es posible, o solo texto.
+        continuar_btn = page.locator("a").filter(has_text="Continuar")
+        
+        if await continuar_btn.count() > 0:
+            if await continuar_btn.is_visible():
+                logging.info("Pulsando botón Continuar...")
+                # Navegación esperada
+                async with page.expect_navigation(timeout=60000, wait_until="domcontentloaded"):
+                    await continuar_btn.click()
+                logging.info("Navegación completada tras 'Continuar'.")
+            else:
+                logging.warning("El botón Continuar existe pero NO es visible.")
+        else:
+             logging.warning("No se encontró el botón 'Continuar' con texto 'Continuar'")
+
+        logging.info("Formulario completado (y enviado) con éxito")
 
     except Exception as e:
         logging.error(f"Error durante el rellenado: {e}")
