@@ -104,8 +104,18 @@ async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]
         _validar_extension(a)
 
     logging.info(f"Adjuntando {len(archivos)} documento(s)")
+    
+    # Wait for page stability
+    await page.wait_for_timeout(1000)
 
     docs_link = page.locator("a.docs").first
+    if await docs_link.count() == 0:
+         logging.warning("No se encuentra el enlace de adjuntar documentos (a.docs)")
+         # Try to debug/dump
+         content = await page.content()
+         logging.debug(f"HTML Content snip: {content[:200]}")
+         return
+
     popup: Optional[Page] = None
     try:
         async with page.expect_popup(timeout=7000) as popup_info:

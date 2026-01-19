@@ -92,6 +92,20 @@ async def rellenar_formulario(page: Page, datos: DatosMulta) -> None:
         logging.info("Rellenando motivos (TinyMCE)...")
         await _rellenar_tinymce_motius(page, str(datos.motivos))
 
+        # Check LOPD if present
+        try:
+            logging.info("Verificando checkbox LOPD (#lopdok)...")
+            lopd = page.locator("#lopdok")
+            if await lopd.count() > 0:
+                await lopd.wait_for(state="visible", timeout=5000)
+                await lopd.scroll_into_view_if_needed()
+                await lopd.check()
+                logging.info("Checkbox LOPD marcado.")
+            else:
+                logging.info("Checkbox LOPD no encontrado en esta fase.")
+        except Exception as e:
+            logging.warning(f"No se pudo interactuar con LOPD: {e}")
+
         logging.info("Formulario completado con éxito")
 
     except Exception as e:
