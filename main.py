@@ -11,12 +11,7 @@ import os
 
 from core.site_registry import get_site, get_site_controller, list_sites
 
-from core.logging_utils import JSONFormatter
-
-# Configurar logging estructurado (JSON)
-handler = logging.StreamHandler(sys.stdout)
-handler.setFormatter(JSONFormatter())
-logging.basicConfig(level=logging.INFO, handlers=[handler], force=True)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")

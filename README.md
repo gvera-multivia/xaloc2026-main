@@ -1,85 +1,146 @@
-# Xaloc 2026 - Automatización Web (Playwright + Python)
+# Xaloc 2026 - Automatizacion web (Playwright + Python)
 
-Herramienta de automatización basada en **Playwright (async)** con una arquitectura **multi-sitio**. El proyecto ha evolucionado para soportar diversos portales (Xaloc Girona, BASE On-line, Ayuntamiento de Madrid) bajo un núcleo común, priorizando la robustez en la navegación y la gestión de certificados digitales.
+Herramienta de automatizacion basada en **Playwright (async)** con una arquitectura **multi-sitio**. El proyecto arranco automatizando Xaloc Girona (STA) y ha evolucionado para soportar distintos portales bajo un nucleo comun.
 
-## Estado Actual del Proyecto
+## Que hay hoy (estado actual)
 
-Los siguientes sitios están integrados y funcionales:
+Sitios registrados en `core/site_registry.py`:
 
-- **`xaloc_girona`**:
-    - Login con certificado (VALID).
-    - Rellenado de formularios STA, adjuntar documentos y confirmación.
-    - Screenshot final.
-    - **Nota**: El flujo se detiene antes de pulsar "Enviar" para evitar registros reales en pruebas.
+- `xaloc_girona`: login con certificado (VALID), rellenado STA, adjuntos, confirmacion y screenshot final **sin pulsar "Enviar"**.
+- `base_online`: login con certificado y ramificacion `P1`/`P2`/`P3` (rellena formularios + adjunta documentos), llega a pantalla "Signar i Presentar" **sin firmar/presentar**.
+- `madrid`: navegacion completa hasta el formulario + rellenado del formulario (pantalla de adjuntos alcanzada); **upload/envio pendientes**.
 
-- **`base_online`**:
-    - Login con certificado.
-    - Soporte para múltiples subprocesos:
-        - `P1`: Identificación de conductor.
-        - `P2`: Alegaciones (adjunta PDF).
-        - `P3`: Recurso de reposición (formulario complejo + adjuntos).
-    - Navegación completa hasta la pantalla "Signar i Presentar".
+## Requisitos
 
-- **`madrid` (COMPLETADO)**:
-    - **Navegación robusta**: Implementada con tiempos de espera "humanos" (0.5s entre pasos) y recuperación automática de errores.
-    - **Gestión de certificado**:
-        - Detección automática del popup de Windows.
-        - **Timeout de 15s**: Si la automatización falla, espera indefinidamente a que el usuario seleccione el certificado manualmente, evitando bloqueos.
-    - **Rellenado de formulario**:
-        - Completado de todos los campos (texto, radios, combos, checks) con delays aleatorios para simular interacción humana.
-        - Gestión de subida de ficheros (FileUploader).
-    - **Bloqueo de popups**: Cierre automático de pestañas de redes sociales o publicidad emergente.
+- Python **3.10+** (se usan type hints `str | None`).
+- Windows recomendado si necesitas automatizar el popup nativo del certificado (usa `pyautogui`).
+- Playwright + navegador `msedge` (por defecto se lanza canal `msedge` con perfil persistente).
 
-## Estructura del Proyecto
-
-```
-core/                 # Núcleo común (configuración base, gestión de sesiones, logging)
-sites/                # Implementaciones por portal
-  xaloc_girona/       # Automatización específica para Xaloc
-  base_online/        # Automatización para BASE (Tarragona)
-  madrid/             # Automatización para Ayto. Madrid (Finalizado)
-flows/                # (Compatibilidad) Redirige a flujos de xaloc_girona
-utils/                # Utilidades (Popup de certificado Windows, manejo de PDF, etc.)
-explore-html/         # Documentación de ingeniería inversa y análisis de los portales
-pdfs-prueba/          # Archivos dummy para pruebas de subida
-profiles/             # Perfiles de navegador persistentes (cookies/sesiones)
-logs/                 # Logs de ejecución
-screenshots/          # Evidencias visuales de éxito o error
-main.py               # Punto de entrada (CLI) con menú interactivo
-```
-
-## Uso
-
-El script principal `main.py` ofrece un menú interactivo si no se especifican argumentos:
+## Instalacion
 
 ```powershell
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+python -m playwright install msedge
+```
+
+## Uso (CLI)
+
+El entrypoint es `main.py`. Si no pasas `--site`, te pide uno por consola.
+
+```powershell
+# Modo interactivo (seleccion de site por prompt)
 python main.py
-```
-*Se desplegará un menú para elegir el portal y, si corresponde, el subproceso a ejecutar.*
 
-### Argumentos de línea de comandos
-También es posible ejecutar directamente pasando parámetros:
-
-```powershell
-# Ejecutar Madrid
+# Ejecutar un site concreto
+python main.py --site xaloc_girona
+python main.py --site base_online --protocol P1
 python main.py --site madrid
 
-# Ejecutar BASE On-line (Recurso de reposición)
-python main.py --site base_online --protocol P3 --p3-file pdfs-prueba/doc.pdf
-
-# Ejecutar en modo Headless (sin interfaz gráfica)
+# Headless (flag; si no la pasas, abre navegador visible)
 python main.py --site madrid --headless
 ```
 
-## Recomendaciones y Próximos Pasos
+Parametros especificos disponibles hoy en `main.py` (BASE On-line):
 
-Para seguir mejorando la robustez y funcionalidad del proyecto, se sugieren las siguientes acciones:
+```powershell
+# P1 / P2 adjuntos
+python main.py --site base_online --protocol P1 --p1-file pdfs-prueba/test1.pdf
+python main.py --site base_online --protocol P2 --p2-file pdfs-prueba/test1.pdf
 
-1.  **Validación de Fin de Trámite**: Implementar una verificación final más estricta en `madrid` que confirme no solo la subida de archivos, sino la recepción de un "acuse de recibo" o mensaje de éxito explícito (actualmente se llega a la pantalla final).
-2.  **Gestor de Certificados**: Abstraer la lógica del certificado (actualmente en `utils/windows_popup.py`) para soportar diferentes keystores o navegadores, no solo el popup nativo de Windows.
-3.  **Tests E2E Automatizados**: Crear una batería de tests que usen un servidor "mock" local simulando los formularios de la administración para validar la lógica de rellenado sin depender de la disponibilidad (o lentitud) de las webs reales.
-4.  **Refactorización de Configuración**: Unificar la definición de selectores. Actualmente, cada sitio tiene su `config.py`. Podría ser útil un formato común (JSON/YAML) si se planea escalar a muchas más webs, permitiendo cambios sin tocar código Python.
-5.  **Logging Estructurado**: Migrar los logs a formato JSON para facilitar su ingesta por herramientas de monitoreo si el proyecto escala a producción masiva.
+# P3 (recurso reposicion)
+python main.py --site base_online --protocol P3 `
+  --p3-tipus-objecte IVTM `
+  --p3-dades "1234-ABC" `
+  --p3-tipus-solicitud 1 `
+  --p3-exposo "Texto de exposicion" `
+  --p3-solicito "Texto de solicitud" `
+  --p3-file pdfs-prueba/test3.pdf
+```
 
----
-**Desarrollado con Playwright + Python**
+Nota: en `madrid` y `xaloc_girona`, los datos "demo" se generan en sus controladores (`sites/<site>/controller.py`). `main.py` solo pasa argumentos que el controlador declare en su firma.
+
+## Como funciona por dentro (arquitectura)
+
+```mermaid
+flowchart TB
+  A[main.py] --> B[core.site_registry]
+  B --> C[sites/<site>/controller.py]
+  B --> D[sites/<site>/automation.py]
+  D --> E[sites/<site>/flows/*]
+  D --> F[core/base_automation.py]
+  F --> G[Playwright chromium.launch_persistent_context]
+  E --> H[logs/ + screenshots/]
+```
+
+Piezas:
+
+- `core/base_automation.py`: context manager async que abre Playwright con **perfil persistente** (`profiles/...`), configura timeouts, logging y captura screenshots de error.
+- `core/base_config.py`: configuracion base (`BaseConfig`) + navegador (`BrowserConfig`) + `Timeouts`.
+- `core/site_registry.py`: "router" de sitios. Resuelve `site_id -> Automation class` y `site_id -> Controller`.
+- `sites/<site>/automation.py`: orquestador del flujo del sitio (fases) y manejo de errores/screenshot.
+- `sites/<site>/flows/*.py`: pasos concretos del portal (login, navegacion, formulario, adjuntos...).
+- `sites/<site>/data_models.py`: modelos de datos del tramite (lo que se rellena).
+- `sites/<site>/config.py`: selectores/URLs/timeouts especificos del portal.
+
+## Estructura de carpetas (lo importante)
+
+```
+core/                 # nucleo comun (base automation/config + registry)
+sites/                # implementaciones por portal
+  xaloc_girona/
+  base_online/
+  madrid/
+flows/                # compat: redirige a sites/xaloc_girona/flows
+utils/                # utilidades (p.ej. popup nativo de Windows)
+explore-html/         # capturas/guias de reverse engineering por portal
+pdfs-prueba/          # PDFs de prueba para adjuntos
+profiles/             # perfiles persistentes del navegador (NO versionar)
+logs/                 # logs por site
+screenshots/          # evidencias (ok/error)
+main.py               # CLI/entrypoint
+```
+
+## Certificado digital (puntos criticos)
+
+- La autenticacion con certificado puede disparar un **popup nativo de Windows**. Se intenta aceptar automaticamente desde `utils/windows_popup.py` usando `pyautogui`.
+- Esto requiere **sesion interactiva** (no funciona en entornos sin escritorio). Si falla, hazlo manualmente y vuelve a ejecutar.
+- Se usa **perfil persistente** (`profiles/...`) para reutilizar estado del navegador.
+
+## Artefactos: logs y screenshots
+
+- Logs: `logs/<site_id>.log` (tambien salen por consola).
+- Screenshots: `screenshots/`.
+- Screenshot en error: cada `Automation` captura uno especifico (p.ej. `madrid_error.png`, `base_online_error.png`, etc.).
+
+## Seguridad / modo "demo" (para no registrar tramites)
+
+- `xaloc_girona`: el flujo llega a la pantalla final y guarda evidencia, pero **no pulsa "Enviar"** (ver `sites/xaloc_girona/flows/confirmacion.py`).
+- `base_online`: el flujo llega a "Signar i Presentar", pero **no firma/presenta** (ver `sites/base_online/flows/p1.py`, `sites/base_online/flows/p2.py`, `sites/base_online/flows/reposicion.py`).
+- `madrid`: el envio esta pendiente; hoy llega y rellena hasta la pantalla posterior al formulario.
+
+## Anadir un nuevo sitio (guia rapida)
+
+1. Crear `sites/<nuevo_site>/` con:
+   - `config.py` (extiende `BaseConfig`)
+   - `data_models.py`
+   - `controller.py` con `get_controller()` y `site_id`
+   - `automation.py` (extiende `BaseAutomation`)
+   - `flows/` con los pasos
+2. Registrar el sitio en `core/site_registry.py` (automation + controller paths).
+
+## Documentacion de apoyo
+
+- `explore-html/base-guide.md`: notas y flujo de BASE On-line.
+- `explore-html/madrid-guide.md` y `explore-html/llenar formulario-madrid.md`: navegacion + campos del formulario de Madrid.
+- `xaloc-documentation.md` y `xaloc-action-plan.md`: documentacion tecnica del portal Xaloc y plan de trabajo.
+
+## Compatibilidad (imports antiguos)
+
+Se mantienen wrappers para no romper scripts antiguos:
+
+- `xaloc_automation.py`: expone `XalocAsync` apuntando a `sites/xaloc_girona/automation.py`.
+- `config.py`: expone `Config` y `DatosMulta` apuntando a `sites/xaloc_girona/*`.
+- `flows/*`: reexporta los flujos de `sites/xaloc_girona/flows/*`.
+

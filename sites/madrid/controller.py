@@ -128,14 +128,22 @@ class MadridController:
             ),
         )
         
-        # 5. Construcción del Target
+        # 1. Definimos el mapa de tipos
+        naturaleza_map = {
+            "A": NaturalezaEscrito.ALEGACION,
+            "R": NaturalezaEscrito.RECURSO,
+            "I": NaturalezaEscrito.IDENTIFICACION_CONDUCTOR
+        }
+
+        # 2. Construcción del Target
         form_data = MadridFormData(
             expediente=expediente,
             matricula=matricula,
             interesado=interesado,
             representante=representante,
             notificacion=notificacion,
-            naturaleza=NaturalezaEscrito.ALEGACION if naturaleza == "A" else NaturalezaEscrito.RECURSO,
+            # .get() permite establecer un valor por defecto si la letra no coincide (ej. ALEGACION)
+            naturaleza=naturaleza_map.get(naturaleza, NaturalezaEscrito.ALEGACION),
             expone=expone,
             solicita=solicita,
         )
