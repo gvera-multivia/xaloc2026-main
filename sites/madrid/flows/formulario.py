@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import random
+import re
 from typing import TYPE_CHECKING
 
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
@@ -193,6 +194,19 @@ async def ejecutar_formulario_madrid(
         Page: Página después de pulsar Continuar
     """
     
+    # Seguridad: no empezar a rellenar si no estamos realmente en la pantalla del formulario
+    if getattr(config, "url_servcla_formulario_contains", None) and config.url_servcla_formulario_contains not in page.url:
+        logger.warning(f"No parece la URL del formulario (action=opcion). URL actual: {page.url}")
+        try:
+            await page.wait_for_url(
+                re.compile(r".*WFORS_WBWFORS/servlet\\?action=opcion.*", re.IGNORECASE),
+                timeout=config.navigation_timeout,
+            )
+        except PlaywrightTimeoutError:
+            pass
+
+    await page.wait_for_selector(config.expediente_tipo_1_selector, state="attached", timeout=config.default_timeout)
+
     logger.info("=" * 80)
     logger.info("FASE 2: RELLENANDO FORMULARIO DE MULTAS")
     logger.info("=" * 80)

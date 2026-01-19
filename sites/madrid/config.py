@@ -16,6 +16,10 @@ class MadridConfig(BaseConfig):
     
     # URL base del trámite (Multas de circulación)
     url_base: str = "https://sede.madrid.es/portal/site/tramites/menuitem.62876cb64654a55e2dbd7003a8a409a0/?vgnextoid=dd7f048aad32e210VgnVCM1000000b205a0aRCRD&vgnextchannel=3838a38813180210VgnVCM100000c90da8c0RCRD&vgnextfmt=default"
+
+    # URLs clave del flujo (se usan como comprobaciones de seguridad)
+    url_servcla_inicial_contains: str = "servcla.madrid.es/WFORS_WBWFORS/servlet?action=inicial"
+    url_servcla_formulario_contains: str = "WFORS_WBWFORS/servlet?action=opcion"
     
     # =========================================================================
     # NAVEGACIÓN (pasos 1-11 del madrid-guide.md)

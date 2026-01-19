@@ -18,6 +18,48 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+async def _seleccionar_radio_por_texto(page: Page, texto: str) -> None:
+    """
+    Selecciona un radio cuyo label contiene el texto indicado.
+    Útil cuando los IDs internos varían entre sesiones.
+    """
+    label = page.locator("label", has_text=re.compile(texto, re.IGNORECASE))
+    radio = label.locator("input[type='radio']")
+    if await radio.count() > 0:
+        await radio.first.check()
+        return
+
+
+async def _manejar_pantalla_servcla_inicial(page: Page, config: "MadridConfig") -> bool:
+    """
+    Maneja la pantalla intermedia de 'Acceso al formulario' en servcla:
+    https://servcla.madrid.es/WFORS_WBWFORS/servlet?action=inicial&fromLogin=true
+
+    Devuelve True si la pantalla se gestionó (y se navegó a la siguiente).
+    """
+    if config.url_servcla_inicial_contains not in page.url:
+        return False
+
+    logger.info("PASO 8: Pantalla 'Acceso al formulario' (servcla) detectada")
+    logger.info(f"  ƒÅ' URL: {page.url}")
+
+    await _seleccionar_radio_por_texto(page, "Tramitar una nueva solicitud")
+    await _seleccionar_radio_por_texto(page, "Persona o entidad interesada")
+
+    # Click en Continuar (type='button', no 'submit')
+    try:
+        await page.wait_for_selector(config.continuar_interesado_selector, state="visible", timeout=config.default_timeout)
+        async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
+            await page.click(config.continuar_interesado_selector)
+    except PlaywrightTimeoutError:
+        boton = page.locator("input[type='button'][value='Continuar'], input[type='submit'][value='Continuar']")
+        await boton.first.wait_for(state="visible", timeout=config.default_timeout)
+        async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
+            await boton.first.click()
+
+    logger.info(f"  ƒÅ' Navegado a: {page.url}")
+    return True
+
 
 async def _aceptar_cookies_si_aparece(page: Page) -> None:
     """
@@ -346,32 +388,33 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
     logger.info(f"  → Navegado a: {page.url}")
     
     # ========================================================================
-    # PASO 8: Seleccionar "Tramitar nueva solicitud"
+    # PASO 8-9: Acceso al formulario (pantalla intermedia servcla o flujo antiguo)
     # ========================================================================
-    logger.info("PASO 8: Seleccionando 'Tramitar nueva solicitud'")
-    await page.wait_for_selector(config.radio_nuevo_tramite_selector, state="visible", timeout=config.default_timeout)
-    await page.click(config.radio_nuevo_tramite_selector)
-    logger.info(f"  → Radio seleccionado ({config.radio_nuevo_tramite_selector})")
-    
-    # Esperar a que cargarOpciones() actualice el DOM
-    # Esperamos a que aparezca el siguiente radio
-    await page.wait_for_selector(config.radio_interesado_selector, state="visible", timeout=config.default_timeout)
-    logger.info("  → DOM actualizado, opciones cargadas")
-    
-    # ========================================================================
-    # PASO 9: Seleccionar "Persona o Entidad interesada" + Continuar
-    # ========================================================================
-    logger.info("PASO 9: Seleccionando 'Persona o Entidad interesada'")
-    await page.click(config.radio_interesado_selector)
-    logger.info(f"  → Radio seleccionado ({config.radio_interesado_selector})")
-    
-    # Click en Continuar (type='button', no 'submit')
-    await page.wait_for_selector(config.continuar_interesado_selector, state="visible", timeout=config.default_timeout)
-    
-    async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
-        await page.click(config.continuar_interesado_selector)
-    
-    logger.info(f"  → Navegado a: {page.url}")
+    if config.url_servcla_formulario_contains in page.url:
+        logger.info("PASO 8-9: Ya estamos en el formulario (action=opcion), saltando selección de acceso")
+    else:
+    # Si estamos en la pantalla action=inicial, gestionarla por texto (más robusto).
+        handled = await _manejar_pantalla_servcla_inicial(page, config)
+        if not handled:
+            # Fallback a la ruta antigua basada en IDs (por si cambia el flujo en el futuro)
+            logger.info("PASO 8: Seleccionando 'Tramitar nueva solicitud'")
+            await page.wait_for_selector(config.radio_nuevo_tramite_selector, state="visible", timeout=config.default_timeout)
+            await page.click(config.radio_nuevo_tramite_selector)
+            logger.info(f"  → Radio seleccionado ({config.radio_nuevo_tramite_selector})")
+            
+            # Esperar a que cargarOpciones() actualice el DOM
+            await page.wait_for_selector(config.radio_interesado_selector, state="visible", timeout=config.default_timeout)
+            logger.info("  → DOM actualizado, opciones cargadas")
+            
+            logger.info("PASO 9: Seleccionando 'Persona o Entidad interesada'")
+            await page.click(config.radio_interesado_selector)
+            logger.info(f"  → Radio seleccionado ({config.radio_interesado_selector})")
+            
+            await page.wait_for_selector(config.continuar_interesado_selector, state="visible", timeout=config.default_timeout)
+            async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
+                await page.click(config.continuar_interesado_selector)
+            
+            logger.info(f"  → Navegado a: {page.url}")
     
     # ========================================================================
     # PASO 10: Condicional - Manejar "Nuevo trámite" si existe
@@ -399,6 +442,9 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
     # PASO 11: Verificar llegada al formulario
     # ========================================================================
     logger.info("PASO 11: Verificando llegada al formulario")
+    
+    if config.url_servcla_formulario_contains not in page.url:
+        logger.info(f"  → Aviso: URL no contiene action=opcion todavía: {page.url}")
     
     # Esperar a que exista un formulario (criterio genérico por ahora)
     await page.wait_for_selector(config.formulario_llegada_selector, state="attached", timeout=config.default_timeout)
