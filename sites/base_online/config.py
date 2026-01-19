@@ -4,7 +4,7 @@ Configuración del sitio BASE On-line.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from core.base_config import BaseConfig
 
@@ -13,6 +13,12 @@ from core.base_config import BaseConfig
 class BaseOnlineConfig(BaseConfig):
     site_id: str = "base_online"
     url_base: str = "https://www.base.cat/ciutada/ca/tramits/multes-i-sancions/multes-i-sancions.html"
+
+    # Autoselección de certificado: restringida a dominios del flujo (Tarragona / BASE)
+    auto_select_certificate_patterns: list[str] = field(default_factory=lambda: [
+        "https://www.base.cat/*",
+        "https://www.baseonline.cat/*",
+    ])
 
     # Landing
     base_online_link_selector: str = "a.logo_text[href*='/sav/valid'], a.logo_text[href*='base.cat/sav/valid']"

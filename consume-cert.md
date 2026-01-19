@@ -176,6 +176,24 @@ Ejemplo de inserción (conceptual):
 
 ---
 
+## 7) Ejecutable (.exe) del Worker (sin terminal)
+
+**Meta:** poder lanzar el Worker haciendo doble click, sin abrir PowerShell/cmd.
+
+1. Construcción del `.exe` (solo una vez por máquina):
+   - Ejecutar: `scripts/build-worker-exe.ps1`
+   - Resultado: `dist/xaloc-worker.exe`
+2. Ejecución:
+   - Doble click a `dist/xaloc-worker.exe`
+   - Por defecto crea/usa:
+     - DB: `db/xaloc_database.db`
+     - Perfil: `profiles/edge_worker`
+     - Log: `logs/worker.log`
+3. Parámetros (si lo lanzas desde Programador de tareas / NSSM):
+   - `--db`, `--schema`, `--profile-dir`, `--log-file`, `--poll-seconds`, `--headless/--no-headless`, `--once`
+
+---
+
 ## Riesgos y mitigaciones
 
 - **Sin escritorio:** evitar `pyautogui` y depender de política + perfil persistente.

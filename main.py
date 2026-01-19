@@ -53,6 +53,11 @@ def print_site_info(site_id: str):
             "nombre": "Xaloc Girona",
             "descripcion": "Portal de la Diputación de Girona",
             "subprocesos": None
+        },
+        "redsara": {
+            "nombre": "RedSARA",
+            "descripcion": "Registro Electrónico Común (Administración General del Estado)",
+            "subprocesos": None
         }
     }
     return site_info.get(site_id, {})

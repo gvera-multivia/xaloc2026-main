@@ -5,7 +5,7 @@ Basado en explore-html/madrid-guide.md y explore-html/llenar formulario-madrid.m
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from core.base_config import BaseConfig
 
@@ -43,6 +43,13 @@ class MadridConfig(BaseConfig):
     
     # Paso 6: Certificado (popup de Windows)
     stealth_disable_webdriver: bool = True
+
+    # Autoselección de certificado: restringida a dominios del flujo (Madrid)
+    auto_select_certificate_patterns: list[str] = field(default_factory=lambda: [
+        "https://sede.madrid.es/*",
+        "https://servcla.madrid.es/*",
+        "https://servpub.madrid.es/*",
+    ])
     
     # Paso 7: Botón "Continuar" tras autenticación
     continuar_post_auth_selector: str = "#btnContinuar"

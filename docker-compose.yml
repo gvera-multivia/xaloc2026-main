@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  worker:
+    build: .
+    container_name: xaloc_worker
+    environment:
+      - CERT_PATH=/app/auth/certificado.p12
+      - CERT_PASSWORD=${CERT_PASSWORD:-password_aqui}
+      # Argumentos adicionales para el worker
+      - XALOC_POLL_SECONDS=15
+    volumes:
+      # Persistencia de datos
+      - ./db:/app/db
+      - ./logs:/app/logs
+      - ./screenshots:/app/screenshots
+      - ./profiles:/app/profiles
+      # El certificado debe mapearse aquí o estar en la carpeta auth
+      - ./auth:/app/auth:ro
+    restart: unless-stopped
+    # Ejecuta el worker con argumentos si es necesario
+    command: ["--poll-seconds", "15"]

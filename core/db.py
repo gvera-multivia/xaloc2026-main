@@ -76,8 +76,47 @@ class MockDatabase:
                         "expediente_eeeeeeeee": "102532229",
                         "expediente_d": "3",
                         "naturaleza": "A",
-                        "expone": "Expongo datos reales desde DB.",
+                        "expone": "Expones datos reales desde DB.",
                         "solicita": "Solicito anulación desde DB."
+                    }
+                }
+            ],
+            "redsara": [
+                {
+                    "id": str(uuid.uuid4()),
+                    "site_id": "redsara",
+                    "protocol": None,
+                    "status": "pending",
+                    "created_at": datetime.now().isoformat(),
+                    "data": {
+                        "representante": {
+                            "nif": "12345678X",
+                            "nombre": "Juan",
+                            "apellido": "García López",
+                            "email": "juan_real@example.com",
+                            "telefono": "666123456",
+                            "direccion": {
+                                "tipo_via": "Calle",
+                                "direccion": "Real 10",
+                                "provincia": "Madrid",
+                                "ciudad": "Madrid",
+                                "codigo_postal": "28001"
+                            },
+                            "es_representante": True
+                        },
+                        "presentador": {"igual_que_representante": True},
+                        "interesado": {
+                            "nombre": "Maria",
+                            "apellido": "Real",
+                            "segundo_apellido": "Gomez",
+                            "nif": "87654321Z",
+                            "tipo_documento": "NIF"
+                        },
+                        "archivos": [],
+                        "asunto": "Prueba Real RedSARA",
+                        "expone": "Expongo hechos reales.",
+                        "solicita": "Solicito acciones reales.",
+                        "organismo": "L01220067"
                     }
                 }
             ]

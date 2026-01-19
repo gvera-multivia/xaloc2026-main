@@ -56,6 +56,9 @@ class BaseConfig:
     lang: str = "ca"
     disable_translate_ui: bool = True
     auto_select_certificate: bool = True
+    # Preferido: lista de patrones (solo URLs del proyecto).
+    # Compat: si la lista está vacía, se usa auto_select_certificate_pattern.
+    auto_select_certificate_patterns: List[str] = field(default_factory=list)
     auto_select_certificate_pattern: str = "*"
     stealth_disable_webdriver: bool = False
 

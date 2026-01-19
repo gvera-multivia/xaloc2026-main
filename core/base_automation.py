@@ -5,6 +5,7 @@ BaseAutomation: orquestador reusable (Playwright + perfil persistente).
 from __future__ import annotations
 
 import logging
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -45,8 +46,13 @@ class BaseAutomation:
         args = list(self.config.navegador.args)
 
         if self.config.auto_select_certificate:
-            policy = f'{{"pattern":"{self.config.auto_select_certificate_pattern}","filter":{{}}}}'
-            args.append(f"--auto-select-certificate-for-urls=[{policy}]")
+            patterns = getattr(self.config, "auto_select_certificate_patterns", None) or []
+            if patterns:
+                policies = [{"pattern": p, "filter": {}} for p in patterns]
+                args.append(f"--auto-select-certificate-for-urls={json.dumps(policies, separators=(',', ':'))}")
+            else:
+                policy = {"pattern": self.config.auto_select_certificate_pattern, "filter": {}}
+                args.append(f"--auto-select-certificate-for-urls={json.dumps([policy], separators=(',', ':'))}")
 
         if self.config.lang:
             args.append(f"--lang={self.config.lang}")
