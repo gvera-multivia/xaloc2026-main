@@ -7,40 +7,11 @@ from __future__ import annotations
 import logging
 import re
 import threading
-import time
 
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeout
 
 from sites.base_online.config import BaseOnlineConfig
-from utils.windows_popup import esperar_y_aceptar_certificado
-
-
-async def _detectar_error_auth(page: Page) -> str | None:
-    url = (page.url or "").lower()
-    try:
-        titulo = (await page.title()).lower()
-    except Exception:
-        titulo = ""
-
-    if "ssl" in titulo or "err_ssl" in titulo:
-        return "ssl"
-    try:
-        if await page.locator("text=/no se puede obtener acceso/i").first.is_visible(timeout=500):
-            return "acceso"
-    except Exception:
-        pass
-    try:
-        if await page.locator("text=/ssl\\s*(handshake|protocol|error)|err_ssl/i").first.is_visible(timeout=500):
-            return "ssl"
-    except Exception:
-        pass
-    if "commonauth" in url:
-        try:
-            if await page.locator("text=/redirigiendo/i").first.is_visible(timeout=500):
-                return "redirigiendo"
-        except Exception:
-            pass
-    return None
+from utils.windows_popup import aceptar_popup_certificado
 
 
 async def _aceptar_cookies_si_aparece(page: Page) -> None:
@@ -218,6 +189,13 @@ async def ejecutar_login_base(page: Page, config: BaseOnlineConfig) -> Page:
         url_destino="https://www.base.cat/sav/valid"
     )
 
+    # En algunos casos, tras el primer click ya estamos autenticados y
+    # redirige directamente a Common Desktop (sin pasar por certificado).
+    await page.wait_for_timeout(getattr(config, "delay_ms", 500))
+    if "/commons-desktop/index" in (page.url or ""):
+        logging.info("[FASE 1.4] ✓ Ya autenticado (Common Desktop), saltando certificado")
+        return page
+
     logging.info("[FASE 1.4] Esperando el botón de certificado...")
     logging.debug(f"[FASE 1.4] URL actual: {page.url}")
     logging.debug(f"[FASE 1.4] Selector botón certificado: {config.cert_button_selector}")
@@ -232,7 +210,10 @@ async def ejecutar_login_base(page: Page, config: BaseOnlineConfig) -> Page:
         raise
 
     def _resolver_popup_windows() -> None:
-        esperar_y_aceptar_certificado(delay_inicial=2.0)
+        aceptar_popup_certificado(
+            tabs_atras=2,
+            delay_inicial=max(0.0, getattr(config, "cert_popup_delay_ms", 1500) / 1000.0),
+        )
 
     thread_popup = threading.Thread(target=_resolver_popup_windows, daemon=True)
     thread_popup.start()
@@ -243,36 +224,6 @@ async def ejecutar_login_base(page: Page, config: BaseOnlineConfig) -> Page:
 
     logging.info("[FASE 1.6] Esperando acceso a Common Desktop...")
     logging.debug(f"[FASE 1.6] Patrón URL esperado: {config.url_post_login}")
-    deadline = time.monotonic() + (config.timeouts.login / 1000.0)
-    while True:
-        try:
-            await page.wait_for_url(config.url_post_login, timeout=2000)
-            break
-        except PlaywrightTimeout:
-            if time.monotonic() > deadline:
-                raise
-            problema = await _detectar_error_auth(page)
-            if problema:
-                logging.warning(f"[FASE 1.6] Detectado problema auth '{problema}', recovery: espera 3s + refresh")
-                await page.wait_for_timeout(3000)
-                try:
-                    await page.reload(wait_until="domcontentloaded", timeout=30000)
-                except Exception:
-                    try:
-                        await page.keyboard.press("F5")
-                    except Exception:
-                        pass
-                await page.wait_for_timeout(getattr(config, "cert_popup_delay_ms", 2000))
-                thread_popup = threading.Thread(
-                    target=esperar_y_aceptar_certificado,
-                    kwargs={"delay_inicial": 0.0},
-                    daemon=True,
-                )
-                thread_popup.start()
-                try:
-                    await boton_cert.click(timeout=2000)
-                except Exception:
-                    pass
-                thread_popup.join(timeout=10)
+    await page.wait_for_url(config.url_post_login, timeout=config.timeouts.login)
     logging.info(f"[FASE 1.6] ✓ Login completado - URL: {page.url}")
     return page
