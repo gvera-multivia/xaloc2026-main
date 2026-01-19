@@ -9,6 +9,7 @@ import asyncio
 import logging
 import re
 import threading
+import time
 from typing import TYPE_CHECKING
 
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
@@ -17,6 +18,116 @@ if TYPE_CHECKING:
     from sites.madrid.config import MadridConfig
 
 logger = logging.getLogger(__name__)
+
+async def _detectar_problema_autenticacion(page: Page) -> str | None:
+    """
+    Detecta problemas conocidos en el flujo de autenticación.
+
+    Triggers:
+    - ssl: mensajes de SSL handshake / ERR_SSL / SSL en título o DOM.
+    - acceso: "no se puede obtener acceso a esta página".
+    - redirigiendo: cas.madrid.es/commonauth con "Redirigiendo a Cl@ve..." que no avanza.
+    """
+    url = (page.url or "").lower()
+
+    try:
+        titulo = (await page.title()).lower()
+    except Exception:
+        titulo = ""
+
+    if "ssl" in titulo or "err_ssl" in titulo:
+        return "ssl"
+
+    ssl_text = page.locator("text=/ssl\\s*(handshake|protocol|error)|err_ssl/i")
+    try:
+        if await ssl_text.first.is_visible(timeout=500):
+            return "ssl"
+    except Exception:
+        pass
+
+    acceso_text = page.locator("text=/no se puede obtener acceso/i")
+    try:
+        if "no se puede obtener acceso" in titulo or await acceso_text.first.is_visible(timeout=500):
+            return "acceso"
+    except Exception:
+        pass
+
+    if "cas.madrid.es" in url and "commonauth" in url:
+        redir = page.locator("text=/Redirigiendo a Cl@ve/i")
+        try:
+            if await redir.first.is_visible(timeout=500):
+                return "redirigiendo"
+        except Exception:
+            pass
+
+    return None
+
+
+async def _recuperar_problema_autenticacion(page: Page, config: "MadridConfig", problema: str) -> bool:
+    """
+    Protocolo de recuperación:
+    - Espera pasiva 3s.
+    - Si persiste, refresh.
+    - Si tras refresh aparece "Confirmar reenvío de formulario", TAB->ENTER (PyAutoGUI).
+    """
+    logger.warning(f"Recuperación auth: detectado problema '{problema}' (URL: {page.url})")
+
+    await page.wait_for_timeout(3000)
+    if await _detectar_problema_autenticacion(page) is None:
+        logger.info("Recuperación auth: el problema desapareció tras espera pasiva")
+        return True
+
+    from utils.windows_popup import confirmar_reenvio_formulario
+
+    popup_thread: threading.Thread | None = None
+    if problema == "ssl":
+        popup_thread = threading.Thread(
+            target=confirmar_reenvio_formulario,
+            kwargs={"delay_inicial": 0.8},
+            daemon=True,
+        )
+        popup_thread.start()
+
+    try:
+        await page.reload(wait_until="domcontentloaded", timeout=config.navigation_timeout)
+    except Exception:
+        # Fallback: F5 equivalente
+        try:
+            await page.keyboard.press("F5")
+        except Exception:
+            pass
+
+    if popup_thread:
+        popup_thread.join(timeout=5)
+
+    return True
+
+
+async def _click_certificado_y_aceptar_popup(page: Page, config: "MadridConfig") -> None:
+    """
+    Click en 'DNIe / Certificado' y aceptación del popup.
+    Monitoriza la página durante ~3s antes de enviar Shift+Tab x2 (evita enviar teclas si hay error de carga).
+    """
+    from utils.windows_popup import enviar_shift_tab_enter
+
+    await page.click(config.certificado_login_selector)
+    logger.info("  ƒÅ' Click en 'DNIe / Certificado'")
+
+    start = time.monotonic()
+    while time.monotonic() - start < 3.0:
+        problema = await _detectar_problema_autenticacion(page)
+        if problema:
+            await _recuperar_problema_autenticacion(page, config, problema)
+            return
+        await page.wait_for_timeout(250)
+
+    popup_thread = threading.Thread(
+        target=enviar_shift_tab_enter,
+        kwargs={"tabs_atras": 2, "evitar_browser": True},
+        daemon=True,
+    )
+    popup_thread.start()
+    popup_thread.join(timeout=5)
 
 async def _seleccionar_radio_por_texto(page: Page, texto: str) -> None:
     """
@@ -342,40 +453,41 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
     # ========================================================================
     logger.info("PASO 6: Preparando manejo de popup de certificado Windows")
     
-    # Importar utilidad de manejo de popup (nombre correcto)
-    from utils.windows_popup import esperar_y_aceptar_certificado
-    
-    # Función wrapper para el thread - más delay inicial
-    def _resolver_popup_windows() -> None:
-        esperar_y_aceptar_certificado(delay_inicial=3.0, timeout=20.0)
-    
-    # Lanzar thread para manejar el popup
-    popup_thread = threading.Thread(
-        target=_resolver_popup_windows,
-        daemon=True
-    )
-    popup_thread.start()
-    logger.info("  → Thread de popup de certificado lanzado (delay 5s)")
-    
-    # Click en el enlace de certificado (dispara el popup)
-    await page.click(config.certificado_login_selector)
-    logger.info("  → Click en 'DNIe / Certificado'")
-    
-    # Esperar a que el thread termine (con timeout)
-    popup_thread.join(timeout=10)
-    
-    # Esperar a que la autenticación complete
-    # Estrategia: esperar a que cambie la URL o aparezca el siguiente botón
-    try:
-        await page.wait_for_selector(
-            config.continuar_post_auth_selector,
-            state="visible",
-            timeout=config.navigation_timeout
-        )
-        logger.info("  → Autenticación completada exitosamente")
-    except PlaywrightTimeoutError:
-        logger.error("  ✗ Timeout esperando autenticación con certificado")
-        raise
+    # Click + monitorización previa antes de enviar Shift+Tab x2 (evita enviar teclas si hay error de carga)
+    await _click_certificado_y_aceptar_popup(page, config)
+
+    # Esperar a que la autenticación complete (con detección + recuperación).
+    deadline = time.monotonic() + (config.navigation_timeout / 1000.0)
+    reintentos_cert = 0
+    while True:
+        try:
+            await page.wait_for_selector(
+                config.continuar_post_auth_selector,
+                state="visible",
+                timeout=2000,
+            )
+            logger.info("  → Autenticación completada exitosamente")
+            break
+        except PlaywrightTimeoutError:
+            if time.monotonic() > deadline:
+                logger.error("  ✗ Timeout esperando autenticación con certificado")
+                raise
+
+            problema = await _detectar_problema_autenticacion(page)
+            if problema:
+                await _recuperar_problema_autenticacion(page, config, problema)
+                # Si hemos vuelto a la pantalla con selector de certificado, reintentar una vez.
+                if reintentos_cert < 1:
+                    try:
+                        await page.wait_for_selector(
+                            config.certificado_login_selector,
+                            state="visible",
+                            timeout=1500,
+                        )
+                        reintentos_cert += 1
+                        await _click_certificado_y_aceptar_popup(page, config)
+                    except PlaywrightTimeoutError:
+                        pass
     
     # ========================================================================
     # PASO 7: Click "Continuar" post-autenticación

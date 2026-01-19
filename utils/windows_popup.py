@@ -12,6 +12,69 @@ pyautogui.FAILSAFE = True  # Mover ratón a esquina superior izquierda para abor
 pyautogui.PAUSE = 0.1  # Pausa entre acciones
 
 
+def _activar_ventana_activa() -> None:
+    """
+    Best-effort: intenta asegurar que la ventana activa tiene el foco.
+    PyAutoGUI integra PyGetWindow en Windows y expone getActiveWindow().
+    """
+    try:
+        win = pyautogui.getActiveWindow()
+        if win:
+            try:
+                win.activate()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def _titulo_ventana_activa() -> str:
+    try:
+        win = pyautogui.getActiveWindow()
+        return (win.title or "") if win else ""
+    except Exception:
+        return ""
+
+
+def enviar_shift_tab_enter(tabs_atras: int = 2, *, evitar_browser: bool = True) -> bool:
+    """
+    Envía Shift+Tab xN y Enter.
+    Útil para aceptar diálogos nativos (p.ej. selección de certificado) sin sleeps internos.
+    """
+    try:
+        _activar_ventana_activa()
+        titulo = _titulo_ventana_activa().lower()
+        if evitar_browser and any(x in titulo for x in ("chrome", "edge", "firefox", "opera", "brave")):
+            logging.warning("Ventana activa parece ser el navegador; abortando Shift+Tab/Enter.")
+            return False
+
+        for _ in range(tabs_atras):
+            pyautogui.hotkey("shift", "tab")
+            time.sleep(0.2)
+        pyautogui.press("enter")
+        return True
+    except Exception as e:
+        logging.error(f"Error enviando Shift+Tab/Enter: {e}")
+        return False
+
+
+def confirmar_reenvio_formulario(*, delay_inicial: float = 1.0) -> bool:
+    """
+    Confirma el reenvío de formulario tras un refresh.
+    Secuencia: TAB -> ENTER
+    """
+    try:
+        time.sleep(max(0.0, delay_inicial))
+        _activar_ventana_activa()
+        pyautogui.press("tab")
+        time.sleep(0.2)
+        pyautogui.press("enter")
+        return True
+    except Exception as e:
+        logging.error(f"Error confirmando reenvío de formulario: {e}")
+        return False
+
+
 def esperar_y_aceptar_certificado(timeout: float = 20.0, delay_inicial: float = 5.0) -> bool:
     """
     Espera a que aparezca el popup de selección de certificado de Windows
@@ -31,6 +94,11 @@ def esperar_y_aceptar_certificado(timeout: float = 20.0, delay_inicial: float = 
         
         # 2. Navegar por el popup con Shift+Tab
         logging.info("⌨️ Navegando por el diálogo con Shift+Tab x2...")
+        _activar_ventana_activa()
+        titulo = _titulo_ventana_activa().lower()
+        if any(x in titulo for x in ("chrome", "edge", "firefox", "opera", "brave")):
+            logging.warning("Ventana activa parece ser el navegador; no se envían teclas al popup.")
+            return False
         pyautogui.hotkey('shift', 'tab')
         time.sleep(0.5)
         pyautogui.hotkey('shift', 'tab')
