@@ -10,6 +10,8 @@ from pathlib import Path
 
 from playwright.async_api import Page, TimeoutError
 
+DELAY_MS = 500
+
 
 async def _wait_mask_hidden(page: Page, timeout_ms: int = 8000) -> None:
     logging.info(f"⏳ Comprobando si existe el overlay #mask...")
@@ -48,6 +50,7 @@ async def _check_lopd(page: Page) -> None:
         await checkbox.check(timeout=1000)
         if await checkbox.is_checked():
             logging.info("✅ Marcado directo EXITOSO")
+            await page.wait_for_timeout(DELAY_MS)
             return
     except Exception as e:
         logging.info(f"❌ Intento 1 fallado o interceptado: {e}")
@@ -61,6 +64,7 @@ async def _check_lopd(page: Page) -> None:
         await checkbox.check(timeout=2000)
         if await checkbox.is_checked():
             logging.info("✅ Marcado tras espera EXITOSO")
+            await page.wait_for_timeout(DELAY_MS)
             return
     except Exception as e:
         logging.info(f"❌ Intento 2 fallado: {e}")
@@ -71,6 +75,7 @@ async def _check_lopd(page: Page) -> None:
         await checkbox.check(timeout=1000, force=True)
         if await checkbox.is_checked():
             logging.info("✅ Marcado forzado EXITOSO")
+            await page.wait_for_timeout(DELAY_MS)
             return
     except Exception as e:
         logging.info(f"❌ Intento 3 (forzado) fallado: {e}")
@@ -97,6 +102,7 @@ async def _check_lopd(page: Page) -> None:
     )
     if ok:
         logging.info("✅ Marcado vía JavaScript EXITOSO")
+        await page.wait_for_timeout(DELAY_MS)
     else:
         logging.error("❌ ERROR CRÍTICO: No se pudo marcar el checkbox de ninguna forma")
         raise TimeoutError("No se pudo marcar el checkbox LOPD (#lopdok)")
@@ -140,6 +146,7 @@ async def confirmar_tramite(page: Page, screenshots_dir: Path) -> str:
             await continuar.click()
     except TimeoutError:
         await continuar.click()
+    await page.wait_for_timeout(DELAY_MS)
 
     if "TramitaSign" not in page.url:
         await page.wait_for_url("**/TramitaSign**", timeout=60000)

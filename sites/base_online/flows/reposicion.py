@@ -30,6 +30,7 @@ def _normalizar_tipus_objecte(raw: str) -> str:
 async def _avanzar_a_presentacion_p3(page: Page) -> None:
     logging.info("[P3] Continuando al paso de presentación...")
     await page.locator("input[type='submit'][name='form0:j_id66'][value='Continuar']").first.click()
+    await page.wait_for_timeout(500)
     await page.wait_for_load_state("domcontentloaded")
 
     boton_firma = page.locator("input[type='button'][value='Signar i Presentar']").first
@@ -39,6 +40,7 @@ async def _avanzar_a_presentacion_p3(page: Page) -> None:
 
 async def rellenar_formulario_p3(page: Page, config: BaseOnlineConfig, data: BaseOnlineReposicionData) -> None:
     logging.info("[P3] Rellenando formulario de Recurso de Reposición...")
+    delay_ms = getattr(config, "delay_ms", 500)
 
     # 1. Inputs radio: tipo de objeto
     tipus_objecte = _normalizar_tipus_objecte(data.tipus_objecte)
@@ -50,26 +52,32 @@ async def rellenar_formulario_p3(page: Page, config: BaseOnlineConfig, data: Bas
     }[tipus_objecte]
     logging.info(f"[P3] Seleccionando tipo de objeto: {tipus_objecte}")
     await page.locator(radio_selector).first.click()
+    await page.wait_for_timeout(delay_ms)
 
     # 2. Dades específiques
     logging.info("[P3] Introduciendo datos específicos...")
     await page.locator(config.p3_textarea_dades).first.fill(data.dades_especifiques)
+    await page.wait_for_timeout(delay_ms)
 
     # 3. Tipo de solicitud
     logging.info(f"[P3] Seleccionando tipo de solicitud: value={data.tipus_solicitud_value}")
     await page.locator(config.p3_select_tipus).first.select_option(value=str(data.tipus_solicitud_value))
+    await page.wait_for_timeout(delay_ms)
 
     # 4. Exposición
     logging.info("[P3] Introduciendo exposición...")
     await page.locator(config.p3_textarea_exposo).first.fill(data.exposo)
+    await page.wait_for_timeout(delay_ms)
 
     # 5. Solicitud
     logging.info("[P3] Introduciendo solicitud...")
     await page.locator(config.p3_textarea_solicito).first.fill(data.solicito)
+    await page.wait_for_timeout(delay_ms)
 
     # 6. Botón Continuar (Página 1 -> Página Documentos)
     logging.info("[P3] Pulsando el botón de continuar...")
     await page.locator(config.p3_button_continuar).first.click()
+    await page.wait_for_timeout(delay_ms)
     await page.wait_for_load_state("domcontentloaded")
 
     # 7. Subida de documentos (modal + iframe)
@@ -79,4 +87,3 @@ async def rellenar_formulario_p3(page: Page, config: BaseOnlineConfig, data: Bas
 
     # 8. Confirmación (llegar hasta la pantalla de firma)
     await _avanzar_a_presentacion_p3(page)
-

@@ -9,6 +9,8 @@ from sites.base_online.data_models import BaseOnlineAddressData, BaseOnlineP1Dat
 from sites.base_online.flows.common import rellenar_contacto
 from sites.base_online.flows.upload import subir_archivos_por_modal
 
+DELAY_MS = 500
+
 
 _SIGLES_PERMESES = {
     "AG",
@@ -150,6 +152,7 @@ async def _rellenar_contacto(page: Page, data: BaseOnlineP1Data) -> None:
     await rellenar_contacto(page, data.contacte)
 
     await page.locator("input[type='submit'][name='form:j_id20'][value='Continuar']").first.click()
+    await page.wait_for_timeout(DELAY_MS)
     await page.wait_for_load_state("domcontentloaded")
 
 
@@ -157,19 +160,29 @@ async def _rellenar_identificacion_conductor(page: Page, data: BaseOnlineP1Data)
     info = data.identificacio
 
     await page.locator("#form\\:clau_expedient_id_ens").first.fill(info.expedient_id_ens)
+    await page.wait_for_timeout(DELAY_MS)
     await page.locator("#form\\:clau_expedient_any_exp").first.fill(info.expedient_any)
+    await page.wait_for_timeout(DELAY_MS)
     await page.locator("#form\\:clau_expedient_num_exp").first.fill(info.expedient_num)
+    await page.wait_for_timeout(DELAY_MS)
 
     await page.evaluate(
         "typeof actualitzarClauExpedientclau_expedient === 'function' && actualitzarClauExpedientclau_expedient()"
     )
+    await page.wait_for_timeout(DELAY_MS)
 
     await page.locator("#form\\:num_butlleti").first.fill(info.num_butlleti)
+    await page.wait_for_timeout(DELAY_MS)
     await page.locator("#form\\:data_denuncia").first.fill(info.data_denuncia)
+    await page.wait_for_timeout(DELAY_MS)
     await page.locator("#form\\:matricula").first.fill(info.matricula)
+    await page.wait_for_timeout(DELAY_MS)
     await page.locator("#form\\:identificacio").first.fill(info.identificacio)
+    await page.wait_for_timeout(DELAY_MS)
     await page.locator("#form\\:llicencia_conduccio").first.fill(info.llicencia_conduccio)
+    await page.wait_for_timeout(DELAY_MS)
     await page.locator("#form\\:nom_complet").first.fill(info.nom_complet)
+    await page.wait_for_timeout(DELAY_MS)
 
     adreca_text = info.adreca
     if not adreca_text and info.adreca_detall:
@@ -190,15 +203,18 @@ async def _rellenar_identificacion_conductor(page: Page, data: BaseOnlineP1Data)
         }""",
         adreca_text,
     )
+    await page.wait_for_timeout(DELAY_MS)
 
     logging.info("[P1] Formulario 2 rellenado; avanzando al siguiente paso...")
     await page.locator("input[type='submit'][name='form:j_id24'][value='Continuar']").first.click()
+    await page.wait_for_timeout(DELAY_MS)
     await page.wait_for_load_state("domcontentloaded")
 
     archivos = data.archivos_adjuntos or [Path("pdfs-prueba/test1.pdf")]
     await subir_archivos_por_modal(page, list(archivos), max_archivos=1)
 
     await page.locator("input[type='submit'][name='form:j_id29'][value='Continuar']").first.click()
+    await page.wait_for_timeout(DELAY_MS)
     await page.wait_for_load_state("domcontentloaded")
 
     boton_firma = page.locator("input[type='button'][value='Signar i Presentar']").first

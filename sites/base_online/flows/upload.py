@@ -6,6 +6,8 @@ from pathlib import Path
 
 from playwright.async_api import Page
 
+DELAY_MS = 500
+
 
 async def subir_archivos_por_modal(
     page: Page,
@@ -37,6 +39,7 @@ async def subir_archivos_por_modal(
         logging.info(f"Subiendo archivo {idx}/{len(archivos_a_subir)}: {archivo}")
 
         await page.get_by_role("button", name=re.compile(boton_abrir_regex, re.IGNORECASE)).first.click()
+        await page.wait_for_timeout(DELAY_MS)
 
         modal = page.locator("#fitxer").first
         await modal.wait_for(state="visible", timeout=15000)
@@ -45,10 +48,12 @@ async def subir_archivos_por_modal(
         file_input = frame.locator("input[type='file'][name='qqfile']").first
         await file_input.wait_for(state="attached", timeout=20000)
         await file_input.set_input_files(str(archivo.resolve()))
+        await page.wait_for_timeout(DELAY_MS)
 
         boton_carregar = frame.locator("#penjar_fitxers").first
         if await boton_carregar.count() > 0:
             await boton_carregar.click()
+            await page.wait_for_timeout(DELAY_MS)
 
         success_text = frame.locator("#textSuccess").first
         await success_text.wait_for(state="visible", timeout=30000)
@@ -57,6 +62,6 @@ async def subir_archivos_por_modal(
             raise RuntimeError(f"Upload no confirmado. textSuccess='{texto}'")
 
         await frame.locator("#continuar").first.click()
+        await page.wait_for_timeout(DELAY_MS)
         await modal.wait_for(state="hidden", timeout=15000)
-        await page.wait_for_timeout(500)
-
+        await page.wait_for_timeout(DELAY_MS)

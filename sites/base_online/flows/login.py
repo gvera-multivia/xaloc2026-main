@@ -13,6 +13,8 @@ from playwright.async_api import Page, TimeoutError as PlaywrightTimeout
 from sites.base_online.config import BaseOnlineConfig
 from utils.windows_popup import aceptar_popup_certificado
 
+DELAY_MS = 500
+
 
 async def _aceptar_cookies_si_aparece(page: Page) -> None:
     posibles = [
@@ -178,6 +180,7 @@ async def ejecutar_login_base(page: Page, config: BaseOnlineConfig) -> Page:
     # Esperar un momento para que los scripts dinámicos terminen
     logging.info("[FASE 1.1] Esperando estabilización del DOM...")
     await _esperar_dom_estable(page, timeout_ms=2000)
+    await page.wait_for_timeout(getattr(config, "delay_ms", DELAY_MS))
 
     await _aceptar_cookies_si_aparece(page)
 
@@ -191,7 +194,7 @@ async def ejecutar_login_base(page: Page, config: BaseOnlineConfig) -> Page:
 
     # En algunos casos, tras el primer click ya estamos autenticados y
     # redirige directamente a Common Desktop (sin pasar por certificado).
-    await page.wait_for_timeout(getattr(config, "delay_ms", 500))
+    await page.wait_for_timeout(getattr(config, "delay_ms", DELAY_MS))
     if "/commons-desktop/index" in (page.url or ""):
         logging.info("[FASE 1.4] ✓ Ya autenticado (Common Desktop), saltando certificado")
         return page
@@ -220,7 +223,20 @@ async def ejecutar_login_base(page: Page, config: BaseOnlineConfig) -> Page:
 
     logging.info("[FASE 1.5] Pulsando botón de certificado...")
     await boton_cert.click()
+    await page.wait_for_timeout(getattr(config, "delay_ms", DELAY_MS))
     thread_popup.join(timeout=10)
+
+    # Si tras aceptar el popup seguimos en login, reintentar Shift+Tab x2.
+    await page.wait_for_timeout(4000)
+    if "/commons-desktop/index" not in (page.url or ""):
+        logging.warning("[FASE 1.5] Seguimos en login tras 4s; reintentando aceptación de certificado")
+        thread_popup_2 = threading.Thread(
+            target=aceptar_popup_certificado,
+            kwargs={"tabs_atras": 2, "delay_inicial": 0.0},
+            daemon=True,
+        )
+        thread_popup_2.start()
+        thread_popup_2.join(timeout=10)
 
     logging.info("[FASE 1.6] Esperando acceso a Common Desktop...")
     logging.debug(f"[FASE 1.6] Patrón URL esperado: {config.url_post_login}")

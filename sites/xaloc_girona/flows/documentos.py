@@ -11,6 +11,8 @@ from typing import List, Optional, Sequence, Union
 
 from playwright.async_api import Page, TimeoutError
 
+DELAY_MS = 500
+
 
 def _normalizar_archivos(archivos: Union[None, Path, Sequence[Path]]) -> List[Path]:
     if archivos is None:
@@ -46,12 +48,14 @@ async def _seleccionar_archivos(popup: Page, archivos: List[Path]) -> None:
         if idx is None:
             raise RuntimeError("No hay más inputs de archivo libres en el popup.")
         await popup.locator("input[type='file']").nth(idx).set_input_files(archivo)
+        await popup.wait_for_timeout(DELAY_MS)
 
 
 async def _click_link(popup: Page, patron: str) -> None:
     link = popup.get_by_role("link", name=re.compile(patron, re.IGNORECASE)).first
     await link.wait_for(state="visible", timeout=20000)
     await link.click()
+    await popup.wait_for_timeout(DELAY_MS)
 
 
 async def _wait_upload_ok(popup: Page) -> None:
@@ -112,7 +116,7 @@ async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]
 
     if popup is None:
         # Fallback: si no hay popup, intentamos en la misma página.
-        await page.wait_for_timeout(500)
+        await page.wait_for_timeout(DELAY_MS)
         await _seleccionar_archivos(page, archivos)
         await _adjuntar_y_continuar(page)
     else:
@@ -129,7 +133,7 @@ async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]
             await popup.close()
 
     # Espera corta a que el STA reciba el resultado del uploader (evitamos 'networkidle', suele ser lento).
-    await page.wait_for_timeout(250)
+    await page.wait_for_timeout(DELAY_MS)
     logging.info("Documentos subidos")
 
 

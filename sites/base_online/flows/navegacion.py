@@ -6,6 +6,8 @@ from playwright.async_api import Page
 
 from sites.base_online.data_models import BaseOnlineTarget
 
+DELAY_MS = 500
+
 
 _PROTOCOL_TO_URL = {
     "P1": "https://www.baseonline.cat/pst/flow/formulari?tramit=M250",
@@ -24,7 +26,7 @@ async def navegar_a_rama(page: Page, target: BaseOnlineTarget) -> None:
     
     # Navegación directa para evitar problemas con menús desplegables ocultos
     await page.goto(url_destino, wait_until="domcontentloaded")
+    await page.wait_for_timeout(DELAY_MS)
     
     # Verificación simple para confirmar que no estamos en una página de error
     logging.info(f"Rama {protocol} cargada. URL actual: {page.url}")
-

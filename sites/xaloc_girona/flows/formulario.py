@@ -11,6 +11,8 @@ from playwright.async_api import Page
 
 from sites.xaloc_girona.data_models import DatosMulta
 
+DELAY_MS = 500
+
 
 async def _rellenar_input(page: Page, selector: str, valor: str) -> None:
     locator = page.locator(selector)
@@ -32,6 +34,7 @@ async def _rellenar_input(page: Page, selector: str, valor: str) -> None:
             await locator.press("Tab")
     except Exception:
         pass
+    await page.wait_for_timeout(DELAY_MS)
 
 
 async def _rellenar_tinymce_motius(page: Page, texto: str) -> None:
@@ -64,6 +67,7 @@ async def _rellenar_tinymce_motius(page: Page, texto: str) -> None:
     await body.wait_for(state="visible", timeout=10000)
     await body.click()
     await body.fill(texto)
+    await page.wait_for_timeout(DELAY_MS)
 
 
 async def rellenar_formulario(page: Page, datos: DatosMulta) -> None:

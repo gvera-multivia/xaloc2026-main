@@ -13,6 +13,8 @@ from playwright.async_api import Page
 from sites.xaloc_girona.config import XalocConfig
 from utils.windows_popup import aceptar_popup_certificado
 
+DELAY_MS = 500
+
 
 async def _aceptar_cookies_si_aparece(page: Page) -> None:
     posibles = [
@@ -37,6 +39,7 @@ async def _aceptar_cookies_si_aparece(page: Page) -> None:
 async def ejecutar_login(page: Page, config: XalocConfig) -> Page:
     logging.info(f"Navegando a {config.url_base}")
     await page.goto(config.url_base, wait_until="networkidle")
+    await page.wait_for_timeout(getattr(config, "delay_ms", DELAY_MS))
 
     await _aceptar_cookies_si_aparece(page)
 
@@ -53,6 +56,7 @@ async def ejecutar_login(page: Page, config: XalocConfig) -> Page:
     logging.info("Pulsando enlace y esperando nueva pestaña de VÀLid...")
     async with page.expect_popup() as popup_info:
         await enlace.click()
+        await page.wait_for_timeout(getattr(config, "delay_ms", DELAY_MS))
 
     valid_page = await popup_info.value
     await valid_page.wait_for_load_state("domcontentloaded")
@@ -73,7 +77,20 @@ async def ejecutar_login(page: Page, config: XalocConfig) -> Page:
 
     logging.info("Pulsando botón de certificado...")
     await boton_cert.click()
+    await valid_page.wait_for_timeout(getattr(config, "delay_ms", DELAY_MS))
     thread_popup.join(timeout=10)
+
+    # Si tras aceptar el popup seguimos en login, reintentar Shift+Tab x2.
+    await valid_page.wait_for_timeout(4000)
+    if "seu.xalocgirona.cat/sta/" not in (valid_page.url or ""):
+        logging.warning("Seguimos en login tras 4s; reintentando aceptación de certificado")
+        thread_popup_2 = threading.Thread(
+            target=aceptar_popup_certificado,
+            kwargs={"tabs_atras": 2, "delay_inicial": 0.0},
+            daemon=True,
+        )
+        thread_popup_2.start()
+        thread_popup_2.join(timeout=10)
 
     logging.info("Esperando retorno al formulario STA...")
     await valid_page.wait_for_url(config.url_post_login, timeout=config.timeouts.login)
