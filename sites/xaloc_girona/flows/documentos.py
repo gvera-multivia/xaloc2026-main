@@ -105,15 +105,36 @@ async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]
 
     logging.info(f"Adjuntando {len(archivos)} documento(s)")
     
+    # Verify page is still valid
+    try:
+        if page.is_closed():
+            logging.error("ERROR: La página está cerrada antes de subir documentos!")
+            return
+    except Exception as e:
+        logging.error(f"ERROR: No se puede verificar el estado de la página: {e}")
+        return
+    
     # Wait for page stability
-    await page.wait_for_timeout(1000)
+    try:
+        await page.wait_for_timeout(1000)
+    except Exception as e:
+        logging.error(f"ERROR: Página cerrada durante la espera inicial: {e}")
+        # Try to get current URL for debugging
+        try:
+            logging.error(f"URL actual (si disponible): {page.url}")
+        except:
+            pass
+        return
 
     docs_link = page.locator("a.docs").first
     if await docs_link.count() == 0:
          logging.warning("No se encuentra el enlace de adjuntar documentos (a.docs)")
          # Try to debug/dump
-         content = await page.content()
-         logging.debug(f"HTML Content snip: {content[:200]}")
+         try:
+             content = await page.content()
+             logging.debug(f"HTML Content snip: {content[:500]}")
+         except Exception as e:
+             logging.error(f"No se pudo obtener el contenido de la página: {e}")
          return
 
     popup: Optional[Page] = None
