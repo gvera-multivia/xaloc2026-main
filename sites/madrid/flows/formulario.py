@@ -6,6 +6,7 @@ Implementa las secciones documentadas en explore-html/llenar formulario-madrid.m
 from __future__ import annotations
 
 import logging
+import random
 from typing import TYPE_CHECKING
 
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
@@ -18,10 +19,22 @@ from sites.madrid.data_models import TipoExpediente, NaturalezaEscrito, TipoDocu
 
 logger = logging.getLogger(__name__)
 
+# Delays para parecer más humano (en milisegundos)
+DELAY_ENTRE_CAMPOS_MIN = 150  # 150ms mínimo
+DELAY_ENTRE_CAMPOS_MAX = 400  # 400ms máximo
+DELAY_DESPUES_SELECT = 300   # 300ms después de seleccionar en dropdown
+
+
+async def _delay_humano(page: Page, min_ms: int = DELAY_ENTRE_CAMPOS_MIN, max_ms: int = DELAY_ENTRE_CAMPOS_MAX) -> None:
+    """Añade un pequeño delay aleatorio para simular comportamiento humano."""
+    delay = random.randint(min_ms, max_ms)
+    await page.wait_for_timeout(delay)
+
 
 async def _rellenar_input(page: Page, selector: str, valor: str, nombre_campo: str = "") -> bool:
     """
     Rellena un input de texto si el valor no está vacío.
+    Incluye un pequeño delay para parecer más humano.
     
     Returns:
         True si se rellenó, False si estaba vacío o no se encontró
@@ -40,6 +53,9 @@ async def _rellenar_input(page: Page, selector: str, valor: str, nombre_campo: s
             
             await elemento.first.fill(valor)
             logger.debug(f"  → {nombre_campo or selector}: {valor}")
+            
+            # Pequeño delay después de rellenar
+            await _delay_humano(page)
             return True
     except Exception as e:
         logger.warning(f"  → Error rellenando {nombre_campo or selector}: {e}")
@@ -51,6 +67,7 @@ async def _seleccionar_opcion(page: Page, selector: str, valor: str, nombre_camp
     """
     Selecciona una opción en un select si el valor no está vacío.
     Intenta primero por label, luego por value.
+    Incluye delay para parecer más humano.
     """
     if not valor:
         return False
@@ -67,18 +84,21 @@ async def _seleccionar_opcion(page: Page, selector: str, valor: str, nombre_camp
             try:
                 await elemento.first.select_option(label=valor)
                 logger.debug(f"  → {nombre_campo or selector}: {valor} (por label)")
+                await _delay_humano(page, DELAY_DESPUES_SELECT, DELAY_DESPUES_SELECT + 200)
                 return True
             except:
                 # Si falla, intentar por value
                 try:
                     await elemento.first.select_option(value=valor)
                     logger.debug(f"  → {nombre_campo or selector}: {valor} (por value)")
+                    await _delay_humano(page, DELAY_DESPUES_SELECT, DELAY_DESPUES_SELECT + 200)
                     return True
                 except:
                     # Si ambos fallan, intentar por index si es numérico
                     if valor.isdigit():
                         await elemento.first.select_option(index=int(valor))
                         logger.debug(f"  → {nombre_campo or selector}: opción {valor} (por index)")
+                        await _delay_humano(page, DELAY_DESPUES_SELECT, DELAY_DESPUES_SELECT + 200)
                         return True
                     raise
     except Exception as e:
@@ -90,6 +110,7 @@ async def _seleccionar_opcion(page: Page, selector: str, valor: str, nombre_camp
 async def _marcar_checkbox(page: Page, selector: str, marcar: bool, nombre_campo: str = "") -> bool:
     """
     Marca o desmarca un checkbox.
+    Incluye delay para parecer más humano.
     """
     try:
         elemento = page.locator(selector)
@@ -103,9 +124,11 @@ async def _marcar_checkbox(page: Page, selector: str, marcar: bool, nombre_campo
             if marcar and not is_checked:
                 await elemento.first.check()
                 logger.debug(f"  → {nombre_campo or selector}: marcado")
+                await _delay_humano(page)
             elif not marcar and is_checked:
                 await elemento.first.uncheck()
                 logger.debug(f"  → {nombre_campo or selector}: desmarcado")
+                await _delay_humano(page)
             return True
     except Exception as e:
         logger.warning(f"  → Error con checkbox {nombre_campo or selector}: {e}")
@@ -116,12 +139,14 @@ async def _marcar_checkbox(page: Page, selector: str, marcar: bool, nombre_campo
 async def _click_radio(page: Page, selector: str, nombre_campo: str = "") -> bool:
     """
     Hace click en un radio button.
+    Incluye delay para parecer más humano.
     """
     try:
         elemento = page.locator(selector)
         if await elemento.count() > 0:
             await elemento.first.click()
             logger.debug(f"  → Radio {nombre_campo or selector}: seleccionado")
+            await _delay_humano(page)
             return True
     except Exception as e:
         logger.warning(f"  → Error con radio {nombre_campo or selector}: {e}")
