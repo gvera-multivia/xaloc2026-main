@@ -36,17 +36,77 @@ def _titulo_ventana_activa() -> str:
         return ""
 
 
+def _buscar_ventana_certificado():
+    """
+    Intenta localizar el diálogo nativo de selección de certificado.
+    Devuelve la ventana (PyGetWindow) o None.
+    """
+    posibles = [
+        "Seleccionar un certificado",
+        "Seleccionar certificado",
+        "certificado para la autenticación",
+        "Select a certificate",
+        "certificate",
+        "certificado",
+    ]
+    try:
+        for texto in posibles:
+            wins = pyautogui.getWindowsWithTitle(texto)
+            if wins:
+                return wins[0]
+    except Exception:
+        return None
+    return None
+
+
+def dialogo_certificado_presente() -> bool:
+    return _buscar_ventana_certificado() is not None
+
+
+def aceptar_popup_certificado(*, tabs_atras: int = 2, delay_inicial: float = 0.0) -> bool:
+    """
+    Acepta el popup de certificado: Shift+Tab xN + Enter.
+    Prioriza activar el diálogo de certificado si se encuentra.
+    """
+    try:
+        time.sleep(max(0.0, delay_inicial))
+        win = _buscar_ventana_certificado()
+        if win:
+            try:
+                win.activate()
+            except Exception:
+                pass
+        else:
+            _activar_ventana_activa()
+
+        for _ in range(tabs_atras):
+            pyautogui.hotkey("shift", "tab")
+            time.sleep(0.2)
+        pyautogui.press("enter")
+        return True
+    except Exception as e:
+        logging.error(f"Error aceptando popup de certificado: {e}")
+        return False
+
+
 def enviar_shift_tab_enter(tabs_atras: int = 2, *, evitar_browser: bool = True) -> bool:
     """
     Envía Shift+Tab xN y Enter.
     Útil para aceptar diálogos nativos (p.ej. selección de certificado) sin sleeps internos.
     """
     try:
-        _activar_ventana_activa()
-        titulo = _titulo_ventana_activa().lower()
-        if evitar_browser and any(x in titulo for x in ("chrome", "edge", "firefox", "opera", "brave")):
-            logging.warning("Ventana activa parece ser el navegador; abortando Shift+Tab/Enter.")
-            return False
+        win = _buscar_ventana_certificado()
+        if win:
+            try:
+                win.activate()
+            except Exception:
+                pass
+        else:
+            _activar_ventana_activa()
+            titulo = _titulo_ventana_activa().lower()
+            if evitar_browser and any(x in titulo for x in ("chrome", "edge", "firefox", "opera", "brave")):
+                logging.warning("Ventana activa parece ser el navegador; abortando Shift+Tab/Enter.")
+                return False
 
         for _ in range(tabs_atras):
             pyautogui.hotkey("shift", "tab")

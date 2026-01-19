@@ -28,6 +28,15 @@ async def _detectar_problema_autenticacion(page: Page) -> str | None:
     - acceso: "no se puede obtener acceso a esta página".
     - redirigiendo: cas.madrid.es/commonauth con "Redirigiendo a Cl@ve..." que no avanza.
     """
+    # Si el popup de certificado ya está presente, no disparar recovery.
+    try:
+        from utils.windows_popup import dialogo_certificado_presente
+
+        if dialogo_certificado_presente():
+            return None
+    except Exception:
+        pass
+
     url = (page.url or "").lower()
 
     try:
@@ -73,17 +82,27 @@ async def _recuperar_problema_autenticacion(page: Page, config: "MadridConfig", 
     logger.warning(f"Recuperación auth: detectado problema '{problema}' (URL: {page.url})")
 
     await page.wait_for_timeout(3000)
+    try:
+        from utils.windows_popup import dialogo_certificado_presente, aceptar_popup_certificado
+
+        if dialogo_certificado_presente():
+            aceptar_popup_certificado(tabs_atras=2, delay_inicial=0.0)
+            return True
+    except Exception:
+        pass
     if await _detectar_problema_autenticacion(page) is None:
         logger.info("Recuperación auth: el problema desapareció tras espera pasiva")
         return True
 
-    from utils.windows_popup import enviar_shift_tab_enter
+    from utils.windows_popup import aceptar_popup_certificado
 
     # En este caso el popup aparece "a mitad" del refresh: programamos Shift+Tab x2
     # sin esperar a que termine la recarga.
     def _delayed_shift_tab() -> None:
-        time.sleep(getattr(config, "cert_popup_midload_delay_ms", 800) / 1000.0)
-        enviar_shift_tab_enter(tabs_atras=2, evitar_browser=True)
+        aceptar_popup_certificado(
+            tabs_atras=2,
+            delay_inicial=getattr(config, "cert_popup_midload_delay_ms", 800) / 1000.0,
+        )
 
     popup_thread = threading.Thread(target=_delayed_shift_tab, daemon=True)
     popup_thread.start()
@@ -107,7 +126,7 @@ async def _click_certificado_y_aceptar_popup(page: Page, config: "MadridConfig")
     Click en 'DNIe / Certificado' y aceptación del popup.
     Monitoriza la página durante ~3s antes de enviar Shift+Tab x2 (evita enviar teclas si hay error de carga).
     """
-    from utils.windows_popup import enviar_shift_tab_enter
+    from utils.windows_popup import aceptar_popup_certificado
 
     await page.click(config.certificado_login_selector)
     logger.info("  ƒÅ' Click en 'DNIe / Certificado'")
@@ -115,8 +134,10 @@ async def _click_certificado_y_aceptar_popup(page: Page, config: "MadridConfig")
     # El popup aparece mientras la página aún está cargando: programar Shift+Tab x2
     # sin esperar a un estado de carga concreto.
     def _delayed_shift_tab() -> None:
-        time.sleep(getattr(config, "cert_popup_midload_delay_ms", 800) / 1000.0)
-        enviar_shift_tab_enter(tabs_atras=2, evitar_browser=True)
+        aceptar_popup_certificado(
+            tabs_atras=2,
+            delay_inicial=getattr(config, "cert_popup_midload_delay_ms", 800) / 1000.0,
+        )
 
     popup_thread = threading.Thread(target=_delayed_shift_tab, daemon=True)
     popup_thread.start()
