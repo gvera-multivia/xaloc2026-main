@@ -50,6 +50,7 @@ async def _rellenar_input(page: Page, selector: str, valor: str, nombre_campo: s
 async def _seleccionar_opcion(page: Page, selector: str, valor: str, nombre_campo: str = "") -> bool:
     """
     Selecciona una opción en un select si el valor no está vacío.
+    Intenta primero por label, luego por value.
     """
     if not valor:
         return False
@@ -62,9 +63,24 @@ async def _seleccionar_opcion(page: Page, selector: str, valor: str, nombre_camp
                 logger.debug(f"  → Select {nombre_campo or selector} deshabilitado, saltando")
                 return False
             
-            await elemento.first.select_option(label=valor)
-            logger.debug(f"  → {nombre_campo or selector}: {valor}")
-            return True
+            # Intentar primero por label
+            try:
+                await elemento.first.select_option(label=valor)
+                logger.debug(f"  → {nombre_campo or selector}: {valor} (por label)")
+                return True
+            except:
+                # Si falla, intentar por value
+                try:
+                    await elemento.first.select_option(value=valor)
+                    logger.debug(f"  → {nombre_campo or selector}: {valor} (por value)")
+                    return True
+                except:
+                    # Si ambos fallan, intentar por index si es numérico
+                    if valor.isdigit():
+                        await elemento.first.select_option(index=int(valor))
+                        logger.debug(f"  → {nombre_campo or selector}: opción {valor} (por index)")
+                        return True
+                    raise
     except Exception as e:
         logger.warning(f"  → Error seleccionando {nombre_campo or selector}: {e}")
     
@@ -219,15 +235,16 @@ async def ejecutar_formulario_madrid(
     rep_con = rep.contacto
     
     # Dirección (solo campos editables)
+    await _rellenar_input(page, config.representante_municipio_selector, rep_dir.municipio, "Municipio rep.")
     await _seleccionar_opcion(page, config.representante_tipo_via_selector, rep_dir.tipo_via, "Tipo vía rep.")
     await _rellenar_input(page, config.representante_nombre_via_selector, rep_dir.nombre_via, "Nombre vía rep.")
     await _seleccionar_opcion(page, config.representante_tipo_num_selector, rep_dir.tipo_numeracion, "Tipo num. rep.")
+    await _rellenar_input(page, config.representante_numero_selector, rep_dir.numero, "Número rep.")
     await _rellenar_input(page, config.representante_portal_selector, rep_dir.portal, "Portal rep.")
     await _rellenar_input(page, config.representante_escalera_selector, rep_dir.escalera, "Escalera rep.")
     await _rellenar_input(page, config.representante_planta_selector, rep_dir.planta, "Planta rep.")
     await _rellenar_input(page, config.representante_puerta_selector, rep_dir.puerta, "Puerta rep.")
     await _rellenar_input(page, config.representante_codpostal_selector, rep_dir.codigo_postal, "C.P. rep.")
-    await _rellenar_input(page, config.representante_municipio_selector, rep_dir.municipio, "Municipio rep.")
     await _seleccionar_opcion(page, config.representante_provincia_selector, rep_dir.provincia, "Provincia rep.")
     await _seleccionar_opcion(page, config.representante_pais_selector, rep_dir.pais, "País rep.")
     
