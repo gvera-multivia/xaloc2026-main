@@ -28,7 +28,7 @@ def print_header():
     print("    XALOC 2026 - AUTOMATIZACIÓN DE TRÁMITES")
     print("=" * 60)
     print()
-    print("    ⚠️  MODO PRUEBAS - DATOS DUMMY ⚠️")
+    print("    !  MODO PRUEBAS - DATOS DUMMY !")
     print("    Los protocolos NO envían datos reales.")
     print()
     print("-" * 60)
@@ -67,14 +67,14 @@ def _prompt_site_id() -> str:
     clear_screen()
     print_header()
     print()
-    print("  📌 PASO 1: Selecciona la web a probar")
+    print("  --> PASO 1: Selecciona la web a probar")
     print()
     
     for idx, sid in enumerate(sites, start=1):
         info = print_site_info(sid)
         nombre = info.get("nombre", sid)
         descripcion = info.get("descripcion", "")
-        tiene_subprocesos = "✓ Subprocesos" if info.get("subprocesos") else ""
+        tiene_subprocesos = "<3> Subprocesos" if info.get("subprocesos") else ""
         
         print(f"    {idx}. {nombre}")
         print(f"       └─ {descripcion}")
@@ -90,7 +90,7 @@ def _prompt_site_id() -> str:
             return sites[int(raw) - 1]
         if raw in sites:
             return raw
-        print(f"  ❌ Entrada inválida. Opciones válidas: 1-{len(sites)}")
+        print(f"  !! Entrada inválida. Opciones válidas: 1-{len(sites)}")
 
 
 def _prompt_protocol(site_id: str) -> str | None:
@@ -104,9 +104,9 @@ def _prompt_protocol(site_id: str) -> str | None:
     clear_screen()
     print_header()
     print()
-    print(f"  📌 PASO 2: Selecciona el subproceso para {info.get('nombre', site_id)}")
+    print(f"  --> PASO 2: Selecciona el subproceso para {info.get('nombre', site_id)}")
     print()
-    print("    ℹ️  Los subprocesos actuales son métodos de prueba DUMMY.")
+    print("    INFO:  Los subprocesos actuales son métodos de prueba DUMMY.")
     print("       No se enviarán datos reales al servidor.")
     print()
     
@@ -118,6 +118,11 @@ def _prompt_protocol(site_id: str) -> str | None:
     print("-" * 60)
     
     while True:
+        print("\n-----------------------------------------------------------")
+        print("P1 -> Identificación de Conductor")
+        print("P2 -> Alegaciones")
+        print("P3 -> Recurso de Reposición")
+        print("\n-----------------------------------------------------------")
         raw = input("\n  Introduce el número o código (P1/P2/P3): ").strip().upper()
         
         # Aceptar número
@@ -128,7 +133,7 @@ def _prompt_protocol(site_id: str) -> str | None:
         if raw in opciones:
             return raw
         
-        print(f"  ❌ Entrada inválida. Opciones: 1-{len(opciones)} o {', '.join(opciones)}")
+        print(f"  !! Entrada inválida. Opciones: 1-{len(opciones)} o {', '.join(opciones)}")
 
 
 def _show_summary(site_id: str, protocol: str | None):
@@ -138,7 +143,7 @@ def _show_summary(site_id: str, protocol: str | None):
     clear_screen()
     print_header()
     print()
-    print("  📋 RESUMEN DE LA PRUEBA")
+    print("  <> RESUMEN DE LA PRUEBA")
     print()
     print(f"    • Web:         {info.get('nombre', site_id)}")
     
@@ -147,7 +152,7 @@ def _show_summary(site_id: str, protocol: str | None):
         print(f"    • Subproceso:  [{protocol}] {desc}")
     
     print()
-    print("  ⚠️  RECORDATORIO:")
+    print("  !  RECORDATORIO:")
     print("    - Esta es una prueba con datos DUMMY")
     print("    - Los protocolos NO envían información real")
     print("    - El popup de certificado se aceptará automáticamente")
@@ -215,7 +220,7 @@ async def main() -> None:
     )
 
     print("\n" + "=" * 60)
-    print(f"  🚀 INICIANDO AUTOMATIZACIÓN: {site_id.upper()}")
+    print(f"  >>> INICIANDO AUTOMATIZACIÓN: {site_id.upper()}")
     if protocol:
         print(f"     Subproceso: {protocol}")
     print("=" * 60)
@@ -224,10 +229,10 @@ async def main() -> None:
     async with AutomationCls(config) as bot:
         try:
             screenshot_path = await bot.ejecutar_flujo_completo(datos)
-            print(f"\n  ✅ PROCESO FINALIZADO CON ÉXITO")
+            print(f"\n  <> PROCESO FINALIZADO CON ÉXITO")
             print(f"     Screenshot: {screenshot_path}")
         except Exception as e:
-            print(f"\n  ❌ ERROR durante la ejecución: {e}")
+            print(f"\n  !! ERROR durante la ejecución: {e}")
         finally:
             print()
             print("-" * 60)

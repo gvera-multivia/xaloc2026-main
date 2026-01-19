@@ -59,6 +59,11 @@ class BaseConfig:
     auto_select_certificate_pattern: str = "*"
     stealth_disable_webdriver: bool = False
 
+    # Delays (milisegundos)
+    # Útiles para desacelerar la demo y dar tiempo a renders/handlers del sitio.
+    delay_ms: int = 500
+    cert_popup_delay_ms: int = 2000
+
     def ensure_directories(self) -> None:
         self.dir_screenshots.mkdir(exist_ok=True)
         self.dir_logs.mkdir(exist_ok=True)

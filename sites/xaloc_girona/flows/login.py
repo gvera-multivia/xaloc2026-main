@@ -7,8 +7,9 @@ from __future__ import annotations
 import logging
 import re
 import threading
+import time
 
-from playwright.async_api import Page
+from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
 from sites.xaloc_girona.config import XalocConfig
 from utils.windows_popup import esperar_y_aceptar_certificado
@@ -32,6 +33,34 @@ async def _aceptar_cookies_si_aparece(page: Page) -> None:
                 return
         except Exception:
             continue
+
+
+async def _detectar_error_auth(page: Page) -> str | None:
+    url = (page.url or "").lower()
+    try:
+        titulo = (await page.title()).lower()
+    except Exception:
+        titulo = ""
+
+    if "ssl" in titulo or "err_ssl" in titulo:
+        return "ssl"
+    try:
+        if await page.locator("text=/no se puede obtener acceso/i").first.is_visible(timeout=500):
+            return "acceso"
+    except Exception:
+        pass
+    try:
+        if await page.locator("text=/ssl\\s*(handshake|protocol|error)|err_ssl/i").first.is_visible(timeout=500):
+            return "ssl"
+    except Exception:
+        pass
+    if "commonauth" in url:
+        try:
+            if await page.locator("text=/redirigiendo/i").first.is_visible(timeout=500):
+                return "redirigiendo"
+        except Exception:
+            pass
+    return None
 
 
 async def ejecutar_login(page: Page, config: XalocConfig) -> Page:
@@ -73,7 +102,37 @@ async def ejecutar_login(page: Page, config: XalocConfig) -> Page:
     thread_popup.join(timeout=10)
 
     logging.info("Esperando retorno al formulario STA...")
-    await valid_page.wait_for_url(config.url_post_login, timeout=config.timeouts.login)
+    deadline = time.monotonic() + (config.timeouts.login / 1000.0)
+    while True:
+        try:
+            await valid_page.wait_for_url(config.url_post_login, timeout=2000)
+            break
+        except PlaywrightTimeoutError:
+            if time.monotonic() > deadline:
+                raise
+            problema = await _detectar_error_auth(valid_page)
+            if problema:
+                logging.warning(f"Detectado problema auth '{problema}', recovery: espera 3s + refresh")
+                await valid_page.wait_for_timeout(3000)
+                try:
+                    await valid_page.reload(wait_until="domcontentloaded", timeout=30000)
+                except Exception:
+                    try:
+                        await valid_page.keyboard.press("F5")
+                    except Exception:
+                        pass
+                await valid_page.wait_for_timeout(getattr(config, "cert_popup_delay_ms", 2000))
+                thread_popup = threading.Thread(
+                    target=esperar_y_aceptar_certificado,
+                    kwargs={"delay_inicial": 0.0},
+                    daemon=True,
+                )
+                thread_popup.start()
+                try:
+                    await boton_cert.click(timeout=2000)
+                except Exception:
+                    pass
+                thread_popup.join(timeout=10)
     logging.info("Login completado con éxito - Formulario STA cargado")
 
     return valid_page

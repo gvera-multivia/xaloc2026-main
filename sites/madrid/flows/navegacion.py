@@ -77,16 +77,7 @@ async def _recuperar_problema_autenticacion(page: Page, config: "MadridConfig", 
         logger.info("Recuperación auth: el problema desapareció tras espera pasiva")
         return True
 
-    from utils.windows_popup import confirmar_reenvio_formulario
-
-    popup_thread: threading.Thread | None = None
-    if problema == "ssl":
-        popup_thread = threading.Thread(
-            target=confirmar_reenvio_formulario,
-            kwargs={"delay_inicial": 0.8},
-            daemon=True,
-        )
-        popup_thread.start()
+    from utils.windows_popup import enviar_shift_tab_enter
 
     try:
         await page.reload(wait_until="domcontentloaded", timeout=config.navigation_timeout)
@@ -97,8 +88,15 @@ async def _recuperar_problema_autenticacion(page: Page, config: "MadridConfig", 
         except Exception:
             pass
 
-    if popup_thread:
-        popup_thread.join(timeout=5)
+    # Tras el refresh, el popup de certificado aparece sin cambiar la URL: esperar y aceptar.
+    await page.wait_for_timeout(getattr(config, "cert_popup_delay_ms", 2000))
+    popup_thread = threading.Thread(
+        target=enviar_shift_tab_enter,
+        kwargs={"tabs_atras": 2, "evitar_browser": True},
+        daemon=True,
+    )
+    popup_thread.start()
+    popup_thread.join(timeout=5)
 
     return True
 
@@ -113,8 +111,10 @@ async def _click_certificado_y_aceptar_popup(page: Page, config: "MadridConfig")
     await page.click(config.certificado_login_selector)
     logger.info("  ƒÅ' Click en 'DNIe / Certificado'")
 
+    # Tras el click, la web puede quedarse "cargando" y el popup tarda en aparecer.
+    # Esperamos ~2s monitorizando errores antes de enviar Shift+Tab x2.
     start = time.monotonic()
-    while time.monotonic() - start < 3.0:
+    while time.monotonic() - start < (getattr(config, "cert_popup_delay_ms", 2000) / 1000.0):
         problema = await _detectar_problema_autenticacion(page)
         if problema:
             await _recuperar_problema_autenticacion(page, config, problema)
@@ -337,8 +337,8 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
         Page: Página de Playwright en el formulario final
     """
     
-    # Delay entre pasos de navegación (para evitar errores SSL)
-    DELAY_ENTRE_PASOS = 1500  # 1.5 segundos
+    # Delay entre pasos de navegación (demo)
+    DELAY_ENTRE_PASOS = int(getattr(config, "delay_ms", 500))
     
     # ========================================================================
     # CONFIGURACIÓN INICIAL: Bloqueo de popups de redes sociales
@@ -436,8 +436,8 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
     # Aceptar cookies en dominio de login si aparecen
     await _aceptar_cookies_si_aparece(page)
     
-    # Delay extra antes del paso de certificado (crítico para evitar SSL errors)
-    await page.wait_for_timeout(2000)  # 2 segundos extra
+    # Delay extra antes del paso de certificado (demo)
+    await page.wait_for_timeout(int(getattr(config, "delay_ms", 500)))
     
     # ========================================================================
     # PASO 5: Click "DNIe / Certificado"
