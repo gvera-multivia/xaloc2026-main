@@ -151,7 +151,7 @@ async def ejecutar_upload_madrid(page: Page, config: MadridConfig, archivos: lis
             await page.click(selector_mas)
 
             try:
-                await page.wait_for_load_state("domcontentloaded", timeout=5000)
+                await page.wait_for_load_state("domcontentloaded", timeout=6000)
             except PlaywrightTimeoutError:
                 pass
 

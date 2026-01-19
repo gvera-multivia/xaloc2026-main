@@ -149,7 +149,7 @@ def esperar_y_aceptar_certificado(timeout: float = 20.0, delay_inicial: float = 
     """
     try:
         # 1. Espera crucial: da tiempo a que el popup se dibuje y gane foco
-        logging.info(f"⏳ Esperando {delay_inicial}s a que aparezca el popup...")
+        logging.info(f"-- Esperando {delay_inicial}s a que aparezca el popup...")
         time.sleep(delay_inicial)
         
         # 2. Navegar por el popup con Shift+Tab
@@ -168,11 +168,11 @@ def esperar_y_aceptar_certificado(timeout: float = 20.0, delay_inicial: float = 
         logging.info("⌨️ Enviando ENTER al popup de Windows...")
         pyautogui.press('enter')
         
-        logging.info("✅ Secuencia de teclas enviada correctamente")
+        logging.info("-> Secuencia de teclas enviada correctamente")
         return True
         
     except Exception as e:
-        logging.error(f"❌ Error al interactuar con el popup: {e}")
+        logging.error(f"!! Error al interactuar con el popup: {e}")
         return False
 
 
@@ -201,10 +201,10 @@ def navegar_y_aceptar_certificado(tabs_atras: int = 2) -> bool:
         # Pulsar Enter para aceptar
         time.sleep(0.3)
         pyautogui.press('enter')
-        logging.info("✅ ENTER enviado")
+        logging.info("-> ENTER enviado")
         
         return True
         
     except Exception as e:
-        logging.error(f"❌ Error: {e}")
+        logging.error(f"!! Error: {e}")
         return False

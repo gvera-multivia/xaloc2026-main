@@ -148,7 +148,7 @@ async def ejecutar_login(page: Page, config: Config) -> Page:
     await page.get_by_role("link", name="Tramitació en línia").click()
     
     # 2. Esperar redirección a VÀLid
-    logging.info("⏳ Esperando pasarela VÀLid...")
+    logging.info("-- Esperando pasarela VÀLid...")
     await page.wait_for_url("**/valid.aoc.cat/**", timeout=10000)
     
     # 3. Seleccionar método certificado
@@ -157,13 +157,13 @@ async def ejecutar_login(page: Page, config: Config) -> Page:
     
     # 4. El popup de certificado es del SO - perfil persistente lo maneja
     # 5. Esperar llegada al formulario STA
-    logging.info("⏳ Esperando formulario STA...")
+    logging.info("-- Esperando formulario STA...")
     await page.wait_for_url(
         "**/seu.xalocgirona.cat/sta/**", 
         timeout=config.timeouts.login
     )
     
-    logging.info("✅ Login completado - Formulario STA cargado")
+    logging.info("-> Login completado - Formulario STA cargado")
 ```
 
 ### Configuración del Certificado
@@ -211,7 +211,7 @@ async def rellenar_formulario(page: Page, datos: DatosMulta) -> None:
     editor = page.frame_locator("#DinVarMOTIUS_ifr")
     await editor.locator("body#tinymce").fill(datos.motivos)
     
-    logging.info("✅ Formulario completado")
+    logging.info("-> Formulario completado")
 ```
 
 ---
@@ -245,7 +245,7 @@ async def subir_documento(page: Page, archivo: Path) -> None:
     await page.wait_for_timeout(2000)
     await page.wait_for_load_state("networkidle")
     
-    logging.info("✅ Documento subido")
+    logging.info("-> Documento subido")
 ```
 
 ---
@@ -284,7 +284,7 @@ async def confirmar_tramite(page: Page, screenshots_dir: Path) -> str:
     await page.screenshot(path=screenshot_path, full_page=True)
     
     logging.warning("🛑 PROCESO DETENIDO - Screenshot guardado")
-    logging.warning("⚠️ Botón 'Enviar' NO pulsado (modo testing)")
+    logging.warning("!! Botón 'Enviar' NO pulsado (modo testing)")
     
     return str(screenshot_path)
 ```

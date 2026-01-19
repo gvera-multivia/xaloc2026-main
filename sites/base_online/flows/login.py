@@ -44,7 +44,7 @@ async def _esperar_dom_estable(page: Page, timeout_ms: int = 2000) -> None:
     hacen peticiones de red constantes y nunca se alcanza el estado idle.
     """
     try:
-        await page.wait_for_load_state("domcontentloaded", timeout=5000)
+        await page.wait_for_load_state("domcontentloaded", timeout=6000)
     except PlaywrightTimeout:
         logging.warning("Timeout esperando domcontentloaded, continuando...")
     
@@ -83,7 +83,7 @@ async def _localizar_enlace_base_online(page: Page, config: BaseOnlineConfig):
             logging.debug(f"[FASE 1.2] Estrategia '{nombre}': encontrados {count} elementos")
             
             if count > 0:
-                await enlace.wait_for(state="visible", timeout=5000)
+                await enlace.wait_for(state="visible", timeout=6000)
                 logging.info(f"[FASE 1.2] ✓ Enlace encontrado con '{nombre}'")
                 return enlace
         except PlaywrightTimeout:

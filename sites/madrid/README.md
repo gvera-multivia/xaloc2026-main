@@ -129,7 +129,7 @@ try:
     await page.wait_for_selector(
         config.boton_nuevo_tramite_condicional,
         state="visible",
-        timeout=5000  # Only 5 seconds
+        timeout=6000  # Only 5 seconds
     )
     # Found it - click to clear partial submission
     await page.click(config.boton_nuevo_tramite_condicional)

@@ -275,7 +275,7 @@ async def _esperar_dom_estable(page: Page, timeout_ms: int = 2000) -> None:
     peticiones constantes y nunca se alcanza el estado idle.
     """
     try:
-        await page.wait_for_load_state("domcontentloaded", timeout=5000)
+        await page.wait_for_load_state("domcontentloaded", timeout=6000)
     except PlaywrightTimeoutError:
         logger.warning("Timeout esperando domcontentloaded, continuando...")
     
@@ -625,7 +625,7 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
         await page.wait_for_selector(
             config.boton_nuevo_tramite_condicional,
             state="visible",
-            timeout=5000  # Solo 5 segundos
+            timeout=6000  # Solo 5 segundos
         )
         
         logger.info("  → Detectado trámite a medias, clickando 'Nuevo trámite'")
