@@ -154,13 +154,13 @@ async def _click_radio(page: Page, selector: str, nombre_campo: str = "") -> boo
     return False
 
 
-async def _esperar_actualizacion_dom(page: Page, timeout_ms: int = 2000) -> None:
+async def _esperar_actualizacion_dom(page: Page, timeout_ms: int = 1000) -> None:
     """
     Espera a que el DOM se actualice después de un cambio que dispara refresh.
     """
     await page.wait_for_timeout(timeout_ms)
     try:
-        await page.wait_for_load_state("domcontentloaded", timeout=5000)
+        await page.wait_for_load_state("domcontentloaded", timeout=3000)
     except PlaywrightTimeoutError:
         pass
 
@@ -206,7 +206,7 @@ async def ejecutar_formulario_madrid(
     if exp.tipo == TipoExpediente.OPCION1:
         # Seleccionar opción 1 (NNN/EEEEEEEEE.D)
         await _click_radio(page, config.expediente_tipo_1_selector, "Tipo expediente opción 1")
-        await _esperar_actualizacion_dom(page, 1500)
+        await _esperar_actualizacion_dom(page, 1000)
         
         # Rellenar campos
         await _rellenar_input(page, config.expediente_1_nnn_selector, exp.nnn, "NNN")
@@ -217,7 +217,7 @@ async def ejecutar_formulario_madrid(
     else:
         # Seleccionar opción 2 (LLL/AAAA/EEEEEEEEE)
         await _click_radio(page, config.expediente_tipo_2_selector, "Tipo expediente opción 2")
-        await _esperar_actualizacion_dom(page, 1500)
+        await _esperar_actualizacion_dom(page, 1000)
         
         # Rellenar campos
         await _rellenar_input(page, config.expediente_2_lll_selector, exp.lll, "LLL")
@@ -300,11 +300,11 @@ async def ejecutar_formulario_madrid(
     if notif.copiar_desde == "interesado":
         logger.info("  → Copiando datos del interesado...")
         await page.click(config.notificacion_copiar_interesado_selector)
-        await _esperar_actualizacion_dom(page, 2000)
+        await _esperar_actualizacion_dom(page, 1000)
     elif notif.copiar_desde == "representante":
         logger.info("  → Copiando datos del representante...")
         await page.click(config.notificacion_copiar_representante_selector)
-        await _esperar_actualizacion_dom(page, 2000)
+        await _esperar_actualizacion_dom(page, 1000)
     
     # Identificación
     notif_id = notif.identificacion
@@ -312,7 +312,7 @@ async def ejecutar_formulario_madrid(
     # Seleccionar tipo de documento (dispara refresh)
     tipo_doc_valor = notif_id.tipo_documento.value
     await _seleccionar_opcion(page, config.notificacion_tipo_doc_selector, tipo_doc_valor, "Tipo doc. notif.")
-    await _esperar_actualizacion_dom(page, 2000)  # El PDF indica que hay refresh al cambiar tipo
+    await _esperar_actualizacion_dom(page, 1000)  # El PDF indica que hay refresh al cambiar tipo
     
     await _rellenar_input(page, config.notificacion_num_doc_selector, notif_id.numero_documento, "Núm. doc. notif.")
     
@@ -368,7 +368,7 @@ async def ejecutar_formulario_madrid(
         logger.info("  → Naturaleza: Identificación del conductor/a")
     
     # Esperar actualización del DOM (hay refresh_method)
-    await _esperar_actualizacion_dom(page, 1500)
+    await _esperar_actualizacion_dom(page, 1000)
     
     # =========================================================================
     # SECCIÓN 7: Expone y Solicita

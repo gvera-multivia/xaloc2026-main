@@ -9,7 +9,7 @@ from pathlib import Path
 from core.base_automation import BaseAutomation
 from sites.madrid.config import MadridConfig
 from sites.madrid.data_models import MadridTarget
-from sites.madrid.flows import ejecutar_navegacion_madrid, ejecutar_formulario_madrid
+from sites.madrid.flows import ejecutar_navegacion_madrid, ejecutar_formulario_madrid, ejecutar_upload_madrid
 
 
 class MadridAutomation(BaseAutomation):
@@ -29,9 +29,9 @@ class MadridAutomation(BaseAutomation):
         Fases implementadas:
         - FASE 1: Navegación hasta el formulario (11 pasos)
         - FASE 2: Rellenado del formulario (8 secciones)
+        - FASE 3: Subida de documentos (adjuntos)
         
         Fases futuras:
-        - FASE 3: Subida de documentos
         - FASE 4: Confirmación y envío
         
         Args:
@@ -78,23 +78,24 @@ class MadridAutomation(BaseAutomation):
                 self.logger.info("\n⚠ Sin datos de formulario, saltando FASE 2")
             
             # ================================================================
-            # FASE 3: SUBIDA DE DOCUMENTOS (FUTURO)
+            # FASE 3: SUBIDA DE DOCUMENTOS (adjuntos)
             # ================================================================
-            # TODO: Implementar si el formulario requiere adjuntos
-            # if datos.archivos_adjuntos:
-            #     self.logger.info("\n" + "=" * 80)
-            #     self.logger.info("FASE 3: SUBIDA DE DOCUMENTOS")
-            #     self.logger.info("=" * 80)
-            #     await ejecutar_upload_madrid(self.page, self.config, datos.archivos_adjuntos)
+            if datos.archivos_adjuntos:
+                self.logger.info("\n" + "=" * 80)
+                self.logger.info("FASE 3: SUBIDA DE DOCUMENTOS")
+                self.logger.info("=" * 80)
+                self.page = await ejecutar_upload_madrid(self.page, self.config, datos.archivos_adjuntos)
+            else:
+                self.logger.info("\nƒsÿ Sin adjuntos, saltando FASE 3")
             
             # ================================================================
-            # FASE 4: CONFIRMACIÓN Y ENVÍO (FUTURO)
+            # FASE 4: FIRMA Y REGISTRO (NO SE EJECUTA EN DEMO)
             # ================================================================
-            # TODO: Implementar confirmación final
-            # self.logger.info("\n" + "=" * 80)
-            # self.logger.info("FASE 4: CONFIRMACIÓN Y ENVÍO")
-            # self.logger.info("=" * 80)
-            # await ejecutar_confirmacion_madrid(self.page, self.config)
+            # Importante: el siguiente paso sería pulsar "Firma y registrar" (`#btRedireccion`),
+            # pero se deja sin ejecutar en modo demo.
+            self.logger.info("\n" + "=" * 80)
+            self.logger.info("FASE 4: FIRMA Y REGISTRO (NO SE EJECUTA EN DEMO)")
+            self.logger.info("=" * 80)
             
             # ================================================================
             # CAPTURA DE SCREENSHOT FINAL

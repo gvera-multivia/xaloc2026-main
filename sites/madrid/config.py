@@ -179,6 +179,16 @@ class MadridConfig(BaseConfig):
     
     guardar_borrador_selector: str = "input[name='guardar_borrador'][type='submit']"
     continuar_formulario_selector: str = "input[type='submit'][value='Continuar']"
+
+    # =========================================================================
+    # ADJUNTOS / FIRMA (pantallas posteriores)
+    # =========================================================================
+
+    # Botón "Continuar" tras adjuntar documentos
+    adjuntos_continuar_selector: str = "input[id='formDesigner:_id699'][type='submit'][value='Continuar']"
+
+    # Botón final "Firma y registrar" (NO se pulsa en modo demo)
+    firma_registrar_selector: str = "input#btRedireccion"
     
     # =========================================================================
     # Configuración de esperas
