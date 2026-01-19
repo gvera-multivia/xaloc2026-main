@@ -15,18 +15,57 @@ class XalocGironaController:
         config.navegador.headless = bool(headless)
         return config
 
-    def create_demo_data(self) -> DatosMulta:
-        archivos_a_enviar = [
-            Path("pdfs-prueba") / "test1.pdf",
-            # Path("pdfs-prueba") / "test2.pdf",
-        ]
+    def map_data(self, data: dict) -> dict:
+        """
+        Mapea claves genéricas de DB a argumentos de create_target.
+        """
+        return {
+            "email": data.get("user_email"),
+            "num_denuncia": data.get("denuncia_num"),
+            "matricula": data.get("plate_number"),
+            "num_expediente": data.get("expediente_num"),
+            "motivos": data.get("motivos"),
+            # En un caso real, los archivos podrían venir de otra forma o descargarse
+            "archivos_adjuntos": data.get("archivos")
+        }
+
+    def create_target(
+        self,
+        email: str,
+        num_denuncia: str,
+        matricula: str,
+        num_expediente: str,
+        motivos: str,
+        archivos_adjuntos: list[Path] | list[str] | None = None
+    ) -> DatosMulta:
+        if not archivos_adjuntos:
+            archivos_adjuntos = [Path("pdfs-prueba") / "test1.pdf"]
+
+        # Asegurar que sean Path
+        paths = []
+        for a in archivos_adjuntos:
+            if isinstance(a, str):
+                paths.append(Path(a))
+            else:
+                paths.append(a)
+
         return DatosMulta(
+            email=email or "test@example.com",
+            num_denuncia=num_denuncia or "DEN/2024/001",
+            matricula=matricula or "1234ABC",
+            num_expediente=num_expediente or "EXP/2024/001",
+            motivos=motivos or "Alegación de prueba.",
+            archivos_adjuntos=paths,
+        )
+
+    def create_demo_data(self) -> DatosMulta:
+        return self.create_target(
             email="test@example.com",
             num_denuncia="DEN/2024/001",
             matricula="1234ABC",
             num_expediente="EXP/2024/001",
             motivos="Alegación de prueba.",
-            archivos_adjuntos=archivos_a_enviar,
+            archivos_adjuntos=[Path("pdfs-prueba") / "test1.pdf"]
         )
 
 

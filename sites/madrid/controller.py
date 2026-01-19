@@ -157,5 +157,33 @@ class MadridController:
             headless=headless,
         )
 
+    create_target = create_demo_data
+
+    def map_data(self, data: dict) -> dict:
+        """
+        Mapea claves genéricas de DB a argumentos de create_target.
+        """
+        return {
+            "matricula": data.get("plate_number"),
+            "inter_telefono": data.get("user_phone"),
+            "rep_email": data.get("representative_email"),
+            "rep_movil": data.get("representative_phone"),
+            "rep_nombre_via": data.get("representative_street"),
+            "rep_numero": data.get("representative_number"),
+            "rep_cp": data.get("representative_zip"),
+            "rep_municipio": data.get("representative_city"),
+            "notif_nombre": data.get("notif_name"),
+            "notif_apellido1": data.get("notif_surname1"),
+            "notif_apellido2": data.get("notif_surname2"),
+            "exp_tipo": data.get("expediente_tipo"),
+            "exp_nnn": data.get("expediente_nnn"),
+            "exp_eeeeeeeee": data.get("expediente_eeeeeeeee"),
+            "exp_d": data.get("expediente_d"),
+            "naturaleza": data.get("naturaleza"),
+            "expone": data.get("expone"),
+            "solicita": data.get("solicita"),
+            "archivos": data.get("archivos"),
+        }
+
 def get_controller() -> MadridController:
     return MadridController()
