@@ -3,10 +3,10 @@ from __future__ import annotations
 from core.base_automation import BaseAutomation
 from sites.xaloc_girona.config import XalocConfig
 from sites.xaloc_girona.data_models import DatosMulta
-    confirmar_tramite,
-    ejecutar_login,
-    rellenar_formulario,
-)
+from sites.xaloc_girona.flows.confirmacion import confirmar_tramite
+from sites.xaloc_girona.flows.login import ejecutar_login
+from sites.xaloc_girona.flows.formulario import rellenar_formulario
+
 
 
 class XalocGironaAutomation(BaseAutomation):
