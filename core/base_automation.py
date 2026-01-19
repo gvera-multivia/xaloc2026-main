@@ -57,6 +57,13 @@ class BaseAutomation:
         return args
 
     async def __aenter__(self):
+        await self._start_browser()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self._stop_browser()
+
+    async def _start_browser(self) -> None:
         self.logger.info("Iniciando navegador con perfil persistente...")
         self.playwright = await async_playwright().start()
 
@@ -74,7 +81,9 @@ class BaseAutomation:
 
         if self.config.stealth_disable_webdriver:
             try:
-                await self.context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                await self.context.add_init_script(
+                    "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+                )
             except Exception:
                 pass
 
@@ -85,14 +94,27 @@ class BaseAutomation:
 
         self.page.set_default_timeout(self.config.timeouts.general)
         self.logger.info("Navegador listo")
-        return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def _stop_browser(self) -> None:
         if self.context:
-            await self.context.close()
+            try:
+                await self.context.close()
+            finally:
+                self.context = None
+                self.page = None
         if self.playwright:
-            await self.playwright.stop()
+            try:
+                await self.playwright.stop()
+            finally:
+                self.playwright = None
         self.logger.info("Navegador cerrado")
+
+    async def restart_browser(self) -> None:
+        """
+        Cierra por completo el navegador/contexto y lo vuelve a abrir con el mismo perfil.
+        """
+        await self._stop_browser()
+        await self._start_browser()
 
     async def capture_error_screenshot(self, filename: str = "error.png") -> Optional[Path]:
         if not self.page:

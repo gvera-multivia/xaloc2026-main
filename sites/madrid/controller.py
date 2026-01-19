@@ -141,7 +141,7 @@ class MadridController:
         )
         
         if archivos is None:
-            archivos = ["pdfs-prueba/test1.pdf"]
+            archivos = ["pdfs-prueba/test1.pdf", "pdfs-prueba/test2.pdf"]
 
         return MadridTarget(
             form_data=form_data,

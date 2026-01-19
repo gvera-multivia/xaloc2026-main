@@ -14,10 +14,29 @@ from typing import TYPE_CHECKING
 
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
+from core.errors import RestartRequiredError
+
 if TYPE_CHECKING:
     from sites.madrid.config import MadridConfig
 
 logger = logging.getLogger(__name__)
+
+async def _detectar_tramite_en_curso(page: Page) -> bool:
+    locator = page.locator(
+        "div.modal-alert.modal-warning span.bold",
+        has_text=re.compile(r"ya\\s+est[aá]\\s+realizando\\s+un\\s+tr[aá]mite", re.IGNORECASE),
+    )
+    try:
+        return await locator.first.is_visible(timeout=500)
+    except Exception:
+        return False
+
+
+async def _asegurar_no_tramite_en_curso(page: Page) -> None:
+    if await _detectar_tramite_en_curso(page):
+        raise RestartRequiredError(
+            "Se ha detectado que ya está realizando un trámite; cerrar navegador y reiniciar."
+        )
 
 async def _detectar_problema_autenticacion(page: Page) -> str | None:
     """
@@ -181,14 +200,22 @@ async def _manejar_pantalla_servcla_inicial(page: Page, config: "MadridConfig") 
     # 1) Seleccionar "Tramitar una nueva solicitud" (checkboxNuevoTramite)
     # Esto dispara cargarOpciones() y el DOM se actualiza.
     await page.wait_for_selector(config.radio_nuevo_tramite_selector, state="visible", timeout=config.default_timeout)
+    
+    await page.wait_for_timeout(500) # Delay
     await page.click(config.radio_nuevo_tramite_selector)
+    await _asegurar_no_tramite_en_curso(page)
 
     # 2) Tras el refresh, aparece el radio de rol (checkboxInteresado)
     await page.wait_for_selector(config.radio_interesado_selector, state="visible", timeout=config.default_timeout)
+    
+    await page.wait_for_timeout(500) # Delay
     await page.click(config.radio_interesado_selector)
+    await _asegurar_no_tramite_en_curso(page)
 
     # 3) Continuar
     await page.wait_for_selector(config.continuar_interesado_selector, state="visible", timeout=config.default_timeout)
+    
+    await page.wait_for_timeout(500) # Delay
     async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
         await page.click(config.continuar_interesado_selector)
 
@@ -379,6 +406,7 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
     # ========================================================================
     logger.info("PASO 1: Navegando a página base y clickando 'Tramitar en línea'")
     await page.goto(config.url_base, wait_until="domcontentloaded", timeout=config.navigation_timeout)
+    await _asegurar_no_tramite_en_curso(page)
     logger.info(f"  → URL cargada: {page.url}")
     
     # Esperar estabilización del DOM (más tiempo)
@@ -411,6 +439,7 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
     # Click y esperar navegación a servpub.madrid.es
     async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
         await page.click(config.registro_electronico_selector)
+    await _asegurar_no_tramite_en_curso(page)
     
     logger.info(f"  → Navegado a: {page.url}")
     
@@ -431,6 +460,7 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
     
     async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
         await page.click(config.continuar_1_selector)
+    await _asegurar_no_tramite_en_curso(page)
     
     logger.info(f"  → Navegado a: {page.url}")
     
@@ -451,6 +481,7 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
     
     async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
         await page.click(config.iniciar_tramitacion_selector)
+    await _asegurar_no_tramite_en_curso(page)
     
     logger.info(f"  → Navegado a pantalla de login: {page.url}")
     
@@ -462,6 +493,11 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
     
     # Delay extra antes del paso de certificado (demo)
     await page.wait_for_timeout(int(getattr(config, "delay_ms", 500)))
+    
+    # ========================================================================
+    # PASO 5: Click "DNIe / Certificado"
+    # ========================================================================
+    logger.info("PASO 5: Seleccionando método de acceso 'DNIe / Certificado'")
     
     # ========================================================================
     # PASO 5: Click "DNIe / Certificado"
@@ -481,8 +517,12 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
     await _click_certificado_y_aceptar_popup(page, config)
 
     # Esperar a que la autenticación complete (con detección + recuperación).
-    deadline = time.monotonic() + (config.navigation_timeout / 1000.0)
+    # MODIFICADO: Timeout de 15 segundos para la automatización. Si falla, espera manual.
+    deadline = time.monotonic() + 15.0
     reintentos_cert = 0
+    
+    manual_mode = False
+    
     while True:
         try:
             await page.wait_for_selector(
@@ -494,8 +534,17 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
             break
         except PlaywrightTimeoutError:
             if time.monotonic() > deadline:
-                logger.error("  ✗ Timeout esperando autenticación con certificado")
-                raise
+                logger.warning("  ! Timeout de automatización (15s). Esperando intervención manual del usuario...")
+                logger.info("    Si el certificado no se seleccionó, hazlo manualmente y continúa.")
+                
+                # Espera infinita (timeout=0) hasta que el usuario llegue a la siguiente pantalla
+                await page.wait_for_selector(
+                    config.continuar_post_auth_selector,
+                    state="visible",
+                    timeout=0
+                )
+                logger.info("  → Detectado avance manual post-autenticación")
+                break
 
             problema = await _detectar_problema_autenticacion(page)
             if problema:
@@ -518,8 +567,12 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
     # ========================================================================
     logger.info("PASO 7: Clickando 'Continuar' tras autenticación")
     
+    # Delay antes del siguiente paso
+    await page.wait_for_timeout(DELAY_ENTRE_PASOS)
+    
     async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
         await page.click(config.continuar_post_auth_selector)
+    await _asegurar_no_tramite_en_curso(page)
     
     logger.info(f"  → Navegado a: {page.url}")
     
@@ -535,6 +588,9 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
             # Fallback a la ruta antigua basada en IDs (por si cambia el flujo en el futuro)
             logger.info("PASO 8: Seleccionando 'Tramitar nueva solicitud'")
             await page.wait_for_selector(config.radio_nuevo_tramite_selector, state="visible", timeout=config.default_timeout)
+            
+            # Delay
+            await page.wait_for_timeout(DELAY_ENTRE_PASOS)
             await page.click(config.radio_nuevo_tramite_selector)
             logger.info(f"  → Radio seleccionado ({config.radio_nuevo_tramite_selector})")
             
@@ -543,13 +599,20 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
             logger.info("  → DOM actualizado, opciones cargadas")
             
             logger.info("PASO 9: Seleccionando 'Persona o Entidad interesada'")
+            
+            # Delay
+            await page.wait_for_timeout(DELAY_ENTRE_PASOS)
             await page.click(config.radio_interesado_selector)
             logger.info(f"  → Radio seleccionado ({config.radio_interesado_selector})")
             
             await page.wait_for_selector(config.continuar_interesado_selector, state="visible", timeout=config.default_timeout)
+            
+            # Delay
+            await page.wait_for_timeout(DELAY_ENTRE_PASOS)
             async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
                 await page.click(config.continuar_interesado_selector)
             
+            await _asegurar_no_tramite_en_curso(page)
             logger.info(f"  → Navegado a: {page.url}")
     
     # ========================================================================
@@ -566,8 +629,13 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
         )
         
         logger.info("  → Detectado trámite a medias, clickando 'Nuevo trámite'")
+        
+        # Delay
+        await page.wait_for_timeout(DELAY_ENTRE_PASOS)
+        
         async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
             await page.click(config.boton_nuevo_tramite_condicional)
+        await _asegurar_no_tramite_en_curso(page)
         
         logger.info(f"  → Navegado a nuevo trámite: {page.url}")
         
