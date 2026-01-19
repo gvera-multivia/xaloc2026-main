@@ -39,6 +39,11 @@ class BaseOnlineController:
         p1_llicencia_conduccio: str | None = None,
         p1_nom_complet: str | None = None,
         p1_adreca: str | None = None,
+        p1_address_street: str | None = None,
+        p1_address_number: str | None = None,
+        p1_address_zip: str | None = None,
+        p1_address_city: str | None = None,
+        p1_address_province: str | None = None,
         p1_archivos: str | list[str] | None = None,
         p3_tipus_objecte: str | None = None,
         p3_dades_especifiques: str | None = None,
@@ -82,11 +87,11 @@ class BaseOnlineController:
                     adreca=p1_adreca,
                     adreca_detall=BaseOnlineAddressData(
                         sigla="CL",
-                        calle="CALLE PRUEBA",
-                        numero="1",
-                        codigo_postal="43001",
-                        municipio="TARRAGONA",
-                        provincia="TARRAGONA",
+                        calle=p1_address_street or "CALLE PRUEBA",
+                        numero=p1_address_number or "1",
+                        codigo_postal=p1_address_zip or "43001",
+                        municipio=p1_address_city or "TARRAGONA",
+                        provincia=p1_address_province or "TARRAGONA",
                         ampliacion_municipio="AMPLIACION MUNICIPIO",
                         ampliacion_calle="AMPLIACION CALLE",
                     ),
@@ -139,6 +144,38 @@ class BaseOnlineController:
             )
             p3 = reposicion
         return BaseOnlineTarget(protocol=protocol_norm, p1=p1, p2=p2, p3=p3, reposicion=reposicion)
+
+    create_target = create_demo_data
+
+    def map_data(self, data: dict) -> dict:
+        """
+        Mapea claves genéricas de DB a argumentos de create_target.
+        """
+        return {
+            "p1_telefon_mobil": data.get("user_phone"),
+            "p1_correu": data.get("user_email"),
+            "p1_matricula": data.get("plate_number"),
+            "p1_expedient_id_ens": data.get("expediente_id_ens"),
+            "p1_expedient_any": data.get("expediente_any"),
+            "p1_expedient_num": data.get("expediente_num"),
+            "p1_num_butlleti": data.get("num_butlleti"),
+            "p1_data_denuncia": data.get("data_denuncia"),
+            "p1_identificacio": data.get("nif"),
+            "p1_llicencia_conduccio": data.get("llicencia_conduccio"),
+            "p1_nom_complet": data.get("name"),
+            "p1_address_street": data.get("address_street"),
+            "p1_address_number": data.get("address_number"),
+            "p1_address_zip": data.get("address_zip"),
+            "p1_address_city": data.get("address_city"),
+            "p1_address_province": data.get("address_province"),
+            # P2 mapping example (podría ser necesario ajustar según protocolo)
+            "p2_nif": data.get("nif"),
+            "p2_rao_social": data.get("name"),
+            # Archivos
+            "p1_archivos": data.get("archivos"),
+            "p2_archivos": data.get("archivos"),
+            "p3_archivos": data.get("archivos"),
+        }
 
 def get_controller() -> BaseOnlineController:
     return BaseOnlineController()

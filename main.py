@@ -10,6 +10,7 @@ import inspect
 import os
 
 from core.site_registry import get_site, get_site_controller, list_sites
+from core.db import MockDatabase
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 
@@ -136,14 +137,14 @@ def _prompt_protocol(site_id: str) -> str | None:
         print(f"  !! Entrada inválida. Opciones: 1-{len(opciones)} o {', '.join(opciones)}")
 
 
-def _show_summary(site_id: str, protocol: str | None):
+def _show_summary(site_id: str, protocol: str | None, is_real: bool = False):
     """Muestra un resumen antes de ejecutar."""
     info = print_site_info(site_id)
     
     clear_screen()
     print_header()
     print()
-    print("  <> RESUMEN DE LA PRUEBA")
+    print("  <> RESUMEN DE LA EJECUCIÓN")
     print()
     print(f"    • Web:         {info.get('nombre', site_id)}")
     
@@ -152,14 +153,20 @@ def _show_summary(site_id: str, protocol: str | None):
         print(f"    • Subproceso:  [{protocol}] {desc}")
     
     print()
-    print("  !  RECORDATORIO:")
-    print("    - Esta es una prueba con datos DUMMY")
-    print("    - Los protocolos NO envían información real")
+    if is_real:
+        print("  !  MODO REAL ACTIVADO")
+        print("    - Se obtendrán datos de la BASE DE DATOS.")
+        print("    - Se procesarán trámites reales.")
+    else:
+        print("  !  RECORDATORIO:")
+        print("    - Esta es una prueba con datos DUMMY")
+        print("    - Los protocolos NO envían información real")
+
     print("    - El popup de certificado se aceptará automáticamente")
     print()
     print("-" * 60)
     
-    input("\n  Pulsa ENTER para iniciar la prueba...")
+    input("\n  Pulsa ENTER para iniciar la ejecución...")
 
 
 def _call_with_supported_kwargs(fn, **kwargs):
@@ -172,6 +179,7 @@ async def main() -> None:
     parser = argparse.ArgumentParser(description="Automatización de trámites - Modo pruebas")
     parser.add_argument("--site", default=None, help="ID del sitio (base_online, madrid, xaloc_girona)")
     parser.add_argument("--headless", action="store_true", help="Ejecutar sin interfaz gráfica")
+    parser.add_argument("--real", action="store_true", help="Usar datos reales de la base de datos (Mock).")
     parser.add_argument(
         "--protocol",
         default=None,
@@ -202,22 +210,47 @@ async def main() -> None:
         protocol = args.protocol
 
     # Mostrar resumen antes de ejecutar
-    _show_summary(site_id, protocol)
+    _show_summary(site_id, protocol, is_real=args.real)
 
     controller = get_site_controller(site_id)
     config = _call_with_supported_kwargs(controller.create_config, headless=args.headless, protocol=protocol)
-    datos = _call_with_supported_kwargs(
-        controller.create_demo_data,
-        protocol=protocol,
-        p3_tipus_objecte=args.p3_tipus_objecte,
-        p3_dades_especifiques=args.p3_dades,
-        p3_tipus_solicitud_value=args.p3_tipus_solicitud,
-        p3_exposo=args.p3_exposo,
-        p3_solicito=args.p3_solicito,
-        p3_archivos=args.p3_file,
-        p1_archivos=args.p1_file,
-        p2_archivos=args.p2_file,
-    )
+
+    tramite_id = None
+    db = None
+
+    if args.real:
+        db = MockDatabase()
+        print(f"  >>> BUSCANDO TRÁMITE PENDIENTE EN DB para {site_id} ({protocol or 'N/A'})...")
+        tramite_result = db.get_pending_tramite(site_id, protocol)
+
+        if not tramite_result:
+            print(f"  !! No se encontraron trámites pendientes en la DB para {site_id}.")
+            return
+
+        tramite_id, raw_data = tramite_result
+        print(f"  <> Trámite encontrado: {tramite_id}")
+
+        mapped_data = controller.map_data(raw_data)
+        # Añadir parámetros de configuración/protocolo al mapeo para pasarlos al controller
+        mapped_data["protocol"] = protocol
+        mapped_data["headless"] = args.headless
+
+        datos = _call_with_supported_kwargs(controller.create_target, **mapped_data)
+
+    else:
+        datos = _call_with_supported_kwargs(
+            controller.create_target,
+            protocol=protocol,
+            p3_tipus_objecte=args.p3_tipus_objecte,
+            p3_dades_especifiques=args.p3_dades,
+            p3_tipus_solicitud_value=args.p3_tipus_solicitud,
+            p3_exposo=args.p3_exposo,
+            p3_solicito=args.p3_solicito,
+            p3_archivos=args.p3_file,
+            p1_archivos=args.p1_file,
+            p2_archivos=args.p2_file,
+            headless=args.headless,
+        )
 
     print("\n" + "=" * 60)
     print(f"  >>> INICIANDO AUTOMATIZACIÓN: {site_id.upper()}")
@@ -231,8 +264,15 @@ async def main() -> None:
             screenshot_path = await bot.ejecutar_flujo_completo(datos)
             print(f"\n  <> PROCESO FINALIZADO CON ÉXITO")
             print(f"     Screenshot: {screenshot_path}")
+
+            if args.real and db and tramite_id:
+                db.mark_tramite_processed(tramite_id, "success", {"screenshot": str(screenshot_path)})
+
         except Exception as e:
             print(f"\n  !! ERROR durante la ejecución: {e}")
+            if args.real and db and tramite_id:
+                db.mark_tramite_processed(tramite_id, "error", {"error": str(e)})
+
         finally:
             print()
             print("-" * 60)
