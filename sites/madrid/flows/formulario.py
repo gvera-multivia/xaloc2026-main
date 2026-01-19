@@ -20,9 +20,10 @@ from sites.madrid.data_models import TipoExpediente, NaturalezaEscrito, TipoDocu
 logger = logging.getLogger(__name__)
 
 # Delays para parecer más humano (en milisegundos)
-DELAY_ENTRE_CAMPOS_MIN = 150  # 150ms mínimo
-DELAY_ENTRE_CAMPOS_MAX = 400  # 400ms máximo
-DELAY_DESPUES_SELECT = 300   # 300ms después de seleccionar en dropdown
+# Reducidos para acelerar la demo y evitar pausas largas entre secciones.
+DELAY_ENTRE_CAMPOS_MIN = 20   # 20ms mínimo
+DELAY_ENTRE_CAMPOS_MAX = 80   # 80ms máximo
+DELAY_DESPUES_SELECT = 80     # 80ms después de seleccionar en dropdown
 
 
 async def _delay_humano(page: Page, min_ms: int = DELAY_ENTRE_CAMPOS_MIN, max_ms: int = DELAY_ENTRE_CAMPOS_MAX) -> None:

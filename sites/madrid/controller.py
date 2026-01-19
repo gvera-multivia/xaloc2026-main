@@ -42,6 +42,8 @@ class MadridController:
         exp_nnn: str = "911",
         exp_eeeeeeeee: str = "102532229",
         exp_d: str = "3",
+        # --- Matrícula (Sección 2) ---
+        matricula: str = "1234ABC",
         # --- Datos del Interesado (Sección _id21:2) ---
         inter_telefono: str = "600123456",
         inter_email_check: bool = True,
@@ -129,6 +131,7 @@ class MadridController:
         # 5. Construcción del Target
         form_data = MadridFormData(
             expediente=expediente,
+            matricula=matricula,
             interesado=interesado,
             representante=representante,
             notificacion=notificacion,
