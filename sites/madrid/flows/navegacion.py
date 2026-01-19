@@ -79,6 +79,15 @@ async def _recuperar_problema_autenticacion(page: Page, config: "MadridConfig", 
 
     from utils.windows_popup import enviar_shift_tab_enter
 
+    # En este caso el popup aparece "a mitad" del refresh: programamos Shift+Tab x2
+    # sin esperar a que termine la recarga.
+    def _delayed_shift_tab() -> None:
+        time.sleep(getattr(config, "cert_popup_midload_delay_ms", 800) / 1000.0)
+        enviar_shift_tab_enter(tabs_atras=2, evitar_browser=True)
+
+    popup_thread = threading.Thread(target=_delayed_shift_tab, daemon=True)
+    popup_thread.start()
+
     try:
         await page.reload(wait_until="domcontentloaded", timeout=config.navigation_timeout)
     except Exception:
@@ -88,14 +97,6 @@ async def _recuperar_problema_autenticacion(page: Page, config: "MadridConfig", 
         except Exception:
             pass
 
-    # Tras el refresh, el popup de certificado aparece sin cambiar la URL: esperar y aceptar.
-    await page.wait_for_timeout(getattr(config, "cert_popup_delay_ms", 2000))
-    popup_thread = threading.Thread(
-        target=enviar_shift_tab_enter,
-        kwargs={"tabs_atras": 2, "evitar_browser": True},
-        daemon=True,
-    )
-    popup_thread.start()
     popup_thread.join(timeout=5)
 
     return True
@@ -111,22 +112,24 @@ async def _click_certificado_y_aceptar_popup(page: Page, config: "MadridConfig")
     await page.click(config.certificado_login_selector)
     logger.info("  ƒÅ' Click en 'DNIe / Certificado'")
 
-    # Tras el click, la web puede quedarse "cargando" y el popup tarda en aparecer.
-    # Esperamos ~2s monitorizando errores antes de enviar Shift+Tab x2.
+    # El popup aparece mientras la página aún está cargando: programar Shift+Tab x2
+    # sin esperar a un estado de carga concreto.
+    def _delayed_shift_tab() -> None:
+        time.sleep(getattr(config, "cert_popup_midload_delay_ms", 800) / 1000.0)
+        enviar_shift_tab_enter(tabs_atras=2, evitar_browser=True)
+
+    popup_thread = threading.Thread(target=_delayed_shift_tab, daemon=True)
+    popup_thread.start()
+
+    # Durante ese intervalo, monitorizar errores para recovery.
     start = time.monotonic()
-    while time.monotonic() - start < (getattr(config, "cert_popup_delay_ms", 2000) / 1000.0):
+    while time.monotonic() - start < 3.0:
         problema = await _detectar_problema_autenticacion(page)
         if problema:
             await _recuperar_problema_autenticacion(page, config, problema)
-            return
+            break
         await page.wait_for_timeout(250)
 
-    popup_thread = threading.Thread(
-        target=enviar_shift_tab_enter,
-        kwargs={"tabs_atras": 2, "evitar_browser": True},
-        daemon=True,
-    )
-    popup_thread.start()
     popup_thread.join(timeout=5)
 
 async def _seleccionar_radio_por_texto(page: Page, texto: str) -> None:

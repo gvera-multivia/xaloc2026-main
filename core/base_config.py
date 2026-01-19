@@ -63,6 +63,7 @@ class BaseConfig:
     # Útiles para desacelerar la demo y dar tiempo a renders/handlers del sitio.
     delay_ms: int = 500
     cert_popup_delay_ms: int = 2000
+    cert_popup_midload_delay_ms: int = 800
 
     def ensure_directories(self) -> None:
         self.dir_screenshots.mkdir(exist_ok=True)
