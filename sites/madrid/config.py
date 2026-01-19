@@ -79,65 +79,49 @@ class MadridConfig(BaseConfig):
     # =========================================================================
     
     matricula_selector: str = ".formula2_GESTION_MULTAS_MATRICULA"
-    
     # =========================================================================
-    # FORMULARIO - Sección 3: Datos del interesado
-    # =========================================================================
-    
-    interesado_telefono_selector: str = ".formula2_COMUNES_INTERESADO_TELEFONO"
-    interesado_check_email_selector: str = ".formula2_COMUNES_INTERESADO_CHECKEMAIL"
-    interesado_check_sms_selector: str = ".formula2_COMUNES_INTERESADO_CHECKSMS"
-    
-    # =========================================================================
-    # FORMULARIO - Sección 4: Datos del representante
+    # FORMULARIO - Sección 3: Datos del interesado (SOLO TELÉFONO)
     # =========================================================================
     
-    # Usar selectores por name attribute (más estables que IDs dinámicos)
-    # Municipio - campo de texto
-    representante_municipio_selector: str = "input[name*='_id28:4:_id31:0:_id35:0:_id64']"
+    # Solo tocamos el teléfono del interesado, el resto se queda como está
+    interesado_telefono_selector: str = "input[name*='_id21:2'][name*='TELEFONO']"
+    interesado_check_email_selector: str = "input[name*='_id21:2'][name*='CHECKEMAIL']"
+    interesado_check_sms_selector: str = "input[name*='_id21:2'][name*='CHECKSMS']"
     
-    # Tipo de vía - select
-    representante_tipo_via_selector: str = "select[name*='_id28:4:_id31:1:_id35:0:_id574']"
+    # =========================================================================
+    # FORMULARIO - Sección 4: Datos del representante (CAMPOS ACTIVOS)
+    # =========================================================================
     
-    # Nombre de la vía - campo de texto
-    representante_nombre_via_selector: str = "input[name*='_id28:4:_id31:2:_id35:0:_id64']"
+    # Forzamos el selector a buscar dentro de '_id21:3' (Sección del Representante)
     
-    # Tipo de numeración - select
-    representante_tipo_num_selector: str = "select[name*='_id28:5:_id31:0:_id35:0:_id574']"
+    # País y Provincia
+    representante_pais_selector: str = "select[name*='_id21:3'][name*='PAIS']"
+    representante_provincia_selector: str = "select[name*='_id21:3'][name*='PROVINCIA']"
+
+    # Dirección (Municipio, Tipo Vía, Nombre)
+    representante_municipio_selector: str = "input[name*='_id21:3'][name*='_id28:4:_id31:0']"
+    representante_tipo_via_selector: str = "select[name*='_id21:3'][name*='_id28:4:_id31:1']"
+    representante_nombre_via_selector: str = "input[name*='_id21:3'][name*='_id28:4:_id31:2']"
     
-    # Número - campo numérico
-    representante_numero_selector: str = "input[name*='_id28:5:_id31:1:_id35:0:_id435']"
+    # Numeración (Tipo, Número, Portal)
+    representante_tipo_num_selector: str = "select[name*='_id21:3'][name*='_id28:5:_id31:0']"
+    representante_numero_selector: str = "input[name*='_id21:3'][name*='_id28:5:_id31:1']"
+    representante_portal_selector: str = "input[name*='_id21:3'][name*='_id28:5:_id31:2']"
     
-    # Portal
-    representante_portal_selector: str = "input[name*='_id28:5:_id31:2:_id35:0:_id64']"
+    # Detalles (Escalera, Planta, Puerta, CP)
+    representante_escalera_selector: str = "input[name*='_id21:3'][name*='_id28:6:_id31:0']"
+    representante_planta_selector: str = "input[name*='_id21:3'][name*='_id28:6:_id31:1']"
+    representante_puerta_selector: str = "input[name*='_id21:3'][name*='_id28:6:_id31:2']"
+    representante_codpostal_selector: str = "input[name*='_id21:3'][name*='_id28:6:_id31:3']"
     
-    # Escalera
-    representante_escalera_selector: str = "input[name*='_id28:6:_id31:0:_id35:0:_id64']"
+    # Contacto (Email, Móvil, Teléfono)
+    representante_email_selector: str = "input[name*='_id21:3'][name*='_id28:7:_id31:0']"
+    representante_movil_selector: str = "input[name*='_id21:3'][name*='_id28:7:_id31:1']"
+    representante_telefono_selector: str = "input[name*='_id21:3'][name*='_id28:7:_id31:2']"
     
-    # Planta
-    representante_planta_selector: str = "input[name*='_id28:6:_id31:1:_id35:0:_id64']"
-    
-    # Puerta
-    representante_puerta_selector: str = "input[name*='_id28:6:_id31:2:_id35:0:_id64']"
-    
-    # Código Postal
-    representante_codpostal_selector: str = "input[name*='_id28:6:_id31:3:_id35:0:_id276']"
-    
-    # Email
-    representante_email_selector: str = "input[name*='_id28:7:_id31:0:_id35:0:_id170']"
-    
-    # Móvil
-    representante_movil_selector: str = "input[name*='_id28:7:_id31:1:_id35:0:_id64']"
-    
-    # Teléfono
-    representante_telefono_selector: str = "input[name*='_id28:7:_id31:2:_id35:0:_id64']"
-    
-    # Provincia y País (si existen en representante, usar selectores genéricos)
-    representante_provincia_selector: str = "select[name*='REPRESENTANTE'][name*='PROVINCIA']"
-    representante_pais_selector: str = "select[name*='REPRESENTANTE'][name*='PAIS']"
-    
-    representante_check_email_selector: str = ".formula2_COMUNES_REPRESENTANTE_CHECKEMAIL"
-    representante_check_sms_selector: str = ".formula2_COMUNES_REPRESENTANTE_CHECKSMS"
+    # Checkboxes de confirmación (Representante)
+    representante_check_email_selector: str = "input[name*='_id21:3'][name*='CHECKEMAIL']"
+    representante_check_sms_selector: str = "input[name*='_id21:3'][name*='CHECKSMS']"
     
     # =========================================================================
     # FORMULARIO - Sección 5: Datos de notificación
