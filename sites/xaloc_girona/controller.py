@@ -31,12 +31,13 @@ class XalocGironaController:
 
     def create_target(
         self,
-        email: str,
-        num_denuncia: str,
-        matricula: str,
-        num_expediente: str,
-        motivos: str,
-        archivos_adjuntos: list[Path] | list[str] | None = None
+        email: str | None = None,
+        num_denuncia: str | None = None,
+        matricula: str | None = None,
+        num_expediente: str | None = None,
+        motivos: str | None = None,
+        archivos_adjuntos: list[Path] | list[str] | None = None,
+        **kwargs
     ) -> DatosMulta:
         if not archivos_adjuntos:
             archivos_adjuntos = [Path("pdfs-prueba") / "test1.pdf"]
