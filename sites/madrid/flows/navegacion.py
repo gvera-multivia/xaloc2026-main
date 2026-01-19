@@ -184,6 +184,9 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
         Page: Página de Playwright en el formulario final
     """
     
+    # Delay entre pasos de navegación (para evitar errores SSL)
+    DELAY_ENTRE_PASOS = 1500  # 1.5 segundos
+    
     # ========================================================================
     # CONFIGURACIÓN INICIAL: Bloqueo de popups de redes sociales
     # ========================================================================
@@ -201,11 +204,14 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
     await page.goto(config.url_base, wait_until="domcontentloaded", timeout=config.navigation_timeout)
     logger.info(f"  → URL cargada: {page.url}")
     
-    # Esperar estabilización del DOM
-    await _esperar_dom_estable(page, timeout_ms=2000)
+    # Esperar estabilización del DOM (más tiempo)
+    await _esperar_dom_estable(page, timeout_ms=3000)
     
     # Aceptar cookies si aparecen
     await _aceptar_cookies_si_aparece(page)
+    
+    # Delay adicional para parecer más humano
+    await page.wait_for_timeout(DELAY_ENTRE_PASOS)
     
     # Esperar y clickar el botón "Tramitar en línea"
     await page.wait_for_selector(config.boton_tramitar_selector, state="visible", timeout=config.default_timeout)
@@ -215,6 +221,9 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
     # Esperar a que aparezca el bloque #verTodas
     await page.wait_for_selector(config.bloque_tramitar_selector, state="visible", timeout=config.default_timeout)
     logger.info(f"  → Bloque de tramitación visible ({config.bloque_tramitar_selector})")
+    
+    # Delay antes del siguiente paso
+    await page.wait_for_timeout(DELAY_ENTRE_PASOS)
     
     # ========================================================================
     # PASO 2: Click "Registro Electrónico"
@@ -228,8 +237,14 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
     
     logger.info(f"  → Navegado a: {page.url}")
     
+    # Esperar estabilización después de cambio de dominio
+    await _esperar_dom_estable(page, timeout_ms=2000)
+    
     # Aceptar cookies en nuevo dominio si aparecen
     await _aceptar_cookies_si_aparece(page)
+    
+    # Delay antes del siguiente paso
+    await page.wait_for_timeout(DELAY_ENTRE_PASOS)
     
     # ========================================================================
     # PASO 3: Click primer "Continuar"
@@ -242,25 +257,43 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
     
     logger.info(f"  → Navegado a: {page.url}")
     
+    # Esperar estabilización
+    await _esperar_dom_estable(page, timeout_ms=2000)
+    
+    # Delay antes del siguiente paso
+    await page.wait_for_timeout(DELAY_ENTRE_PASOS)
+    
     # ========================================================================
     # PASO 4: Click "Iniciar tramitación"
     # ========================================================================
     logger.info("PASO 4: Clickando 'Iniciar tramitación'")
     await page.wait_for_selector(config.iniciar_tramitacion_selector, state="visible", timeout=config.default_timeout)
     
+    # Delay antes de la acción que llevará a la pasarela de certificados
+    await page.wait_for_timeout(DELAY_ENTRE_PASOS)
+    
     async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
         await page.click(config.iniciar_tramitacion_selector)
     
     logger.info(f"  → Navegado a pantalla de login: {page.url}")
     
+    # Esperar estabilización después de llegar a la pasarela
+    await _esperar_dom_estable(page, timeout_ms=3000)
+    
     # Aceptar cookies en dominio de login si aparecen
     await _aceptar_cookies_si_aparece(page)
+    
+    # Delay extra antes del paso de certificado (crítico para evitar SSL errors)
+    await page.wait_for_timeout(2000)  # 2 segundos extra
     
     # ========================================================================
     # PASO 5: Click "DNIe / Certificado"
     # ========================================================================
     logger.info("PASO 5: Seleccionando método de acceso 'DNIe / Certificado'")
     await page.wait_for_selector(config.certificado_login_selector, state="visible", timeout=config.default_timeout)
+    
+    # Delay antes de hacer click en certificado
+    await page.wait_for_timeout(DELAY_ENTRE_PASOS)
     
     # ========================================================================
     # PASO 6: Manejar popup de certificado Windows
@@ -270,9 +303,9 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
     # Importar utilidad de manejo de popup (nombre correcto)
     from utils.windows_popup import esperar_y_aceptar_certificado
     
-    # Función wrapper para el thread
+    # Función wrapper para el thread - más delay inicial
     def _resolver_popup_windows() -> None:
-        esperar_y_aceptar_certificado(delay_inicial=2.0)
+        esperar_y_aceptar_certificado(delay_inicial=3.0, timeout=20.0)
     
     # Lanzar thread para manejar el popup
     popup_thread = threading.Thread(
@@ -280,7 +313,7 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
         daemon=True
     )
     popup_thread.start()
-    logger.info("  → Thread de popup de certificado lanzado")
+    logger.info("  → Thread de popup de certificado lanzado (delay 5s)")
     
     # Click en el enlace de certificado (dispara el popup)
     await page.click(config.certificado_login_selector)
