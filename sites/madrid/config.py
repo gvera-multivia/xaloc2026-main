@@ -83,10 +83,10 @@ class MadridConfig(BaseConfig):
     # FORMULARIO - Sección 3: Datos del interesado (SOLO TELÉFONO)
     # =========================================================================
     
-    # Solo tocamos el teléfono del interesado, el resto se queda como está
-    interesado_telefono_selector: str = "input[name*='_id21:2'][name*='TELEFONO']"
-    interesado_check_email_selector: str = "input[name*='_id21:2'][name*='CHECKEMAIL']"
-    interesado_check_sms_selector: str = "input[name*='_id21:2'][name*='CHECKSMS']"
+    # Solo tocamos teléfono y checkboxes de confirmación dentro de la sección _id21:2
+    interesado_telefono_selector: str = "input[name*='_id21:2'].formula2_COMUNES_INTERESADO_TELEFONO"
+    interesado_check_email_selector: str = "input[name*='_id21:2'].formula2_COMUNES_INTERESADO_CHECKEMAIL"
+    interesado_check_sms_selector: str = "input[name*='_id21:2'].formula2_COMUNES_INTERESADO_CHECKSMS"
     
     # =========================================================================
     # FORMULARIO - Sección 4: Datos del representante (CAMPOS ACTIVOS)
@@ -95,33 +95,33 @@ class MadridConfig(BaseConfig):
     # Forzamos el selector a buscar dentro de '_id21:3' (Sección del Representante)
     
     # País y Provincia
-    representante_pais_selector: str = "select[name*='_id21:3'][name*='PAIS']"
-    representante_provincia_selector: str = "select[name*='_id21:3'][name*='PROVINCIA']"
+    representante_pais_selector: str = "select[name*='_id21:3'].formula2_COMUNES_REPRESENTANTE_PAIS"
+    representante_provincia_selector: str = "select[name*='_id21:3'].formula2_COMUNES_REPRESENTANTE_PROVINCIA"
 
     # Dirección (Municipio, Tipo Vía, Nombre)
-    representante_municipio_selector: str = "input[name*='_id21:3'][name*='_id28:4:_id31:0']"
-    representante_tipo_via_selector: str = "select[name*='_id21:3'][name*='_id28:4:_id31:1']"
-    representante_nombre_via_selector: str = "input[name*='_id21:3'][name*='_id28:4:_id31:2']"
+    representante_municipio_selector: str = "input[name*='_id21:3'].formula2_COMUNES_REPRESENTANTE_MUNICIPIO"
+    representante_tipo_via_selector: str = "select[name*='_id21:3'].formula2_COMUNES_REPRESENTANTE_TIPOVIA"
+    representante_nombre_via_selector: str = "input[name*='_id21:3'].formula2_COMUNES_REPRESENTANTE_NOMBREVIA"
     
     # Numeración (Tipo, Número, Portal)
-    representante_tipo_num_selector: str = "select[name*='_id21:3'][name*='_id28:5:_id31:0']"
-    representante_numero_selector: str = "input[name*='_id21:3'][name*='_id28:5:_id31:1']"
-    representante_portal_selector: str = "input[name*='_id21:3'][name*='_id28:5:_id31:2']"
+    representante_tipo_num_selector: str = "select[name*='_id21:3'].formula2_COMUNES_REPRESENTANTE_TIPONUM"
+    representante_numero_selector: str = "input[name*='_id21:3'].formula2_COMUNES_REPRESENTANTE_NUMERO"
+    representante_portal_selector: str = "input[name*='_id21:3'].formula2_COMUNES_REPRESENTANTE_PORTAL"
     
     # Detalles (Escalera, Planta, Puerta, CP)
-    representante_escalera_selector: str = "input[name*='_id21:3'][name*='_id28:6:_id31:0']"
-    representante_planta_selector: str = "input[name*='_id21:3'][name*='_id28:6:_id31:1']"
-    representante_puerta_selector: str = "input[name*='_id21:3'][name*='_id28:6:_id31:2']"
-    representante_codpostal_selector: str = "input[name*='_id21:3'][name*='_id28:6:_id31:3']"
+    representante_escalera_selector: str = "input[name*='_id21:3'].formula2_COMUNES_REPRESENTANTE_ESCALERA"
+    representante_planta_selector: str = "input[name*='_id21:3'].formula2_COMUNES_REPRESENTANTE_PLANTA"
+    representante_puerta_selector: str = "input[name*='_id21:3'].formula2_COMUNES_REPRESENTANTE_PUERTA"
+    representante_codpostal_selector: str = "input[name*='_id21:3'].formula2_COMUNES_REPRESENTANTE_CODPOSTAL"
     
     # Contacto (Email, Móvil, Teléfono)
-    representante_email_selector: str = "input[name*='_id21:3'][name*='_id28:7:_id31:0']"
-    representante_movil_selector: str = "input[name*='_id21:3'][name*='_id28:7:_id31:1']"
-    representante_telefono_selector: str = "input[name*='_id21:3'][name*='_id28:7:_id31:2']"
+    representante_email_selector: str = "input[name*='_id21:3'].formula2_COMUNES_REPRESENTANTE_EMAIL"
+    representante_movil_selector: str = "input[name*='_id21:3'].formula2_COMUNES_REPRESENTANTE_MOVIL"
+    representante_telefono_selector: str = "input[name*='_id21:3'].formula2_COMUNES_REPRESENTANTE_TELEFONO"
     
     # Checkboxes de confirmación (Representante)
-    representante_check_email_selector: str = "input[name*='_id21:3'][name*='CHECKEMAIL']"
-    representante_check_sms_selector: str = "input[name*='_id21:3'][name*='CHECKSMS']"
+    representante_check_email_selector: str = "input[name*='_id21:3'].formula2_COMUNES_REPRESENTANTE_CHECKEMAIL"
+    representante_check_sms_selector: str = "input[name*='_id21:3'].formula2_COMUNES_REPRESENTANTE_CHECKSMS"
     
     # =========================================================================
     # FORMULARIO - Sección 5: Datos de notificación
@@ -131,71 +131,32 @@ class MadridConfig(BaseConfig):
     notificacion_copiar_interesado_selector: str = "input[type='submit'][value='Copiar datos del interesado']"
     notificacion_copiar_representante_selector: str = "input[type='submit'][value='Copiar datos del representante']"
     
-    # Identificación
-    # Tipo documento - select
-    notificacion_tipo_doc_selector: str = "select[name*='_id28:2:_id31:0:_id35:0:_id574']"
-    
-    # Número de documento
-    notificacion_num_doc_selector: str = "input[name*='_id28:2:_id31:1:_id35:0:_id64']"
-    
-    # Nombre
-    notificacion_nombre_selector: str = "input[name*='_id28:2:_id31:2:_id35:0:_id64']"
-    
-    # Primer apellido
-    notificacion_apellido1_selector: str = "input[name*='_id28:3:_id31:0:_id35:0:_id64']"
-    
-    # Segundo apellido
-    notificacion_apellido2_selector: str = "input[name*='_id28:3:_id31:1:_id35:0:_id64']"
-    
-    # Razón social
-    notificacion_razon_social_selector: str = "input[name*='_id28:4:_id31:0:_id35:0:_id64']"
+    # Identificación (forzar _id21:5 para evitar colisiones con otras secciones, p.ej. _id21:4)
+    notificacion_tipo_doc_selector: str = "select[name*='_id21:5'].formula2_COMUNES_NOTIFICACION_TIPODOC"
+    notificacion_num_doc_selector: str = "input[name*='_id21:5'].formula2_COMUNES_NOTIFICACION_NUMIDENT"
+    notificacion_nombre_selector: str = "input[name*='_id21:5'].formula2_COMUNES_NOTIFICACION_NOMBRE"
+    notificacion_apellido1_selector: str = "input[name*='_id21:5'].formula2_COMUNES_NOTIFICACION_APELLIDO1"
+    notificacion_apellido2_selector: str = "input[name*='_id21:5'].formula2_COMUNES_NOTIFICACION_APELLIDO2"
+    notificacion_razon_social_selector: str = "input[name*='_id21:5'].formula2_COMUNES_NOTIFICACION_RAZONSOCIAL"
     
     # Dirección
-    # País - select
-    notificacion_pais_selector: str = "select[name*='_id28:5:_id31:0:_id35:0:_id574']"
-    
-    # Provincia - select
-    notificacion_provincia_selector: str = "select[name*='_id28:5:_id31:1:_id35:0:_id574']"
-    
-    # Municipio
-    notificacion_municipio_selector: str = "input[name*='_id28:6:_id31:0:_id35:0:_id64']"
-    
-    # Tipo vía - select
-    notificacion_tipo_via_selector: str = "select[name*='_id28:6:_id31:1:_id35:0:_id574']"
-    
-    # Nombre vía (Domicilio)
-    notificacion_nombre_via_selector: str = "input[name*='_id28:6:_id31:2:_id35:0:_id64']"
-    
-    # Tipo de numeración - select
-    notificacion_tipo_num_selector: str = "select[name*='_id28:7:_id31:0:_id35:0:_id574']"
-    
-    # Número
-    notificacion_numero_selector: str = "input[name*='_id28:7:_id31:1:_id35:0:_id435']"
-    
-    # Portal
-    notificacion_portal_selector: str = "input[name*='_id28:7:_id31:2:_id35:0:_id64']"
-    
-    # Escalera
-    notificacion_escalera_selector: str = "input[name*='_id28:8:_id31:0:_id35:0:_id64']"
-    
-    # Planta
-    notificacion_planta_selector: str = "input[name*='_id28:8:_id31:1:_id35:0:_id64']"
-    
-    # Puerta
-    notificacion_puerta_selector: str = "input[name*='_id28:8:_id31:2:_id35:0:_id64']"
-    
-    # C.P. (Código Postal)
-    notificacion_codpostal_selector: str = "input[name*='_id28:8:_id31:3:_id35:0:_id276']"
+    notificacion_pais_selector: str = "select[name*='_id21:5'].formula2_COMUNES_NOTIFICACION_PAIS"
+    notificacion_provincia_selector: str = "select[name*='_id21:5'].formula2_COMUNES_NOTIFICACION_PROVINCIA"
+    notificacion_municipio_selector: str = "input[name*='_id21:5'].formula2_COMUNES_NOTIFICACION_MUNICIPIO"
+    notificacion_tipo_via_selector: str = "select[name*='_id21:5'].formula2_COMUNES_NOTIFICACION_TIPOVIA"
+    notificacion_nombre_via_selector: str = "input[name*='_id21:5'].formula2_COMUNES_NOTIFICACION_NOMBREVIA"
+    notificacion_tipo_num_selector: str = "select[name*='_id21:5'].formula2_COMUNES_NOTIFICACION_TIPONUM"
+    notificacion_numero_selector: str = "input[name*='_id21:5'].formula2_COMUNES_NOTIFICACION_NUMERO"
+    notificacion_portal_selector: str = "input[name*='_id21:5'].formula2_COMUNES_NOTIFICACION_PORTAL"
+    notificacion_escalera_selector: str = "input[name*='_id21:5'].formula2_COMUNES_NOTIFICACION_ESCALERA"
+    notificacion_planta_selector: str = "input[name*='_id21:5'].formula2_COMUNES_NOTIFICACION_PLANTA"
+    notificacion_puerta_selector: str = "input[name*='_id21:5'].formula2_COMUNES_NOTIFICACION_PUERTA"
+    notificacion_codpostal_selector: str = "input[name*='_id21:5'].formula2_COMUNES_NOTIFICACION_CODPOSTAL"
     
     # Contacto
-    # Email
-    notificacion_email_selector: str = "input[name*='_id28:9:_id31:0:_id35:0:_id170']"
-    
-    # Móvil
-    notificacion_movil_selector: str = "input[name*='_id28:9:_id31:1:_id35:0:_id64']"
-    
-    # Teléfono
-    notificacion_telefono_selector: str = "input[name*='_id28:9:_id31:2:_id35:0:_id64']"
+    notificacion_email_selector: str = "input[name*='_id21:5'].formula2_COMUNES_NOTIFICACION_EMAIL"
+    notificacion_movil_selector: str = "input[name*='_id21:5'].formula2_COMUNES_NOTIFICACION_MOVIL"
+    notificacion_telefono_selector: str = "input[name*='_id21:5'].formula2_COMUNES_NOTIFICACION_TELEFONO"
     
     # =========================================================================
     # FORMULARIO - Sección 6: Naturaleza del escrito

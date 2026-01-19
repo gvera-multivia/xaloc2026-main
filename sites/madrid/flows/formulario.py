@@ -278,6 +278,14 @@ async def ejecutar_formulario_madrid(
     await _rellenar_input(page, config.representante_movil_selector, rep_con.movil, "Móvil rep.")
     await _rellenar_input(page, config.representante_telefono_selector, rep_con.telefono, "Teléfono rep.")
     
+    # Checkbox de confirmación (evita escribir en checkboxes homónimos fuera de _id21:3)
+    await _marcar_checkbox(
+        page,
+        config.representante_check_email_selector,
+        bool(rep_con.email),
+        "Confirmar email rep.",
+    )
+    
     logger.info(f"  → Dirección: {rep_dir.nombre_via or '(vacío)'}, {rep_dir.municipio or '(vacío)'}")
     logger.info(f"  → Contacto: {rep_con.email or '(vacío)'}")
     
