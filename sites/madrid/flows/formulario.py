@@ -53,7 +53,7 @@ async def _rellenar_input(page: Page, selector: str, valor: str, nombre_campo: s
                 logger.debug(f"  → Campo {nombre_campo or selector} deshabilitado, saltando")
                 return False
             
-            await elemento.first.fill(valor)
+            await elemento.first.fill(valor, timeout=1000)
             logger.debug(f"  → {nombre_campo or selector}: {valor}")
             
             # Pequeño delay después de rellenar
@@ -84,21 +84,21 @@ async def _seleccionar_opcion(page: Page, selector: str, valor: str, nombre_camp
             
             # Intentar primero por label
             try:
-                await elemento.first.select_option(label=valor)
+                await elemento.first.select_option(label=valor, timeout=1000)
                 logger.debug(f"  → {nombre_campo or selector}: {valor} (por label)")
                 await _delay_humano(page, DELAY_DESPUES_SELECT, DELAY_DESPUES_SELECT + 200)
                 return True
             except:
                 # Si falla, intentar por value
                 try:
-                    await elemento.first.select_option(value=valor)
+                    await elemento.first.select_option(value=valor, timeout=1000)
                     logger.debug(f"  → {nombre_campo or selector}: {valor} (por value)")
                     await _delay_humano(page, DELAY_DESPUES_SELECT, DELAY_DESPUES_SELECT + 200)
                     return True
                 except:
                     # Si ambos fallan, intentar por index si es numérico
                     if valor.isdigit():
-                        await elemento.first.select_option(index=int(valor))
+                        await elemento.first.select_option(index=int(valor), timeout=1000)
                         logger.debug(f"  → {nombre_campo or selector}: opción {valor} (por index)")
                         await _delay_humano(page, DELAY_DESPUES_SELECT, DELAY_DESPUES_SELECT + 200)
                         return True
@@ -124,11 +124,11 @@ async def _marcar_checkbox(page: Page, selector: str, marcar: bool, nombre_campo
             
             is_checked = await elemento.first.is_checked()
             if marcar and not is_checked:
-                await elemento.first.check()
+                await elemento.first.check(timeout=1000)
                 logger.debug(f"  → {nombre_campo or selector}: marcado")
                 await _delay_humano(page)
             elif not marcar and is_checked:
-                await elemento.first.uncheck()
+                await elemento.first.uncheck(timeout=1000)
                 logger.debug(f"  → {nombre_campo or selector}: desmarcado")
                 await _delay_humano(page)
             return True
@@ -146,7 +146,7 @@ async def _click_radio(page: Page, selector: str, nombre_campo: str = "") -> boo
     try:
         elemento = page.locator(selector)
         if await elemento.count() > 0:
-            await elemento.first.click()
+            await elemento.first.click(timeout=1000)
             logger.debug(f"  → Radio {nombre_campo or selector}: seleccionado")
             await _delay_humano(page)
             return True

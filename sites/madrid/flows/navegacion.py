@@ -41,23 +41,23 @@ async def _manejar_pantalla_servcla_inicial(page: Page, config: "MadridConfig") 
         return False
 
     logger.info("PASO 8: Pantalla 'Acceso al formulario' (servcla) detectada")
-    logger.info(f"  ƒÅ' URL: {page.url}")
+    logger.info(f"  → URL: {page.url}")
 
-    await _seleccionar_radio_por_texto(page, "Tramitar una nueva solicitud")
-    await _seleccionar_radio_por_texto(page, "Persona o entidad interesada")
+    # 1) Seleccionar "Tramitar una nueva solicitud" (checkboxNuevoTramite)
+    # Esto dispara cargarOpciones() y el DOM se actualiza.
+    await page.wait_for_selector(config.radio_nuevo_tramite_selector, state="visible", timeout=config.default_timeout)
+    await page.click(config.radio_nuevo_tramite_selector)
 
-    # Click en Continuar (type='button', no 'submit')
-    try:
-        await page.wait_for_selector(config.continuar_interesado_selector, state="visible", timeout=config.default_timeout)
-        async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
-            await page.click(config.continuar_interesado_selector)
-    except PlaywrightTimeoutError:
-        boton = page.locator("input[type='button'][value='Continuar'], input[type='submit'][value='Continuar']")
-        await boton.first.wait_for(state="visible", timeout=config.default_timeout)
-        async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
-            await boton.first.click()
+    # 2) Tras el refresh, aparece el radio de rol (checkboxInteresado)
+    await page.wait_for_selector(config.radio_interesado_selector, state="visible", timeout=config.default_timeout)
+    await page.click(config.radio_interesado_selector)
 
-    logger.info(f"  ƒÅ' Navegado a: {page.url}")
+    # 3) Continuar
+    await page.wait_for_selector(config.continuar_interesado_selector, state="visible", timeout=config.default_timeout)
+    async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
+        await page.click(config.continuar_interesado_selector)
+
+    logger.info(f"  → Navegado a: {page.url}")
     return True
 
 
