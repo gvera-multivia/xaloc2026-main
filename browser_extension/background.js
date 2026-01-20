@@ -5,6 +5,8 @@ let session = {
 };
 let currentVisitByTab = {}; // tabId -> { pageIndex, visitIndex }
 
+importScripts('flowmap.js');
+
 // Debounce storage
 let storageTimer = null;
 const saveSession = () => {
@@ -134,6 +136,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const count = session.pages.reduce((acc, p) => acc + p.visits.reduce((acc2, v) => acc2 + v.interactions.length, 0), 0);
           chrome.runtime.sendMessage({ type: 'UPDATE_COUNT', count }).catch(() => {});
       }
+    }
+  }
+  else if (message.type === 'BUILD_FLOWMAP') {
+    try {
+      const rawRecording = typeof message.rawRecording === 'string'
+        ? JSON.parse(message.rawRecording)
+        : message.rawRecording;
+      const flowmap = self.buildFlowMap(rawRecording);
+      sendResponse({ ok: true, flowmap });
+    } catch (err) {
+      sendResponse({ ok: false, error: String(err && err.message ? err.message : err) });
     }
   }
 
