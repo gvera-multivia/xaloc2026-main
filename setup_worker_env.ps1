@@ -1,6 +1,22 @@
 # setup_worker_env.ps1
 # Ejecutar como Administrador
 
+param(
+  # CN del Subject del certificado a autoseleccionar (opcional).
+
+  [string]$CertSubjectCN = ""
+)
+
+# Permite configurar el CN sin tocar el script (por variable de entorno).
+# Se aceptan ambas por compatibilidad: CERTIFICADO_CN (recomendado) y certificado_cn (ya usada en Python).
+if ([string]::IsNullOrWhiteSpace($CertSubjectCN)) {
+  if (-not [string]::IsNullOrWhiteSpace($env:CERTIFICADO_CN)) {
+    $CertSubjectCN = $env:CERTIFICADO_CN
+  } elseif (-not [string]::IsNullOrWhiteSpace($env:certificado_cn)) {
+    $CertSubjectCN = $env:certificado_cn
+  }
+}
+
 $registryPath = "HKLM:\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls"
 if (!(Test-Path $registryPath)) { New-Item -Path $registryPath -Force }
 
@@ -29,7 +45,13 @@ $certUrlPatterns = @(
 
 $i = 1
 foreach ($pattern in $certUrlPatterns) {
-  $policyValue = "{`"pattern`":`"$pattern`",`"filter`":{}}"
+  # Si se proporciona un CN, filtramos para evitar que Edge elija el certificado equivocado.
+  # En caso contrario, Edge autoselecciona el certificado disponible para esa URL.
+  if ([string]::IsNullOrWhiteSpace($CertSubjectCN)) {
+    $policyValue = "{`"pattern`":`"$pattern`",`"filter`":{}}"
+  } else {
+    $policyValue = "{`"pattern`":`"$pattern`",`"filter`":{`"SUBJECT`":{`"CN`":`"$CertSubjectCN`"}}}"
+  }
   New-ItemProperty -Path $registryPath -Name "$i" -Value $policyValue -PropertyType String -Force | Out-Null
   $i++
 }

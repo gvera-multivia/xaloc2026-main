@@ -13,11 +13,22 @@ Este documento describe cómo configurar y operar el modo Worker desatendido.
 Para evitar que Edge pregunte qué certificado usar en cada conexión, se debe aplicar una política de registro.
 
 1. Abrir PowerShell como **Administrador**.
-2. Ejecutar el script `setup_worker_env.ps1`:
+2. (Opcional pero recomendado) Si hay mas de un certificado instalado, fija el CN para que Edge autoseleccione el correcto:
+   ```powershell
+   $env:CERTIFICADO_CN = "TU_CN_AQUI"
+   ```
+   El CN sale del campo `Subject` del certificado (p.ej. `CN=...`).
+   Alternativa: pasar el CN como parбmetro:
+   ```powershell
+   .\setup_worker_env.ps1 -CertSubjectCN "TU_CN_AQUI"
+   ```
+3. Ejecutar el script `setup_worker_env.ps1`:
    ```powershell
    .\setup_worker_env.ps1
    ```
-   Esto añadirá las URLs del proyecto a la lista de autoselección de certificados de Edge.
+   Esto añadirá las URLs del proyecto a la lista de autoselección de certificados de Edge (y aplicará el filtro por CN si se ha configurado).
+
+**Nota:** tras aplicar la política, cerrar Edge por completo (todos los procesos `msedge.exe`) para que la nueva configuración tenga efecto.
 
 ### 1.3. Base de Datos
 La base de datos SQLite se inicializa automáticamente al arrancar `worker.py` o usar `enqueue_task.py`. Se creará en `db/xaloc_database.db`.
