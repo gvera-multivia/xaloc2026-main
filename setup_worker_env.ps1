@@ -20,6 +20,17 @@ if ([string]::IsNullOrWhiteSpace($CertSubjectCN)) {
 $registryPath = "HKLM:\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls"
 if (!(Test-Path $registryPath)) { New-Item -Path $registryPath -Force }
 
+# Limpiar valores numéricos existentes ("1", "2", ...) para evitar patrones obsoletos.
+try {
+  $existing = Get-ItemProperty -Path $registryPath -ErrorAction Stop
+  $props = $existing.PSObject.Properties | Where-Object { $_.Name -match '^\d+$' } | Select-Object -ExpandProperty Name
+  foreach ($name in $props) {
+    Remove-ItemProperty -Path $registryPath -Name $name -ErrorAction SilentlyContinue | Out-Null
+  }
+} catch {
+  # Si no existe o no se puede leer, continuamos igualmente.
+}
+
 # Lista explícita de URLs donde Edge debe autoseleccionar certificado (sin popup)
 # Nota: cada entrada crea un valor "1", "2", "3"... en el registro.
 #
@@ -40,7 +51,10 @@ $certUrlPatterns = @(
   "https://www.xalocgirona.cat/*",
   "https://seu.xalocgirona.cat/*",
   "https://www.base.cat/*",
-  "https://www.baseonline.cat/*"
+  "https://www.baseonline.cat/*",
+  # VÀLid (AOC): en algunos casos el prompt aparece para cert.valid.aoc.cat:443
+  "https://valid.aoc.cat/*",
+  "https://cert.valid.aoc.cat/*"
 )
 
 $i = 1

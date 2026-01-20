@@ -32,6 +32,8 @@ Para evitar que Edge pregunte qué certificado usar en cada conexión, se debe a
 
 **Servidor sin PowerShell:** si no puedes ejecutar scripts de PowerShell en el servidor, puedes aplicar la misma polнtica desde `cmd` siguiendo `certificados-cmd.md`.
 
+**Nota (VÀLid/AOC):** si sigue saliendo el selector, revisa que la policy incluya tambiйn `https://cert.valid.aoc.cat/*` (es el host que suele disparar el popup).
+
 ### 1.3. Base de Datos
 La base de datos SQLite se inicializa automáticamente al arrancar `worker.py` o usar `enqueue_task.py`. Se creará en `db/xaloc_database.db`.
 
