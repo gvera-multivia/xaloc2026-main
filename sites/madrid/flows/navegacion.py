@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-import threading
 import time
 from typing import TYPE_CHECKING
 
@@ -48,14 +47,6 @@ async def _detectar_problema_autenticacion(page: Page) -> str | None:
     - redirigiendo: cas.madrid.es/commonauth con "Redirigiendo a Cl@ve..." que no avanza.
     """
     # Si el popup de certificado ya está presente, no disparar recovery.
-    try:
-        from utils.windows_popup import dialogo_certificado_presente
-
-        if dialogo_certificado_presente():
-            return None
-    except Exception:
-        pass
-
     url = (page.url or "").lower()
 
     try:
@@ -101,30 +92,9 @@ async def _recuperar_problema_autenticacion(page: Page, config: "MadridConfig", 
     logger.warning(f"Recuperación auth: detectado problema '{problema}' (URL: {page.url})")
 
     await page.wait_for_timeout(3000)
-    try:
-        from utils.windows_popup import dialogo_certificado_presente, aceptar_popup_certificado
-
-        if dialogo_certificado_presente():
-            aceptar_popup_certificado(tabs_atras=2, delay_inicial=0.0)
-            return True
-    except Exception:
-        pass
     if await _detectar_problema_autenticacion(page) is None:
         logger.info("Recuperación auth: el problema desapareció tras espera pasiva")
         return True
-
-    from utils.windows_popup import aceptar_popup_certificado
-
-    # En este caso el popup aparece "a mitad" del refresh: programamos Shift+Tab x2
-    # sin esperar a que termine la recarga.
-    def _delayed_shift_tab() -> None:
-        aceptar_popup_certificado(
-            tabs_atras=2,
-            delay_inicial=getattr(config, "cert_popup_midload_delay_ms", 800) / 1000.0,
-        )
-
-    popup_thread = threading.Thread(target=_delayed_shift_tab, daemon=True)
-    popup_thread.start()
 
     try:
         await page.reload(wait_until="domcontentloaded", timeout=config.navigation_timeout)
@@ -135,8 +105,6 @@ async def _recuperar_problema_autenticacion(page: Page, config: "MadridConfig", 
         except Exception:
             pass
 
-    popup_thread.join(timeout=5)
-
     return True
 
 
@@ -145,32 +113,19 @@ async def _click_certificado_y_aceptar_popup(page: Page, config: "MadridConfig")
     Click en 'DNIe / Certificado' y aceptación del popup.
     Monitoriza la página durante ~3s antes de enviar Shift+Tab x2 (evita enviar teclas si hay error de carga).
     """
-    from utils.windows_popup import aceptar_popup_certificado
 
-    await page.click(config.certificado_login_selector)
+
+    await page.click(config.certificado_login_selector, timeout=config.navigation_timeout)
     logger.info("  ƒÅ' Click en 'DNIe / Certificado'")
 
     # El popup aparece mientras la página aún está cargando: programar Shift+Tab x2
     # sin esperar a un estado de carga concreto.
-    def _delayed_shift_tab() -> None:
-        aceptar_popup_certificado(
-            tabs_atras=2,
-            delay_inicial=getattr(config, "cert_popup_midload_delay_ms", 800) / 1000.0,
-        )
+    await page.wait_for_timeout(getattr(config, "delay_ms", 500))
 
-    popup_thread = threading.Thread(target=_delayed_shift_tab, daemon=True)
-    popup_thread.start()
+
 
     # Durante ese intervalo, monitorizar errores para recovery.
-    start = time.monotonic()
-    while time.monotonic() - start < 3.0:
-        problema = await _detectar_problema_autenticacion(page)
-        if problema:
-            await _recuperar_problema_autenticacion(page, config, problema)
-            break
-        await page.wait_for_timeout(250)
 
-    popup_thread.join(timeout=5)
 
 async def _seleccionar_radio_por_texto(page: Page, texto: str) -> None:
     """
@@ -534,6 +489,12 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
             break
         except PlaywrightTimeoutError:
             if time.monotonic() > deadline:
+                if getattr(config.navegador, "headless", False):
+                    raise RuntimeError(
+                        "Madrid: timeout esperando autenticación post-certificado. "
+                        "Si aparece el selector de certificado, revisa la policy de Edge (AutoSelectCertificateForUrls) "
+                        "y que incluya hosts intermedios (cas.madrid.es / pasarela.clave.gob.es)."
+                    )
                 logger.warning("  ! Timeout de automatización (15s). Esperando intervención manual del usuario...")
                 logger.info("    Si el certificado no se seleccionó, hazlo manualmente y continúa.")
                 

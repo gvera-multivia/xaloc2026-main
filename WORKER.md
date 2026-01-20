@@ -36,6 +36,8 @@ Para evitar que Edge pregunte qué certificado usar en cada conexión, se debe a
 
 **PyAutoGUI:** ya no se usa (el worker asume autoselección de certificado vía policy). Si aparece un popup nativo, es señal de que falta algún dominio en la policy o el certificado no está instalado en el usuario correcto.
 
+**Madrid/Cl@ve:** el popup puede venir de hosts intermedios (p.ej. `cas.madrid.es`, `pasarela.clave.gob.es`). Inclúyelos en la policy (ver `setup_worker_env.ps1` / `certificados-cmd.md`) y verifica en `edge://policy` que Edge los ha cargado.
+
 ### 1.3. Base de Datos
 La base de datos SQLite se inicializa automáticamente al arrancar `worker.py` o usar `enqueue_task.py`. Se creará en `db/xaloc_database.db`.
 

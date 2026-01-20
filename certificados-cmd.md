@@ -27,6 +27,13 @@ reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 
 reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 7 /t REG_SZ /d "{\"pattern\":\"https://www.baseonline.cat/*\",\"filter\":{\"SUBJECT\":{\"CN\":\"%CN%\"}}}" /f
 reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 8 /t REG_SZ /d "{\"pattern\":\"https://valid.aoc.cat/*\",\"filter\":{\"SUBJECT\":{\"CN\":\"%CN%\"}}}" /f
 reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 9 /t REG_SZ /d "{\"pattern\":\"https://cert.valid.aoc.cat/*\",\"filter\":{\"SUBJECT\":{\"CN\":\"%CN%\"}}}" /f
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 10 /t REG_SZ /d "{\"pattern\":\"https://cas.madrid.es/*\",\"filter\":{\"SUBJECT\":{\"CN\":\"%CN%\"}}}" /f
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 11 /t REG_SZ /d "{\"pattern\":\"https://pasarela.clave.gob.es/*\",\"filter\":{\"SUBJECT\":{\"CN\":\"%CN%\"}}}" /f
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 12 /t REG_SZ /d "{\"pattern\":\"https://[*.]madrid.es/*\",\"filter\":{\"SUBJECT\":{\"CN\":\"%CN%\"}}}" /f
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 13 /t REG_SZ /d "{\"pattern\":\"https://[*.]clave.gob.es/*\",\"filter\":{\"SUBJECT\":{\"CN\":\"%CN%\"}}}" /f
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 14 /t REG_SZ /d "{\"pattern\":\"https://cas.madrid.es:443/*\",\"filter\":{\"SUBJECT\":{\"CN\":\"%CN%\"}}}" /f
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 15 /t REG_SZ /d "{\"pattern\":\"https://pasarela.clave.gob.es:443/*\",\"filter\":{\"SUBJECT\":{\"CN\":\"%CN%\"}}}" /f
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 16 /t REG_SZ /d "{\"pattern\":\"https://cert.valid.aoc.cat:443/*\",\"filter\":{\"SUBJECT\":{\"CN\":\"%CN%\"}}}" /f
 ```
 
 ## 2) Sin filtrar por certificado (Edge elige el disponible)
@@ -47,10 +54,13 @@ reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 
 reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 7 /t REG_SZ /d "{\"pattern\":\"https://www.baseonline.cat/*\",\"filter\":{}}" /f
 reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 8 /t REG_SZ /d "{\"pattern\":\"https://valid.aoc.cat/*\",\"filter\":{}}" /f
 reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 9 /t REG_SZ /d "{\"pattern\":\"https://cert.valid.aoc.cat/*\",\"filter\":{}}" /f
-
-reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 10 /t REG_SZ /d "{\"pattern\":\"https://pasarela.clave.gob.es/*\",\"filter\":{}}" /f
-
-reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 11 /t REG_SZ /d "{\"pattern\":\"https://cas.madrid.es/*\",\"filter\":{}}" /f
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 10 /t REG_SZ /d "{\"pattern\":\"https://cas.madrid.es/*\",\"filter\":{}}" /f
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 11 /t REG_SZ /d "{\"pattern\":\"https://pasarela.clave.gob.es/*\",\"filter\":{}}" /f
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 12 /t REG_SZ /d "{\"pattern\":\"https://[*.]madrid.es/*\",\"filter\":{}}" /f
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 13 /t REG_SZ /d "{\"pattern\":\"https://[*.]clave.gob.es/*\",\"filter\":{}}" /f
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 14 /t REG_SZ /d "{\"pattern\":\"https://cas.madrid.es:443/*\",\"filter\":{}}" /f
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 15 /t REG_SZ /d "{\"pattern\":\"https://pasarela.clave.gob.es:443/*\",\"filter\":{}}" /f
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 16 /t REG_SZ /d "{\"pattern\":\"https://cert.valid.aoc.cat:443/*\",\"filter\":{}}" /f
 
 ```
 

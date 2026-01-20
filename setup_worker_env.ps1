@@ -48,13 +48,22 @@ $certUrlPatterns = @(
   "https://sede.madrid.es/*",
   "https://servcla.madrid.es/*",
   "https://servpub.madrid.es/*",
+  "https://cas.madrid.es/*",
+  "https://cas.madrid.es:443/*",
+  # Cl@ve (pasarela): puede solicitar certificado durante el flujo de Madrid
+  "https://pasarela.clave.gob.es/*",
+  "https://pasarela.clave.gob.es:443/*",
+  # Wildcards (formato de patrones de políticas Chromium/Edge)
+  "https://[*.]madrid.es/*",
+  "https://[*.]clave.gob.es/*",
   "https://www.xalocgirona.cat/*",
   "https://seu.xalocgirona.cat/*",
   "https://www.base.cat/*",
   "https://www.baseonline.cat/*",
   # VÀLid (AOC): en algunos casos el prompt aparece para cert.valid.aoc.cat:443
   "https://valid.aoc.cat/*",
-  "https://cert.valid.aoc.cat/*"
+  "https://cert.valid.aoc.cat/*",
+  "https://cert.valid.aoc.cat:443/*"
 )
 
 $i = 1
