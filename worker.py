@@ -6,6 +6,7 @@ import traceback
 import os
 from pathlib import Path
 from typing import Optional
+import subprocess
 
 from core.sqlite_db import SQLiteDatabase
 from core.site_registry import get_site, get_site_controller
@@ -27,6 +28,42 @@ def _call_with_supported_kwargs(fn, **kwargs):
     sig = inspect.signature(fn)
     supported = {k: v for k, v in kwargs.items() if k in sig.parameters}
     return fn(**supported)
+
+def apply_url_cert_config():
+    """
+    Ejecuta el script de configuración de certificados leyendo el archivo:
+    url-cert-config.txt (que contiene comandos CMD tal cual).
+    Solo aplica en Windows.
+    """
+    if sys.platform != "win32":
+        logger.info("apply_url_cert_config: no es Windows; se omite.")
+        return
+
+    script_path = Path("url-cert-config.txt")
+    if not script_path.exists():
+        raise FileNotFoundError(f"No existe {script_path.resolve()}")
+
+    logger.info(f"Aplicando configuración de AutoSelectCertificateForUrls desde: {script_path.resolve()}")
+
+    # Ejecuta el archivo con cmd.exe para que soporte 'set', 'rem', expansión %CN%, etc.
+    # /d -> no auto-run, /s -> manejo de comillas, /c -> ejecutar y salir
+    completed = subprocess.run(
+        ["cmd.exe", "/d", "/s", "/c", str(script_path.resolve())],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    if completed.stdout:
+        logger.info(f"[url-cert-config stdout]\n{completed.stdout.strip()}")
+    if completed.stderr:
+        logger.warning(f"[url-cert-config stderr]\n{completed.stderr.strip()}")
+
+    if completed.returncode != 0:
+        raise RuntimeError(f"url-cert-config.txt falló con código {completed.returncode}")
+
+    logger.info("Configuración de certificados aplicada correctamente.")
 
 async def process_task(db: SQLiteDatabase, task_id: int, site_id: str, protocol: Optional[str], payload: dict):
     logger.info(f"Procesando tarea ID: {task_id} - Site: {site_id} - Protocol: {protocol}")
@@ -107,6 +144,9 @@ if __name__ == "__main__":
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
     try:
+        # ANTES DE NADA: aplicar el script de registro desde url-cert-config.txt
+        apply_url_cert_config()
+
         asyncio.run(worker_loop())
     except KeyboardInterrupt:
         pass
