@@ -1,0 +1,11 @@
+{
+  "user_email": "test@example.com",
+  "denuncia_num": "DEN/2024/001",
+  "plate_number": "1234ABC",
+  "expediente_num": "EXP/2024/001",
+  "motivos": "Alegación de prueba.",
+  "archivos": [
+    "pdfs-prueba/test1.pdf"
+  ]
+}
+

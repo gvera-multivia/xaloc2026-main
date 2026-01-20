@@ -30,6 +30,8 @@ Para evitar que Edge pregunte qué certificado usar en cada conexión, se debe a
 
 **Nota:** tras aplicar la política, cerrar Edge por completo (todos los procesos `msedge.exe`) para que la nueva configuración tenga efecto.
 
+**Servidor sin PowerShell:** si no puedes ejecutar scripts de PowerShell en el servidor, puedes aplicar la misma polнtica desde `cmd` siguiendo `certificados-cmd.md`.
+
 ### 1.3. Base de Datos
 La base de datos SQLite se inicializa automáticamente al arrancar `worker.py` o usar `enqueue_task.py`. Se creará en `db/xaloc_database.db`.
 
@@ -67,6 +69,8 @@ python enqueue_task.py --site <SITE_ID> [--protocol <PROTOCOLO>] --payload <JSON
    ```bash
    python enqueue_task.py --site base_online --protocol P1 --payload datos_tramite.json
    ```
+
+**Ejemplos listos para usar (modo prueba):** ver `worker-tasks/README.md` y los JSONs en `worker-tasks/`.
 
 ## 3. Monitorización y Logs
 

@@ -1,0 +1,22 @@
+{
+  "user_phone": "600123123",
+  "user_email": "test@example.com",
+  "plate_number": "1234ABC",
+  "expediente_id_ens": "43150",
+  "expediente_any": "2017",
+  "expediente_num": "1596",
+  "num_butlleti": "BUT/2026/001",
+  "data_denuncia": "21/03/2017",
+  "nif": "12345678Z",
+  "llicencia_conduccio": "LIC123456",
+  "name": "Nombre Apellidos",
+  "address_street": "CALLE PRUEBA",
+  "address_number": "1",
+  "address_zip": "43001",
+  "address_city": "TARRAGONA",
+  "address_province": "TARRAGONA",
+  "archivos": [
+    "pdfs-prueba/test1.pdf"
+  ]
+}
+
