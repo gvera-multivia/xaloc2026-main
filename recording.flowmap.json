@@ -1,0 +1,770 @@
+{
+  "meta": {
+    "version": "flowmap-v1",
+    "startedAt": "2026-01-20T14:18:10.690Z",
+    "endedAt": "2026-01-20T14:19:50.233Z",
+    "source": "my-extension",
+    "rawFile": "recording.raw.json"
+  },
+  "selectOptionsStore": {
+    "opt_e7a113b4a138": {
+      "count": 27,
+      "hash": "sha1:e7a113b4a1384442d7b637bc5873cec36677dc1d",
+      "options": [
+        [
+          "",
+          ""
+        ],
+        [
+          "100105294059702306120",
+          "Altres"
+        ],
+        [
+          "100105200489361306120",
+          "Consell Comarcal de la Selva"
+        ],
+        [
+          "100105201583792106120",
+          "Amer"
+        ],
+        [
+          "100100300000000106120",
+          "Anglès"
+        ],
+        [
+          "100105203711187306120",
+          "Arbúcies"
+        ],
+        [
+          "100105217327589806120",
+          "Blanes"
+        ],
+        [
+          "100100300000000306120",
+          "Breda"
+        ],
+        [
+          "100100000000084900000",
+          "Brunyola"
+        ],
+        [
+          "100100400058455206120",
+          "Caldes de Malavella"
+        ],
+        [
+          "100100000000085100000",
+          "Hostalric"
+        ],
+        [
+          "100105220425938306120",
+          "Lloret de Mar"
+        ],
+        [
+          "100100000000085300000",
+          "Massanes"
+        ],
+        [
+          "100100000000084800000",
+          "Maçanet de la Selva"
+        ],
+        [
+          "100100000000085200000",
+          "Osor"
+        ],
+        [
+          "100100000000085400000",
+          "Riells i Viabrea"
+        ],
+        [
+          "100100000000085500000",
+          "Riudarenes"
+        ],
+        [
+          "100100000000085600000",
+          "Riudellots de la Selva"
+        ],
+        [
+          "100100400004799306120",
+          "Sant Feliu de Buixalleu"
+        ],
+        [
+          "100100000000086300000",
+          "Sant Hilari Sacalm"
+        ],
+        [
+          "100100000000085000000",
+          "Santa Coloma de Farners"
+        ],
+        [
+          "100105200781186806120",
+          "Cellera de Ter, La"
+        ],
+        [
+          "100100000000086000000",
+          "Sils"
+        ],
+        [
+          "100100000000086100000",
+          "Susqueda"
+        ],
+        [
+          "100100000000086200000",
+          "Vidreres"
+        ],
+        [
+          "100105201583792006120",
+          "Vilobí d'Onyar"
+        ],
+        [
+          "100105205295481806120",
+          "Urb. La Goba"
+        ]
+      ]
+    },
+    "opt_73b2be18cdb0": {
+      "count": 17,
+      "hash": "sha1:73b2be18cdb015c503ff15168d4c6f6c84c0551e",
+      "options": [
+        [
+          "ALTRES",
+          "Altres / Otros"
+        ],
+        [
+          "CONSUM",
+          "Consum / Consumo"
+        ],
+        [
+          "RECAPTACIO",
+          "Recaptació i gestió tributària / Recaudación i gestión tributaria"
+        ],
+        [
+          "CADASTRE",
+          "Cadastre / Catastro"
+        ],
+        [
+          "UJOV",
+          "Joventut / Juventud"
+        ],
+        [
+          "UMA",
+          "Servei del porta a porta-Gestió de residus / Servicio de puerta a puerta-Gestión de residuos"
+        ],
+        [
+          "UMA",
+          "Serveis tècnics - llicències activitats / Servicios técnicos / licencias de actividades"
+        ],
+        [
+          "URRHH",
+          "Recursos humans / Recursos humanos"
+        ],
+        [
+          "UST",
+          "Sancions de trànsit / Sanciones de tráfico"
+        ],
+        [
+          "USSB",
+          "Serveis socials / Servicios sociales"
+        ],
+        [
+          "USOST",
+          "Prevenció incendis - neteja de parcel.les / Prevención de incendios-limpieza de parcelas"
+        ],
+        [
+          "UEMP",
+          "Suport a l'empresa / Soporte a la empresa"
+        ],
+        [
+          "UENS",
+          "Ensenyament - Ajuts i transport escolar / Educación- Ayudas i transporte escolar"
+        ],
+        [
+          "HABITATGE",
+          "Ajuts a l'habitatge / Ayudas a la vivienda"
+        ],
+        [
+          "SEC",
+          "Dret d'accés informació pública / Derecho al acceso a la información pública"
+        ],
+        [
+          "SEC",
+          "Contractació pública / Contractación pública"
+        ],
+        [
+          "GER",
+          "Gerència o Presidència / Geréncia o Presidencia"
+        ]
+      ]
+    }
+  },
+  "pages": [
+    {
+      "topUrl": "edge://newtab/",
+      "visits": [
+        {
+          "visitIndex": 1,
+          "startedAt": "2026-01-20T14:18:10.715Z",
+          "endedAt": "2026-01-20T14:18:10.715Z",
+          "steps": [
+            {
+              "action": "navigate",
+              "url": "edge://newtab/"
+            }
+          ],
+          "elements": []
+        }
+      ]
+    },
+    {
+      "topUrl": "https://seu.selva.cat/sta/CarpetaPublic/doEvent?APP_CODE=STA&PAGE_CODE=CATALOGO&DETALLE=6269005284505775806120",
+      "visits": [
+        {
+          "visitIndex": 1,
+          "startedAt": "2026-01-20T14:18:15.018Z",
+          "endedAt": "2026-01-20T14:18:15.018Z",
+          "steps": [
+            {
+              "action": "navigate",
+              "url": "https://seu.selva.cat/sta/CarpetaPublic/doEvent?APP_CODE=STA&PAGE_CODE=CATALOGO&DETALLE=6269005284505775806120"
+            }
+          ],
+          "elements": []
+        },
+        {
+          "visitIndex": 2,
+          "startedAt": "2026-01-20T14:18:15.818Z",
+          "endedAt": "2026-01-20T14:18:25.345Z",
+          "steps": [
+            {
+              "action": "navigate",
+              "url": "https://seu.selva.cat/sta/CarpetaPublic/doEvent?APP_CODE=STA&PAGE_CODE=CATALOGO&DETALLE=6269005284505775806120"
+            },
+            {
+              "action": "click",
+              "ref": "div#aazone.CATSERV > div > ul > li > div:nth-of-type(2) > ul > li > a"
+            }
+          ],
+          "elements": [
+            {
+              "elementKey": "div#aazone.CATSERV > div > ul > li > div:nth-of-type(2) > ul > li > a",
+              "tag": "A",
+              "bestSelector": "div#aazone.CATSERV > div > ul > li > div:nth-of-type(2) > ul > li > a",
+              "heading": "Instància genèrica"
+            }
+          ],
+          "heading": "Instància genèrica"
+        }
+      ]
+    },
+    {
+      "topUrl": "https://seu.selva.cat/sta/frame.jsp",
+      "visits": [
+        {
+          "visitIndex": 1,
+          "startedAt": "2026-01-20T14:18:25.461Z",
+          "endedAt": "2026-01-20T14:18:25.461Z",
+          "steps": [
+            {
+              "action": "navigate",
+              "url": "https://seu.selva.cat/sta/frame.jsp"
+            }
+          ],
+          "elements": []
+        }
+      ]
+    },
+    {
+      "topUrl": "https://seu.selva.cat/sta/Relec/TramitaForm?dboidSolicitud=6269005284505775806120&urlBack=+%2Fsta%2FCarpetaPublic%2F%3FAPP_CODE%3DSTA%26PAGE_CODE%3DCATALOGO%26DETALLE%3D6269005284505775806120&autoFirma=false&showApplet=false&&fire=false&&frame=true",
+      "visits": [
+        {
+          "visitIndex": 1,
+          "startedAt": "2026-01-20T14:18:41.340Z",
+          "endedAt": "2026-01-20T14:19:37.856Z",
+          "steps": [
+            {
+              "action": "navigate",
+              "url": "https://seu.selva.cat/sta/Relec/TramitaForm?dboidSolicitud=6269005284505775806120&urlBack=+%2Fsta%2FCarpetaPublic%2F%3FAPP_CODE%3DSTA%26PAGE_CODE%3DCATALOGO%26DETALLE%3D6269005284505775806120&autoFirma=false&showApplet=false&&fire=false&&frame=true"
+            },
+            {
+              "action": "click",
+              "ref": "tr#tr1 > td:nth-of-type(2) > table"
+            },
+            {
+              "action": "fill",
+              "ref": "contact1",
+              "value": "601353054"
+            },
+            {
+              "action": "click",
+              "ref": "tr#tr1 > td:nth-of-type(2) > table > tbody > tr > td:nth-of-type(2)"
+            },
+            {
+              "action": "check",
+              "ref": "info1",
+              "checked": true
+            },
+            {
+              "action": "fill",
+              "ref": "contact3",
+              "value": "601353054"
+            },
+            {
+              "action": "click",
+              "ref": "tr#tr3 > td:nth-of-type(2) > table"
+            },
+            {
+              "action": "check",
+              "ref": "info3",
+              "checked": true
+            },
+            {
+              "action": "fill",
+              "ref": "contact11",
+              "value": "601353054"
+            },
+            {
+              "action": "check",
+              "ref": "info11",
+              "checked": true
+            },
+            {
+              "action": "fill",
+              "ref": "contact4",
+              "value": "601353054"
+            },
+            {
+              "action": "check",
+              "ref": "info4",
+              "checked": true
+            },
+            {
+              "action": "check",
+              "ref": "info1",
+              "checked": true
+            },
+            {
+              "action": "click",
+              "ref": "div#pantallaDPA > div > div > label"
+            },
+            {
+              "action": "select",
+              "ref": "Instancia_generica$IG_MUNICIPIO_ENTIDAD",
+              "selectedValue": "100100400058455206120",
+              "selectedText": "Caldes de Malavella"
+            },
+            {
+              "action": "select",
+              "ref": "Instancia_generica$TEMA",
+              "selectedValue": "CADASTRE",
+              "selectedText": "Cadastre / Catastro"
+            },
+            {
+              "action": "fill",
+              "ref": "Instancia_generica$EXPONE",
+              "value": "Exposicion de ejemplo"
+            },
+            {
+              "action": "fill",
+              "ref": "Instancia_generica$SOLICITA",
+              "value": "Solicitud de ejemplo"
+            },
+            {
+              "action": "check",
+              "ref": "Instancia_generica$IG_OPOSICION_OBTENER_DATOS",
+              "checked": true
+            },
+            {
+              "action": "check",
+              "ref": "Autorizacion_Notificacion_Electronica$AUTNOTELEC$AUTNOTELEC",
+              "checked": true
+            },
+            {
+              "action": "click",
+              "ref": "div#divBoton6261105284505789606120_2000405279801993506120 > a"
+            },
+            {
+              "action": "check",
+              "ref": "lopdok",
+              "checked": true
+            },
+            {
+              "action": "click",
+              "ref": "div#botoncontinuar > a"
+            }
+          ],
+          "elements": [
+            {
+              "elementKey": "tr#tr1 > td:nth-of-type(2) > table",
+              "tag": "TABLE",
+              "bestSelector": "tr#tr1 > td:nth-of-type(2) > table",
+              "heading": "Dades de contacte"
+            },
+            {
+              "elementKey": "contact1",
+              "tag": "INPUT",
+              "type": "text",
+              "id": "contact1",
+              "name": "contact1",
+              "bestSelector": "#contact1",
+              "altSelectors": [
+                "[name=\"contact1\"]",
+                "input#contact1"
+              ],
+              "labelText": "Telèfon particular:",
+              "heading": "Dades de contacte"
+            },
+            {
+              "elementKey": "tr#tr1 > td:nth-of-type(2) > table > tbody > tr > td:nth-of-type(2)",
+              "tag": "TD",
+              "bestSelector": "tr#tr1 > td:nth-of-type(2) > table > tbody > tr > td:nth-of-type(2)",
+              "heading": "Dades de contacte"
+            },
+            {
+              "elementKey": "info1",
+              "tag": "INPUT",
+              "type": "checkbox",
+              "id": "info1",
+              "name": "info1",
+              "bestSelector": "#info1",
+              "altSelectors": [
+                "[name=\"info1\"]",
+                "input#info1"
+              ],
+              "heading": "Dades de contacte"
+            },
+            {
+              "elementKey": "contact3",
+              "tag": "INPUT",
+              "type": "text",
+              "id": "contact3",
+              "name": "contact3",
+              "bestSelector": "#contact3",
+              "altSelectors": [
+                "[name=\"contact3\"]",
+                "input#contact3"
+              ],
+              "labelText": "Telèfon mòbil:",
+              "heading": "Dades de contacte"
+            },
+            {
+              "elementKey": "tr#tr3 > td:nth-of-type(2) > table",
+              "tag": "TABLE",
+              "bestSelector": "tr#tr3 > td:nth-of-type(2) > table",
+              "heading": "Dades de contacte"
+            },
+            {
+              "elementKey": "info3",
+              "tag": "INPUT",
+              "type": "checkbox",
+              "id": "info3",
+              "name": "info3",
+              "bestSelector": "#info3",
+              "altSelectors": [
+                "[name=\"info3\"]",
+                "input#info3"
+              ],
+              "heading": "Dades de contacte"
+            },
+            {
+              "elementKey": "contact11",
+              "tag": "INPUT",
+              "type": "text",
+              "id": "contact11",
+              "name": "contact11",
+              "bestSelector": "#contact11",
+              "altSelectors": [
+                "[name=\"contact11\"]",
+                "input#contact11"
+              ],
+              "labelText": "Fax particular:",
+              "heading": "Dades de contacte"
+            },
+            {
+              "elementKey": "info11",
+              "tag": "INPUT",
+              "type": "checkbox",
+              "id": "info11",
+              "name": "info11",
+              "bestSelector": "#info11",
+              "altSelectors": [
+                "[name=\"info11\"]",
+                "input#info11"
+              ],
+              "heading": "Dades de contacte"
+            },
+            {
+              "elementKey": "contact4",
+              "tag": "INPUT",
+              "type": "text",
+              "id": "contact4",
+              "name": "contact4",
+              "bestSelector": "#contact4",
+              "altSelectors": [
+                "[name=\"contact4\"]",
+                "input#contact4"
+              ],
+              "labelText": "Telèfon (uns altres):",
+              "heading": "Dades de contacte"
+            },
+            {
+              "elementKey": "info4",
+              "tag": "INPUT",
+              "type": "checkbox",
+              "id": "info4",
+              "name": "info4",
+              "bestSelector": "#info4",
+              "altSelectors": [
+                "[name=\"info4\"]",
+                "input#info4"
+              ],
+              "heading": "Dades de contacte"
+            },
+            {
+              "elementKey": "div#pantallaDPA > div > div > label",
+              "tag": "LABEL",
+              "bestSelector": "div#pantallaDPA > div > div > label",
+              "labelText": "Municipi que afecta a la sol·licitud / Municipio que afecta a la solicitud",
+              "heading": "Dades particulars"
+            },
+            {
+              "elementKey": "Instancia_generica$IG_MUNICIPIO_ENTIDAD",
+              "tag": "SELECT",
+              "id": "Instancia_generica$IG_MUNICIPIO_ENTIDAD",
+              "name": "IG_MUNICIPIO_ENTIDAD",
+              "bestSelector": "#Instancia_generica$IG_MUNICIPIO_ENTIDAD",
+              "altSelectors": [
+                "[name=\"IG_MUNICIPIO_ENTIDAD\"]",
+                "select#Instancia_generica$IG_MUNICIPIO_ENTIDAD"
+              ],
+              "heading": "Dades particulars",
+              "optionsId": "opt_e7a113b4a138",
+              "optionsCount": 27
+            },
+            {
+              "elementKey": "Instancia_generica$TEMA",
+              "tag": "SELECT",
+              "id": "Instancia_generica$TEMA",
+              "name": "TEMA",
+              "bestSelector": "#Instancia_generica$TEMA",
+              "altSelectors": [
+                "[name=\"TEMA\"]",
+                "select#Instancia_generica$TEMA"
+              ],
+              "heading": "Dades particulars",
+              "optionsId": "opt_73b2be18cdb0",
+              "optionsCount": 17
+            },
+            {
+              "elementKey": "Instancia_generica$EXPONE",
+              "tag": "TEXTAREA",
+              "id": "Instancia_generica$EXPONE",
+              "name": "EXPONE",
+              "bestSelector": "#Instancia_generica$EXPONE",
+              "altSelectors": [
+                "[name=\"EXPONE\"]",
+                "textarea#Instancia_generica$EXPONE"
+              ],
+              "heading": "Dades particulars"
+            },
+            {
+              "elementKey": "Instancia_generica$SOLICITA",
+              "tag": "TEXTAREA",
+              "id": "Instancia_generica$SOLICITA",
+              "name": "SOLICITA",
+              "bestSelector": "#Instancia_generica$SOLICITA",
+              "altSelectors": [
+                "[name=\"SOLICITA\"]",
+                "textarea#Instancia_generica$SOLICITA"
+              ],
+              "heading": "Dades particulars"
+            },
+            {
+              "elementKey": "Instancia_generica$IG_OPOSICION_OBTENER_DATOS",
+              "tag": "INPUT",
+              "type": "checkbox",
+              "id": "Instancia_generica$IG_OPOSICION_OBTENER_DATOS",
+              "name": "Instancia_generica$IG_OPOSICION_OBTENER_DATOS",
+              "bestSelector": "#Instancia_generica$IG_OPOSICION_OBTENER_DATOS",
+              "altSelectors": [
+                "[name=\"Instancia_generica$IG_OPOSICION_OBTENER_DATOS\"]",
+                "input#Instancia_generica$IG_OPOSICION_OBTENER_DATOS"
+              ],
+              "heading": "Dades particulars"
+            },
+            {
+              "elementKey": "Autorizacion_Notificacion_Electronica$AUTNOTELEC$AUTNOTELEC",
+              "tag": "INPUT",
+              "type": "checkbox",
+              "id": "Autorizacion_Notificacion_Electronica$AUTNOTELEC$AUTNOTELEC",
+              "name": "Autorizacion_Notificacion_Electronica$AUTNOTELEC$AUTNOTELEC",
+              "bestSelector": "#Autorizacion_Notificacion_Electronica$AUTNOTELEC$AUTNOTELEC",
+              "altSelectors": [
+                "[name=\"Autorizacion_Notificacion_Electronica$AUTNOTELEC$AUTNOTELEC\"]",
+                "input#Autorizacion_Notificacion_Electronica$AUTNOTELEC$AUTNOTELEC"
+              ],
+              "heading": "Dades particulars"
+            },
+            {
+              "elementKey": "div#divBoton6261105284505789606120_2000405279801993506120 > a",
+              "tag": "A",
+              "bestSelector": "div#divBoton6261105284505789606120_2000405279801993506120 > a",
+              "heading": "Documentació que cal aportar"
+            },
+            {
+              "elementKey": "lopdok",
+              "tag": "INPUT",
+              "type": "checkbox",
+              "id": "lopdok",
+              "name": "lopdok",
+              "bestSelector": "#lopdok",
+              "altSelectors": [
+                "[name=\"lopdok\"]",
+                "input#lopdok"
+              ],
+              "heading": "Dades particulars"
+            },
+            {
+              "elementKey": "div#botoncontinuar > a",
+              "tag": "A",
+              "bestSelector": "div#botoncontinuar > a",
+              "heading": "Dades particulars"
+            }
+          ],
+          "heading": "Dades de contacte"
+        }
+      ]
+    },
+    {
+      "topUrl": "https://seu.selva.cat/sta/pages/relec/documentSignSend.jsp?tipoDocumento=6261105284505789606120&firma=N&extensions=jpeg,jpg,pdf,png,xls,xlsx,xml&personDBOID=2000405279801993506120&maxSize=10000&checkPdf=true&reusable=false&allowMultiple=true",
+      "visits": [
+        {
+          "visitIndex": 1,
+          "startedAt": "2026-01-20T14:19:22.766Z",
+          "endedAt": "2026-01-20T14:19:34.816Z",
+          "steps": [
+            {
+              "action": "navigate",
+              "url": "https://seu.selva.cat/sta/pages/relec/documentSignSend.jsp?tipoDocumento=6261105284505789606120&firma=N&extensions=jpeg,jpg,pdf,png,xls,xlsx,xml&personDBOID=2000405279801993506120&maxSize=10000&checkPdf=true&reusable=false&allowMultiple=true"
+            },
+            {
+              "action": "upload",
+              "ref": "fichero",
+              "fileMeta": {
+                "names": [
+                  "test2.pdf"
+                ],
+                "count": 1
+              }
+            },
+            {
+              "action": "upload",
+              "ref": "fichero1",
+              "fileMeta": {
+                "names": [
+                  "test3.pdf"
+                ],
+                "count": 1
+              }
+            },
+            {
+              "action": "click",
+              "ref": "div#adjuntar > table > tbody > tr:nth-of-type(2) > td > a"
+            },
+            {
+              "action": "click",
+              "ref": "div#continuar > a"
+            }
+          ],
+          "elements": [
+            {
+              "elementKey": "fichero",
+              "tag": "INPUT",
+              "type": "file",
+              "id": "fichero",
+              "name": "fichero",
+              "bestSelector": "#fichero",
+              "altSelectors": [
+                "[name=\"fichero\"]",
+                "input#fichero"
+              ]
+            },
+            {
+              "elementKey": "fichero1",
+              "tag": "INPUT",
+              "type": "file",
+              "id": "fichero1",
+              "name": "fichero1",
+              "bestSelector": "#fichero1",
+              "altSelectors": [
+                "[name=\"fichero1\"]",
+                "input#fichero1"
+              ]
+            },
+            {
+              "elementKey": "div#adjuntar > table > tbody > tr:nth-of-type(2) > td > a",
+              "tag": "A",
+              "bestSelector": "div#adjuntar > table > tbody > tr:nth-of-type(2) > td > a"
+            },
+            {
+              "elementKey": "div#continuar > a",
+              "tag": "A",
+              "bestSelector": "div#continuar > a",
+              "frameKey": "frm_5a69816a04"
+            }
+          ],
+          "frames": [
+            {
+              "frameKey": "frm_5a69816a04",
+              "frameUrl": "https://seu.selva.cat/sta/pages/relec/documentSignSend.jsp?tipoDocumento=6261105284505789606120&firma=N&extensions=jpeg,jpg,pdf,png,xls,xlsx,xml&personDBOID=2000405279801993506120&maxSize=10000&checkPdf=true&reusable=false&allowMultiple=true#"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "topUrl": "https://seu.selva.cat/sta/pages/relec/documentSignSend.jsp?tipoDocumento=6261105284505789606120&firma=N&extensions=jpeg,jpg,pdf,png,xls,xlsx,xml&personDBOID=2000405279801993506120&maxSize=10000&checkPdf=true&reusable=false&allowMultiple=true#",
+      "visits": [
+        {
+          "visitIndex": 1,
+          "startedAt": "2026-01-20T14:19:34.823Z",
+          "endedAt": "2026-01-20T14:19:34.823Z",
+          "steps": [
+            {
+              "action": "navigate",
+              "url": "https://seu.selva.cat/sta/pages/relec/documentSignSend.jsp?tipoDocumento=6261105284505789606120&firma=N&extensions=jpeg,jpg,pdf,png,xls,xlsx,xml&personDBOID=2000405279801993506120&maxSize=10000&checkPdf=true&reusable=false&allowMultiple=true#"
+            }
+          ],
+          "elements": []
+        }
+      ]
+    },
+    {
+      "topUrl": "https://seu.selva.cat/sta/Relec/TramitaSign",
+      "visits": [
+        {
+          "visitIndex": 1,
+          "startedAt": "2026-01-20T14:19:41.750Z",
+          "endedAt": "2026-01-20T14:19:41.750Z",
+          "steps": [
+            {
+              "action": "navigate",
+              "url": "https://seu.selva.cat/sta/Relec/TramitaSign"
+            }
+          ],
+          "elements": []
+        },
+        {
+          "visitIndex": 2,
+          "startedAt": "2026-01-20T14:19:42.248Z",
+          "endedAt": "2026-01-20T14:19:42.248Z",
+          "steps": [
+            {
+              "action": "navigate",
+              "url": "https://seu.selva.cat/sta/Relec/TramitaSign"
+            }
+          ],
+          "elements": []
+        }
+      ]
+    }
+  ]
+}
