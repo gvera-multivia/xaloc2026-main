@@ -215,7 +215,7 @@ async def ejecutar_login_base(page: Page, config: BaseOnlineConfig) -> Page:
     def _resolver_popup_windows() -> None:
         aceptar_popup_certificado(
             tabs_atras=2,
-            delay_inicial=max(0.0, getattr(config, "cert_popup_delay_ms", 1500) / 1000.0),
+            delay_inicial=max(0.0, getattr(config, "cert_popup_delay_ms", 2000) / 1000.0),
         )
 
     thread_popup = threading.Thread(target=_resolver_popup_windows, daemon=True)

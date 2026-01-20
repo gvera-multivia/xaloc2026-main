@@ -120,7 +120,7 @@ async def _recuperar_problema_autenticacion(page: Page, config: "MadridConfig", 
     def _delayed_shift_tab() -> None:
         aceptar_popup_certificado(
             tabs_atras=2,
-            delay_inicial=getattr(config, "cert_popup_midload_delay_ms", 800) / 1000.0,
+            delay_inicial=getattr(config, "cert_popup_midload_delay_ms", 2000) / 1000.0,
         )
 
     popup_thread = threading.Thread(target=_delayed_shift_tab, daemon=True)
@@ -155,7 +155,7 @@ async def _click_certificado_y_aceptar_popup(page: Page, config: "MadridConfig")
     def _delayed_shift_tab() -> None:
         aceptar_popup_certificado(
             tabs_atras=2,
-            delay_inicial=getattr(config, "cert_popup_midload_delay_ms", 800) / 1000.0,
+            delay_inicial=getattr(config, "cert_popup_midload_delay_ms", 2000) / 1000.0,
         )
 
     popup_thread = threading.Thread(target=_delayed_shift_tab, daemon=True)
