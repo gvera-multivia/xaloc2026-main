@@ -1,0 +1,25 @@
+{
+  "plate_number": "1234ABC",
+  "user_phone": "600123456",
+  "representative_email": "representante@example.com",
+  "representative_phone": "600123123",
+  "representative_street": "GRAN VIA",
+  "representative_number": "1",
+  "representative_zip": "28013",
+  "representative_city": "MADRID",
+  "notif_name": "JUAN",
+  "notif_surname1": "PEREZ",
+  "notif_surname2": "GARCIA",
+  "expediente_tipo": "opcion1",
+  "expediente_nnn": "911",
+  "expediente_eeeeeeeee": "102532229",
+  "expediente_d": "3",
+  "naturaleza": "A",
+  "expone": "Expongo que los hechos no concuerdan con la realidad.",
+  "solicita": "Solicito la revisión del expediente.",
+  "archivos": [
+    "pdfs-prueba/test1.pdf",
+    "pdfs-prueba/test2.pdf"
+  ]
+}
+

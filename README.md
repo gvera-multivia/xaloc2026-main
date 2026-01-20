@@ -13,7 +13,7 @@ Sitios registrados en `core/site_registry.py`:
 ## Requisitos
 
 - Python **3.10+** (se usan type hints `str | None`).
-- Windows recomendado si necesitas automatizar el popup nativo del certificado (usa `pyautogui`).
+- Windows recomendado (Edge + políticas de autoselección de certificado).
 - Playwright + navegador `msedge` (por defecto se lanza canal `msedge` con perfil persistente).
 
 ## Instalacion
@@ -104,8 +104,7 @@ main.py               # CLI/entrypoint
 
 ## Certificado digital (puntos criticos)
 
-- La autenticacion con certificado puede disparar un **popup nativo de Windows**. Se intenta aceptar automaticamente desde `utils/windows_popup.py` usando `pyautogui`.
-- Esto requiere **sesion interactiva** (no funciona en entornos sin escritorio). Si falla, hazlo manualmente y vuelve a ejecutar.
+- La autenticacion con certificado puede disparar un **popup nativo de Windows**. En modo worker se evita con políticas de Edge (`AutoSelectCertificateForUrls`).
 - Se usa **perfil persistente** (`profiles/...`) para reutilizar estado del navegador.
 
 ## Artefactos: logs y screenshots
