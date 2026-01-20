@@ -192,39 +192,61 @@
     // EVENT HANDLERS
     // =====================================================
 
-    // Track focus to know when user is interacting with inputs
-    let lastFocusedInput = null;
-    let lastFocusedValue = null;
+    // Track all inputs/textareas for value changes
+    const inputValues = new Map();
 
+    // Capture ALL form element values on any interaction
+    function trackInputValue(el) {
+        if (!inputValues.has(el)) {
+            inputValues.set(el, el.value);
+        }
+    }
+
+    // Check if value changed and send event
+    function checkAndSendFill(el) {
+        const oldValue = inputValues.get(el);
+        const newValue = el.value;
+
+        if (oldValue !== newValue && newValue !== '') {
+            console.log(`[RECORDER] Value changed: "${oldValue}" -> "${newValue}"`, el.id || el.name);
+            sendEvent('fill', el);
+            inputValues.set(el, newValue);
+        }
+    }
+
+    // Focus - track initial value
     document.addEventListener('focusin', (e) => {
         const el = e.target;
         if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
-            lastFocusedInput = el;
-            lastFocusedValue = el.value;
-            console.log('[RECORDER] Focus on:', el.id || el.name || el.tagName);
+            trackInputValue(el);
+            console.log('[RECORDER] Focus on:', el.id || el.name || el.tagName, 'value:', el.value);
         }
     }, true);
 
-    // Capture blur to detect text input changes
+    // Blur - check for changes
     document.addEventListener('focusout', (e) => {
         const el = e.target;
-        if ((el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') &&
-            el === lastFocusedInput &&
-            el.value !== lastFocusedValue) {
-
+        if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
             const inputType = el.type || 'text';
             if (!['checkbox', 'radio', 'file', 'submit', 'button', 'reset', 'hidden'].includes(inputType)) {
-                sendEvent('fill', el);
+                checkAndSendFill(el);
             }
         }
-        lastFocusedInput = null;
-        lastFocusedValue = null;
     }, true);
 
-    // Change event for select, checkbox, radio, file
+    // Input event - fires on every keystroke (backup for blur)
+    document.addEventListener('input', (e) => {
+        const el = e.target;
+        // Just log that input is happening (don't send event on every keystroke)
+        if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+            console.log('[RECORDER] Input on:', el.id || el.name, 'current value:', el.value?.substring(0, 30));
+        }
+    }, true);
+
+    // Change event for select, checkbox, radio, file, AND text inputs
     document.addEventListener('change', (e) => {
         const el = e.target;
-        console.log('[RECORDER] Change event on:', el.tagName, el.type, el.id || el.name);
+        console.log('[RECORDER] CHANGE event on:', el.tagName, el.type, el.id || el.name, 'value:', el.value);
 
         if (el.tagName === 'SELECT') {
             sendEvent('select', el);
@@ -234,13 +256,19 @@
             sendEvent('select_radio', el);
         } else if (el.type === 'file') {
             sendEvent('upload', el);
+        } else if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+            // Also capture change events on text inputs (some pages trigger this)
+            const inputType = el.type || 'text';
+            if (!['checkbox', 'radio', 'file', 'submit', 'button', 'reset', 'hidden'].includes(inputType)) {
+                sendEvent('fill', el);
+            }
         }
-        // Text inputs are handled by focusout
     }, true);
 
     // Click events for buttons, links, and other interactive elements
     document.addEventListener('click', (e) => {
         const el = e.target;
+        console.log('[RECORDER] Click on:', el.tagName, el.id || el.name || el.className);
 
         // Find the clickable element (might be a child of button/link)
         const clickable = el.closest('button, a, input[type="submit"], input[type="button"], [role="button"], [onclick]');
@@ -263,6 +291,7 @@
             formMethod: form.method
         });
     }, true);
+
 
     // =====================================================
     // DOM SNAPSHOT (captures all form fields on page)

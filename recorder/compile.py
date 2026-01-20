@@ -1,34 +1,78 @@
 import json
 import os
 from pathlib import Path
+from datetime import datetime
 from recorder.extract import get_best_selector
+
+def parse_timestamp(ts_str):
+    """Parse ISO timestamp to datetime."""
+    try:
+        return datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+    except:
+        return None
+
+def is_duplicate(event1, event2):
+    """Check if two events are duplicates (same action on same element within 100ms)."""
+    ts1 = parse_timestamp(event1.get('ts', ''))
+    ts2 = parse_timestamp(event2.get('ts', ''))
+    
+    if not ts1 or not ts2:
+        return False
+    
+    # Check if within 100ms
+    time_diff = abs((ts2 - ts1).total_seconds())
+    if time_diff > 0.1:
+        return False
+    
+    # Check if same action
+    if event1.get('action') != event2.get('action'):
+        return False
+    
+    # Check if same target (by ID, name, or locators)
+    field1 = event1.get('field', {})
+    field2 = event2.get('field', {})
+    
+    if field1.get('id') and field1.get('id') == field2.get('id'):
+        return True
+    if field1.get('name') and field1.get('name') == field2.get('name'):
+        return True
+    
+    return False
 
 def compile_recording(site: str, recording_file: Path):
     print(f"Compiling recording for {site} from {recording_file}")
 
-    events = []
-    seen_timestamps = set()
+    raw_events = []
     
     with open(recording_file, 'r', encoding='utf-8') as f:
         for line in f:
             if line.strip():
                 try:
-                    event = json.loads(line)
-                    # Deduplicate based on timestamp (events recorded twice have same ts)
-                    ts = event.get('ts')
-                    if ts not in seen_timestamps:
-                        seen_timestamps.add(ts)
-                        events.append(event)
+                    raw_events.append(json.loads(line))
                 except json.JSONDecodeError:
                     pass
 
-    if not events:
+    if not raw_events:
         print("No events found.")
         return
+    
+    # Deduplicate events (remove events within 100ms with same action/target)
+    events = []
+    for event in raw_events:
+        is_dup = False
+        for existing in events[-5:]:  # Only check last 5 events for performance
+            if is_duplicate(existing, event):
+                is_dup = True
+                break
+        if not is_dup:
+            events.append(event)
+    
+    print(f"Loaded {len(events)} events (deduplicated from {len(raw_events)} raw)")
     
     # Separate snapshots from action events
     snapshots = [e for e in events if e.get('action') == 'page_snapshot']
     action_events = [e for e in events if e.get('action') != 'page_snapshot']
+
     
     print(f"Loaded {len(action_events)} action events + {len(snapshots)} page snapshots")
     
