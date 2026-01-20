@@ -23,7 +23,9 @@ class Recorder:
         self.site = site
         self.protocol = protocol
         self.events = []
-        self.output_dir = Path(f"recordings/{site}")
+        # Use absolute path based on project root (parent of recorder/)
+        self.project_root = Path(__file__).parent.parent.resolve()
+        self.output_dir = self.project_root / "recordings" / site
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.output_file = self.output_dir / f"{self.timestamp}.jsonl"
@@ -32,10 +34,11 @@ class Recorder:
         self.browser_context = None
         self.js_content = None
 
+
     async def start(self):
         async with async_playwright() as p:
-            # Launch persistent context
-            user_data_dir = Path(f"user_data/{self.site}")
+            # Launch persistent context with absolute path
+            user_data_dir = self.project_root / "user_data" / self.site
             user_data_dir.mkdir(parents=True, exist_ok=True)
 
             print(f"Launching browser with user data: {user_data_dir}")
