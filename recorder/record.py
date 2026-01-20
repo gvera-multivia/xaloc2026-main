@@ -33,6 +33,14 @@ class Recorder:
         self.capture_manager = CaptureManager(site)
         self.browser_context = None
         self.js_content = None
+        
+        # Create the output file immediately to ensure path is valid
+        try:
+            self.output_file.touch()
+            print(f"Created recording file: {self.output_file}")
+        except Exception as e:
+            print(f"ERROR: Could not create recording file: {e}")
+            raise
 
 
     async def start(self):
@@ -118,8 +126,13 @@ class Recorder:
         if page:
             await self.capture_manager.capture_checkpoint(page, data['url'], data.get('h1'))
 
-        with open(self.output_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(data) + "\n")
+        try:
+            with open(self.output_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(data) + "\n")
+                f.flush()  # Ensure data is written immediately
+            print(f"  -> Saved to file")
+        except Exception as e:
+            print(f"  -> ERROR writing to file: {e}")
 
     def post_process(self):
         print(f"\n{'='*50}")
