@@ -119,20 +119,29 @@ class Recorder:
         asyncio.create_task(inject())
 
     async def handle_action_binding(self, source, data):
-        print(f"[Event #{len(self.events)+1}] {data['action']} on {data.get('field', {}).get('label') or data.get('field', {}).get('name') or 'element'}")
-        self.events.append(data)
-
-        page = source.page
-        if page:
-            await self.capture_manager.capture_checkpoint(page, data['url'], data.get('h1'))
-
+        event_num = len(self.events) + 1
+        print(f"[Event #{event_num}] {data['action']} on {data.get('field', {}).get('label') or data.get('field', {}).get('name') or 'element'}")
+        
+        # FIRST: Write to file immediately (synchronous, cannot be cancelled)
         try:
             with open(self.output_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(data) + "\n")
-                f.flush()  # Ensure data is written immediately
-            print(f"  -> Saved to file")
+                f.flush()
+            print(f"  -> Event #{event_num} saved to file")
         except Exception as e:
-            print(f"  -> ERROR writing to file: {e}")
+            print(f"  -> ERROR writing event #{event_num} to file: {e}")
+        
+        # THEN: Add to memory
+        self.events.append(data)
+        
+        # FINALLY: Try to capture screenshot (this can fail/be cancelled, but file is already saved)
+        try:
+            page = source.page
+            if page:
+                await self.capture_manager.capture_checkpoint(page, data['url'], data.get('h1'))
+        except Exception as e:
+            print(f"  -> Screenshot capture failed: {e}")
+
 
     def post_process(self):
         print(f"\n{'='*50}")

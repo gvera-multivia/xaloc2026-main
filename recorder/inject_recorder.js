@@ -1,6 +1,12 @@
-(function() {
-    if (window._recorder_injected) return;
+(function () {
+    console.log('[RECORDER] Script starting on:', window.location.href);
+
+    if (window._recorder_injected) {
+        console.log('[RECORDER] Already injected, skipping.');
+        return;
+    }
     window._recorder_injected = true;
+    console.log('[RECORDER] Injecting recorder...');
 
     function getXPath(element) {
         if (element.id !== '') return `//*[@id="${element.id}"]`;
@@ -42,47 +48,47 @@
         // 1. getByRole (approximate)
         const role = el.getAttribute('role');
         if (role) {
-             candidates.push({kind: 'getByRole', value: role, matches: 1});
+            candidates.push({ kind: 'getByRole', value: role, matches: 1 });
         } else {
-             // Implicit roles
-             if (el.tagName === 'BUTTON' || (el.tagName === 'INPUT' && ['button', 'submit', 'reset'].includes(el.type))) {
-                 candidates.push({kind: 'getByRole', value: 'button', matches: 1});
-             } else if (el.tagName === 'A') {
-                 candidates.push({kind: 'getByRole', value: 'link', matches: 1});
-             } else if (el.tagName === 'INPUT' && el.type === 'checkbox') {
-                 candidates.push({kind: 'getByRole', value: 'checkbox', matches: 1});
-             } else if (el.tagName === 'INPUT' && el.type === 'radio') {
-                 candidates.push({kind: 'getByRole', value: 'radio', matches: 1});
-             }
+            // Implicit roles
+            if (el.tagName === 'BUTTON' || (el.tagName === 'INPUT' && ['button', 'submit', 'reset'].includes(el.type))) {
+                candidates.push({ kind: 'getByRole', value: 'button', matches: 1 });
+            } else if (el.tagName === 'A') {
+                candidates.push({ kind: 'getByRole', value: 'link', matches: 1 });
+            } else if (el.tagName === 'INPUT' && el.type === 'checkbox') {
+                candidates.push({ kind: 'getByRole', value: 'checkbox', matches: 1 });
+            } else if (el.tagName === 'INPUT' && el.type === 'radio') {
+                candidates.push({ kind: 'getByRole', value: 'radio', matches: 1 });
+            }
         }
 
         // 2. getByLabel
         if (el.labels && el.labels.length > 0) {
-            candidates.push({kind: 'getByLabel', value: el.labels[0].innerText.trim(), matches: 1});
+            candidates.push({ kind: 'getByLabel', value: el.labels[0].innerText.trim(), matches: 1 });
         } else {
-             const ariaLabel = el.getAttribute('aria-label');
-             if (ariaLabel) candidates.push({kind: 'getByLabel', value: ariaLabel, matches: 1});
-             const ariaLabelledBy = el.getAttribute('aria-labelledby');
-             if (ariaLabelledBy) {
-                 const labelEl = document.getElementById(ariaLabelledBy);
-                 if (labelEl) candidates.push({kind: 'getByLabel', value: labelEl.innerText.trim(), matches: 1});
-             }
+            const ariaLabel = el.getAttribute('aria-label');
+            if (ariaLabel) candidates.push({ kind: 'getByLabel', value: ariaLabel, matches: 1 });
+            const ariaLabelledBy = el.getAttribute('aria-labelledby');
+            if (ariaLabelledBy) {
+                const labelEl = document.getElementById(ariaLabelledBy);
+                if (labelEl) candidates.push({ kind: 'getByLabel', value: labelEl.innerText.trim(), matches: 1 });
+            }
         }
 
         // 3. getByPlaceholder
         const placeholder = el.getAttribute('placeholder');
-        if (placeholder) candidates.push({kind: 'getByPlaceholder', value: placeholder, matches: 1});
+        if (placeholder) candidates.push({ kind: 'getByPlaceholder', value: placeholder, matches: 1 });
 
         // 4. text=
         if (['BUTTON', 'A', 'LABEL', 'SPAN', 'DIV'].includes(el.tagName) && el.innerText.trim().length > 0 && el.innerText.trim().length < 50) {
-            candidates.push({kind: 'text', value: el.innerText.trim(), matches: 1});
+            candidates.push({ kind: 'text', value: el.innerText.trim(), matches: 1 });
         }
 
         // 5. css
-        candidates.push({kind: 'css', value: getCssSelector(el), matches: 1});
+        candidates.push({ kind: 'css', value: getCssSelector(el), matches: 1 });
 
         // 6. xpath
-        candidates.push({kind: 'xpath', value: getXPath(el), matches: 1});
+        candidates.push({ kind: 'xpath', value: getXPath(el), matches: 1 });
 
         return candidates;
     }
@@ -166,27 +172,30 @@
                 actionData.action = 'select';
                 actionData.field.value = el.value;
             } else if (el.type === 'file') {
-                 actionData.action = 'upload';
-                 // We can't get the real path, but we know it happened
+                actionData.action = 'upload';
+                // We can't get the real path, but we know it happened
             } else {
                 actionData.action = 'fill';
             }
         }
 
         if (event.type === 'click') {
-             // Avoid double recording if click triggered change? No, change usually happens on blur.
-             // But clicking a submit button is important.
-             // If it's an input/textarea/select, we generally ignore click and wait for change/focus?
-             // Actually, clicking an input usually just focuses it. We care about 'fill'.
-             if (el.tagName === 'INPUT' && (el.type !== 'submit' && el.type !== 'button' && el.type !== 'checkbox' && el.type !== 'radio' && el.type !== 'file')) {
-                 return;
-             }
-             if (el.tagName === 'TEXTAREA') return;
-             if (el.tagName === 'SELECT') return;
+            // Avoid double recording if click triggered change? No, change usually happens on blur.
+            // But clicking a submit button is important.
+            // If it's an input/textarea/select, we generally ignore click and wait for change/focus?
+            // Actually, clicking an input usually just focuses it. We care about 'fill'.
+            if (el.tagName === 'INPUT' && (el.type !== 'submit' && el.type !== 'button' && el.type !== 'checkbox' && el.type !== 'radio' && el.type !== 'file')) {
+                return;
+            }
+            if (el.tagName === 'TEXTAREA') return;
+            if (el.tagName === 'SELECT') return;
         }
 
         if (window.record_action) {
+            console.log('[RECORDER] Sending event to Python:', actionData.action);
             window.record_action(actionData);
+        } else {
+            console.warn('[RECORDER] window.record_action is NOT available!');
         }
     }
 
@@ -195,7 +204,7 @@
     document.addEventListener('change', handler, true);
     // submit event?
     document.addEventListener('submit', (e) => {
-         const actionData = {
+        const actionData = {
             ts: new Date().toISOString(),
             url: window.location.href,
             title: document.title,
@@ -205,8 +214,8 @@
             locators: [], // usually on the form
             context: {}
         };
-         if (window.record_action) window.record_action(actionData);
+        if (window.record_action) window.record_action(actionData);
     }, true);
 
-    console.log("Recorder injected");
+    console.log('[RECORDER] Event listeners attached. record_action available:', !!window.record_action);
 })();
