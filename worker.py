@@ -3,6 +3,7 @@ import logging
 import sys
 import inspect
 import traceback
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -39,8 +40,10 @@ async def process_task(db: SQLiteDatabase, task_id: int, site_id: str, protocol:
             raise ValueError(f"No se encontró controlador/automator para {site_id}: {e}")
 
         # 2. Crear configuración
-        # Por defecto headless=True para el worker.
-        headless = True
+        # Por defecto headless=True para el worker (desatendido).
+        # Override: WORKER_HEADLESS=0 para ejecutar en visible (debug/calentamiento de perfil).
+        headless_env = os.getenv("WORKER_HEADLESS", "0").strip().lower()
+        headless = headless_env not in {"0", "false", "no"}
 
         # Creamos la config base usando el controlador
         config = _call_with_supported_kwargs(

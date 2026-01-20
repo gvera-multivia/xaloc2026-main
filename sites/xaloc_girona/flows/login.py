@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import re
+import sys
 import threading
 
 from playwright.async_api import Page
@@ -66,31 +67,38 @@ async def ejecutar_login(page: Page, config: XalocConfig) -> Page:
     boton_cert = valid_page.locator(config.cert_button_selector).first
     await boton_cert.wait_for(state="visible", timeout=15000)
 
-    def _resolver_popup_windows() -> None:
-        aceptar_popup_certificado(
-            tabs_atras=2,
-            delay_inicial=max(0.0, getattr(config, "cert_popup_delay_ms", 1500) / 1000.0),
-        )
+    # En headless no podemos interactuar con popups nativos (PyAutoGUI).
+    # Con auto-selección de certificado (policy/flag), no debería aparecer el popup.
+    thread_popup = None
+    if sys.platform == "win32" and not getattr(config.navegador, "headless", False):
+        def _resolver_popup_windows() -> None:
+            aceptar_popup_certificado(
+                tabs_atras=2,
+                delay_inicial=max(0.0, getattr(config, "cert_popup_delay_ms", 1500) / 1000.0),
+            )
 
-    thread_popup = threading.Thread(target=_resolver_popup_windows, daemon=True)
-    thread_popup.start()
+        thread_popup = threading.Thread(target=_resolver_popup_windows, daemon=True)
+        thread_popup.start()
 
     logging.info("Pulsando botón de certificado...")
-    await boton_cert.click()
+    # Evita timeout por "scheduled navigations" en el click; el control lo hace wait_for_url().
+    await boton_cert.click(timeout=config.timeouts.login, no_wait_after=True)
     await valid_page.wait_for_timeout(getattr(config, "delay_ms", DELAY_MS))
-    thread_popup.join(timeout=10)
+    if thread_popup:
+        thread_popup.join(timeout=10)
 
     # Si tras aceptar el popup seguimos en login, reintentar Shift+Tab x2.
     await valid_page.wait_for_timeout(4000)
     if "seu.xalocgirona.cat/sta/" not in (valid_page.url or ""):
         logging.warning("Seguimos en login tras 4s; reintentando aceptación de certificado")
-        thread_popup_2 = threading.Thread(
-            target=aceptar_popup_certificado,
-            kwargs={"tabs_atras": 2, "delay_inicial": 0.0},
-            daemon=True,
-        )
-        thread_popup_2.start()
-        thread_popup_2.join(timeout=10)
+        if sys.platform == "win32" and not getattr(config.navegador, "headless", False):
+            thread_popup_2 = threading.Thread(
+                target=aceptar_popup_certificado,
+                kwargs={"tabs_atras": 2, "delay_inicial": 0.0},
+                daemon=True,
+            )
+            thread_popup_2.start()
+            thread_popup_2.join(timeout=10)
 
     logging.info("Esperando retorno al formulario STA...")
     await valid_page.wait_for_url(config.url_post_login, timeout=config.timeouts.login)
