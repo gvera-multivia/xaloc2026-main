@@ -182,11 +182,18 @@
         console.log(`[RECORDER] Event: ${action} on ${el.id || el.name || el.tagName}`, actionData.field);
 
         if (window.record_action) {
-            window.record_action(actionData);
+            // CRITICAL: Send as JSON string to avoid Array.prototype.toJSON issues
+            // Some pages (like this one) modify Array.prototype which breaks Playwright binding
+            try {
+                window.record_action(JSON.stringify(actionData));
+            } catch (e) {
+                console.error('[RECORDER] Failed to send event:', e);
+            }
         } else {
             console.warn('[RECORDER] window.record_action NOT available!');
         }
     }
+
 
     // =====================================================
     // EVENT HANDLERS
@@ -347,15 +354,21 @@
         if (snapshot.forms.length > 0) {
             console.log('[RECORDER] DOM Snapshot:', snapshot);
             if (window.record_action) {
-                window.record_action({
-                    ts: new Date().toISOString(),
-                    url: window.location.href,
-                    action: 'page_snapshot',
-                    snapshot: snapshot
-                });
+                // CRITICAL: Send as JSON string to avoid Array.prototype.toJSON issues
+                try {
+                    window.record_action(JSON.stringify({
+                        ts: new Date().toISOString(),
+                        url: window.location.href,
+                        action: 'page_snapshot',
+                        snapshot: snapshot
+                    }));
+                } catch (e) {
+                    console.error('[RECORDER] Failed to send snapshot:', e);
+                }
             }
         }
     }, 1000); // Wait for page to stabilize
+
 
     console.log('[RECORDER] Event listeners attached. record_action available:', !!window.record_action);
 })();

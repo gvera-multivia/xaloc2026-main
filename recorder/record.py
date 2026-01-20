@@ -128,8 +128,17 @@ class Recorder:
 
 
     async def handle_action_binding(self, source, data):
+        # Data is now a JSON string to avoid Array.prototype.toJSON issues
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except json.JSONDecodeError as e:
+                print(f"  -> ERROR parsing JSON: {e}")
+                return
+        
         event_num = len(self.events) + 1
-        print(f"[Event #{event_num}] {data['action']} on {data.get('field', {}).get('label') or data.get('field', {}).get('name') or 'element'}")
+        field_info = data.get('field', {})
+        print(f"[Event #{event_num}] {data.get('action', 'unknown')} on {field_info.get('id') or field_info.get('name') or 'element'}")
         
         # FIRST: Write to file immediately (synchronous, cannot be cancelled)
         try:
@@ -147,9 +156,10 @@ class Recorder:
         try:
             page = source.page
             if page:
-                await self.capture_manager.capture_checkpoint(page, data['url'], data.get('h1'))
+                await self.capture_manager.capture_checkpoint(page, data.get('url', ''), data.get('h1'))
         except Exception as e:
             print(f"  -> Screenshot capture failed: {e}")
+
 
 
     def post_process(self):
