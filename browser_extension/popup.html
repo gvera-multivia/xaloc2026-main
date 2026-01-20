@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { width: 300px; font-family: sans-serif; padding: 10px; }
+    button { padding: 10px; width: 100%; margin-bottom: 10px; cursor: pointer; }
+    #status { margin-bottom: 10px; font-weight: bold; }
+    #export-section { display: none; }
+    .recording { color: red; }
+  </style>
+</head>
+<body>
+  <h3>DOM Recorder MVP</h3>
+  <div id="status">Status: Idle</div>
+  <button id="toggleBtn">Start Recording</button>
+  <div id="export-section">
+      <button id="downloadBtn">Download JSON</button>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

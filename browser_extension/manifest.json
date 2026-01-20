@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "DOM Recorder + Navigation MVP",
+  "version": "0.1",
+  "description": "Records DOM interactions and navigation for Playwright automation.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "webNavigation",
+    "downloads"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "all_frames": true,
+      "run_at": "document_start"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "DOM Recorder"
+  }
+}
