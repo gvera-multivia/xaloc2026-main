@@ -1,0 +1,70 @@
+# Documentación del Worker Xaloc 2026
+
+Este documento describe cómo configurar y operar el modo Worker desatendido.
+
+## 1. Configuración del Entorno (Solo una vez)
+
+### 1.1. Prerrequisitos
+- Python 3.10+
+- Playwright instalado (`playwright install chromium msedge`)
+- Dependencias instaladas (`pip install -r requirements.txt`)
+
+### 1.2. Configurar Certificados (Eliminar Popups)
+Para evitar que Edge pregunte qué certificado usar en cada conexión, se debe aplicar una política de registro.
+
+1. Abrir PowerShell como **Administrador**.
+2. Ejecutar el script `setup_worker_env.ps1`:
+   ```powershell
+   .\setup_worker_env.ps1
+   ```
+   Esto añadirá las URLs del proyecto a la lista de autoselección de certificados de Edge.
+
+### 1.3. Base de Datos
+La base de datos SQLite se inicializa automáticamente al arrancar `worker.py` o usar `enqueue_task.py`. Se creará en `db/xaloc_database.db`.
+
+## 2. Operación del Worker
+
+### 2.1. Arrancar el Worker
+El worker es un proceso que busca tareas pendientes en la base de datos y las ejecuta secuencialmente.
+
+```bash
+python worker.py
+```
+- El worker corre en bucle infinito.
+- Usa un perfil de navegador persistente en `profiles/worker/`.
+- Genera logs en consola y en `logs/worker.log`.
+- Guarda screenshots de éxito/error en `screenshots/`.
+
+Para detenerlo, usar `Ctrl+C`.
+
+### 2.2. Encolar Tareas
+Para añadir trabajo a la cola, usar el script `enqueue_task.py`.
+
+**Sintaxis:**
+```bash
+python enqueue_task.py --site <SITE_ID> [--protocol <PROTOCOLO>] --payload <JSON_DATA>
+```
+
+**Ejemplos:**
+
+1. **Insertar tarea pasando JSON como string:**
+   ```bash
+   python enqueue_task.py --site madrid --payload '{"plate_number": "1234BBB", "user_phone": "600111222"}'
+   ```
+
+2. **Insertar tarea desde archivo JSON:**
+   ```bash
+   python enqueue_task.py --site base_online --protocol P1 --payload datos_tramite.json
+   ```
+
+## 3. Monitorización y Logs
+
+- **Logs del sistema:** `logs/worker.log`
+- **Logs por sitio:** `logs/<site_id>.log`
+- **Evidencia visual:** `screenshots/`
+- **Estado de la cola:** Consultar la tabla `tramite_queue` en `db/xaloc_database.db` (usando cualquier cliente SQLite).
+
+## 4. Notas Importantes
+
+- **Modo Demo/Seguro:** El worker ejecuta todo el flujo pero **NO** realiza la firma final (botón "Firmar/Registrar" no se pulsa) para evitar registros reales durante pruebas/desarrollo, a menos que se modifique el código del flujo.
+- **Perfil Persistente:** El perfil `profiles/worker` guarda cookies y sesiones. Si hay problemas de sesión corrupta, se puede borrar esa carpeta para forzar un inicio limpio.
