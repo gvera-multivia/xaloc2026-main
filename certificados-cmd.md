@@ -47,6 +47,11 @@ reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 
 reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 7 /t REG_SZ /d "{\"pattern\":\"https://www.baseonline.cat/*\",\"filter\":{}}" /f
 reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 8 /t REG_SZ /d "{\"pattern\":\"https://valid.aoc.cat/*\",\"filter\":{}}" /f
 reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 9 /t REG_SZ /d "{\"pattern\":\"https://cert.valid.aoc.cat/*\",\"filter\":{}}" /f
+
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 10 /t REG_SZ /d "{\"pattern\":\"https://pasarela.clave.gob.es/*\",\"filter\":{}}" /f
+
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 11 /t REG_SZ /d "{\"pattern\":\"https://cas.madrid.es/*\",\"filter\":{}}" /f
+
 ```
 
 ## 3) Aplicar cambios

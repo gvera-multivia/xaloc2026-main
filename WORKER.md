@@ -34,6 +34,8 @@ Para evitar que Edge pregunte qué certificado usar en cada conexión, se debe a
 
 **Nota (VÀLid/AOC):** si sigue saliendo el selector, revisa que la policy incluya tambiйn `https://cert.valid.aoc.cat/*` (es el host que suele disparar el popup).
 
+**PyAutoGUI:** ya no se usa (el worker asume autoselección de certificado vía policy). Si aparece un popup nativo, es señal de que falta algún dominio en la policy o el certificado no está instalado en el usuario correcto.
+
 ### 1.3. Base de Datos
 La base de datos SQLite se inicializa automáticamente al arrancar `worker.py` o usar `enqueue_task.py`. Se creará en `db/xaloc_database.db`.
 
