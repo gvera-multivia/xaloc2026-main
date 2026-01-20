@@ -40,6 +40,7 @@ class Recorder:
 
             self.browser_context = await p.chromium.launch_persistent_context(
                 user_data_dir=user_data_dir,
+                channel="msedge",
                 headless=False,
                 args=["--start-maximized"],
                 no_viewport=True,
