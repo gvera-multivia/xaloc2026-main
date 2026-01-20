@@ -26,9 +26,18 @@ def compile_recording(site: str, recording_file: Path):
         print("No events found.")
         return
     
-    print(f"Loaded {len(events)} unique events (deduplicated from file)")
+    # Separate snapshots from action events
+    snapshots = [e for e in events if e.get('action') == 'page_snapshot']
+    action_events = [e for e in events if e.get('action') != 'page_snapshot']
+    
+    print(f"Loaded {len(action_events)} action events + {len(snapshots)} page snapshots")
+    
+    if not action_events:
+        print("No action events found (only snapshots).")
+        return
 
     # 1. Identify Phases
+
     phases = []
     current_phase = {"name": "start", "events": []}
 
@@ -36,7 +45,7 @@ def compile_recording(site: str, recording_file: Path):
     last_h1 = None
     last_fingerprint = None
 
-    for i, event in enumerate(events):
+    for i, event in enumerate(action_events):
         url = event.get("url")
         h1 = event.get("h1")
         fingerprint = event.get("fingerprint")
@@ -77,26 +86,38 @@ def get_best_target_description(event):
     field = event.get('field', {})
     locators = event.get('locators', [])
     
-    # Priority: ID > name > label > text > tagName
     parts = []
     
-    # Add ID if available
+    # Priority: ID > name > label > text > tagName
     if field.get('id'):
         parts.append(f"#{field['id']}")
     elif field.get('name'):
         parts.append(f"[name={field['name']}]")
     
+    # Add label if available
+    if field.get('label'):
+        parts.append(f'"{field["label"][:30]}"')
+    
     # Add text content from locators
-    for loc in locators:
-        if loc['kind'] == 'text' and loc['value']:
-            parts.append(f'"{loc["value"]}"')
-            break
+    if not parts:
+        for loc in locators:
+            if loc.get('kind') == 'text' and loc.get('value'):
+                parts.append(f'"{loc["value"][:30]}"')
+                break
     
     # Fallback to tagName
     if not parts:
         parts.append(field.get('tagName', 'element'))
     
+    # Add value info for certain actions
+    action = event.get('action', '')
+    if action == 'select' and field.get('selectedText'):
+        parts.append(f"→ {field['selectedText'][:20]}")
+    elif action in ('check', 'uncheck') and field.get('value'):
+        parts.append(f"({field['value']})")
+    
     return ' '.join(parts)
+
 
 def generate_md(site, phases):
     md_lines = [f"# Recording for {site}", ""]

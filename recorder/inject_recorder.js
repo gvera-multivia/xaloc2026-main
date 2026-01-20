@@ -8,23 +8,30 @@
     window._recorder_injected = true;
     console.log('[RECORDER] Injecting recorder...');
 
+    // =====================================================
+    // HELPER FUNCTIONS
+    // =====================================================
+
     function getXPath(element) {
+        if (!element) return '';
         if (element.id !== '') return `//*[@id="${element.id}"]`;
         if (element === document.body) return element.tagName;
 
         var ix = 0;
-        var siblings = element.parentNode.childNodes;
+        var siblings = element.parentNode ? element.parentNode.childNodes : [];
         for (var i = 0; i < siblings.length; i++) {
             var sibling = siblings[i];
             if (sibling === element) return getXPath(element.parentNode) + '/' + element.tagName + '[' + (ix + 1) + ']';
             if (sibling.nodeType === 1 && sibling.tagName === element.tagName) ix++;
         }
+        return '';
     }
 
     function getCssSelector(element) {
+        if (!element) return '';
         if (element.id) return `#${element.id}`;
         let path = [];
-        while (element.nodeType === Node.ELEMENT_NODE) {
+        while (element && element.nodeType === Node.ELEMENT_NODE) {
             let selector = element.nodeName.toLowerCase();
             if (element.id) {
                 selector += `#${element.id}`;
@@ -42,180 +49,284 @@
         return path.join(" > ");
     }
 
-    function getCandidateLocators(el) {
-        const candidates = [];
-
-        // 1. getByRole (approximate)
-        const role = el.getAttribute('role');
-        if (role) {
-            candidates.push({ kind: 'getByRole', value: role, matches: 1 });
-        } else {
-            // Implicit roles
-            if (el.tagName === 'BUTTON' || (el.tagName === 'INPUT' && ['button', 'submit', 'reset'].includes(el.type))) {
-                candidates.push({ kind: 'getByRole', value: 'button', matches: 1 });
-            } else if (el.tagName === 'A') {
-                candidates.push({ kind: 'getByRole', value: 'link', matches: 1 });
-            } else if (el.tagName === 'INPUT' && el.type === 'checkbox') {
-                candidates.push({ kind: 'getByRole', value: 'checkbox', matches: 1 });
-            } else if (el.tagName === 'INPUT' && el.type === 'radio') {
-                candidates.push({ kind: 'getByRole', value: 'radio', matches: 1 });
-            }
-        }
-
-        // 2. getByLabel
+    function getLabel(el) {
+        // Try multiple ways to get a label
         if (el.labels && el.labels.length > 0) {
-            candidates.push({ kind: 'getByLabel', value: el.labels[0].innerText.trim(), matches: 1 });
-        } else {
-            const ariaLabel = el.getAttribute('aria-label');
-            if (ariaLabel) candidates.push({ kind: 'getByLabel', value: ariaLabel, matches: 1 });
-            const ariaLabelledBy = el.getAttribute('aria-labelledby');
-            if (ariaLabelledBy) {
-                const labelEl = document.getElementById(ariaLabelledBy);
-                if (labelEl) candidates.push({ kind: 'getByLabel', value: labelEl.innerText.trim(), matches: 1 });
+            return el.labels[0].innerText.trim();
+        }
+        // aria-label
+        if (el.getAttribute('aria-label')) {
+            return el.getAttribute('aria-label');
+        }
+        // aria-labelledby
+        const labelledBy = el.getAttribute('aria-labelledby');
+        if (labelledBy) {
+            const labelEl = document.getElementById(labelledBy);
+            if (labelEl) return labelEl.innerText.trim();
+        }
+        // placeholder
+        if (el.placeholder) {
+            return el.placeholder;
+        }
+        // title
+        if (el.title) {
+            return el.title;
+        }
+        // Nearby text (previous sibling or parent td/th)
+        const prev = el.previousElementSibling;
+        if (prev && prev.tagName === 'LABEL') {
+            return prev.innerText.trim();
+        }
+        const parent = el.closest('td, th, div, span');
+        if (parent) {
+            const prevCell = parent.previousElementSibling;
+            if (prevCell && (prevCell.tagName === 'TD' || prevCell.tagName === 'TH')) {
+                return prevCell.innerText.trim().substring(0, 50);
             }
         }
-
-        // 3. getByPlaceholder
-        const placeholder = el.getAttribute('placeholder');
-        if (placeholder) candidates.push({ kind: 'getByPlaceholder', value: placeholder, matches: 1 });
-
-        // 4. text=
-        if (['BUTTON', 'A', 'LABEL', 'SPAN', 'DIV'].includes(el.tagName) && el.innerText.trim().length > 0 && el.innerText.trim().length < 50) {
-            candidates.push({ kind: 'text', value: el.innerText.trim(), matches: 1 });
-        }
-
-        // 5. css
-        candidates.push({ kind: 'css', value: getCssSelector(el), matches: 1 });
-
-        // 6. xpath
-        candidates.push({ kind: 'xpath', value: getXPath(el), matches: 1 });
-
-        return candidates;
+        return null;
     }
 
-    function getContext(el) {
-        // Find closest form or section
-        const form = el.closest('form');
-        const section = el.closest('section, div[class*="section"], div[id*="section"]');
-
-        // Find closest label if not directly associated
-        let label = null;
-        if (el.labels && el.labels.length > 0) {
-            label = el.labels[0].innerText.trim();
+    function getSelectOptions(el) {
+        if (el.tagName !== 'SELECT') return null;
+        const options = [];
+        for (let opt of el.options) {
+            options.push({
+                value: opt.value,
+                text: opt.text,
+                selected: opt.selected
+            });
         }
+        return options;
+    }
 
-        return {
-            form: !!form,
-            section: section ? (section.getAttribute('aria-label') || section.getAttribute('id') || 'unknown') : null,
-            nearby_text: label
+    function buildFieldData(el) {
+        const data = {
+            tagName: el.tagName,
+            type: el.type || null,
+            name: el.name || null,
+            id: el.id || null,
+            value: null,
+            label: getLabel(el),
+            placeholder: el.placeholder || null,
+            required: el.required || false,
+            disabled: el.disabled || false
         };
-    }
 
-    function getFingerprint() {
-        // Collect visible buttons and labels to detect screen changes
-        // Using a simple strategy: text content of buttons and labels
-        try {
-            const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"]'))
-                .filter(el => el.offsetParent !== null) // check visibility
-                .map(el => (el.innerText || el.value || el.id || '').trim())
-                .filter(t => t.length > 0)
-                .sort() // sort to be order-independent
-                .join('|');
-
-            const labels = Array.from(document.querySelectorAll('label'))
-                .filter(el => el.offsetParent !== null)
-                .map(el => (el.innerText || '').trim())
-                .filter(t => t.length > 0)
-                .sort()
-                .join('|');
-
-            return buttons + "::" + labels;
-        } catch (e) {
-            return "";
-        }
-    }
-
-    function handler(event) {
-        const el = event.target;
-        if (!el) return;
-
-        // Skip non-interactive elements for click unless they are likely clickable
-        if (event.type === 'click') {
-            const interactive = el.closest('button, a, input[type="submit"], input[type="button"], [role="button"]');
-            if (!interactive && !el.onclick) return; // naive check
+        // Get value based on element type
+        if (el.tagName === 'SELECT') {
+            data.value = el.value;
+            data.selectedText = el.options[el.selectedIndex]?.text || null;
+            data.options = getSelectOptions(el);
+        } else if (el.type === 'checkbox' || el.type === 'radio') {
+            data.checked = el.checked;
+            data.value = el.value;
+        } else if (el.type === 'file') {
+            // Can't get real path but we know files were selected
+            data.value = el.value; // Will be C:\fakepath\...
+            data.files = el.files ? el.files.length : 0;
+        } else {
+            data.value = el.value || null;
         }
 
+        return data;
+    }
+
+    function buildLocators(el) {
+        const locators = [];
+
+        // ID selector (most reliable)
+        if (el.id) {
+            locators.push({ kind: 'id', value: el.id, selector: `#${el.id}` });
+        }
+
+        // Name selector
+        if (el.name) {
+            locators.push({ kind: 'name', value: el.name, selector: `[name="${el.name}"]` });
+        }
+
+        // Label
+        const label = getLabel(el);
+        if (label) {
+            locators.push({ kind: 'label', value: label, selector: `getByLabel('${label}')` });
+        }
+
+        // Text content (for buttons/links)
+        if (['BUTTON', 'A', 'SPAN'].includes(el.tagName)) {
+            const text = el.innerText?.trim();
+            if (text && text.length < 50) {
+                locators.push({ kind: 'text', value: text, selector: `getByText('${text}')` });
+            }
+        }
+
+        // CSS selector
+        locators.push({ kind: 'css', value: getCssSelector(el), selector: getCssSelector(el) });
+
+        // XPath
+        locators.push({ kind: 'xpath', value: getXPath(el), selector: getXPath(el) });
+
+        return locators;
+    }
+
+    function sendEvent(action, el, extraData = {}) {
         const actionData = {
             ts: new Date().toISOString(),
             url: window.location.href,
             title: document.title,
-            h1: document.querySelector('h1')?.innerText,
-            fingerprint: getFingerprint(),
-            action: event.type,
-            field: {
-                tagName: el.tagName,
-                type: el.type || null,
-                name: el.name || null,
-                id: el.id || null,
-                value: el.value || null,
-                label: (el.labels && el.labels.length > 0) ? el.labels[0].innerText.trim() : null
-            },
-            locators: getCandidateLocators(el),
-            context: getContext(el)
+            action: action,
+            field: buildFieldData(el),
+            locators: buildLocators(el),
+            ...extraData
         };
 
-        // Special handling for fill (change event on input/textarea)
-        if (event.type === 'change' && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT')) {
-            if (el.type === 'checkbox' || el.type === 'radio') {
-                actionData.action = el.checked ? 'check' : 'uncheck';
-            } else if (el.tagName === 'SELECT') {
-                actionData.action = 'select';
-                actionData.field.value = el.value;
-            } else if (el.type === 'file') {
-                actionData.action = 'upload';
-                // We can't get the real path, but we know it happened
-            } else {
-                actionData.action = 'fill';
-            }
-        }
-
-        if (event.type === 'click') {
-            // Avoid double recording if click triggered change? No, change usually happens on blur.
-            // But clicking a submit button is important.
-            // If it's an input/textarea/select, we generally ignore click and wait for change/focus?
-            // Actually, clicking an input usually just focuses it. We care about 'fill'.
-            if (el.tagName === 'INPUT' && (el.type !== 'submit' && el.type !== 'button' && el.type !== 'checkbox' && el.type !== 'radio' && el.type !== 'file')) {
-                return;
-            }
-            if (el.tagName === 'TEXTAREA') return;
-            if (el.tagName === 'SELECT') return;
-        }
+        console.log(`[RECORDER] Event: ${action} on ${el.id || el.name || el.tagName}`, actionData.field);
 
         if (window.record_action) {
-            console.log('[RECORDER] Sending event to Python:', actionData.action);
             window.record_action(actionData);
         } else {
-            console.warn('[RECORDER] window.record_action is NOT available!');
+            console.warn('[RECORDER] window.record_action NOT available!');
         }
     }
 
-    // Capture events
-    document.addEventListener('click', handler, true);
-    document.addEventListener('change', handler, true);
-    // submit event?
+    // =====================================================
+    // EVENT HANDLERS
+    // =====================================================
+
+    // Track focus to know when user is interacting with inputs
+    let lastFocusedInput = null;
+    let lastFocusedValue = null;
+
+    document.addEventListener('focusin', (e) => {
+        const el = e.target;
+        if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+            lastFocusedInput = el;
+            lastFocusedValue = el.value;
+            console.log('[RECORDER] Focus on:', el.id || el.name || el.tagName);
+        }
+    }, true);
+
+    // Capture blur to detect text input changes
+    document.addEventListener('focusout', (e) => {
+        const el = e.target;
+        if ((el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') &&
+            el === lastFocusedInput &&
+            el.value !== lastFocusedValue) {
+
+            const inputType = el.type || 'text';
+            if (!['checkbox', 'radio', 'file', 'submit', 'button', 'reset', 'hidden'].includes(inputType)) {
+                sendEvent('fill', el);
+            }
+        }
+        lastFocusedInput = null;
+        lastFocusedValue = null;
+    }, true);
+
+    // Change event for select, checkbox, radio, file
+    document.addEventListener('change', (e) => {
+        const el = e.target;
+        console.log('[RECORDER] Change event on:', el.tagName, el.type, el.id || el.name);
+
+        if (el.tagName === 'SELECT') {
+            sendEvent('select', el);
+        } else if (el.type === 'checkbox') {
+            sendEvent(el.checked ? 'check' : 'uncheck', el);
+        } else if (el.type === 'radio') {
+            sendEvent('select_radio', el);
+        } else if (el.type === 'file') {
+            sendEvent('upload', el);
+        }
+        // Text inputs are handled by focusout
+    }, true);
+
+    // Click events for buttons, links, and other interactive elements
+    document.addEventListener('click', (e) => {
+        const el = e.target;
+
+        // Find the clickable element (might be a child of button/link)
+        const clickable = el.closest('button, a, input[type="submit"], input[type="button"], [role="button"], [onclick]');
+
+        if (clickable) {
+            sendEvent('click', clickable);
+        } else if (el.tagName === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio')) {
+            // These will be handled by change event, skip
+        } else if (el.onclick || el.hasAttribute('onclick')) {
+            // Element has onclick handler
+            sendEvent('click', el);
+        }
+    }, true);
+
+    // Form submit
     document.addEventListener('submit', (e) => {
-        const actionData = {
-            ts: new Date().toISOString(),
+        const form = e.target;
+        sendEvent('submit', form, {
+            formAction: form.action,
+            formMethod: form.method
+        });
+    }, true);
+
+    // =====================================================
+    // DOM SNAPSHOT (captures all form fields on page)
+    // =====================================================
+
+    function captureFormSnapshot() {
+        const forms = document.querySelectorAll('form');
+        const snapshot = {
             url: window.location.href,
             title: document.title,
-            h1: document.querySelector('h1')?.innerText,
-            fingerprint: getFingerprint(),
-            action: 'submit',
-            locators: [], // usually on the form
-            context: {}
+            timestamp: new Date().toISOString(),
+            forms: []
         };
-        if (window.record_action) window.record_action(actionData);
-    }, true);
+
+        forms.forEach((form, formIndex) => {
+            const formData = {
+                id: form.id || null,
+                name: form.name || null,
+                action: form.action || null,
+                method: form.method || 'GET',
+                fields: []
+            };
+
+            // Get all form fields
+            const fields = form.querySelectorAll('input, select, textarea');
+            fields.forEach(field => {
+                formData.fields.push(buildFieldData(field));
+            });
+
+            snapshot.forms.push(formData);
+        });
+
+        // Also capture fields outside forms
+        const orphanFields = document.querySelectorAll('input:not(form input), select:not(form select), textarea:not(form textarea)');
+        if (orphanFields.length > 0) {
+            const orphanForm = {
+                id: null,
+                name: 'orphan_fields',
+                fields: []
+            };
+            orphanFields.forEach(field => {
+                orphanForm.fields.push(buildFieldData(field));
+            });
+            snapshot.forms.push(orphanForm);
+        }
+
+        return snapshot;
+    }
+
+    // Send initial snapshot
+    setTimeout(() => {
+        const snapshot = captureFormSnapshot();
+        if (snapshot.forms.length > 0) {
+            console.log('[RECORDER] DOM Snapshot:', snapshot);
+            if (window.record_action) {
+                window.record_action({
+                    ts: new Date().toISOString(),
+                    url: window.location.href,
+                    action: 'page_snapshot',
+                    snapshot: snapshot
+                });
+            }
+        }
+    }, 1000); // Wait for page to stabilize
 
     console.log('[RECORDER] Event listeners attached. record_action available:', !!window.record_action);
 })();

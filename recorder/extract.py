@@ -13,39 +13,67 @@ def refine_candidates(candidates: list) -> list:
 def get_best_selector(candidates: list) -> str:
     """
     Returns the 'best' selector string for code generation.
-    Strategy: Role > Label > Placeholder > Text > CSS > XPath
+    Strategy: ID > Name > Label > Text > CSS > XPath
     """
     if not candidates:
         return "page.locator('unknown')"
 
-    # Order of preference
-    # 1. getByRole
-    # 2. getByLabel
-    # 3. getByPlaceholder
-    # 4. text
+    # Priority order for new format
+    for c in candidates:
+        kind = c.get('kind', '')
+        value = c.get('value', '')
+        selector = c.get('selector', '')
+        
+        if not value:
+            continue
+            
+        # Escape quotes in value
+        safe_value = str(value).replace("'", "\\'").replace('"', '\\"')
+        
+        if kind == 'id':
+            return f'page.locator("#{safe_value}")'
+        elif kind == 'name':
+            return f'page.locator("[name=\\"{safe_value}\\"]")'
+    
+    # Second priority: label/text
+    for c in candidates:
+        kind = c.get('kind', '')
+        value = c.get('value', '')
+        
+        if not value:
+            continue
+            
+        safe_value = str(value).replace("'", "\\'")
+        
+        if kind == 'label':
+            return f"page.get_by_label('{safe_value}')"
+        elif kind == 'text':
+            return f"page.get_by_text('{safe_value}')"
 
-    for kind in ['getByRole', 'getByLabel', 'getByPlaceholder', 'text']:
+    # Legacy format support (getByRole, etc.)
+    for kind in ['getByRole', 'getByLabel', 'getByPlaceholder']:
         for c in candidates:
-            if c['kind'] == kind:
-                val = c['value'].replace("'", "\\'")
+            if c.get('kind') == kind:
+                val = str(c.get('value', '')).replace("'", "\\'")
                 if kind == 'getByRole':
                     return f"page.get_by_role('{val}')"
                 elif kind == 'getByLabel':
                     return f"page.get_by_label('{val}')"
                 elif kind == 'getByPlaceholder':
                     return f"page.get_by_placeholder('{val}')"
-                elif kind == 'text':
-                    return f"page.get_by_text('{val}')"
 
     # Fallback to CSS/XPath
     for c in candidates:
-        if c['kind'] == 'css':
-             val = c['value'].replace('"', '\\"')
-             return f"page.locator(\"{val}\")"
+        if c.get('kind') == 'css':
+            val = str(c.get('value', '')).replace('"', '\\"')
+            if val:
+                return f'page.locator("{val}")'
 
     for c in candidates:
-        if c['kind'] == 'xpath':
-            val = c['value'].replace('"', '\\"')
-            return f"page.locator(\"{val}\")"
+        if c.get('kind') == 'xpath':
+            val = str(c.get('value', '')).replace('"', '\\"')
+            if val:
+                return f'page.locator("{val}")'
 
     return "page.locator('unknown')"
+
