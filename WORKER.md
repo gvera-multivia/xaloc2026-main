@@ -50,7 +50,7 @@ El worker es un proceso que busca tareas pendientes en la base de datos y las ej
 python worker.py
 ```
 - El worker corre en bucle infinito.
-- Usa un perfil de navegador persistente en `profiles/worker/`.
+- Usa un perfil de navegador persistente por site en `profiles/worker/<site_id>/`.
 - Genera logs en consola y en `logs/worker.log`.
 - Guarda screenshots de éxito/error en `screenshots/`.
 

@@ -133,6 +133,7 @@ main.py               # CLI/entrypoint
 
 - `explore-html/base-guide.md`: notas y flujo de BASE On-line.
 - `explore-html/madrid-guide.md` y `explore-html/llenar formulario-madrid.md`: navegacion + campos del formulario de Madrid.
+- `recorder/README.md`: guía de uso del grabador de flujos.
 - `xaloc-documentation.md` y `xaloc-action-plan.md`: documentacion tecnica del portal Xaloc y plan de trabajo.
 
 ## Compatibilidad (imports antiguos)
