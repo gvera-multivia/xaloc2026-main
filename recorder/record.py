@@ -68,24 +68,18 @@ class Recorder:
             with open(RECORDER_JS_PATH, "r", encoding="utf-8") as f:
                 self.js_content = f.read()
 
-            # Inject script on load for NEW pages
-            await self.browser_context.add_init_script(self.js_content)
-
-            # Inject script into EXISTING pages (restored from persistent context)
+            # Setup injection for ALL pages (existing and new)
             for page in self.browser_context.pages:
-                try:
-                    await page.evaluate(self.js_content)
-                    print(f"Injected recorder into existing page: {page.url}")
-                except Exception as e:
-                    print(f"Could not inject into page {page.url}: {e}")
+                await self._setup_page_injection(page)
 
-            # Listen for new pages and inject script
-            self.browser_context.on("page", self._on_new_page)
+            # Listen for new pages
+            self.browser_context.on("page", lambda page: asyncio.create_task(self._setup_page_injection(page)))
 
-            # Open a blank page if none exists (persistent context might restore tabs)
+            # Open a blank page if none exists
             if not self.browser_context.pages:
                 page = await self.browser_context.new_page()
                 print("Opened new blank page.")
+
 
             print(f"Recording started for {self.site}. Press Ctrl+C in terminal to stop.")
             print(f"Saving to {self.output_file}")
@@ -109,14 +103,29 @@ class Recorder:
                         pass
                 print("Browser closed.")
 
-    def _on_new_page(self, page):
-        async def inject():
-            try:
-                await page.evaluate(self.js_content)
-                print(f"Injected recorder into new page: {page.url}")
-            except:
-                pass
-        asyncio.create_task(inject())
+    async def _setup_page_injection(self, page):
+        """Setup injection for a page - injects now AND on every future navigation."""
+        # Inject immediately if page has content
+        await self._inject_into_page(page)
+        
+        # Re-inject after every navigation (this is the key fix!)
+        async def on_load():
+            await self._inject_into_page(page)
+        
+        page.on("load", lambda: asyncio.create_task(on_load()))
+        print(f"  [Page setup] Listening for navigations on: {page.url}")
+
+    async def _inject_into_page(self, page):
+        """Inject the recorder script into a page."""
+        try:
+            # Reset the injection flag so script runs again
+            await page.evaluate("window._recorder_injected = false")
+            await page.evaluate(self.js_content)
+            print(f"  [Injected] {page.url[:80]}...")
+        except Exception as e:
+            # Page might be navigating or closed
+            pass
+
 
     async def handle_action_binding(self, source, data):
         event_num = len(self.events) + 1
