@@ -242,8 +242,13 @@ async def main() -> None:
         mapped_data.update({"protocol": protocol, "headless": args.headless})
         datos = _call_with_supported_kwargs(controller.create_target, **mapped_data)
     else:
+        # En modo PRUEBAS, priorizamos un builder de datos dummy si el controlador lo expone.
+        # Esto evita errores si `create_target()` requiere campos no proporcionados por CLI.
+        build_demo = getattr(controller, "create_demo_data", None)
+        target_fn = build_demo if callable(build_demo) else controller.create_target
+
         datos = _call_with_supported_kwargs(
-            controller.create_target,
+            target_fn,
             protocol=protocol,
             p3_tipus_objecte=args.p3_tipus_objecte,
             p3_dades_especifiques=args.p3_dades,
