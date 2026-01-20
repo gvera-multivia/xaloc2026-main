@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { width: 300px; font-family: sans-serif; padding: 10px; }
+    button { padding: 10px; width: 100%; margin-bottom: 10px; cursor: pointer; }
+    #status { margin-bottom: 10px; font-weight: bold; }
+    #export-section { display: none; }
+    .recording { color: red; }
+    textarea { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+  </style>
+</head>
+<body>
+  <h3>DOM Recorder MVP</h3>
+  <div id="status">Status: Idle</div>
+  <button id="toggleBtn">Start Recording</button>
+  <div id="export-section">
+      <button id="downloadBtn">Export raw + flowmap</button>
+      <hr />
+      <div style="font-size: 12px; margin-bottom: 6px;">Convert raw JSON file -> flowmap</div>
+      <input id="rawFileInput" type="file" accept="application/json,.json" style="width: 100%; margin-bottom: 6px;" />
+      <div style="font-size: 12px; margin-bottom: 6px;">...or paste raw JSON</div>
+      <textarea id="rawJsonInput" rows="5" style="width: 100%; margin-bottom: 6px;" placeholder='{"meta":...,"pages":[...]}'></textarea>
+      <button id="convertBtn">Build FlowMap</button>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
+
