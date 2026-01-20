@@ -7,17 +7,26 @@ def compile_recording(site: str, recording_file: Path):
     print(f"Compiling recording for {site} from {recording_file}")
 
     events = []
+    seen_timestamps = set()
+    
     with open(recording_file, 'r', encoding='utf-8') as f:
         for line in f:
             if line.strip():
                 try:
-                    events.append(json.loads(line))
+                    event = json.loads(line)
+                    # Deduplicate based on timestamp (events recorded twice have same ts)
+                    ts = event.get('ts')
+                    if ts not in seen_timestamps:
+                        seen_timestamps.add(ts)
+                        events.append(event)
                 except json.JSONDecodeError:
                     pass
 
     if not events:
         print("No events found.")
         return
+    
+    print(f"Loaded {len(events)} unique events (deduplicated from file)")
 
     # 1. Identify Phases
     phases = []
@@ -63,33 +72,62 @@ def compile_recording(site: str, recording_file: Path):
     # 3. Generate Skeleton Code
     generate_skeleton(site, phases)
 
+def get_best_target_description(event):
+    """Get the most descriptive identifier for an element."""
+    field = event.get('field', {})
+    locators = event.get('locators', [])
+    
+    # Priority: ID > name > label > text > tagName
+    parts = []
+    
+    # Add ID if available
+    if field.get('id'):
+        parts.append(f"#{field['id']}")
+    elif field.get('name'):
+        parts.append(f"[name={field['name']}]")
+    
+    # Add text content from locators
+    for loc in locators:
+        if loc['kind'] == 'text' and loc['value']:
+            parts.append(f'"{loc["value"]}"')
+            break
+    
+    # Fallback to tagName
+    if not parts:
+        parts.append(field.get('tagName', 'element'))
+    
+    return ' '.join(parts)
+
 def generate_md(site, phases):
     md_lines = [f"# Recording for {site}", ""]
+    md_lines.append(f"**Total phases:** {len(phases)}")
+    md_lines.append(f"**Total events:** {sum(len(p['events']) for p in phases)}")
+    md_lines.append("")
 
     for phase in phases:
         md_lines.append(f"## Phase: {phase['name']}")
         first_event = phase['events'][0] if phase['events'] else {}
         md_lines.append(f"**URL:** `{first_event.get('url', 'unknown')}`")
-        md_lines.append(f"**H1:** {first_event.get('h1', 'unknown')}")
-        md_lines.append(f"**Fingerprint:** {first_event.get('fingerprint', 'none')[:50]}...")
+        md_lines.append(f"**Title:** {first_event.get('title', 'unknown')}")
         md_lines.append("")
+        
+        md_lines.append("### Actions:")
+        md_lines.append("")
+        md_lines.append("| # | Action | Target | Selector | Value |")
+        md_lines.append("|---|--------|--------|----------|-------|")
 
-        for event in phase['events']:
+        for idx, event in enumerate(phase['events'], 1):
             action = event['action']
-            target = event.get('field', {}).get('label') or event.get('field', {}).get('name') or event.get('field', {}).get('tagName')
+            target = get_best_target_description(event)
+            
+            # Get best selector for code
+            selector = get_best_selector(event.get('locators', []))
+            selector_short = selector[:50] + "..." if len(selector) > 50 else selector
+            
             value = event.get('field', {}).get('value', '')
-
-            line = f"- **{action}** on `{target}`"
-            if value and action in ['fill', 'select']:
-                line += f" (Value: `{value}`)"
-
-            md_lines.append(line)
-
-            context = event.get('context', {})
-            if context.get('section') and context['section'] != 'unknown':
-                 md_lines.append(f"  - Section: {context['section']}")
-            if context.get('form'):
-                 md_lines.append(f"  - Form: Yes")
+            value_short = value[:30] + "..." if len(str(value)) > 30 else value
+            
+            md_lines.append(f"| {idx} | **{action}** | `{target}` | `{selector_short}` | {value_short} |")
 
         md_lines.append("")
 
@@ -98,6 +136,7 @@ def generate_md(site, phases):
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("\n".join(md_lines))
     print(f"Generated {output_path}")
+
 
 def generate_skeleton(site, phases):
     base_dir = Path(f"sites/{site}")
