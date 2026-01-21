@@ -26,7 +26,7 @@ logger = logging.getLogger("worker")
 def _call_with_supported_kwargs(fn, **kwargs):
     """Llama a fn solo con los argumentos que acepta."""
     sig = inspect.signature(fn)
-    supported = {k: v for k, v in kwargs.items() if k in sig.parameters}
+    supported = {k: v for k, v in kwargs.items() if k in sig.parameters and v is not None}
     return fn(**supported)
 
 def apply_url_cert_config():

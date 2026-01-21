@@ -42,6 +42,10 @@ class MadridController:
         exp_nnn: str = "911",
         exp_eeeeeeeee: str = "102532229",
         exp_d: str = "3",
+        # --- Datos del Expediente (opcion2) ---
+        exp_lll: str = "",
+        exp_aaaa: str = "",
+        exp_exp_num: str = "",
         # --- Matrícula (Sección 2) ---
         matricula: str = "1234ABC",
         # --- Datos del Interesado (Sección _id21:2) ---
@@ -69,9 +73,14 @@ class MadridController:
         
         # 1. Configuración del Expediente
         tipo_exp = TipoExpediente.OPCION1 if exp_tipo == "opcion1" else TipoExpediente.OPCION2
-        expediente = ExpedienteData(
-            tipo=tipo_exp, nnn=exp_nnn, eeeeeeeee=exp_eeeeeeeee, d=exp_d
-        )
+        if tipo_exp == TipoExpediente.OPCION1:
+            expediente = ExpedienteData(
+                tipo=tipo_exp, nnn=exp_nnn, eeeeeeeee=exp_eeeeeeeee, d=exp_d
+            )
+        else:
+            expediente = ExpedienteData(
+                tipo=tipo_exp, lll=exp_lll, aaaa=exp_aaaa, exp_num=exp_exp_num
+            )
         
         # 2. Interesado (_id21:2): SOLO teléfono y confirmación de aviso
         # Esto evita que el bot intente tocar campos bloqueados del interesado.
@@ -164,25 +173,34 @@ class MadridController:
         Mapea claves genéricas de DB a argumentos de create_target.
         """
         return {
-            "matricula": data.get("plate_number"),
-            "inter_telefono": data.get("user_phone"),
-            "rep_email": data.get("representative_email"),
-            "rep_movil": data.get("representative_phone"),
-            "rep_nombre_via": data.get("representative_street"),
-            "rep_numero": data.get("representative_number"),
-            "rep_cp": data.get("representative_zip"),
-            "rep_municipio": data.get("representative_city"),
-            "notif_nombre": data.get("notif_name"),
-            "notif_apellido1": data.get("notif_surname1"),
-            "notif_apellido2": data.get("notif_surname2"),
-            "exp_tipo": data.get("expediente_tipo"),
-            "exp_nnn": data.get("expediente_nnn"),
-            "exp_eeeeeeeee": data.get("expediente_eeeeeeeee"),
-            "exp_d": data.get("expediente_d"),
+            # Permite dos formatos:
+            # - "genérico" (plate_number, representative_*, etc.) para worker-tasks
+            # - "avanzado" (matricula, rep_*, exp_*) para sobreescribir defaults del controlador
+            "matricula": data.get("matricula") or data.get("plate_number"),
+            "inter_telefono": data.get("inter_telefono") or data.get("user_phone"),
+            "inter_email_check": data.get("inter_email_check"),
+            "rep_tipo_via": data.get("rep_tipo_via"),
+            "rep_nombre_via": data.get("rep_nombre_via") or data.get("representative_street"),
+            "rep_numero": data.get("rep_numero") or data.get("representative_number"),
+            "rep_cp": data.get("rep_cp") or data.get("representative_zip"),
+            "rep_municipio": data.get("rep_municipio") or data.get("representative_city"),
+            "rep_email": data.get("rep_email") or data.get("representative_email"),
+            "rep_movil": data.get("rep_movil") or data.get("representative_phone"),
+            "notif_nombre": data.get("notif_nombre") or data.get("notif_name"),
+            "notif_apellido1": data.get("notif_apellido1") or data.get("notif_surname1"),
+            "notif_apellido2": data.get("notif_apellido2") or data.get("notif_surname2"),
+            "notif_razon_social": data.get("notif_razon_social"),
+            "exp_tipo": data.get("exp_tipo") or data.get("expediente_tipo"),
+            "exp_nnn": data.get("exp_nnn") or data.get("expediente_nnn"),
+            "exp_eeeeeeeee": data.get("exp_eeeeeeeee") or data.get("expediente_eeeeeeeee"),
+            "exp_d": data.get("exp_d") or data.get("expediente_d"),
+            "exp_lll": data.get("exp_lll") or data.get("expediente_lll"),
+            "exp_aaaa": data.get("exp_aaaa") or data.get("expediente_aaaa"),
+            "exp_exp_num": data.get("exp_exp_num") or data.get("expediente_exp_num"),
             "naturaleza": data.get("naturaleza"),
             "expone": data.get("expone"),
             "solicita": data.get("solicita"),
-            "archivos": data.get("archivos"),
+            "archivos": data.get("archivos") or data.get("archivos_adjuntos"),
         }
 
 def get_controller() -> MadridController:

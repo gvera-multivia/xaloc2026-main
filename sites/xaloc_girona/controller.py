@@ -20,13 +20,13 @@ class XalocGironaController:
         Mapea claves genéricas de DB a argumentos de create_target.
         """
         return {
-            "email": data.get("user_email"),
-            "num_denuncia": data.get("denuncia_num"),
-            "matricula": data.get("plate_number"),
-            "num_expediente": data.get("expediente_num"),
+            "email": data.get("email") or data.get("user_email"),
+            "num_denuncia": data.get("num_denuncia") or data.get("denuncia_num"),
+            "matricula": data.get("matricula") or data.get("plate_number"),
+            "num_expediente": data.get("num_expediente") or data.get("expediente_num"),
             "motivos": data.get("motivos"),
             # En un caso real, los archivos podrían venir de otra forma o descargarse
-            "archivos_adjuntos": data.get("archivos")
+            "archivos_adjuntos": data.get("archivos_adjuntos") or data.get("archivos")
         }
 
     def create_target(

@@ -78,6 +78,26 @@ python enqueue_task.py --site <SITE_ID> [--protocol <PROTOCOLO>] --payload <JSON
 
 **Ejemplos listos para usar (modo prueba):** ver `worker-tasks/README.md` y los JSONs en `worker-tasks/`.
 
+### 2.3. Sincronizar desde SQL Server (solo lectura)
+
+Si tu “fuente de verdad” está en SQL Server, puedes generar/encolar tareas en la SQLite local del worker con:
+
+```bash
+python sync_sqlserver_to_worker_queue.py --connection-string "<TU_CONNECTION_STRING>"
+```
+
+Opciones comunes:
+
+- Filtrar por fase (default `PENDIENTE`): `--fase PENDIENTE`
+- Forzar protocolo para `base_online` (default `P1`): `--default-protocol P1`
+- Adjuntos por defecto (CSV): `--default-archivos pdfs-prueba/test1.pdf,pdfs-prueba/test2.pdf`
+- Dry-run (no inserta): `--dry-run`
+
+Notas:
+
+- El script solo hace `SELECT` en SQL Server (no escribe).
+- Requiere `pyodbc` y el driver ODBC de SQL Server en la máquina donde se ejecute.
+
 ## 3. Monitorización y Logs
 
 - **Logs del sistema:** `logs/worker.log`

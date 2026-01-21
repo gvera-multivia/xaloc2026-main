@@ -2,6 +2,10 @@
 
 Payloads JSON de ejemplo para encolar tareas con `enqueue_task.py`.
 
+## Guía de parámetros
+
+- Referencia completa de parámetros por web: `worker-tasks/PARAMETROS.md`.
+
 ## Comandos
 
 - BASE On-line (P1):
