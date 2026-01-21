@@ -14,6 +14,9 @@ Payloads JSON de ejemplo para encolar tareas con `enqueue_task.py`.
   - `python enqueue_task.py --site madrid --payload worker-tasks/madrid.json`
 - Xaloc Girona:
   - `python enqueue_task.py --site xaloc_girona --payload worker-tasks/xaloc_girona.json`
+- Selva:
+  - `python enqueue_task.py --site selva --payload worker-tasks/selva.json`
+
 
 ## Nota
 

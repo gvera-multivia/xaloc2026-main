@@ -19,3 +19,5 @@ reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 
 reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 14 /t REG_SZ /d "{\"pattern\":\"https://cas.madrid.es:443/*\",\"filter\":{\"SUBJECT\":{\"CN\":\"%CN%\"}}}" /f
 reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 15 /t REG_SZ /d "{\"pattern\":\"https://pasarela.clave.gob.es:443/*\",\"filter\":{\"SUBJECT\":{\"CN\":\"%CN%\"}}}" /f
 reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 16 /t REG_SZ /d "{\"pattern\":\"https://cert.valid.aoc.cat:443/*\",\"filter\":{\"SUBJECT\":{\"CN\":\"%CN%\"}}}" /f
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 17 /t REG_SZ /d "{\"pattern\":\"https://seu.selva.cat/*\",\"filter\":{\"SUBJECT\":{\"CN\":\"%CN%\"}}}" /f
+
