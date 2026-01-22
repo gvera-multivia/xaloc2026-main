@@ -41,7 +41,9 @@ class SQLiteDatabase:
                     error_log TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     processed_at TIMESTAMP,
-                    result JSON
+                    result JSON,
+                    attachments_count INTEGER DEFAULT 0,
+                    attachments_metadata JSON
                 );
                 """)
             conn.commit()
