@@ -439,22 +439,24 @@ def main(argv: Optional[list[str]] = None) -> int:
         cursor.execute(query, tuple(query_params))
         columns = [c[0] for c in cursor.description]
 
-        processed = 0
+        scanned = 0
+        matched = 0
         for row in cursor:
-            if args.limit and processed >= args.limit:
-                break
-            processed += 1
+            scanned += 1
 
             try:
                 row_dict = dict(zip(columns, row))
                 site_id = _infer_site_id(row_dict.get("Organisme"))
                 if args.site != "auto" and site_id != args.site:
                     continue
+                if args.limit and matched >= args.limit:
+                    break
                 protocol = _infer_protocol(site_id, default_protocol=default_protocol)
                 payload = map_to_worker_payload(row_dict, site_id, defaults=defaults)
 
                 counts_by_site[site_id] += 1
                 counts_by_site_protocol[site_id][protocol or "-"] += 1
+                matched += 1
 
                 if not args.dry_run:
                     task_id = _insert_task(args.sqlite_db, site_id, protocol, payload)
@@ -473,6 +475,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     print("Resumen de sincronización")
     print(f"- SQLite: {args.sqlite_db}")
     print(f"- Fase: {args.fase}")
+    print(f"- Filas leídas: {scanned}")
     print(f"- Filas procesadas: {sum(counts_by_site.values())}")
     print(f"- Errores de fila: {row_errors}")
     for site_id, count in counts_by_site.items():
