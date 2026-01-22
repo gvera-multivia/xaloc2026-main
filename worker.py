@@ -11,6 +11,7 @@ import subprocess
 from core.sqlite_db import SQLiteDatabase
 from core.site_registry import get_site, get_site_controller
 from core.validation import ValidationEngine, DiscrepancyReporter, DocumentDownloader
+from core.attachments import AttachmentDownloader, AttachmentInfo
 
 # Configuración de URLs y Directorios
 DOCUMENT_URL_TEMPLATE = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf/{idRecurso}"
@@ -115,8 +116,44 @@ async def process_task(db: SQLiteDatabase, task_id: int, site_id: str, protocol:
             return
 
         local_pdf_path = download_res.local_path
+        archivos_para_subir = [local_pdf_path]
         
-        # 3. Preparar automatización
+        # 3. DESCARGA DE ADJUNTOS (NUEVO)
+        adjuntos_metadata = payload.get("adjuntos", [])
+        if adjuntos_metadata:
+            logger.info(f"Descargando {len(adjuntos_metadata)} adjunto(s)...")
+
+            attachment_downloader = AttachmentDownloader()
+            attachments_info = [
+                AttachmentInfo(
+                    id=adj["id"],
+                    filename=adj["filename"],
+                    url=adj["url"]
+                )
+                for adj in adjuntos_metadata
+            ]
+
+            download_results = await attachment_downloader.download_batch(
+                attachments_info,
+                str(id_recurso)
+            )
+
+            # Validar resultados
+            failed_downloads = [r for r in download_results if not r.success]
+            if failed_downloads:
+                error_msg = f"Fallo descargando {len(failed_downloads)} adjunto(s): " + \
+                           ", ".join([f"{r.filename} ({r.error})" for r in failed_downloads])
+                logger.error(error_msg)
+                db.update_task_status(task_id, "failed", error=error_msg)
+                return
+
+            # Añadir adjuntos descargados a la lista de archivos
+            for result in download_results:
+                if result.local_path:
+                    archivos_para_subir.append(result.local_path)
+                    logger.info(f"Adjunto descargado: {result.filename} ({result.file_size_bytes} bytes)")
+
+        # 4. Preparar automatización
         try:
             controller = get_site_controller(site_id)
             AutomationCls = get_site(site_id)
@@ -135,9 +172,9 @@ async def process_task(db: SQLiteDatabase, task_id: int, site_id: str, protocol:
         worker_profile_path = Path("profiles/worker")
         config.navegador.perfil_path = worker_profile_path.absolute()
 
-        # 4. Mapear datos y añadir el archivo descargado
+        # 5. Mapear datos y añadir TODOS los archivos descargados
         mapped_data = controller.map_data(payload)
-        mapped_data["archivos_adjuntos"] = [local_pdf_path]
+        mapped_data["archivos_adjuntos"] = archivos_para_subir
         
         mapped_data.update({
             "protocol": protocol,
@@ -146,7 +183,7 @@ async def process_task(db: SQLiteDatabase, task_id: int, site_id: str, protocol:
 
         datos = _call_with_supported_kwargs(controller.create_target, **mapped_data)
 
-        # 5. Ejecutar la automatización
+        # 6. Ejecutar la automatización
         logger.info(f"Iniciando automatización para {site_id}...")
         async with AutomationCls(config) as bot:
             screenshot_path = await bot.ejecutar_flujo_completo(datos)

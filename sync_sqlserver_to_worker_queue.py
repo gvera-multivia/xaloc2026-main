@@ -34,11 +34,56 @@ SELECT
     c.Cpostal,
     c.poblacion,
     c.provincia,
-    d.ConducDni
+    d.ConducDni,
+    -- ADJUNTOS (SQL Server 2017+)
+    STRING_AGG(CAST(adj.id AS VARCHAR(MAX)), ',') WITHIN GROUP (ORDER BY adj.id) AS adjunto_ids,
+    STRING_AGG(adj.Filename, '|') WITHIN GROUP (ORDER BY adj.id) AS adjunto_filenames
 FROM Recursos.RecursosExp rs
 INNER JOIN clientes c ON rs.numclient = c.numerocliente
 LEFT JOIN DadesIdentif d ON rs.Expedient = d.Expedient
+LEFT JOIN attachments_resource_documents adj
+    ON rs.automatic_id = adj.automatic_id
+GROUP BY
+    rs.idRecurso, rs.Expedient, rs.Matricula, rs.DtaDenuncia,
+    rs.Organisme, rs.automatic_id, c.Nombre, c.Apellido1,
+    c.Apellido2, c.nif, c.email, c.movil, c.telefono1,
+    c.calle, c.numero, c.Cpostal, c.poblacion, c.provincia,
+    d.ConducDni
 """
+
+
+def _parse_attachments(adjunto_ids: str | None, adjunto_filenames: str | None) -> list[dict]:
+    """
+    Parsea los adjuntos desde las columnas agregadas de SQL.
+
+    Args:
+        adjunto_ids: IDs separados por comas (ej: "2042,2043,2089")
+        adjunto_filenames: Nombres separados por pipes (ej: "doc1.pdf|doc2.pdf|doc3.pdf")
+
+    Returns:
+        Lista de diccionarios con {id, filename, url}
+    """
+    if not adjunto_ids or not adjunto_filenames:
+        return []
+
+    ids = [i.strip() for i in str(adjunto_ids).split(',') if i.strip()]
+    filenames = [f.strip() for f in str(adjunto_filenames).split('|') if f.strip()]
+
+    # Validar que coincidan en cantidad
+    if len(ids) != len(filenames):
+        # Log warning pero continuar
+        return []
+
+    url_template = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf-adjuntos/{id}"
+
+    return [
+        {
+            "id": adj_id,
+            "filename": filename,
+            "url": url_template.format(id=adj_id)
+        }
+        for adj_id, filename in zip(ids, filenames)
+    ]
 
 
 def build_query(*, fase: str | None) -> tuple[str, list[Any]]:
@@ -50,10 +95,28 @@ def build_query(*, fase: str | None) -> tuple[str, list[Any]]:
     """
     query = BASE_SELECT_QUERY.strip()
     params: list[Any] = []
+
+    # Filtros obligatorios
+    where_clauses = [
+        "rs.Estado = 0",           # Solo pendientes
+        "rs.TExp IN (2, 3)"        # Solo documentos generados/servidor
+    ]
+
     fase_norm = (fase or "").strip()
     if fase_norm:
-        query += "\nWHERE LTRIM(RTRIM(rs.FaseProcedimiento)) = ?"
+        where_clauses.append("LTRIM(RTRIM(rs.FaseProcedimiento)) = ?")
         params.append(fase_norm)
+
+    # La query base ya tiene GROUP BY, pero necesitamos meter el WHERE antes.
+    # Como BASE_SELECT_QUERY tiene GROUP BY al final, necesitamos insertarlo antes.
+    # Esto es un poco hacky con string replacement, pero efectivo dado el formato fijo.
+    parts = query.split("GROUP BY")
+    if len(parts) == 2:
+        query = parts[0] + "\nWHERE " + " AND ".join(where_clauses) + "\nGROUP BY" + parts[1]
+    else:
+        # Fallback por si cambia la query base (aunque no debería)
+        query += "\nWHERE " + " AND ".join(where_clauses)
+
     return query, params
 
 DEFAULT_MADRID_EXPONE = "Alegación automática basada en registros de base de datos."
@@ -172,6 +235,12 @@ def _map_common_payload(row: dict[str, Any]) -> dict[str, Any]:
 
     full_name = " ".join(p for p in [nombre, apellido1, apellido2] if p).strip()
 
+    # Parsear adjuntos
+    adjuntos = _parse_attachments(
+        row.get("adjunto_ids"),
+        row.get("adjunto_filenames")
+    )
+
     payload: dict[str, Any] = {
         "idRecurso": _clean_str(row.get("idRecurso")),
         "expediente": _clean_str(row.get("Expedient")),
@@ -185,6 +254,7 @@ def _map_common_payload(row: dict[str, Any]) -> dict[str, Any]:
         "address_zip": _clean_str(row.get("Cpostal")),
         "address_city": _clean_str(row.get("poblacion")),
         "address_province": _clean_str(row.get("provincia")),
+        "adjuntos": adjuntos,  # NUEVO CAMPO
     }
     return payload
 
@@ -352,7 +422,9 @@ def _init_sqlite(db_path: str) -> None:
                     error_log TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     processed_at TIMESTAMP,
-                    result JSON
+                    result JSON,
+                    attachments_count INTEGER DEFAULT 0,
+                    attachments_metadata JSON
                 );
                 """
             )
