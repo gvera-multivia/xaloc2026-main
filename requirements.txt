@@ -2,3 +2,5 @@ playwright
 python-dotenv
 pyodbc
 pandas
+jinja2
+aiohttp

@@ -173,6 +173,8 @@ def _map_common_payload(row: dict[str, Any]) -> dict[str, Any]:
     full_name = " ".join(p for p in [nombre, apellido1, apellido2] if p).strip()
 
     payload: dict[str, Any] = {
+        "idRecurso": _clean_str(row.get("idRecurso")),
+        "expediente": _clean_str(row.get("Expedient")),
         "user_phone": _clean_phone(row.get("movil")) or _clean_phone(row.get("telefono1")),
         "user_email": _clean_str(row.get("email")),
         "plate_number": _normalize_plate(row.get("Matricula")),

@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>⚠️ Validación Fallida - ID: TEST-FAIL</title>
+    <style>
+        :root {
+            --error-bg: #ffebee;
+            --error-border: #f44336;
+            --error-text: #b71c1c;
+            --warning-bg: #fffde7;
+            --warning-border: #fbc02d;
+            --warning-text: #f57f17;
+            --header-bg: #263238;
+            --text-main: #37474f;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f5f7f9;
+            color: var(--text-main);
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: #fff;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        header {
+            background-color: var(--header-bg);
+            color: white;
+            padding: 20px;
+            border-radius: 8px 8px 0 0;
+            margin: -30px -30px 30px -30px;
+            text-align: center;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 24px;
+        }
+
+        .id-exp {
+            font-size: 18px;
+            margin-top: 10px;
+            opacity: 0.9;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        th,
+        td {
+            text-align: left;
+            padding: 12px 15px;
+            border-bottom: 1px solid #ddd;
+        }
+
+        th {
+            background-color: #f8f9fa;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 13px;
+        }
+
+        .row-error {
+            background-color: var(--error-bg);
+        }
+
+        .row-error td {
+            border-bottom-color: var(--error-border);
+        }
+
+        .row-warning {
+            background-color: var(--warning-bg);
+        }
+
+        .row-warning td {
+            border-bottom-color: var(--warning-border);
+        }
+
+        .error-message {
+            color: var(--error-text);
+            font-weight: bold;
+            font-size: 12px;
+            display: block;
+            margin-top: 4px;
+        }
+
+        .warning-message {
+            color: var(--warning-text);
+            font-weight: bold;
+            font-size: 12px;
+            display: block;
+            margin-top: 4px;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .status-error {
+            background: var(--error-border);
+            color: white;
+        }
+
+        .status-warning {
+            background: var(--warning-border);
+            color: white;
+        }
+
+        .footer {
+            margin-top: 30px;
+            text-align: center;
+            font-size: 14px;
+            color: #78909c;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>⚠️ Reporte de Validación de Datos</h1>
+            <div class="id-exp">Expediente: <strong>TEST-FAIL</strong></div>
+        </header>
+
+        <p>Se han detectado posibles problemas en los datos recuperados de la base de datos. Por favor, revise la
+            información antes de continuar.</p>
+
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 25%;">Campo</th>
+                    <th style="width: 35%;">Valor Actual</th>
+                    <th style="width: 40%;">Estado / Detalle</th>
+                </tr>
+            </thead>
+            <tbody>
+                
+                
+                
+                
+                <tr class="">
+                    <td><strong>idRecurso</strong></td>
+                    <td>848198</td>
+                    <td>
+                        
+                        <span style="color: #4caf50;">✓ Correcto</span>
+                        
+                    </td>
+                </tr>
+                
+                
+                
+                
+                
+                <tr class="">
+                    <td><strong>expediente</strong></td>
+                    <td>848198</td>
+                    <td>
+                        
+                        <span style="color: #4caf50;">✓ Correcto</span>
+                        
+                    </td>
+                </tr>
+                
+                
+                
+                
+                
+                <tr class="">
+                    <td><strong>nif</strong></td>
+                    <td>12345678Z</td>
+                    <td>
+                        
+                        <span style="color: #4caf50;">✓ Correcto</span>
+                        
+                    </td>
+                </tr>
+                
+                
+                
+                
+                
+                <tr class="row-error">
+                    <td><strong>name</strong></td>
+                    <td><em>Vacio</em></td>
+                    <td>
+                        
+                        <span class="status-badge status-error">Error</span>
+                        <span class="error-message">El campo 'name' es obligatorio</span>
+                        
+                    </td>
+                </tr>
+                
+                
+                
+                
+                
+                <tr class="row-error">
+                    <td><strong>address_street</strong></td>
+                    <td>Gran Via 44</td>
+                    <td>
+                        
+                        <span class="status-badge status-error">Error</span>
+                        <span class="error-message">Detección de 'Dirección Sucia': La calle contiene números pero el campo número está vacío</span>
+                        
+                    </td>
+                </tr>
+                
+                
+                
+                
+                
+                <tr class="">
+                    <td><strong>address_number</strong></td>
+                    <td><em>Vacio</em></td>
+                    <td>
+                        
+                        <span style="color: #4caf50;">✓ Correcto</span>
+                        
+                    </td>
+                </tr>
+                
+                
+                
+                
+                
+                <tr class="row-error">
+                    <td><strong>address_zip</strong></td>
+                    <td>2801</td>
+                    <td>
+                        
+                        <span class="status-badge status-error">Error</span>
+                        <span class="error-message">El código postal debe tener exactamente 5 dígitos</span>
+                        
+                    </td>
+                </tr>
+                
+                
+                
+                
+                
+                <tr class="row-error">
+                    <td><strong>user_email</strong></td>
+                    <td>usuario-error</td>
+                    <td>
+                        
+                        <span class="status-badge status-error">Error</span>
+                        <span class="error-message">Formato de correo electrónico inválido</span>
+                        
+                    </td>
+                </tr>
+                
+                
+                
+                
+                
+                <tr class="">
+                    <td><strong>address_province</strong></td>
+                    <td>MADRID</td>
+                    <td>
+                        
+                        <span style="color: #4caf50;">✓ Correcto</span>
+                        
+                    </td>
+                </tr>
+                
+                
+                
+                
+                
+                <tr class="row-warning">
+                    <td><strong>address_city</strong></td>
+                    <td>GIRONA</td>
+                    <td>
+                        
+                        <span class="status-badge status-warning">Aviso</span>
+                        <span class="warning-message">Ciudad 'GIRONA' no reconocida para la provincia 'MADRID'</span>
+                        
+                    </td>
+                </tr>
+                
+                
+            </tbody>
+        </table>
+
+        <div class="footer">
+            Este es un documento generado automáticamente por el sistema de validación Xaloc 2026.
+        </div>
+    </div>
+</body>
+
+</html>

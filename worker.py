@@ -10,6 +10,11 @@ import subprocess
 
 from core.sqlite_db import SQLiteDatabase
 from core.site_registry import get_site, get_site_controller
+from core.validation import ValidationEngine, DiscrepancyReporter, DocumentDownloader
+
+# Configuración de URLs y Directorios
+DOCUMENT_URL_TEMPLATE = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf/{idRecurso}"
+DOWNLOAD_DIR = Path("tmp/downloads")
 
 # Configuración de logging para el Worker
 logging.basicConfig(
@@ -69,44 +74,79 @@ async def process_task(db: SQLiteDatabase, task_id: int, site_id: str, protocol:
     logger.info(f"Procesando tarea ID: {task_id} - Site: {site_id} - Protocol: {protocol}")
 
     try:
-        # 1. Obtener controlador y clase de automatización
+        # 1. VALIDACIÓN EXHAUSTIVA
+        logger.info(f"Validando datos para ID: {payload.get('idRecurso', 'N/A')}...")
+        validator = ValidationEngine(site_id=site_id)
+        val_result = validator.validate(payload)
+
+        if not val_result.is_valid:
+            logger.warning(f"Validación fallida para Tarea {task_id}")
+            reporter = DiscrepancyReporter()
+            report_path = reporter.generate_html(
+                payload, 
+                val_result.errors, 
+                val_result.warnings,
+                str(payload.get('idRecurso', 'N/A'))
+            )
+            reporter.open_in_browser(report_path)
+            
+            print(f"\n[!] VALIDACIÓN FALLIDA para ID: {payload.get('idRecurso', 'N/A')}")
+            print(f"Reporte generado en: {report_path.absolute()}")
+            print("Por favor, corrija los datos en la base de datos.")
+            
+            # En un entorno real, marcaríamos como 'needs_review' y pasaríamos a la siguiente.
+            # Según el prompt, debemos "detener" o "pausar".
+            input("Pulse Enter para continuar con la siguiente tarea una vez revisado... (o Ctrl+C para salir)")
+            
+            db.update_task_status(task_id, "failed", error="Validation failed. Discrepancy report opened.")
+            return
+
+        # 2. DESCARGA DE DOCUMENTO
+        id_recurso = payload.get("idRecurso")
+        if not id_recurso:
+            raise ValueError("Falta 'idRecurso' en el payload para descargar el documento.")
+
+        downloader = DocumentDownloader(url_template=DOCUMENT_URL_TEMPLATE, download_dir=DOWNLOAD_DIR)
+        download_res = await downloader.download(str(id_recurso))
+
+        if not download_res.success:
+            logger.error(f"Error descargando documento: {download_res.error}")
+            db.update_task_status(task_id, "failed", error=f"Download failed: {download_res.error}")
+            return
+
+        local_pdf_path = download_res.local_path
+        
+        # 3. Preparar automatización
         try:
             controller = get_site_controller(site_id)
             AutomationCls = get_site(site_id)
         except Exception as e:
             raise ValueError(f"No se encontró controlador/automator para {site_id}: {e}")
 
-        # 2. Crear configuración
-        # Por defecto headless=True para el worker (desatendido).
-        # Override: WORKER_HEADLESS=0 para ejecutar en visible (debug/calentamiento de perfil).
         headless_env = os.getenv("WORKER_HEADLESS", "0").strip().lower()
         headless = headless_env not in {"0", "false", "no"}
 
-        # Creamos la config base usando el controlador
         config = _call_with_supported_kwargs(
             controller.create_config,
             headless=headless,
             protocol=protocol
         )
 
-        # SOBREESCRIBIMOS la ruta del perfil para usar uno dedicado al worker
         worker_profile_path = Path("profiles/worker")
         config.navegador.perfil_path = worker_profile_path.absolute()
 
-        # 3. Preparar los datos (Target)
-        # Mapeamos los datos crudos (payload) al formato interno
+        # 4. Mapear datos y añadir el archivo descargado
         mapped_data = controller.map_data(payload)
-
-        # Añadimos info de contexto
+        mapped_data["archivos_adjuntos"] = [local_pdf_path]
+        
         mapped_data.update({
             "protocol": protocol,
             "headless": headless
         })
 
-        # Creamos el objeto Target
         datos = _call_with_supported_kwargs(controller.create_target, **mapped_data)
 
-        # 4. Ejecutar la automatización
+        # 5. Ejecutar la automatización
         logger.info(f"Iniciando automatización para {site_id}...")
         async with AutomationCls(config) as bot:
             screenshot_path = await bot.ejecutar_flujo_completo(datos)
