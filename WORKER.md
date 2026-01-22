@@ -88,7 +88,8 @@ python sync_sqlserver_to_worker_queue.py --connection-string "<TU_CONNECTION_STR
 
 Opciones comunes:
 
-- Filtrar por fase (default `PENDIENTE`): `--fase PENDIENTE`
+- Filtrar por `FaseProcedimiento` (opcional): `--fase denuncia` (si se omite, no filtra)
+- Filtrar por portal: `--site xaloc_girona` (o `madrid` / `base_online`)
 - Forzar protocolo para `base_online` (default `P1`): `--default-protocol P1`
 - Adjuntos por defecto (CSV): `--default-archivos pdfs-prueba/test1.pdf,pdfs-prueba/test2.pdf`
 - Dry-run (no inserta): `--dry-run`

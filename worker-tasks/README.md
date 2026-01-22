@@ -6,6 +6,17 @@ Payloads JSON de ejemplo para encolar tareas con `enqueue_task.py`.
 
 - Referencia completa de parámetros por web: `worker-tasks/PARAMETROS.md`.
 
+## Previsualizar tareas desde SQL Server (a CSV)
+
+1) Edita `sync_sqlserver_config.json` con tus credenciales (no se sube al repo; está en `.gitignore`).
+2) Ejecuta el preview interactivo:
+   - `python sync_sqlserver_preview_to_csv.py`
+3) Revisa el CSV generado (por defecto `out/sync_preview.csv`).
+
+Notas:
+
+- En tu BD, `rs.FaseProcedimiento` suele ser un tipo (`denuncia`, `apremio`, `embargo`, `sancion`, `identificacion`), no “PENDIENTE”. Si quieres filtrar, pon `"fase": "denuncia"` en el config; si lo dejas vacío, no filtra.
+
 ## Comandos
 
 - BASE On-line (P1):

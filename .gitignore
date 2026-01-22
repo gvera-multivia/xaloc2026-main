@@ -7,6 +7,8 @@ __pycache__/
 *.so
 .Python
 venv/
+out/
+sync_sqlserver_config.json
 env/
 ENV/
 .venv

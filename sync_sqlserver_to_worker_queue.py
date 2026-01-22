@@ -15,7 +15,7 @@ except Exception:  # pragma: no cover
     pyodbc = None
 
 
-DEFAULT_QUERY = """
+BASE_SELECT_QUERY = """
 SELECT
     rs.idRecurso,
     rs.Expedient,
@@ -38,8 +38,23 @@ SELECT
 FROM Recursos.RecursosExp rs
 INNER JOIN clientes c ON rs.numclient = c.numerocliente
 LEFT JOIN DadesIdentif d ON rs.Expedient = d.Expedient
-WHERE rs.FaseProcedimiento = ?
 """
+
+
+def build_query(*, fase: str | None) -> tuple[str, list[Any]]:
+    """
+    Construye la query y parámetros.
+
+    Nota: en algunos entornos `FaseProcedimiento` no es un "estado" tipo PENDIENTE,
+    sino un tipo (denuncia/apremio/embargo/sancion/identificacion). Por eso el filtro es opcional.
+    """
+    query = BASE_SELECT_QUERY.strip()
+    params: list[Any] = []
+    fase_norm = (fase or "").strip()
+    if fase_norm:
+        query += "\nWHERE LTRIM(RTRIM(rs.FaseProcedimiento)) = ?"
+        params.append(fase_norm)
+    return query, params
 
 DEFAULT_MADRID_EXPONE = "Alegación automática basada en registros de base de datos."
 DEFAULT_MADRID_SOLICITA = "Solicitud automática basada en registros de base de datos."
@@ -133,9 +148,11 @@ def _infer_site_id(organisme: Any) -> str:
     org = _clean_str(organisme).upper()
     if "MADRID" in org:
         return "madrid"
-    if "GIRONA" in org:
+    # Girona: el portal implementado es XALOC Girona (no SCT/otros organismos de Girona).
+    if "XALOC" in org or "GIRONA" in org:
         return "xaloc_girona"
-    return "base_online"
+    if "TARRAGONA" in org:
+        return "base_online"
 
 @dataclass(frozen=True)
 class PayloadDefaults:
@@ -235,6 +252,70 @@ def map_to_worker_payload(row: dict[str, Any], site_id: str, *, defaults: Payloa
     return cleaned
 
 
+def map_to_preview_payload(row: dict[str, Any], site_id: str) -> dict[str, Any]:
+    """
+    Genera un payload "mínimo" para previsualización:
+    - Solo incluye campos derivados de columnas de DB.
+    - NO añade `archivos` por defecto.
+    - NO añade textos/representante/motivos por defecto.
+    """
+    payload = _map_common_payload(row)
+
+    expediente_raw = row.get("Expedient")
+
+    if site_id == "base_online":
+        nif = payload.get("nif") or ""
+        llic = _clean_str(row.get("ConducDni")) or nif
+        payload.update(
+            {
+                "expediente_id_ens": _clean_str(row.get("idRecurso")),
+                "expediente_any": _year(row.get("DtaDenuncia")),
+                "expediente_num": _clean_str(expediente_raw),
+                "data_denuncia": _format_ddmmyyyy(row.get("DtaDenuncia")),
+                "llicencia_conduccio": llic,
+            }
+        )
+
+    elif site_id == "madrid":
+        parsed = _parse_madrid_expediente(expediente_raw)
+        notif_name_parts = (
+            _clean_str(row.get("Nombre")).upper(),
+            _clean_str(row.get("Apellido1")).upper(),
+            _clean_str(row.get("Apellido2")).upper(),
+        )
+        payload.update(
+            {
+                "expediente_tipo": parsed.exp_tipo,
+                "expediente_nnn": parsed.exp_nnn,
+                "expediente_eeeeeeeee": parsed.exp_eeeeeeeee,
+                "expediente_d": parsed.exp_d,
+                "expediente_lll": parsed.exp_lll,
+                "expediente_aaaa": parsed.exp_aaaa,
+                "expediente_exp_num": parsed.exp_exp_num,
+                "notif_name": notif_name_parts[0],
+                "notif_surname1": notif_name_parts[1],
+                "notif_surname2": notif_name_parts[2],
+            }
+        )
+
+    elif site_id == "xaloc_girona":
+        payload.update(
+            {
+                "denuncia_num": _clean_str(expediente_raw),
+                "expediente_num": _clean_str(expediente_raw),
+            }
+        )
+
+    cleaned: dict[str, Any] = {}
+    for key, value in payload.items():
+        if value is None:
+            continue
+        if isinstance(value, str) and value == "":
+            continue
+        cleaned[key] = value
+    return cleaned
+
+
 def _infer_protocol(site_id: str, *, default_protocol: str) -> Optional[str]:
     if site_id != "base_online":
         return None
@@ -297,7 +378,17 @@ def main(argv: Optional[list[str]] = None) -> int:
         description="Sincroniza trámites desde SQL Server (solo lectura) a la cola SQLite del worker."
     )
     parser.add_argument("--connection-string", required=True, help="Connection string para pyodbc (SQL Server).")
-    parser.add_argument("--fase", default="PENDIENTE", help="Valor de rs.FaseProcedimiento (default: PENDIENTE).")
+    parser.add_argument(
+        "--site",
+        default="auto",
+        choices=["auto", "madrid", "xaloc_girona", "base_online"],
+        help="Filtra qué portal encolar (default: auto = según Organisme).",
+    )
+    parser.add_argument(
+        "--fase",
+        default="",
+        help="Filtro opcional por rs.FaseProcedimiento (ej: denuncia, apremio, embargo, sancion, identificacion).",
+    )
     parser.add_argument("--query-file", default=None, help="Ruta a un .sql (si se quiere reemplazar la query default).")
     parser.add_argument("--sqlite-db", default="db/xaloc_database.db", help="Ruta a la SQLite del worker.")
     parser.add_argument("--default-protocol", default="P1", help="Protocolo por defecto para base_online (P1/P2/P3).")
@@ -322,7 +413,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         print("ERROR: Falta pyodbc. Instala el driver y el paquete: `pip install pyodbc`.", file=sys.stderr)
         return 2
 
-    query = _read_query_from_file(args.query_file) if args.query_file else DEFAULT_QUERY
+    query, query_params = build_query(fase=args.fase) if not args.query_file else (_read_query_from_file(args.query_file), [args.fase] if args.fase else [])
     default_archivos = [a.strip() for a in str(args.default_archivos).split(",") if a.strip()]
     default_protocol = str(args.default_protocol).strip().upper() or "P1"
     defaults = PayloadDefaults(
@@ -345,7 +436,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     conn = pyodbc.connect(args.connection_string)
     try:
         cursor = conn.cursor()
-        cursor.execute(query, (args.fase,))
+        cursor.execute(query, tuple(query_params))
         columns = [c[0] for c in cursor.description]
 
         processed = 0
@@ -357,6 +448,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             try:
                 row_dict = dict(zip(columns, row))
                 site_id = _infer_site_id(row_dict.get("Organisme"))
+                if args.site != "auto" and site_id != args.site:
+                    continue
                 protocol = _infer_protocol(site_id, default_protocol=default_protocol)
                 payload = map_to_worker_payload(row_dict, site_id, defaults=defaults)
 
