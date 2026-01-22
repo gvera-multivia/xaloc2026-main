@@ -16,7 +16,7 @@ except Exception:  # pragma: no cover
 
 
 BASE_SELECT_QUERY = """
-SELECT
+SELECT DISTINCT
     rs.idRecurso,
     rs.Expedient,
     rs.Matricula,
@@ -35,20 +35,29 @@ SELECT
     c.poblacion,
     c.provincia,
     d.ConducDni,
-    -- ADJUNTOS (SQL Server 2017+)
-    STRING_AGG(CAST(adj.id AS VARCHAR(MAX)), ',') WITHIN GROUP (ORDER BY adj.id) AS adjunto_ids,
-    STRING_AGG(adj.Filename, '|') WITHIN GROUP (ORDER BY adj.id) AS adjunto_filenames
+    -- ADJUNTOS (compatible con SQL Server 2008+; mantiene orden por adj.id)
+    adjAgg.adjunto_ids,
+    adjAgg.adjunto_filenames
 FROM Recursos.RecursosExp rs
 INNER JOIN clientes c ON rs.numclient = c.numerocliente
 LEFT JOIN DadesIdentif d ON rs.Expedient = d.Expedient
-LEFT JOIN attachments_resource_documents adj
-    ON rs.automatic_id = adj.automatic_id
-GROUP BY
-    rs.idRecurso, rs.Expedient, rs.Matricula, rs.DtaDenuncia,
-    rs.Organisme, rs.automatic_id, c.Nombre, c.Apellido1,
-    c.Apellido2, c.nif, c.email, c.movil, c.telefono1,
-    c.calle, c.numero, c.Cpostal, c.poblacion, c.provincia,
-    d.ConducDni
+OUTER APPLY (
+    SELECT
+        adjunto_ids = STUFF((
+            SELECT ',' + CAST(adj2.id AS VARCHAR(MAX))
+            FROM attachments_resource_documents adj2
+            WHERE adj2.automatic_id = rs.automatic_id
+            ORDER BY adj2.id
+            FOR XML PATH(''), TYPE
+        ).value('.', 'VARCHAR(MAX)'), 1, 1, ''),
+        adjunto_filenames = STUFF((
+            SELECT '|' + adj2.Filename
+            FROM attachments_resource_documents adj2
+            WHERE adj2.automatic_id = rs.automatic_id
+            ORDER BY adj2.id
+            FOR XML PATH(''), TYPE
+        ).value('.', 'VARCHAR(MAX)'), 1, 1, '')
+) adjAgg
 """
 
 
@@ -107,14 +116,12 @@ def build_query(*, fase: str | None) -> tuple[str, list[Any]]:
         where_clauses.append("LTRIM(RTRIM(rs.FaseProcedimiento)) = ?")
         params.append(fase_norm)
 
-    # La query base ya tiene GROUP BY, pero necesitamos meter el WHERE antes.
-    # Como BASE_SELECT_QUERY tiene GROUP BY al final, necesitamos insertarlo antes.
-    # Esto es un poco hacky con string replacement, pero efectivo dado el formato fijo.
+    # Si la query base tuviera GROUP BY, insertamos el WHERE antes (por compatibilidad).
     parts = query.split("GROUP BY")
     if len(parts) == 2:
         query = parts[0] + "\nWHERE " + " AND ".join(where_clauses) + "\nGROUP BY" + parts[1]
     else:
-        # Fallback por si cambia la query base (aunque no debería)
+        # Fallback: añadimos WHERE al final del bloque FROM/JOIN/APPLY
         query += "\nWHERE " + " AND ".join(where_clauses)
 
     return query, params
