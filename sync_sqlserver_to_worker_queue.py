@@ -35,6 +35,12 @@ def build_query(*, fase: str | None) -> tuple[str, list[Any]]:
     where_clauses = [
         "rs.Estado = 0",           # Solo pendientes
         "rs.TExp IN (2, 3)"        # Solo documentos generados/servidor
+
+        #validar que los campos esenciales no sean nulos o vacíos
+        "rs.idRecurso IS NOT NULL",
+        "rs.Expedient IS NOT NULL AND LTRIM(RTRIM(rs.Expedient)) <> ''",
+        "rs.Matricula IS NOT NULL AND LTRIM(RTRIM(rs.Matricula)) <> ''",
+        "c.email IS NOT NULL AND LTRIM(RTRIM(c.email)) <> ''"
         
     ]
 

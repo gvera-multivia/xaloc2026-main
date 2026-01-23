@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import logging
 import sys
 import inspect
@@ -8,17 +8,20 @@ from pathlib import Path
 from typing import Optional
 import subprocess
 
+import aiohttp
+from dotenv import load_dotenv
+
 from core.sqlite_db import SQLiteDatabase
 from core.site_registry import get_site, get_site_controller
 from core.validation import ValidationEngine, DiscrepancyReporter, DocumentDownloader
 from core.attachments import AttachmentDownloader, AttachmentInfo
 from core.xvia_auth import create_authenticated_session
 
-# Configuración de URLs y Directorios
+# Configuracion de URLs y Directorios
 DOCUMENT_URL_TEMPLATE = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf/{idRecurso}"
 DOWNLOAD_DIR = Path("tmp/downloads")
 
-# Configuración de logging para el Worker
+# Configuracion de logging para el Worker
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - [WORKER] - %(levelname)s - %(message)s",
@@ -38,7 +41,7 @@ def _call_with_supported_kwargs(fn, **kwargs):
 
 def apply_url_cert_config():
     """
-    Ejecuta el script de configuración de certificados leyendo el archivo:
+    Ejecuta el script de configuracion de certificados leyendo el archivo:
     url-cert-config.txt (que contiene comandos CMD tal cual).
     Solo aplica en Windows.
     """
@@ -50,9 +53,9 @@ def apply_url_cert_config():
     if not script_path.exists():
         raise FileNotFoundError(f"No existe {script_path.resolve()}")
 
-    logger.info(f"Aplicando configuración de AutoSelectCertificateForUrls desde: {script_path.resolve()}")
+    logger.info(f"Aplicando configuracion de AutoSelectCertificateForUrls desde: {script_path.resolve()}")
 
-    # Ejecuta el archivo con cmd.exe para que soporte 'set', 'rem', expansión %CN%, etc.
+    # Ejecuta el archivo con cmd.exe para que soporte 'set', 'rem', expansion %CN%, etc.
     # /d -> no auto-run, /s -> manejo de comillas, /c -> ejecutar y salir
     completed = subprocess.run(
         ["cmd.exe", "/d", "/s", "/c", str(script_path.resolve())],
@@ -68,11 +71,18 @@ def apply_url_cert_config():
         logger.warning(f"[url-cert-config stderr]\n{completed.stderr.strip()}")
 
     if completed.returncode != 0:
-        raise RuntimeError(f"url-cert-config.txt falló con código {completed.returncode}")
+        raise RuntimeError(f"url-cert-config.txt fallo con codigo {completed.returncode}")
 
-    logger.info("Configuración de certificados aplicada correctamente.")
+    logger.info("Configuracion de certificados aplicada correctamente.")
 
-async def process_task(db: SQLiteDatabase, task_id: int, site_id: str, protocol: Optional[str], payload: dict):
+async def process_task(
+    db: SQLiteDatabase,
+    task_id: int,
+    site_id: str,
+    protocol: Optional[str],
+    payload: dict,
+    auth_session: Optional[aiohttp.ClientSession] = None
+):
     logger.info(f"Procesando tarea ID: {task_id} - Site: {site_id} - Protocol: {protocol}")
 
     try:
@@ -86,7 +96,7 @@ async def process_task(db: SQLiteDatabase, task_id: int, site_id: str, protocol:
             val_result = validator.validate(payload)
 
             if not val_result.is_valid:
-                logger.warning(f"Validación fallida para Tarea {task_id}")
+                logger.warning(f"Validacion fallida para Tarea {task_id}")
                 reporter = DiscrepancyReporter()
                 report_path = reporter.generate_html(
                     payload, 
@@ -96,7 +106,7 @@ async def process_task(db: SQLiteDatabase, task_id: int, site_id: str, protocol:
                 )
                 reporter.open_in_browser(report_path)
                 
-                print(f"\n[!] VALIDACIÓN FALLIDA para ID: {payload.get('idRecurso', 'N/A')}")
+                print(f"\n[!] VALIDACION FALLIDA para ID: {payload.get('idRecurso', 'N/A')}")
                 print(f"Reporte generado en: {report_path.absolute()}")
                 print("Por favor, corrija los datos en la base de datos.")
                 
@@ -110,79 +120,64 @@ async def process_task(db: SQLiteDatabase, task_id: int, site_id: str, protocol:
         if not id_recurso:
             raise ValueError("Falta 'idRecurso' en el payload para descargar el documento.")
 
-        auth_email = "gvera@xvia-serviciosjuridicos.com"
-        auth_password = "gvera@20****"
-        auth_session = None
-        if auth_email and auth_password:
-            try:
-                auth_session = await create_authenticated_session(auth_email, auth_password)
-            except Exception as e:
-                logger.error(f"Error autenticando en XVIA: {e}")
-                db.update_task_status(task_id, "failed", error="XVIA login failed")
-                return
-        else:
-            logger.warning("XVIA_EMAIL/XVIA_PASSWORD no definidos; descarga sin login.")
+        downloader = DocumentDownloader(url_template=DOCUMENT_URL_TEMPLATE, download_dir=DOWNLOAD_DIR)
+        download_res = await downloader.download(str(id_recurso), session=auth_session)
 
-        try:
-            downloader = DocumentDownloader(url_template=DOCUMENT_URL_TEMPLATE, download_dir=DOWNLOAD_DIR)
-            download_res = await downloader.download(str(id_recurso), session=auth_session)
+        if not download_res.success:
+            logger.error(f"Error descargando documento: {download_res.error}")
+            db.update_task_status(task_id, "failed", error=f"Download failed: {download_res.error}")
+            return
 
-            if not download_res.success:
-                logger.error(f"Error descargando documento: {download_res.error}")
-                db.update_task_status(task_id, "failed", error=f"Download failed: {download_res.error}")
-                return
+        local_pdf_path = download_res.local_path
+        archivos_para_subir = [local_pdf_path]
+        
+        # 3. DESCARGA DE ADJUNTOS (NUEVO)
+        adjuntos_metadata = payload.get("adjuntos", [])
+        if adjuntos_metadata:
+            logger.info(f"Descargando {len(adjuntos_metadata)} adjunto(s)...")
 
-            local_pdf_path = download_res.local_path
-            archivos_para_subir = [local_pdf_path]
-            
-            # 3. DESCARGA DE ADJUNTOS (NUEVO)
-            adjuntos_metadata = payload.get("adjuntos", [])
-            if adjuntos_metadata:
-                logger.info(f"Descargando {len(adjuntos_metadata)} adjunto(s)...")
-
-                attachment_downloader = AttachmentDownloader()
-                attachments_info = [
-                    AttachmentInfo(
-                        id=adj["id"],
-                        filename=adj["filename"],
-                        url=adj["url"]
-                    )
-                    for adj in adjuntos_metadata
-                ]
-
-                download_results = await attachment_downloader.download_batch(
-                    attachments_info,
-                    str(id_recurso),
-                    session=auth_session
+            attachment_downloader = AttachmentDownloader()
+            attachments_info = [
+                AttachmentInfo(
+                    id=adj["id"],
+                    filename=adj["filename"],
+                    url=adj["url"]
                 )
+                for adj in adjuntos_metadata
+            ]
 
-                # Validar resultados
-                failed_downloads = [r for r in download_results if not r.success]
-                if failed_downloads:
-                    error_msg = f"Fallo descargando {len(failed_downloads)} adjunto(s): " + \
-                               ", ".join([f"{r.filename} ({r.error})" for r in failed_downloads])
-                    logger.error(error_msg)
-                    db.update_task_status(task_id, "failed", error=error_msg)
-                    return
+            download_results = await attachment_downloader.download_batch(
+                attachments_info,
+                str(id_recurso),
+                session=auth_session
+            )
 
-                # Añadir adjuntos descargados a la lista de archivos
-                for result in download_results:
-                    if result.local_path:
-                        archivos_para_subir.append(result.local_path)
-                        logger.info(f"Adjunto descargado: {result.filename} ({result.file_size_bytes} bytes)")
-        finally:
-            if auth_session is not None:
-                await auth_session.close()
+            # Validar resultados
+            failed_downloads = [r for r in download_results if not r.success]
+            if failed_downloads:
+                error_msg = f"Fallo descargando {len(failed_downloads)} adjunto(s): " + \
+                           ", ".join([f"{r.filename} ({r.error})" for r in failed_downloads])
+                logger.error(error_msg)
+                db.update_task_status(task_id, "failed", error=error_msg)
+                return
 
-        # 4. Preparar automatización
+            # Anadir adjuntos descargados a la lista de archivos
+            for result in download_results:
+                if result.local_path:
+                    archivos_para_subir.append(result.local_path)
+                    logger.info(f"Adjunto descargado: {result.filename} ({result.file_size_bytes} bytes)")
+
+        # Guardar rutas en el payload para reuso en mapeos posteriores
+        payload["archivos"] = [str(p) for p in archivos_para_subir if p]
+
+        # 4. Preparar automatizacion
         try:
             controller = get_site_controller(site_id)
             AutomationCls = get_site(site_id)
         except Exception as e:
-            raise ValueError(f"No se encontró controlador/automator para {site_id}: {e}")
+            raise ValueError(f"No se encontro controlador/automator para {site_id}: {e}")
 
-        
-        headless = 0 # Navegador visible para depuración headless=1 -> oculto
+        headless = 0 # Navegador visible para depuracion headless=1 -> oculto
 
         config = _call_with_supported_kwargs(
             controller.create_config,
@@ -193,7 +188,7 @@ async def process_task(db: SQLiteDatabase, task_id: int, site_id: str, protocol:
         worker_profile_path = Path("profiles/worker")
         config.navegador.perfil_path = worker_profile_path.absolute()
 
-        # 5. Mapear datos y añadir TODOS los archivos descargados
+        # 5. Mapear datos y anadir TODOS los archivos descargados
         mapped_data = controller.map_data(payload)
         
         mapped_data.update({
@@ -220,8 +215,8 @@ async def process_task(db: SQLiteDatabase, task_id: int, site_id: str, protocol:
 
         datos = _call_with_supported_kwargs(target_fn, **mapped_data)
 
-        # 6. Ejecutar la automatización
-        logger.info(f"Iniciando automatización para {site_id}...")
+        # 6. Ejecutar la automatizacion
+        logger.info(f"Iniciando automatizacion para {site_id}...")
         async with AutomationCls(config) as bot:
             screenshot_path = await bot.ejecutar_flujo_completo(datos)
 
@@ -237,21 +232,37 @@ async def worker_loop():
     db = SQLiteDatabase()
     logger.info("Iniciando Worker Loop. Esperando tareas...")
 
-    while True:
-        try:
-            task = db.get_pending_task()
-            if task:
-                task_id, site_id, protocol, payload = task
-                await process_task(db, task_id, site_id, protocol, payload)
-            else:
-                # No hay tareas, dormir
-                await asyncio.sleep(10)
-        except KeyboardInterrupt:
-            logger.info("Deteniendo worker por interrupción de teclado...")
-            break
-        except Exception as e:
-            logger.error(f"Error en el bucle principal: {e}")
-            await asyncio.sleep(5)
+    load_dotenv()
+    auth_email = os.getenv("XVIA_EMAIL")
+    auth_password = os.getenv("XVIA_PASSWORD")
+    if not auth_email or not auth_password:
+        logger.error("Faltan XVIA_EMAIL/XVIA_PASSWORD en el entorno o .env.")
+        return
+
+    try:
+        auth_session = await create_authenticated_session(auth_email, auth_password)
+    except Exception as e:
+        logger.error(f"Error autenticando en XVIA: {e}")
+        return
+
+    try:
+        while True:
+            try:
+                task = db.get_pending_task()
+                if task:
+                    task_id, site_id, protocol, payload = task
+                    await process_task(db, task_id, site_id, protocol, payload, auth_session)
+                else:
+                    # No hay tareas, dormir
+                    await asyncio.sleep(10)
+            except KeyboardInterrupt:
+                logger.info("Deteniendo worker por interrupcion de teclado...")
+                break
+            except Exception as e:
+                logger.error(f"Error en el bucle principal: {e}")
+                await asyncio.sleep(5)
+    finally:
+        await auth_session.close()
 
 if __name__ == "__main__":
     if sys.platform == "win32":
