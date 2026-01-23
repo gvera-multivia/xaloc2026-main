@@ -26,31 +26,33 @@ FROM Recursos.RecursosExp rs
 INNER JOIN clientes c ON rs.numclient = c.numerocliente
 LEFT JOIN attachments_resource_documents att ON rs.automatic_id = att.automatic_id
 """
-
 def build_query(*, fase: str | None) -> tuple[str, list[Any]]:
     """Construye la query filtrando por estado pendiente y tipo de expediente."""
+    # Usamos la base y nos aseguramos de que termine con un espacio
     query = BASE_SELECT_QUERY.strip()
     params: list[Any] = []
 
+    # 1. Definimos todas las condiciones obligatorias
     where_clauses = [
-        "rs.Estado = 0",           # Solo pendientes
-        "rs.TExp IN (2, 3)"        # Solo documentos generados/servidor
-
-        #validar que los campos esenciales no sean nulos o vacíos
-        "rs.idRecurso IS NOT NULL",
+        "rs.Estado = 0",               # Solo pendientes
+        "rs.TExp IN (2, 3)",           # Solo documentos generados/servidor
+        "rs.idRecurso IS NOT NULL",    # Validar que existe ID
         "rs.Expedient IS NOT NULL AND LTRIM(RTRIM(rs.Expedient)) <> ''",
         "rs.Matricula IS NOT NULL AND LTRIM(RTRIM(rs.Matricula)) <> ''",
         "c.email IS NOT NULL AND LTRIM(RTRIM(c.email)) <> ''"
-        
     ]
 
+    # 2. Añadimos la fase si el usuario la proporciona
     fase_norm = (fase or "").strip()
     if fase_norm:
         where_clauses.append("LTRIM(RTRIM(rs.FaseProcedimiento)) = ?")
         params.append(fase_norm)
 
-    query += "\nWHERE " + " AND ".join(where_clauses)
-    return query, params
+    # 3. Concatenamos usando WHERE y AND de forma segura
+    # Esto asegura que la consulta final sea: SELECT ... FROM ... WHERE cond1 AND cond2...
+    full_query = f"{query}\nWHERE " + " AND ".join(where_clauses)
+    
+    return full_query, params
 
 def _clean_str(value: Any) -> str:
     return str(value).strip() if value is not None else ""
