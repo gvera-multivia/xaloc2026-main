@@ -15,7 +15,7 @@ from core.sqlite_db import SQLiteDatabase
 from core.site_registry import get_site, get_site_controller
 from core.validation import ValidationEngine, DiscrepancyReporter, DocumentDownloader
 from core.attachments import AttachmentDownloader, AttachmentInfo
-from core.xvia_auth import create_authenticated_session
+from core.xvia_auth import create_authenticated_session_in_place
 
 # Configuracion de URLs y Directorios
 DOCUMENT_URL_TEMPLATE = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf/{idRecurso}"
@@ -239,13 +239,19 @@ async def worker_loop():
         logger.error("Faltan XVIA_EMAIL/XVIA_PASSWORD en el entorno o .env.")
         return
 
-    try:
-        auth_session = await create_authenticated_session(auth_email, auth_password)
-    except Exception as e:
-        logger.error(f"Error autenticando en XVIA: {e}")
-        return
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/pdf,application/xhtml+xml,text/html;q=0.9,*/*;q=0.8"
+    }
 
-    try:
+    async with aiohttp.ClientSession(headers=headers) as auth_session:
+        try:
+            await create_authenticated_session_in_place(auth_session, auth_email, auth_password)
+            logger.info("XVIA Session lista y persistente.")
+        except Exception as e:
+            logger.error(f"Error autenticando en XVIA: {e}")
+            return
+
         while True:
             try:
                 task = db.get_pending_task()
@@ -261,8 +267,6 @@ async def worker_loop():
             except Exception as e:
                 logger.error(f"Error en el bucle principal: {e}")
                 await asyncio.sleep(5)
-    finally:
-        await auth_session.close()
 
 if __name__ == "__main__":
     if sys.platform == "win32":

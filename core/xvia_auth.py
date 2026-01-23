@@ -79,3 +79,35 @@ async def create_authenticated_session(
         await session.close()
         logger.error(f"Error crítico en create_authenticated_session: {e}")
         raise
+
+async def create_authenticated_session_in_place(
+    session: aiohttp.ClientSession,
+    email: str,
+    password: str,
+    login_url: str = LOGIN_URL
+) -> None:
+    # 1. Obtener la pagina de login para extraer el token
+    async with session.get(login_url) as response:
+        if response.status != 200:
+            raise RuntimeError(f"No se pudo cargar la pagina de login. Status: {response.status}")
+        login_page = await response.text()
+
+    token = extract_csrf_token(login_page)
+    if not token:
+        logger.error("Token CSRF no encontrado en login.")
+        raise RuntimeError("CSRF token not found in login page.")
+
+    data = {
+        "_token": token,
+        "email": email,
+        "password": password,
+        "remember": "on",
+    }
+
+    async with session.post(login_url, data=data, allow_redirects=False) as response:
+        if response.status in (302, 303):
+            logger.info(f"XVIA login succeeded (Status {response.status}).")
+            return
+        if response.status == 200:
+            raise RuntimeError("Login failed: Credenciales incorrectas o sesion expirada.")
+        raise RuntimeError(f"Login failed with status {response.status}.")
