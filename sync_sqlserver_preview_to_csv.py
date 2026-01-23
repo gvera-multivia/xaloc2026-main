@@ -109,6 +109,11 @@ def main() -> int:
 
             protocol = _infer_protocol(inferred_site, default_protocol=default_protocol)
             payload = map_to_preview_payload(row_dict, inferred_site)
+            payload["_meta"] = {
+                "source": "sqlserver_sync",
+                "skip_validation": True,
+                "no_defaults": True,
+            }
 
             rows_out.append(
                 {

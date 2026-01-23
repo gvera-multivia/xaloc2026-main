@@ -2,23 +2,7 @@
 
 Este documento detalla los diferentes modos de ejecución disponibles en el proyecto de automatización.
 
-## 1. Modo Interactivo (CLI)
-
-Utiliza `main.py` para ejecutar automatizaciones de forma interactiva, ideal para pruebas rápidas o ejecuciones puntuales controladas manualmente.
-
-**Comando:**
-```bash
-python main.py
-```
-
-**Flujo:**
-1. Seleccionas el sitio (ej. Madrid, Base Online, Xaloc).
-2. Seleccionas el protocolo o configuración específica.
-3. El script lanza el navegador (visible o headless según configuración) y ejecuta el flujo.
-
----
-
-## 2. Modo Worker (Desatendido)
+## 1. Modo Worker (Desatendido)
 
 Utiliza `worker.py` para procesar una cola de tareas almacenada en la base de datos SQLite local (`db/xaloc_database.db`). Este es el modo principal para producción.
 
@@ -39,7 +23,7 @@ python worker.py
 
 ---
 
-## 3. Sincronización y Worker (Flujo Completo)
+## 2. Sincronización y Worker (Flujo Completo)
 
 Este flujo conecta la base de datos origen (SQL Server) con el Worker.
 
@@ -66,7 +50,7 @@ python worker.py
 
 ---
 
-## 4. Encolado Manual de Tareas
+## 3. Encolado Manual de Tareas
 
 Si necesitas probar un caso específico sin pasar por SQL Server, puedes insertar una tarea manualmente en la cola.
 
@@ -86,7 +70,7 @@ python enqueue_task.py --site madrid --payload datos_prueba.json
 
 ---
 
-## 5. Ejecución de Tests
+## 4. Ejecución de Tests
 
 ### Tests Unitarios y de Integración
 Ejecuta los tests definidos en el directorio `test_files` o módulos de prueba específicos.
@@ -105,7 +89,7 @@ python test_validation_module.py
 
 ---
 
-## 6. Configuración del Entorno
+## 5. Configuración del Entorno
 
 Antes de ejecutar cualquier modo, asegúrate de tener el entorno configurado.
 

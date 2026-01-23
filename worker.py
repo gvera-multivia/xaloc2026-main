@@ -75,32 +75,34 @@ async def process_task(db: SQLiteDatabase, task_id: int, site_id: str, protocol:
     logger.info(f"Procesando tarea ID: {task_id} - Site: {site_id} - Protocol: {protocol}")
 
     try:
-        # 1. VALIDACIÓN EXHAUSTIVA
-        logger.info(f"Validando datos para ID: {payload.get('idRecurso', 'N/A')}...")
-        validator = ValidationEngine(site_id=site_id)
-        val_result = validator.validate(payload)
+        meta = payload.get("_meta") or {}
+        skip_validation = bool(meta.get("skip_validation"))
+        no_defaults = bool(meta.get("no_defaults"))
 
-        if not val_result.is_valid:
-            logger.warning(f"Validación fallida para Tarea {task_id}")
-            reporter = DiscrepancyReporter()
-            report_path = reporter.generate_html(
-                payload, 
-                val_result.errors, 
-                val_result.warnings,
-                str(payload.get('idRecurso', 'N/A'))
-            )
-            reporter.open_in_browser(report_path)
-            
-            print(f"\n[!] VALIDACIÓN FALLIDA para ID: {payload.get('idRecurso', 'N/A')}")
-            print(f"Reporte generado en: {report_path.absolute()}")
-            print("Por favor, corrija los datos en la base de datos.")
-            
-            # En un entorno real, marcaríamos como 'needs_review' y pasaríamos a la siguiente.
-            # Según el prompt, debemos "detener" o "pausar".
-            input("Pulse Enter para continuar con la siguiente tarea una vez revisado... (o Ctrl+C para salir)")
-            
-            db.update_task_status(task_id, "failed", error="Validation failed. Discrepancy report opened.")
-            return
+        if not skip_validation:
+            logger.info(f"Validando datos para ID: {payload.get('idRecurso', 'N/A')}...")
+            validator = ValidationEngine(site_id=site_id)
+            val_result = validator.validate(payload)
+
+            if not val_result.is_valid:
+                logger.warning(f"Validación fallida para Tarea {task_id}")
+                reporter = DiscrepancyReporter()
+                report_path = reporter.generate_html(
+                    payload, 
+                    val_result.errors, 
+                    val_result.warnings,
+                    str(payload.get('idRecurso', 'N/A'))
+                )
+                reporter.open_in_browser(report_path)
+                
+                print(f"\n[!] VALIDACIÓN FALLIDA para ID: {payload.get('idRecurso', 'N/A')}")
+                print(f"Reporte generado en: {report_path.absolute()}")
+                print("Por favor, corrija los datos en la base de datos.")
+                
+                input("Pulse Enter para continuar con la siguiente tarea una vez revisado... (o Ctrl+C para salir)")
+                
+                db.update_task_status(task_id, "failed", error="Validation failed. Discrepancy report opened.")
+                return
 
         # 2. DESCARGA DE DOCUMENTO
         id_recurso = payload.get("idRecurso")
@@ -160,8 +162,8 @@ async def process_task(db: SQLiteDatabase, task_id: int, site_id: str, protocol:
         except Exception as e:
             raise ValueError(f"No se encontró controlador/automator para {site_id}: {e}")
 
-        headless_env = os.getenv("WORKER_HEADLESS", "0").strip().lower()
-        headless = headless_env not in {"0", "false", "no"}
+        
+        headless = 0 # Navegador visible para depuración headless=1 -> oculto
 
         config = _call_with_supported_kwargs(
             controller.create_config,
@@ -174,14 +176,30 @@ async def process_task(db: SQLiteDatabase, task_id: int, site_id: str, protocol:
 
         # 5. Mapear datos y añadir TODOS los archivos descargados
         mapped_data = controller.map_data(payload)
-        mapped_data["archivos_adjuntos"] = archivos_para_subir
         
         mapped_data.update({
             "protocol": protocol,
             "headless": headless
         })
 
-        datos = _call_with_supported_kwargs(controller.create_target, **mapped_data)
+        if site_id == "madrid":
+            mapped_data["archivos"] = archivos_para_subir
+        elif site_id == "xaloc_girona":
+            mapped_data["archivos_adjuntos"] = archivos_para_subir
+        elif site_id == "base_online":
+            protocol_norm = (protocol or "P1").upper().strip()
+            if protocol_norm == "P2":
+                mapped_data["p2_archivos"] = archivos_para_subir
+            elif protocol_norm == "P3":
+                mapped_data["p3_archivos"] = archivos_para_subir
+            else:
+                mapped_data["p1_archivos"] = archivos_para_subir
+
+        target_fn = controller.create_target
+        if no_defaults and hasattr(controller, "create_target_strict"):
+            target_fn = controller.create_target_strict
+
+        datos = _call_with_supported_kwargs(target_fn, **mapped_data)
 
         # 6. Ejecutar la automatización
         logger.info(f"Iniciando automatización para {site_id}...")

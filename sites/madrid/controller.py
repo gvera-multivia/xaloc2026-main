@@ -166,6 +166,132 @@ class MadridController:
             headless=headless,
         )
 
+    def create_target_strict(
+        self,
+        *,
+        headless: bool = True,
+        exp_tipo: str | None = None,
+        exp_nnn: str | None = None,
+        exp_eeeeeeeee: str | None = None,
+        exp_d: str | None = None,
+        exp_lll: str | None = None,
+        exp_aaaa: str | None = None,
+        exp_exp_num: str | None = None,
+        matricula: str | None = None,
+        inter_telefono: str | None = None,
+        inter_email_check: bool | None = None,
+        rep_tipo_via: str | None = None,
+        rep_nombre_via: str | None = None,
+        rep_numero: str | None = None,
+        rep_cp: str | None = None,
+        rep_municipio: str | None = None,
+        rep_email: str | None = None,
+        rep_movil: str | None = None,
+        notif_nombre: str | None = None,
+        notif_apellido1: str | None = None,
+        notif_apellido2: str | None = None,
+        notif_razon_social: str | None = None,
+        naturaleza: str | None = None,
+        expone: str | None = None,
+        solicita: str | None = None,
+        archivos: list[str] | None = None,
+    ) -> MadridTarget:
+        def _val(value: str | None) -> str:
+            return value or ""
+
+        if exp_tipo == "opcion2":
+            tipo_exp = TipoExpediente.OPCION2
+        else:
+            tipo_exp = TipoExpediente.OPCION1
+
+        if tipo_exp == TipoExpediente.OPCION1:
+            expediente = ExpedienteData(
+                tipo=tipo_exp,
+                nnn=_val(exp_nnn),
+                eeeeeeeee=_val(exp_eeeeeeeee),
+                d=_val(exp_d),
+            )
+        else:
+            expediente = ExpedienteData(
+                tipo=tipo_exp,
+                lll=_val(exp_lll),
+                aaaa=_val(exp_aaaa),
+                exp_num=_val(exp_exp_num),
+            )
+
+        interesado = InteresadoData(
+            telefono=_val(inter_telefono),
+            confirmar_email=bool(inter_email_check) if inter_email_check is not None else False,
+            confirmar_sms=False,
+        )
+
+        representante = RepresentanteData(
+            direccion=DireccionData(
+                tipo_via=_val(rep_tipo_via),
+                nombre_via=_val(rep_nombre_via),
+                tipo_numeracion="",
+                numero=_val(rep_numero),
+                codigo_postal=_val(rep_cp),
+                municipio=_val(rep_municipio),
+                provincia="",
+                pais="",
+            ),
+            contacto=ContactoData(
+                email=_val(rep_email),
+                movil=_val(rep_movil),
+                telefono=_val(inter_telefono),
+            ),
+        )
+
+        notificacion = NotificacionData(
+            identificacion=IdentificacionData(
+                nombre=_val(notif_nombre),
+                apellido1=_val(notif_apellido1),
+                apellido2=_val(notif_apellido2),
+                razon_social=_val(notif_razon_social),
+            ),
+            direccion=DireccionData(
+                pais="",
+                provincia="",
+                municipio=_val(rep_municipio),
+                tipo_via=_val(rep_tipo_via),
+                nombre_via=_val(rep_nombre_via),
+                tipo_numeracion="",
+                numero=_val(rep_numero),
+                codigo_postal=_val(rep_cp),
+            ),
+            contacto=ContactoData(
+                email=_val(rep_email),
+                movil=_val(rep_movil),
+                telefono=_val(inter_telefono),
+            ),
+        )
+
+        naturaleza_map = {
+            "A": NaturalezaEscrito.ALEGACION,
+            "R": NaturalezaEscrito.RECURSO,
+            "I": NaturalezaEscrito.IDENTIFICACION_CONDUCTOR
+        }
+
+        form_data = MadridFormData(
+            expediente=expediente,
+            matricula=_val(matricula),
+            interesado=interesado,
+            representante=representante,
+            notificacion=notificacion,
+            naturaleza=naturaleza_map.get(naturaleza or "", NaturalezaEscrito.ALEGACION),
+            expone=_val(expone),
+            solicita=_val(solicita),
+        )
+
+        archivos_final = archivos or []
+
+        return MadridTarget(
+            form_data=form_data,
+            archivos_adjuntos=[Path(a) for a in archivos_final] if archivos_final else [],
+            headless=headless,
+        )
+
     create_target = create_demo_data
 
     def map_data(self, data: dict) -> dict:

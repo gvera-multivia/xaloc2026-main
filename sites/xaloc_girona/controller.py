@@ -59,6 +59,33 @@ class XalocGironaController:
             archivos_adjuntos=paths,
         )
 
+    def create_target_strict(
+        self,
+        email: str | None = None,
+        num_denuncia: str | None = None,
+        matricula: str | None = None,
+        num_expediente: str | None = None,
+        motivos: str | None = None,
+        archivos_adjuntos: list[Path] | list[str] | None = None,
+        **kwargs
+    ) -> DatosMulta:
+        paths = []
+        if archivos_adjuntos:
+            for a in archivos_adjuntos:
+                if isinstance(a, str):
+                    paths.append(Path(a))
+                else:
+                    paths.append(a)
+
+        return DatosMulta(
+            email=email or "",
+            num_denuncia=num_denuncia or "",
+            matricula=matricula or "",
+            num_expediente=num_expediente or "",
+            motivos=motivos or "",
+            archivos_adjuntos=paths,
+        )
+
     def create_demo_data(self) -> DatosMulta:
         return self.create_target(
             email="test@example.com",
