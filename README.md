@@ -10,6 +10,19 @@ Sitios registrados en `core/site_registry.py`:
 - `base_online`: login con certificado y ramificacion `P1`/`P2`/`P3` (rellena formularios + adjunta documentos), llega a pantalla "Signar i Presentar" **sin firmar/presentar**.
 - `madrid`: navegacion completa hasta el formulario + rellenado del formulario (pantalla de adjuntos alcanzada); **upload/envio pendientes**.
 
+## SQL Server (sync scripts)
+
+Para `sync_sqlserver_to_worker_queue.py`, la conexion a SQL Server puede venir por variables de entorno (recomendado si tu parser de `.env` se come `;`):
+
+- `SQLSERVER_DRIVER` (por defecto: `SQL Server`)
+- `SQLSERVER_SERVER`
+- `SQLSERVER_DATABASE`
+- `SQLSERVER_USERNAME`
+- `SQLSERVER_PASSWORD`
+- (opcional) `SQLSERVER_TRUSTED_CONNECTION=1`
+
+Alternativamente, puedes seguir usando `--connection-string` o `SQLSERVER_CONNECTION_STRING`.
+
 ## Requisitos
 
 - Python **3.10+** (se usan type hints `str | None`).

@@ -177,6 +177,57 @@ def _insert_task(db_path: str, payload: dict[str, Any]) -> int:
     finally:
         conn.close()
 
+def _build_sqlserver_connection_string(
+    *,
+    direct: str | None,
+) -> str:
+    """
+    Devuelve un connection string para pyodbc.
+
+    Prioridad:
+    1) --connection-string
+    2) SQLSERVER_CONNECTION_STRING
+    3) Variables separadas (evita problemas con ';' en .env):
+       SQLSERVER_DRIVER, SQLSERVER_SERVER, SQLSERVER_DATABASE, SQLSERVER_USERNAME, SQLSERVER_PASSWORD
+       (opcional) SQLSERVER_TRUSTED_CONNECTION=1
+    """
+    if direct:
+        return str(direct).strip()
+
+    cs_env = (os.getenv("SQLSERVER_CONNECTION_STRING") or "").strip()
+    if cs_env:
+        return cs_env
+
+    driver = (os.getenv("SQLSERVER_DRIVER") or "SQL Server").strip()
+    server = (os.getenv("SQLSERVER_SERVER") or "").strip()
+    database = (os.getenv("SQLSERVER_DATABASE") or "").strip()
+    username = (os.getenv("SQLSERVER_USERNAME") or "").strip()
+    password = (os.getenv("SQLSERVER_PASSWORD") or "").strip()
+    trusted = (os.getenv("SQLSERVER_TRUSTED_CONNECTION") or "").strip().lower() in {"1", "true", "yes", "y"}
+
+    if not (server and database):
+        raise ValueError(
+            "Faltan datos de conexiÃ³n. Define SQLSERVER_SERVER y SQLSERVER_DATABASE (o SQLSERVER_CONNECTION_STRING)."
+        )
+
+    parts = [
+        f"DRIVER={{{driver}}}",
+        f"SERVER={server}",
+        f"DATABASE={database}",
+    ]
+
+    if trusted:
+        parts.append("Trusted_Connection=yes")
+    else:
+        if not (username and password):
+            raise ValueError(
+                "Faltan credenciales. Define SQLSERVER_USERNAME y SQLSERVER_PASSWORD (o SQLSERVER_TRUSTED_CONNECTION=1)."
+            )
+        parts.append(f"UID={username}")
+        parts.append(f"PWD={password}")
+
+    return ";".join(parts)
+
 
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
@@ -185,7 +236,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument(
         "--connection-string",
         default=None,
-        help="Connection string SQL Server (si no se pasa, usa env: SQLSERVER_CONNECTION_STRING).",
+        help=(
+            "Connection string SQL Server. Si no se pasa: usa SQLSERVER_CONNECTION_STRING o bien "
+            "SQLSERVER_{DRIVER,SERVER,DATABASE,USERNAME,PASSWORD} (opcional SQLSERVER_TRUSTED_CONNECTION=1)."
+        ),
     )
     parser.add_argument("--fase", default="", help="Filtro opcional rs.FaseProcedimiento.")
     parser.add_argument("--sqlite-db", default="db/xaloc_database.db", help="Ruta SQLite.")
@@ -200,10 +254,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 2
 
     load_dotenv()
-    connection_string = args.connection_string or os.getenv("SQLSERVER_CONNECTION_STRING")
-    if not connection_string:
+    try:
+        connection_string = _build_sqlserver_connection_string(direct=args.connection_string)
+    except Exception as e:
         print(
-            "ERROR: Falta connection string. Pasa --connection-string o define SQLSERVER_CONNECTION_STRING en el entorno/.env.",
+            f"ERROR: No se pudo construir la conexiÃ³n a SQL Server: {e}",
             file=sys.stderr,
         )
         return 2
