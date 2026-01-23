@@ -4,6 +4,7 @@ from core.base_automation import BaseAutomation
 from sites.xaloc_girona.config import XalocConfig
 from sites.xaloc_girona.data_models import DatosMulta
 from sites.xaloc_girona.flows.confirmacion import confirmar_tramite
+from sites.xaloc_girona.flows.documentos import subir_documento
 from sites.xaloc_girona.flows.login import ejecutar_login
 from sites.xaloc_girona.flows.formulario import rellenar_formulario
 
@@ -29,9 +30,14 @@ class XalocGironaAutomation(BaseAutomation):
             self.logger.info("=" * 50)
             await rellenar_formulario(self.page, datos)
 
-            # FASE 3 (SUBIDA) y FASE 4 (CONTINUAR) ahora están integradas en rellenar_formulario
-            # para respetar el orden correcto (Form -> Upload -> LOPD -> Continuar)
-            self.logger.info("FASE 3: SUBIDA DE DOCUMENTOS (Integrada en Formulario)")
+            self.logger.info("\n" + "=" * 50)
+            self.logger.info("FASE 3: SUBIDA DE DOCUMENTOS")
+            self.logger.info("=" * 50)
+            self.logger.info(
+                "Archivos a adjuntar: "
+                + (", ".join(str(p) for p in (datos.archivos_para_subir or [])) or "(ninguno)")
+            )
+            await subir_documento(self.page, datos.archivos_para_subir)
 
             self.logger.info("\n" + "=" * 50)
             self.logger.info("FASE 4: CONFIRMACION")
@@ -41,4 +47,3 @@ class XalocGironaAutomation(BaseAutomation):
         except Exception:
             await self.capture_error_screenshot("error.png")
             raise
-

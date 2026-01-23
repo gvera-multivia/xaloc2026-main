@@ -10,7 +10,6 @@ import sys
 from playwright.async_api import Page
 
 from sites.xaloc_girona.data_models import DatosMulta
-from sites.xaloc_girona.flows.documentos import subir_documento
 
 DELAY_MS = 500
 
