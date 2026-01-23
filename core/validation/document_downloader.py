@@ -1,4 +1,4 @@
-import aiohttp
+﻿import aiohttp
 import logging
 from pathlib import Path
 from dataclasses import dataclass
@@ -22,30 +22,39 @@ class DocumentDownloader:
         """Construye la URL usando el idRecurso."""
         return self.url_template.format(idRecurso=id_recurso)
 
-    async def download(self, id_recurso: str, filename: Optional[str] = None) -> DownloadResult:
+    async def download(
+        self,
+        id_recurso: str,
+        filename: Optional[str] = None,
+        session: Optional[aiohttp.ClientSession] = None
+    ) -> DownloadResult:
         url = self.build_url(id_recurso)
         dest_filename = filename or f"{id_recurso}.pdf"
         dest_path = self.download_dir / dest_filename
 
         logger.info(f"Descargando documento desde: {url}")
-        
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=30) as response:
-                    if response.status == 200:
-                        content = await response.read()
-                        
-                        # Validación básica de PDF
-                        if not content.startswith(b"%PDF-"):
-                            return DownloadResult(False, error="El archivo descargado no parece un PDF válido")
+        owns_session = session is None
+        if session is None:
+            session = aiohttp.ClientSession()
 
-                        with open(dest_path, "wb") as f:
-                            f.write(content)
-                        
-                        logger.info(f"Documento guardado en: {dest_path}")
-                        return DownloadResult(True, local_path=dest_path)
-                    else:
-                        return DownloadResult(False, error=f"Error HTTP {response.status} al descargar")
+        try:
+            async with session.get(url, timeout=30) as response:
+                if response.status == 200:
+                    content = await response.read()
+                    
+                    # Validacion basica de PDF
+                    if not content.startswith(b"%PDF-"):
+                        return DownloadResult(False, error="El archivo descargado no parece un PDF valido")
+
+                    with open(dest_path, "wb") as f:
+                        f.write(content)
+                    
+                    logger.info(f"Documento guardado en: {dest_path}")
+                    return DownloadResult(True, local_path=dest_path)
+                return DownloadResult(False, error=f"Error HTTP {response.status} al descargar")
         except Exception as e:
             logger.error(f"Error en la descarga: {e}")
             return DownloadResult(False, error=str(e))
+        finally:
+            if owns_session and session is not None:
+                await session.close()

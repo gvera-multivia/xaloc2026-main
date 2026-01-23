@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+﻿from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 import aiohttp
@@ -7,7 +7,7 @@ import re
 
 @dataclass
 class AttachmentInfo:
-    """Información de un adjunto a descargar."""
+    """Informacion de un adjunto a descargar."""
     id: str
     filename: str
     url: str
@@ -26,10 +26,10 @@ class AttachmentDownloader:
     """
     Descargador de adjuntos desde el servidor XVIA.
 
-    Características:
-    - Descarga paralela de múltiples adjuntos
-    - Validación de archivos descargados
-    - Gestión de timeouts y reintentos
+    Caracteristicas:
+    - Descarga paralela de multiples adjuntos
+    - Validacion de archivos descargados
+    - Gestion de timeouts y reintentos
     - Almacenamiento organizado por idRecurso
     """
 
@@ -55,13 +55,14 @@ class AttachmentDownloader:
     async def download_single(
         self,
         attachment: AttachmentInfo,
-        id_recurso: str
+        id_recurso: str,
+        session: Optional[aiohttp.ClientSession] = None
     ) -> AttachmentDownloadResult:
         """
-        Descarga un único adjunto.
+        Descarga un unico adjunto.
 
         Args:
-            attachment: Información del adjunto
+            attachment: Informacion del adjunto
             id_recurso: ID del recurso (para organizar en carpetas)
 
         Returns:
@@ -75,18 +76,22 @@ class AttachmentDownloader:
         safe_filename = self._sanitize_filename(attachment.filename)
         local_path = recurso_dir / safe_filename
 
-        for attempt in range(1, self.max_retries + 1):
-            try:
-                async with aiohttp.ClientSession(timeout=self.timeout) as session:
+        owns_session = session is None
+        if session is None:
+            session = aiohttp.ClientSession(timeout=self.timeout)
+
+        try:
+            for attempt in range(1, self.max_retries + 1):
+                try:
                     async with session.get(attachment.url) as response:
                         if response.status != 200:
                             raise Exception(f"HTTP {response.status}")
 
                         content = await response.read()
 
-                        # Validar que no esté vacío
+                        # Validar que no este vacio
                         if len(content) == 0:
-                            raise Exception("Archivo vacío")
+                            raise Exception("Archivo vacio")
 
                         # Guardar archivo
                         local_path.write_bytes(content)
@@ -100,16 +105,19 @@ class AttachmentDownloader:
                             file_size_bytes=len(content)
                         )
 
-            except Exception as e:
-                if attempt == self.max_retries:
-                    return AttachmentDownloadResult(
-                        success=False,
-                        attachment_id=attachment.id,
-                        filename=attachment.filename,
-                        local_path=None,
-                        error=f"Fallo tras {self.max_retries} intentos: {str(e)}"
-                    )
-                await asyncio.sleep(2 ** attempt)  # Backoff exponencial
+                except Exception as e:
+                    if attempt == self.max_retries:
+                        return AttachmentDownloadResult(
+                            success=False,
+                            attachment_id=attachment.id,
+                            filename=attachment.filename,
+                            local_path=None,
+                            error=f"Fallo tras {self.max_retries} intentos: {str(e)}"
+                        )
+                    await asyncio.sleep(2 ** attempt)  # Backoff exponencial
+        finally:
+            if owns_session and session is not None:
+                await session.close()
 
         # Should not reach here
         return AttachmentDownloadResult(
@@ -123,10 +131,11 @@ class AttachmentDownloader:
     async def download_batch(
         self,
         attachments: list[AttachmentInfo],
-        id_recurso: str
+        id_recurso: str,
+        session: Optional[aiohttp.ClientSession] = None
     ) -> list[AttachmentDownloadResult]:
         """
-        Descarga múltiples adjuntos en paralelo (con límite de concurrencia).
+        Descarga multiples adjuntos en paralelo (con limite de concurrencia).
 
         Args:
             attachments: Lista de adjuntos a descargar
@@ -136,13 +145,20 @@ class AttachmentDownloader:
             Lista de resultados de descarga
         """
         semaphore = asyncio.Semaphore(self.max_concurrent)
+        owns_session = session is None
+        if session is None:
+            session = aiohttp.ClientSession(timeout=self.timeout)
 
         async def download_with_semaphore(att: AttachmentInfo):
             async with semaphore:
-                return await self.download_single(att, id_recurso)
+                return await self.download_single(att, id_recurso, session=session)
 
-        tasks = [download_with_semaphore(att) for att in attachments]
-        return await asyncio.gather(*tasks)
+        try:
+            tasks = [download_with_semaphore(att) for att in attachments]
+            return await asyncio.gather(*tasks)
+        finally:
+            if owns_session and session is not None:
+                await session.close()
 
     @staticmethod
     def _sanitize_filename(filename: str) -> str:

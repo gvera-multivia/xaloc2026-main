@@ -12,6 +12,7 @@ from core.sqlite_db import SQLiteDatabase
 from core.site_registry import get_site, get_site_controller
 from core.validation import ValidationEngine, DiscrepancyReporter, DocumentDownloader
 from core.attachments import AttachmentDownloader, AttachmentInfo
+from core.xvia_auth import create_authenticated_session
 
 # Configuración de URLs y Directorios
 DOCUMENT_URL_TEMPLATE = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf/{idRecurso}"
@@ -109,51 +110,69 @@ async def process_task(db: SQLiteDatabase, task_id: int, site_id: str, protocol:
         if not id_recurso:
             raise ValueError("Falta 'idRecurso' en el payload para descargar el documento.")
 
-        downloader = DocumentDownloader(url_template=DOCUMENT_URL_TEMPLATE, download_dir=DOWNLOAD_DIR)
-        download_res = await downloader.download(str(id_recurso))
+        auth_email = "gvera@xvia-serviciosjuridicos.com"
+        auth_password = "gvera@20****"
+        auth_session = None
+        if auth_email and auth_password:
+            try:
+                auth_session = await create_authenticated_session(auth_email, auth_password)
+            except Exception as e:
+                logger.error(f"Error autenticando en XVIA: {e}")
+                db.update_task_status(task_id, "failed", error="XVIA login failed")
+                return
+        else:
+            logger.warning("XVIA_EMAIL/XVIA_PASSWORD no definidos; descarga sin login.")
 
-        if not download_res.success:
-            logger.error(f"Error descargando documento: {download_res.error}")
-            db.update_task_status(task_id, "failed", error=f"Download failed: {download_res.error}")
-            return
+        try:
+            downloader = DocumentDownloader(url_template=DOCUMENT_URL_TEMPLATE, download_dir=DOWNLOAD_DIR)
+            download_res = await downloader.download(str(id_recurso), session=auth_session)
 
-        local_pdf_path = download_res.local_path
-        archivos_para_subir = [local_pdf_path]
-        
-        # 3. DESCARGA DE ADJUNTOS (NUEVO)
-        adjuntos_metadata = payload.get("adjuntos", [])
-        if adjuntos_metadata:
-            logger.info(f"Descargando {len(adjuntos_metadata)} adjunto(s)...")
-
-            attachment_downloader = AttachmentDownloader()
-            attachments_info = [
-                AttachmentInfo(
-                    id=adj["id"],
-                    filename=adj["filename"],
-                    url=adj["url"]
-                )
-                for adj in adjuntos_metadata
-            ]
-
-            download_results = await attachment_downloader.download_batch(
-                attachments_info,
-                str(id_recurso)
-            )
-
-            # Validar resultados
-            failed_downloads = [r for r in download_results if not r.success]
-            if failed_downloads:
-                error_msg = f"Fallo descargando {len(failed_downloads)} adjunto(s): " + \
-                           ", ".join([f"{r.filename} ({r.error})" for r in failed_downloads])
-                logger.error(error_msg)
-                db.update_task_status(task_id, "failed", error=error_msg)
+            if not download_res.success:
+                logger.error(f"Error descargando documento: {download_res.error}")
+                db.update_task_status(task_id, "failed", error=f"Download failed: {download_res.error}")
                 return
 
-            # Añadir adjuntos descargados a la lista de archivos
-            for result in download_results:
-                if result.local_path:
-                    archivos_para_subir.append(result.local_path)
-                    logger.info(f"Adjunto descargado: {result.filename} ({result.file_size_bytes} bytes)")
+            local_pdf_path = download_res.local_path
+            archivos_para_subir = [local_pdf_path]
+            
+            # 3. DESCARGA DE ADJUNTOS (NUEVO)
+            adjuntos_metadata = payload.get("adjuntos", [])
+            if adjuntos_metadata:
+                logger.info(f"Descargando {len(adjuntos_metadata)} adjunto(s)...")
+
+                attachment_downloader = AttachmentDownloader()
+                attachments_info = [
+                    AttachmentInfo(
+                        id=adj["id"],
+                        filename=adj["filename"],
+                        url=adj["url"]
+                    )
+                    for adj in adjuntos_metadata
+                ]
+
+                download_results = await attachment_downloader.download_batch(
+                    attachments_info,
+                    str(id_recurso),
+                    session=auth_session
+                )
+
+                # Validar resultados
+                failed_downloads = [r for r in download_results if not r.success]
+                if failed_downloads:
+                    error_msg = f"Fallo descargando {len(failed_downloads)} adjunto(s): " + \
+                               ", ".join([f"{r.filename} ({r.error})" for r in failed_downloads])
+                    logger.error(error_msg)
+                    db.update_task_status(task_id, "failed", error=error_msg)
+                    return
+
+                # Añadir adjuntos descargados a la lista de archivos
+                for result in download_results:
+                    if result.local_path:
+                        archivos_para_subir.append(result.local_path)
+                        logger.info(f"Adjunto descargado: {result.filename} ({result.file_size_bytes} bytes)")
+        finally:
+            if auth_session is not None:
+                await auth_session.close()
 
         # 4. Preparar automatización
         try:
