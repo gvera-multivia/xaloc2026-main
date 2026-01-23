@@ -16,17 +16,21 @@ try:
 except Exception:  # pragma: no cover
     pyodbc = None
 
-# Query para obtener un único registro por idRecurso sin filtros de lógica de negocio
+# Query para obtener un único registro por idExp sin filtros de lógica de negocio
 SINGLE_ID_QUERY = """
 SELECT 
-    rs.*,
+    rs.idRecurso,
+    rs.Expedient,
+    rs.FaseProcedimiento,
+    rs.Matricula,
+    rs.automatic_id,
     c.email,
     att.id AS adjunto_id,
     att.Filename AS adjunto_filename
 FROM Recursos.RecursosExp rs
 INNER JOIN clientes c ON rs.numclient = c.numerocliente
 LEFT JOIN attachments_resource_documents att ON rs.automatic_id = att.automatic_id
-WHERE rs.idRecurso = ?
+WHERE rs.idExp = ?
 """
 
 
@@ -92,7 +96,9 @@ def _clean_str(value: Any) -> str:
 
 
 def _normalize_plate(value: Any) -> str:
-    return re.sub(r"\s+", "", _clean_str(value)).upper()
+    cleaned = re.sub(r"\s+", "", _clean_str(value)).upper()
+    # Si la matrícula está vacía o es NULL, usar "." porque no es necesaria
+    return cleaned if cleaned else "."
 
 
 def _map_payload(
@@ -211,7 +217,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         "--id",
         type=int,
         required=True,
-        help="El idRecurso que queremos buscar (obligatorio).",
+        help="El idExp que queremos buscar (obligatorio).",
     )
     parser.add_argument(
         "--site-id",
@@ -265,10 +271,10 @@ def main(argv: Optional[list[str]] = None) -> int:
 
         rows = cursor.fetchall()
         if not rows:
-            print(f"ERROR: No se encontró ningún registro con idRecurso = {args.id}", file=sys.stderr)
+            print(f"ERROR: No se encontró ningún registro con idExp = {args.id}", file=sys.stderr)
             return 1
 
-        # Agrupar adjuntos por idRecurso (aunque solo hay uno, puede tener múltiples adjuntos)
+        # Agrupar adjuntos por idExp (aunque solo hay uno, puede tener múltiples adjuntos)
         task_data = {
             "row": None,
             "adjuntos": [],
@@ -281,15 +287,14 @@ def main(argv: Optional[list[str]] = None) -> int:
             if task_data["row"] is None:
                 task_data["row"] = row_dict
 
-            # Agregar adjuntos si existen
+            # Agregar adjuntos si existen (solo datos de la consulta)
             adj_id = row_dict.get("adjunto_id")
-            if adj_id:
+            adj_filename = row_dict.get("adjunto_filename")
+            if adj_id and adj_filename:
                 task_data["adjuntos"].append(
                     {
                         "id": adj_id,
-                        "filename": _clean_str(
-                            row_dict.get("adjunto_filename") or f"adjunto_{adj_id}.pdf"
-                        ),
+                        "filename": _clean_str(adj_filename),
                         "url": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf-adjuntos/{id}".format(
                             id=adj_id
                         ),
@@ -301,18 +306,12 @@ def main(argv: Optional[list[str]] = None) -> int:
             expediente = _clean_str(task_data["row"].get("Expedient"))
             fase_raw = task_data["row"].get("FaseProcedimiento")
             
-            try:
-                motivos_text = get_motivos_por_fase(
-                    fase_raw,
-                    expediente,
-                    config_map=motivos_config,
-                )
-            except Exception:
-                motivos_text = (
-                    "ASUNTO: Recurso de reposicion\n\n"
-                    f"EXPONE: Tramite para el expediente {expediente}.\n\n"
-                    "SOLICITA: Se admita el recurso."
-                )
+            # Obtener motivos sin fallback - solo lo que viene de config_motivos.json
+            motivos_text = get_motivos_por_fase(
+                fase_raw,
+                expediente,
+                config_map=motivos_config,
+            )
 
             payload = _map_payload(
                 task_data["row"],
@@ -339,7 +338,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             return 0
 
         except Exception as e:
-            print(f"ERROR procesando idRecurso {args.id}: {e}", file=sys.stderr)
+            print(f"ERROR procesando idExp {args.id}: {e}", file=sys.stderr)
             if args.verbose:
                 traceback.print_exc()
             return 1
