@@ -76,8 +76,8 @@ async def process_task(db: SQLiteDatabase, task_id: int, site_id: str, protocol:
 
     try:
         meta = payload.get("_meta") or {}
-        skip_validation = bool(meta.get("skip_validation"))
-        no_defaults = bool(meta.get("no_defaults"))
+        skip_validation = True
+        no_defaults = True
 
         if not skip_validation:
             logger.info(f"Validando datos para ID: {payload.get('idRecurso', 'N/A')}...")
