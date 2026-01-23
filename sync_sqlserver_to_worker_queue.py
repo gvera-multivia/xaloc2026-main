@@ -1,5 +1,6 @@
 ﻿import argparse
 import json
+import os
 import re
 import sqlite3
 import sys
@@ -7,6 +8,8 @@ import traceback
 import unicodedata
 from pathlib import Path
 from typing import Any, Optional
+
+from dotenv import load_dotenv
 
 try:
     import pyodbc  # type: ignore
@@ -51,29 +54,40 @@ def get_motivos_por_fase(
     config_map: dict[str, Any],
 ) -> str:
     """Lee config_motivos.json y compone el texto final para el campo motivos."""
-    fase_norm = normalize_text(fase_raw)
+    expediente_txt = str(expediente or "").strip()
 
-    selected: dict[str, Any] | None = None
-    for key, value in config_map.items():
-        # Coincidencia parcial (p. ej. "propuesta de resolucion" matchea variantes)
-        if key and key in fase_norm:
-            selected = value
-            break
-
-    if not selected:
+    def _default() -> str:
         return (
             "ASUNTO: Recurso de reposicion\n\n"
-            f"EXPONE: Tramite para el expediente {expediente}.\n\n"
+            f"EXPONE: Tramite para el expediente {expediente_txt}.\n\n"
             "SOLICITA: Se admita el recurso."
         )
 
-    asunto = str(selected.get("asunto") or "").strip()
-    expone = str(selected.get("expone") or "").strip()
-    solicita = (
-        str(selected.get("solicita") or "").replace("{expediente}", expediente).strip()
-    )
+    try:
+        fase_norm = normalize_text(fase_raw)
 
-    return f"ASUNTO: {asunto}\n\nEXPONE: {expone}\n\nSOLICITA: {solicita}"
+        selected: dict[str, Any] | None = None
+        for key, value in (config_map or {}).items():
+            # Coincidencia parcial (p. ej. "propuesta de resolucion" matchea variantes)
+            if key and key in fase_norm:
+                selected = value
+                break
+
+        if not selected:
+            return _default()
+
+        asunto = str(selected.get("asunto") or "").strip()
+        expone = str(selected.get("expone") or "").strip()
+        solicita = (
+            str(selected.get("solicita") or "").replace("{expediente}", expediente_txt).strip()
+        )
+
+        if not (asunto and expone and solicita):
+            return _default()
+
+        return f"ASUNTO: {asunto}\n\nEXPONE: {expone}\n\nSOLICITA: {solicita}"
+    except Exception:
+        return _default()
 
 
 def build_query(*, fase: str | None) -> tuple[str, list[Any]]:
@@ -82,6 +96,7 @@ def build_query(*, fase: str | None) -> tuple[str, list[Any]]:
     params: list[Any] = []
 
     where_clauses = [
+        "rs.Organisme LIKE '%xaloc%'",
         "rs.Estado = 0",
         "rs.TExp IN (2, 3)",
         "rs.idRecurso IS NOT NULL",
@@ -167,7 +182,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description="Sincronizador exclusivo para XALOC GIRONA con agrupacion de adjuntos."
     )
-    parser.add_argument("--connection-string", required=True, help="Connection string SQL Server.")
+    parser.add_argument(
+        "--connection-string",
+        default=None,
+        help="Connection string SQL Server (si no se pasa, usa env: SQLSERVER_CONNECTION_STRING).",
+    )
     parser.add_argument("--fase", default="", help="Filtro opcional rs.FaseProcedimiento.")
     parser.add_argument("--sqlite-db", default="db/xaloc_database.db", help="Ruta SQLite.")
     parser.add_argument("--dry-run", action="store_true", help="No inserta tareas en la base de datos.")
@@ -178,6 +197,15 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     if pyodbc is None:
         print("ERROR: pyodbc no instalado. Ejecuta 'pip install pyodbc'.", file=sys.stderr)
+        return 2
+
+    load_dotenv()
+    connection_string = args.connection_string or os.getenv("SQLSERVER_CONNECTION_STRING")
+    if not connection_string:
+        print(
+            "ERROR: Falta connection string. Pasa --connection-string o define SQLSERVER_CONNECTION_STRING en el entorno/.env.",
+            file=sys.stderr,
+        )
         return 2
 
     # 1. Preparar Query, cargar config de motivos e iniciar SQLite
@@ -197,7 +225,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     tasks_data: dict[Any, dict[str, Any]] = {}
 
-    conn = pyodbc.connect(args.connection_string)
+    conn = pyodbc.connect(connection_string)
     try:
         cursor = conn.cursor()
         cursor.execute(query, tuple(query_params))
@@ -240,11 +268,18 @@ def main(argv: Optional[list[str]] = None) -> int:
 
                 expediente = _clean_str(info["row"].get("Expedient"))
                 fase_raw = info["row"].get("FaseProcedimiento")
-                motivos_text = get_motivos_por_fase(
-                    fase_raw,
-                    expediente,
-                    config_map=motivos_config,
-                )
+                try:
+                    motivos_text = get_motivos_por_fase(
+                        fase_raw,
+                        expediente,
+                        config_map=motivos_config,
+                    )
+                except Exception:
+                    motivos_text = (
+                        "ASUNTO: Recurso de reposicion\n\n"
+                        f"EXPONE: Tramite para el expediente {expediente}.\n\n"
+                        "SOLICITA: Se admita el recurso."
+                    )
 
                 payload = _map_xaloc_payload(
                     info["row"],

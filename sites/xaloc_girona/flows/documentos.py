@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 from typing import List, Optional, Sequence, Union
 
+from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import Page, TimeoutError
 
 DELAY_MS = 500
@@ -48,14 +49,20 @@ async def _seleccionar_archivos(popup: Page, archivos: List[Path]) -> None:
         if idx is None:
             raise RuntimeError("No hay más inputs de archivo libres en el popup.")
         await popup.locator("input[type='file']").nth(idx).set_input_files(archivo)
-        await popup.wait_for_timeout(DELAY_MS)
+        try:
+            await popup.wait_for_timeout(DELAY_MS)
+        except PlaywrightError:
+            return
 
 
 async def _click_link(popup: Page, patron: str) -> None:
     link = popup.get_by_role("link", name=re.compile(patron, re.IGNORECASE)).first
     await link.wait_for(state="visible", timeout=20000)
     await link.click()
-    await popup.wait_for_timeout(DELAY_MS)
+    try:
+        await popup.wait_for_timeout(DELAY_MS)
+    except PlaywrightError:
+        return
 
 
 async def _wait_upload_ok(popup: Page) -> None:
@@ -74,15 +81,30 @@ async def _wait_upload_ok(popup: Page) -> None:
         await popup.wait_for_timeout(500)
 
 
-async def _adjuntar_y_continuar(popup: Page) -> None:
+async def _adjuntar_y_continuar(popup: Page, *, espera_cierre: bool = False) -> None:
     # En popup.html el CTA es un <a> con texto "Clicar per adjuntar"
     await _click_link(popup, r"^Clicar per adjuntar")
     await _wait_upload_ok(popup)
 
     # Tras adjuntar, aparece "Continuar"
-    await _click_link(popup, r"^Continuar$")
-    # Normalmente el popup se cierra al continuar; no esperamos "networkidle" (puede colgarse por trackers/iframes).
-    await popup.wait_for_load_state("domcontentloaded")
+    continuar = popup.get_by_role("link", name=re.compile(r"^Continuar$", re.IGNORECASE)).first
+    await continuar.wait_for(state="visible", timeout=20000)
+
+    if espera_cierre:
+        try:
+            async with popup.expect_event("close", timeout=15000):
+                await continuar.click()
+        except TimeoutError:
+            try:
+                await continuar.click()
+            except PlaywrightError:
+                return
+    else:
+        await continuar.click()
+        try:
+            await popup.wait_for_load_state("domcontentloaded")
+        except PlaywrightError:
+            return
 
 
 async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]) -> None:
@@ -149,22 +171,25 @@ async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]
         # Fallback: si no hay popup, intentamos en la misma página.
         await page.wait_for_timeout(DELAY_MS)
         await _seleccionar_archivos(page, archivos)
-        await _adjuntar_y_continuar(page)
+        await _adjuntar_y_continuar(page, espera_cierre=False)
     else:
-        await popup.wait_for_load_state("domcontentloaded")
-        await _seleccionar_archivos(popup, archivos)
-        await _adjuntar_y_continuar(popup)
         try:
-            await popup.wait_for_event("close", timeout=500)
-        except TimeoutError:
-            try:
-                await popup.evaluate("() => window.close()")
-            except Exception:
-                pass
-            await popup.close()
+            await popup.wait_for_load_state("domcontentloaded")
+        except PlaywrightError:
+            pass
+        await _seleccionar_archivos(popup, archivos)
+        await _adjuntar_y_continuar(popup, espera_cierre=True)
+        try:
+            if not popup.is_closed():
+                await popup.close()
+        except PlaywrightError:
+            pass
 
     # Espera corta a que el STA reciba el resultado del uploader (evitamos 'networkidle', suele ser lento).
-    await page.wait_for_timeout(DELAY_MS)
+    try:
+        await page.wait_for_timeout(DELAY_MS)
+    except PlaywrightError:
+        return
     logging.info("Documentos subidos")
 
 

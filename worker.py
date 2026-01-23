@@ -1,4 +1,5 @@
 ﻿import asyncio
+import argparse
 import logging
 import sys
 import inspect
@@ -75,86 +76,84 @@ def apply_url_cert_config():
 
     logger.info("Configuracion de certificados aplicada correctamente.")
 
+async def _download_document_and_attachments(
+    *,
+    payload: dict,
+    auth_session: aiohttp.ClientSession,
+) -> list[Path]:
+    id_recurso = payload.get("idRecurso")
+    if not id_recurso:
+        raise ValueError("Falta 'idRecurso' en el payload para descargar el documento.")
+
+    target_url = DOCUMENT_URL_TEMPLATE.format(idRecurso=id_recurso)
+    logger.info(f"Iniciando descarga autenticada desde: {target_url}")
+
+    local_pdf_path = DOWNLOAD_DIR / f"{id_recurso}.pdf"
+    DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+    async with auth_session.get(target_url) as resp:
+        if resp.status != 200:
+            raise RuntimeError(f"El servidor respondió con status {resp.status} al pedir el PDF.")
+
+        content = await resp.read()
+
+        if content.startswith(b"%PDF"):
+            logger.info(f"Documento PDF validado correctamente ({len(content)} bytes).")
+            local_pdf_path.write_bytes(content)
+        else:
+            sample = content[:200].decode(errors="ignore")
+            logger.error(f"CONTENIDO NO VÁLIDO. Se esperaba PDF pero se recibió: {sample}...")
+            if "login" in sample.lower() or "password" in sample.lower():
+                raise RuntimeError("Sesión inválida o expirada (el servidor redirigió al login).")
+            raise RuntimeError("El archivo descargado no es un PDF válido (posible error de intranet).")
+
+    archivos_para_subir: list[Path] = [local_pdf_path]
+
+    adjuntos_metadata = payload.get("adjuntos", [])
+    if adjuntos_metadata:
+        logger.info(f"Descargando {len(adjuntos_metadata)} adjunto(s)...")
+
+        attachment_downloader = AttachmentDownloader()
+        attachments_info = [
+            AttachmentInfo(id=adj["id"], filename=adj["filename"], url=adj["url"])
+            for adj in adjuntos_metadata
+        ]
+
+        download_results = await attachment_downloader.download_batch(
+            attachments_info,
+            str(id_recurso),
+            session=auth_session,
+        )
+
+        for result in download_results:
+            if result.success and result.local_path:
+                archivos_para_subir.append(result.local_path)
+                logger.info(f"Adjunto OK: {result.filename}")
+            else:
+                logger.warning(f"No se pudo descargar el adjunto {result.filename}: {result.error}")
+
+    payload["archivos"] = [str(p) for p in archivos_para_subir if p]
+    return archivos_para_subir
+
 async def process_task(
-    db: SQLiteDatabase,
-    task_id: int,
+    db: Optional[SQLiteDatabase],
+    task_id: Optional[int],
     site_id: str,
     protocol: Optional[str],
     payload: dict,
     auth_session: Optional[aiohttp.ClientSession] = None
 ):
-    logger.info(f"Procesando tarea ID: {task_id} - Site: {site_id} - Protocol: {protocol}")
+    task_label = str(task_id) if task_id is not None else "TEST"
+    logger.info(f"Procesando tarea ID: {task_label} - Site: {site_id} - Protocol: {protocol}")
 
     try:
-        # 1. VALIDACIÓN INICIAL DE PAYLOAD
-        id_recurso = payload.get("idRecurso")
-        if not id_recurso:
-            raise ValueError("Falta 'idRecurso' en el payload para descargar el documento.")
+        if auth_session is None:
+            raise ValueError("auth_session es requerido para descargar documentos (sesión autenticada).")
 
-        # --- SECCIÓN DE DESCARGA DIRECTA AUTENTICADA ---
-        target_url = DOCUMENT_URL_TEMPLATE.format(idRecurso=id_recurso)
-        logger.info(f"Iniciando descarga autenticada desde: {target_url}")
-        
-        local_pdf_path = DOWNLOAD_DIR / f"{id_recurso}.pdf"
-        DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
-        async with auth_session.get(target_url) as resp:
-            if resp.status != 200:
-                raise RuntimeError(f"El servidor respondió con status {resp.status} al pedir el PDF.")
-            
-            content = await resp.read()
-            
-            # VERIFICACIÓN DE CONTENIDO: ¿Es un PDF real?
-            if content.startswith(b"%PDF"):
-                logger.info(f"Documento PDF validado correctamente ({len(content)} bytes).")
-                local_pdf_path.write_bytes(content)
-            else:
-                # Si no empieza por %PDF, es probable que sea HTML (una página de error o login)
-                sample = content[:200].decode(errors='ignore')
-                logger.error(f"CONTENIDO NO VÁLIDO. Se esperaba PDF pero se recibió: {sample}...")
-                
-                if "login" in sample.lower() or "password" in sample.lower():
-                    error_msg = "Sesión inválida o expirada (el servidor redirigió al login)."
-                else:
-                    error_msg = "El archivo descargado no es un PDF válido (posible error de intranet)."
-                
-                db.update_task_status(task_id, "failed", error=error_msg)
-                return
-
-        archivos_para_subir = [local_pdf_path]
-        
-        # 3. DESCARGA DE ADJUNTOS
-        adjuntos_metadata = payload.get("adjuntos", [])
-        if adjuntos_metadata:
-            logger.info(f"Descargando {len(adjuntos_metadata)} adjunto(s)...")
-
-            attachment_downloader = AttachmentDownloader()
-            attachments_info = [
-                AttachmentInfo(
-                    id=adj["id"],
-                    filename=adj["filename"],
-                    url=adj["url"]
-                )
-                for adj in adjuntos_metadata
-            ]
-
-            # Usamos la sesión persistente para los adjuntos también
-            download_results = await attachment_downloader.download_batch(
-                attachments_info,
-                str(id_recurso),
-                session=auth_session
-            )
-
-            # Validar resultados de adjuntos
-            for result in download_results:
-                if result.success and result.local_path:
-                    archivos_para_subir.append(result.local_path)
-                    logger.info(f"Adjunto OK: {result.filename}")
-                else:
-                    logger.warning(f"No se pudo descargar el adjunto {result.filename}: {result.error}")
-
-        # Guardar rutas en el payload para reuso en mapeos posteriores
-        payload["archivos"] = [str(p) for p in archivos_para_subir if p]
+        archivos_para_subir = await _download_document_and_attachments(
+            payload=payload,
+            auth_session=auth_session,
+        )
 
         # 4. PREPARAR AUTOMATIZACIÓN
         try:
@@ -198,12 +197,14 @@ async def process_task(
             screenshot_path = await bot.ejecutar_flujo_completo(datos)
 
             logger.info(f"Tarea {task_id} completada. Screenshot: {screenshot_path}")
-            db.update_task_status(task_id, "completed", screenshot=str(screenshot_path))
+            if db is not None and task_id is not None:
+                db.update_task_status(task_id, "completed", screenshot=str(screenshot_path))
 
     except Exception as e:
         logger.error(f"Error procesando tarea {task_id}: {e}")
         logger.error(traceback.format_exc())
-        db.update_task_status(task_id, "failed", error=str(e))
+        if db is not None and task_id is not None:
+            db.update_task_status(task_id, "failed", error=str(e))
 
 async def worker_loop():
     db = SQLiteDatabase()
@@ -264,6 +265,46 @@ async def worker_loop():
 
     logger.info("Worker finalizado correctamente.")
 
+async def _run_test_mode(
+    *,
+    id_recurso: str,
+    site_id: Optional[str],
+    protocol: Optional[str],
+    download_only: bool,
+) -> int:
+    load_dotenv()
+    auth_email = os.getenv("XVIA_EMAIL")
+    auth_password = os.getenv("XVIA_PASSWORD")
+
+    if not auth_email or not auth_password:
+        logger.error("Faltan XVIA_EMAIL/XVIA_PASSWORD en el entorno o archivo .env.")
+        return 2
+
+    cookie_jar = aiohttp.CookieJar(unsafe=True)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "es-ES,es;q=0.9",
+        "Referer": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login",
+        "Origin": "http://www.xvia-grupoeuropa.net",
+        "DNT": "1",
+        "Connection": "keep-alive",
+    }
+
+    async with aiohttp.ClientSession(headers=headers, cookie_jar=cookie_jar) as auth_session:
+        await create_authenticated_session_in_place(auth_session, auth_email, auth_password)
+        logger.info("XVIA Session lista y persistente (Cookies almacenadas).")
+
+        payload = {"idRecurso": id_recurso}
+
+        if download_only or not site_id:
+            archivos = await _download_document_and_attachments(payload=payload, auth_session=auth_session)
+            logger.info(f"Descarga OK ({len(archivos)} archivo(s)): " + ", ".join(str(a) for a in archivos))
+            return 0
+
+        await process_task(None, None, site_id, protocol, payload, auth_session)
+        return 0
+
 if __name__ == "__main__":
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
@@ -271,6 +312,33 @@ if __name__ == "__main__":
     try:
         # ANTES DE NADA: aplicar el script de registro desde url-cert-config.txt
         apply_url_cert_config()
+
+        parser = argparse.ArgumentParser(description="Worker de automatización + modo test por idRecurso.")
+        parser.add_argument(
+            "--test-idrecurso",
+            default=None,
+            help="Procesa un idRecurso sin depender de la cola/SQLite.",
+        )
+        parser.add_argument(
+            "--test-site",
+            default=None,
+            help="Site a ejecutar en modo test (p.ej. xaloc_girona, base_online, madrid).",
+        )
+        parser.add_argument("--protocol", default=None, help="Protocol opcional (p.ej. P1/P2/P3 para base_online).")
+        parser.add_argument("--download-only", action="store_true", help="Solo descarga PDF/adjuntos y termina.")
+        args = parser.parse_args()
+
+        if args.test_idrecurso:
+            raise SystemExit(
+                asyncio.run(
+                    _run_test_mode(
+                        id_recurso=str(args.test_idrecurso),
+                        site_id=args.test_site,
+                        protocol=args.protocol,
+                        download_only=bool(args.download_only),
+                    )
+                )
+            )
 
         asyncio.run(worker_loop())
     except KeyboardInterrupt:
