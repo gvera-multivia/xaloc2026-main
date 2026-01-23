@@ -86,52 +86,44 @@ async def process_task(
     logger.info(f"Procesando tarea ID: {task_id} - Site: {site_id} - Protocol: {protocol}")
 
     try:
-        meta = payload.get("_meta") or {}
-        skip_validation = True
-        no_defaults = True
-
-        if not skip_validation:
-            logger.info(f"Validando datos para ID: {payload.get('idRecurso', 'N/A')}...")
-            validator = ValidationEngine(site_id=site_id)
-            val_result = validator.validate(payload)
-
-            if not val_result.is_valid:
-                logger.warning(f"Validacion fallida para Tarea {task_id}")
-                reporter = DiscrepancyReporter()
-                report_path = reporter.generate_html(
-                    payload, 
-                    val_result.errors, 
-                    val_result.warnings,
-                    str(payload.get('idRecurso', 'N/A'))
-                )
-                reporter.open_in_browser(report_path)
-                
-                print(f"\n[!] VALIDACION FALLIDA para ID: {payload.get('idRecurso', 'N/A')}")
-                print(f"Reporte generado en: {report_path.absolute()}")
-                print("Por favor, corrija los datos en la base de datos.")
-                
-                input("Pulse Enter para continuar con la siguiente tarea una vez revisado... (o Ctrl+C para salir)")
-                
-                db.update_task_status(task_id, "failed", error="Validation failed. Discrepancy report opened.")
-                return
-
-        # 2. DESCARGA DE DOCUMENTO
+        # 1. VALIDACIÓN INICIAL DE PAYLOAD
         id_recurso = payload.get("idRecurso")
         if not id_recurso:
             raise ValueError("Falta 'idRecurso' en el payload para descargar el documento.")
 
-        downloader = DocumentDownloader(url_template=DOCUMENT_URL_TEMPLATE, download_dir=DOWNLOAD_DIR)
-        download_res = await downloader.download(str(id_recurso), session=auth_session)
+        # --- SECCIÓN DE DESCARGA DIRECTA AUTENTICADA ---
+        target_url = DOCUMENT_URL_TEMPLATE.format(idRecurso=id_recurso)
+        logger.info(f"Iniciando descarga autenticada desde: {target_url}")
+        
+        local_pdf_path = DOWNLOAD_DIR / f"{id_recurso}.pdf"
+        DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-        if not download_res.success:
-            logger.error(f"Error descargando documento: {download_res.error}")
-            db.update_task_status(task_id, "failed", error=f"Download failed: {download_res.error}")
-            return
+        async with auth_session.get(target_url) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"El servidor respondió con status {resp.status} al pedir el PDF.")
+            
+            content = await resp.read()
+            
+            # VERIFICACIÓN DE CONTENIDO: ¿Es un PDF real?
+            if content.startswith(b"%PDF"):
+                logger.info(f"Documento PDF validado correctamente ({len(content)} bytes).")
+                local_pdf_path.write_bytes(content)
+            else:
+                # Si no empieza por %PDF, es probable que sea HTML (una página de error o login)
+                sample = content[:200].decode(errors='ignore')
+                logger.error(f"CONTENIDO NO VÁLIDO. Se esperaba PDF pero se recibió: {sample}...")
+                
+                if "login" in sample.lower() or "password" in sample.lower():
+                    error_msg = "Sesión inválida o expirada (el servidor redirigió al login)."
+                else:
+                    error_msg = "El archivo descargado no es un PDF válido (posible error de intranet)."
+                
+                db.update_task_status(task_id, "failed", error=error_msg)
+                return
 
-        local_pdf_path = download_res.local_path
         archivos_para_subir = [local_pdf_path]
         
-        # 3. DESCARGA DE ADJUNTOS (NUEVO)
+        # 3. DESCARGA DE ADJUNTOS
         adjuntos_metadata = payload.get("adjuntos", [])
         if adjuntos_metadata:
             logger.info(f"Descargando {len(adjuntos_metadata)} adjunto(s)...")
@@ -146,39 +138,32 @@ async def process_task(
                 for adj in adjuntos_metadata
             ]
 
+            # Usamos la sesión persistente para los adjuntos también
             download_results = await attachment_downloader.download_batch(
                 attachments_info,
                 str(id_recurso),
                 session=auth_session
             )
 
-            # Validar resultados
-            failed_downloads = [r for r in download_results if not r.success]
-            if failed_downloads:
-                error_msg = f"Fallo descargando {len(failed_downloads)} adjunto(s): " + \
-                           ", ".join([f"{r.filename} ({r.error})" for r in failed_downloads])
-                logger.error(error_msg)
-                db.update_task_status(task_id, "failed", error=error_msg)
-                return
-
-            # Anadir adjuntos descargados a la lista de archivos
+            # Validar resultados de adjuntos
             for result in download_results:
-                if result.local_path:
+                if result.success and result.local_path:
                     archivos_para_subir.append(result.local_path)
-                    logger.info(f"Adjunto descargado: {result.filename} ({result.file_size_bytes} bytes)")
+                    logger.info(f"Adjunto OK: {result.filename}")
+                else:
+                    logger.warning(f"No se pudo descargar el adjunto {result.filename}: {result.error}")
 
         # Guardar rutas en el payload para reuso en mapeos posteriores
         payload["archivos"] = [str(p) for p in archivos_para_subir if p]
 
-        # 4. Preparar automatizacion
+        # 4. PREPARAR AUTOMATIZACIÓN
         try:
             controller = get_site_controller(site_id)
             AutomationCls = get_site(site_id)
         except Exception as e:
-            raise ValueError(f"No se encontro controlador/automator para {site_id}: {e}")
+            raise ValueError(f"No se encontró controlador/automator para {site_id}: {e}")
 
-        headless = 0 # Navegador visible para depuracion headless=1 -> oculto
-
+        headless = 0 # Cambiar a 1 para ocultar el navegador
         config = _call_with_supported_kwargs(
             controller.create_config,
             headless=headless,
@@ -188,35 +173,27 @@ async def process_task(
         worker_profile_path = Path("profiles/worker")
         config.navegador.perfil_path = worker_profile_path.absolute()
 
-        # 5. Mapear datos y anadir TODOS los archivos descargados
+        # 5. MAPEO DE DATOS Y ASIGNACIÓN DE ARCHIVOS SEGÚN SITE
         mapped_data = controller.map_data(payload)
-        
         mapped_data.update({
             "protocol": protocol,
             "headless": headless
         })
 
+        # Inyectar la lista de archivos según el controlador del sitio
         if site_id == "madrid":
             mapped_data["archivos"] = archivos_para_subir
         elif site_id == "xaloc_girona":
             mapped_data["archivos_adjuntos"] = archivos_para_subir
         elif site_id == "base_online":
             protocol_norm = (protocol or "P1").upper().strip()
-            if protocol_norm == "P2":
-                mapped_data["p2_archivos"] = archivos_para_subir
-            elif protocol_norm == "P3":
-                mapped_data["p3_archivos"] = archivos_para_subir
-            else:
-                mapped_data["p1_archivos"] = archivos_para_subir
+            key = f"{protocol_norm.lower()}_archivos"
+            mapped_data[key] = archivos_para_subir
 
-        target_fn = controller.create_target
-        if no_defaults and hasattr(controller, "create_target_strict"):
-            target_fn = controller.create_target_strict
+        datos = _call_with_supported_kwargs(controller.create_target, **mapped_data)
 
-        datos = _call_with_supported_kwargs(target_fn, **mapped_data)
-
-        # 6. Ejecutar la automatizacion
-        logger.info(f"Iniciando automatizacion para {site_id}...")
+        # 6. EJECUTAR LA AUTOMATIZACIÓN
+        logger.info(f"Iniciando automatización para {site_id}...")
         async with AutomationCls(config) as bot:
             screenshot_path = await bot.ejecutar_flujo_completo(datos)
 
@@ -232,41 +209,60 @@ async def worker_loop():
     db = SQLiteDatabase()
     logger.info("Iniciando Worker Loop. Esperando tareas...")
 
+    # Cargar credenciales
     load_dotenv()
     auth_email = os.getenv("XVIA_EMAIL")
     auth_password = os.getenv("XVIA_PASSWORD")
+    
     if not auth_email or not auth_password:
-        logger.error("Faltan XVIA_EMAIL/XVIA_PASSWORD en el entorno o .env.")
+        logger.error("Faltan XVIA_EMAIL/XVIA_PASSWORD en el entorno o archivo .env.")
         return
 
+    # CONFIGURACIÓN DE CABECERAS Y COOKIES
+    # unsafe=True permite procesar cookies en conexiones HTTP no cifradas
+    cookie_jar = aiohttp.CookieJar(unsafe=True)
+    
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/pdf,application/xhtml+xml,text/html;q=0.9,*/*;q=0.8"
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "es-ES,es;q=0.9",
+        "Referer": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login", # Clave para CSRF
+        "Origin": "http://www.xvia-grupoeuropa.net",
+        "DNT": "1",
+        "Connection": "keep-alive",
     }
 
-    async with aiohttp.ClientSession(headers=headers) as auth_session:
+    # Iniciamos la sesión persistente con el tarro de cookies especial
+    async with aiohttp.ClientSession(headers=headers, cookie_jar=cookie_jar) as auth_session:
         try:
+            # Intentar el login único inicial
             await create_authenticated_session_in_place(auth_session, auth_email, auth_password)
-            logger.info("XVIA Session lista y persistente.")
+            logger.info("XVIA Session lista y persistente (Cookies almacenadas).")
         except Exception as e:
-            logger.error(f"Error autenticando en XVIA: {e}")
-            return
+            logger.error(f"Error crítico de autenticación inicial: {e}")
+            return # Si no podemos loguear al inicio, el worker no puede trabajar
 
+        # Bucle principal de procesamiento
         while True:
             try:
                 task = db.get_pending_task()
                 if task:
                     task_id, site_id, protocol, payload = task
+                    # Procesamos la tarea pasando la sesión autenticada
                     await process_task(db, task_id, site_id, protocol, payload, auth_session)
                 else:
-                    # No hay tareas, dormir
+                    # Sin tareas: esperar 10 segundos antes de volver a consultar la DB
                     await asyncio.sleep(10)
+                    
             except KeyboardInterrupt:
-                logger.info("Deteniendo worker por interrupcion de teclado...")
+                logger.info("Deteniendo worker por interrupción de teclado (Ctrl+C)...")
                 break
             except Exception as e:
-                logger.error(f"Error en el bucle principal: {e}")
+                logger.error(f"Error inesperado en el bucle principal: {e}")
+                logger.error(traceback.format_exc())
                 await asyncio.sleep(5)
+
+    logger.info("Worker finalizado correctamente.")
 
 if __name__ == "__main__":
     if sys.platform == "win32":

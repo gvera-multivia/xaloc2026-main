@@ -2,6 +2,7 @@ import logging
 import re
 from typing import Optional
 import aiohttp
+from pathlib import Path
 
 logger = logging.getLogger("worker")
 
@@ -86,28 +87,45 @@ async def create_authenticated_session_in_place(
     password: str,
     login_url: str = LOGIN_URL
 ) -> None:
-    # 1. Obtener la pagina de login para extraer el token
+    # 1. Obtener la página de login
     async with session.get(login_url) as response:
-        if response.status != 200:
-            raise RuntimeError(f"No se pudo cargar la pagina de login. Status: {response.status}")
-        login_page = await response.text()
-
-    token = extract_csrf_token(login_page)
+        html = await response.text()
+        
+    token = extract_csrf_token(html)
     if not token:
-        logger.error("Token CSRF no encontrado en login.")
-        raise RuntimeError("CSRF token not found in login page.")
+        raise RuntimeError("No se pudo extraer el token CSRF del HTML.")
 
+    # 2. Datos del POST (Asegúrate de que no hay espacios en las credenciales)
     data = {
         "_token": token,
-        "email": email,
-        "password": password,
+        "email": email.strip(),
+        "password": password.strip(),
         "remember": "on",
     }
 
-    async with session.post(login_url, data=data, allow_redirects=False) as response:
-        if response.status in (302, 303):
-            logger.info(f"XVIA login succeeded (Status {response.status}).")
+    logger.info(f"Intentando login para: {email} (Token: {token[:8]}...)")
+
+    # 3. POST Login
+    # Usamos allow_redirects=True para ver a dónde nos manda el servidor
+    async with session.post(login_url, data=data, allow_redirects=True) as response:
+        final_html = await response.text()
+        final_url = str(response.url)
+        
+        # SI VOLVEMOS AL LOGIN: El servidor rechazó las credenciales
+        if "login" in final_url.lower() and response.status == 200:
+            # Guardamos el HTML para que veas el mensaje de error (ej: "Estas credenciales no coinciden")
+            debug_path = Path("logs/error_login_last.html")
+            debug_path.write_text(final_html, encoding="utf-8")
+            
+            # Buscamos mensajes de error comunes en Laravel
+            error_msg = "Credenciales incorrectas o sesión rechazada por el servidor."
+            if "invalid" in final_html.lower() or "coinciden" in final_html.lower():
+                error_msg = "ERROR DE XVIA: El correo o la contraseña no son válidos."
+                
+            raise RuntimeError(f"{error_msg} Revisa logs/error_login_last.html")
+
+        if response.status == 200 or "home" in final_url or "dashboard" in final_url:
+            logger.info(f"XVIA Login OK. Entramos en: {final_url}")
             return
-        if response.status == 200:
-            raise RuntimeError("Login failed: Credenciales incorrectas o sesion expirada.")
-        raise RuntimeError(f"Login failed with status {response.status}.")
+
+        raise RuntimeError(f"Fallo inesperado. Status: {response.status}, URL: {final_url}")
