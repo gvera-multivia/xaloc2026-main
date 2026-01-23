@@ -99,7 +99,7 @@ def _insert_task(db_path: str, payload: dict[str, Any]) -> int:
         cur = conn.cursor()
         cur.execute(
             "INSERT INTO tramite_queue (site_id, payload) VALUES (?, ?)",
-            ("xaloc_girona", json.dumps(payload, ensure_ascii=False)),
+            ("xaloc_girona", json.dumps(payload, ensure_ascii=False, default=str)),
         )
         conn.commit()
         return int(cur.lastrowid)
