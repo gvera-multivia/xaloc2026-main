@@ -54,41 +54,34 @@ def get_motivos_por_fase(
     *,
     config_map: dict[str, Any],
 ) -> str:
-    """Lee config_motivos.json y compone el texto final para el campo motivos."""
+    """Lee config_motivos.json y compone el texto final para el campo motivos.
+    
+    Raises:
+        ValueError: Si no se encuentra la fase en config_motivos.json o los datos están incompletos.
+    """
     expediente_txt = str(expediente or "").strip()
+    fase_norm = normalize_text(fase_raw)
 
-    def _default() -> str:
-        return (
-            "ASUNTO: Recurso de reposicion\n\n"
-            f"EXPONE: Tramite para el expediente {expediente_txt}.\n\n"
-            "SOLICITA: Se admita el recurso."
-        )
+    selected: dict[str, Any] | None = None
+    for key, value in (config_map or {}).items():
+        # Coincidencia parcial (p. ej. "propuesta de resolucion" matchea variantes)
+        if key and key in fase_norm:
+            selected = value
+            break
 
-    try:
-        fase_norm = normalize_text(fase_raw)
+    if not selected:
+        raise ValueError(f"No se encontró configuración para la fase: {fase_raw}")
 
-        selected: dict[str, Any] | None = None
-        for key, value in (config_map or {}).items():
-            # Coincidencia parcial (p. ej. "propuesta de resolucion" matchea variantes)
-            if key and key in fase_norm:
-                selected = value
-                break
+    asunto = str(selected.get("asunto") or "").strip()
+    expone = str(selected.get("expone") or "").strip()
+    solicita = (
+        str(selected.get("solicita") or "").replace("{expediente}", expediente_txt).strip()
+    )
 
-        if not selected:
-            return _default()
+    if not (asunto and expone and solicita):
+        raise ValueError(f"Datos incompletos en config_motivos.json para la fase: {fase_raw}")
 
-        asunto = str(selected.get("asunto") or "").strip()
-        expone = str(selected.get("expone") or "").strip()
-        solicita = (
-            str(selected.get("solicita") or "").replace("{expediente}", expediente_txt).strip()
-        )
-
-        if not (asunto and expone and solicita):
-            return _default()
-
-        return f"ASUNTO: {asunto}\n\nEXPONE: {expone}\n\nSOLICITA: {solicita}"
-    except Exception:
-        return _default()
+    return f"ASUNTO: {asunto}\n\nEXPONE: {expone}\n\nSOLICITA: {solicita}"
 
 
 def _clean_str(value: Any) -> str:
