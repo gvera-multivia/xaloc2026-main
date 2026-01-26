@@ -185,7 +185,9 @@ async def process_task(
         elif site_id == "xaloc_girona":
             mapped_data["archivos_adjuntos"] = archivos_para_subir
         elif site_id == "base_online":
-            protocol_norm = (protocol or "P1").upper().strip()
+            if not protocol:
+                raise ValueError("Falta 'protocol' para tareas del site 'base_online'.")
+            protocol_norm = protocol.upper().strip()
             key = f"{protocol_norm.lower()}_archivos"
             mapped_data[key] = archivos_para_subir
 
@@ -265,46 +267,6 @@ async def worker_loop():
 
     logger.info("Worker finalizado correctamente.")
 
-async def _run_test_mode(
-    *,
-    id_recurso: str,
-    site_id: Optional[str],
-    protocol: Optional[str],
-    download_only: bool,
-) -> int:
-    load_dotenv()
-    auth_email = os.getenv("XVIA_EMAIL")
-    auth_password = os.getenv("XVIA_PASSWORD")
-
-    if not auth_email or not auth_password:
-        logger.error("Faltan XVIA_EMAIL/XVIA_PASSWORD en el entorno o archivo .env.")
-        return 2
-
-    cookie_jar = aiohttp.CookieJar(unsafe=True)
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "es-ES,es;q=0.9",
-        "Referer": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login",
-        "Origin": "http://www.xvia-grupoeuropa.net",
-        "DNT": "1",
-        "Connection": "keep-alive",
-    }
-
-    async with aiohttp.ClientSession(headers=headers, cookie_jar=cookie_jar) as auth_session:
-        await create_authenticated_session_in_place(auth_session, auth_email, auth_password)
-        logger.info("XVIA Session lista y persistente (Cookies almacenadas).")
-
-        payload = {"idRecurso": id_recurso}
-
-        if download_only or not site_id:
-            archivos = await _download_document_and_attachments(payload=payload, auth_session=auth_session)
-            logger.info(f"Descarga OK ({len(archivos)} archivo(s)): " + ", ".join(str(a) for a in archivos))
-            return 0
-
-        await process_task(None, None, site_id, protocol, payload, auth_session)
-        return 0
-
 if __name__ == "__main__":
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
@@ -312,34 +274,6 @@ if __name__ == "__main__":
     try:
         # ANTES DE NADA: aplicar el script de registro desde url-cert-config.txt
         apply_url_cert_config()
-
-        parser = argparse.ArgumentParser(description="Worker de automatización + modo test por idRecurso.")
-        parser.add_argument(
-            "--test-idrecurso",
-            default=None,
-            help="Procesa un idRecurso sin depender de la cola/SQLite.",
-        )
-        parser.add_argument(
-            "--test-site",
-            default=None,
-            help="Site a ejecutar en modo test (p.ej. xaloc_girona, base_online, madrid).",
-        )
-        parser.add_argument("--protocol", default=None, help="Protocol opcional (p.ej. P1/P2/P3 para base_online).")
-        parser.add_argument("--download-only", action="store_true", help="Solo descarga PDF/adjuntos y termina.")
-        args = parser.parse_args()
-
-        if args.test_idrecurso:
-            raise SystemExit(
-                asyncio.run(
-                    _run_test_mode(
-                        id_recurso=str(args.test_idrecurso),
-                        site_id=args.test_site,
-                        protocol=args.protocol,
-                        download_only=bool(args.download_only),
-                    )
-                )
-            )
-
         asyncio.run(worker_loop())
     except KeyboardInterrupt:
         pass

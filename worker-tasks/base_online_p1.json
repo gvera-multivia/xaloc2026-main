@@ -11,10 +11,12 @@
   "llicencia_conduccio": "LIC123456",
   "name": "Nombre Apellidos",
   "address_street": "CALLE PRUEBA",
+  "address_sigla": "CL",
   "address_number": "1",
   "address_zip": "43001",
   "address_city": "TARRAGONA",
   "address_province": "TARRAGONA",
+  "address_pais": "ESPAÑA",
   "archivos": [
     "pdfs-prueba/test1.pdf"
   ]

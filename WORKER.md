@@ -90,8 +90,8 @@ Opciones comunes:
 
 - Filtrar por `FaseProcedimiento` (opcional): `--fase denuncia` (si se omite, no filtra)
 - Filtrar por portal: `--site xaloc_girona` (o `madrid` / `base_online`)
-- Forzar protocolo para `base_online` (default `P1`): `--default-protocol P1`
-- Adjuntos por defecto (CSV): `--default-archivos pdfs-prueba/test1.pdf,pdfs-prueba/test2.pdf`
+- Para `base_online`, el `protocol` debe venir informado (no hay protocolo por defecto).
+- Los adjuntos a subir deben venir informados (no hay adjuntos por defecto).
 - Dry-run (no inserta): `--dry-run`
 
 Notas:

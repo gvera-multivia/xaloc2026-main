@@ -31,69 +31,35 @@ class XalocGironaController:
 
     def create_target(
         self,
-        email: str | None = None,
-        num_denuncia: str | None = None,
-        matricula: str | None = None,
-        num_expediente: str | None = None,
-        motivos: str | None = None,
-        archivos_adjuntos: list[Path] | list[str] | None = None,
-        **kwargs
+        *,
+        email: str | None,
+        num_denuncia: str | None,
+        matricula: str | None,
+        num_expediente: str | None,
+        motivos: str | None,
+        archivos_adjuntos: list[Path] | list[str] | None,
+        **kwargs,
     ) -> DatosMulta:
+        def _require(name: str, value: str | None) -> str:
+            v = (value or "").strip()
+            if not v:
+                raise ValueError(f"xaloc_girona: falta '{name}'.")
+            return v
+
         if not archivos_adjuntos:
-            archivos_adjuntos = [Path("pdfs-prueba") / "test1.pdf"]
+            raise ValueError("xaloc_girona: falta 'archivos_adjuntos' (al menos 1 archivo).")
 
-        # Asegurar que sean Path
-        paths = []
-        for a in archivos_adjuntos:
-            if isinstance(a, str):
-                paths.append(Path(a))
-            else:
-                paths.append(a)
+        paths: list[Path] = [Path(a) if isinstance(a, str) else a for a in archivos_adjuntos]
+        if not paths:
+            raise ValueError("xaloc_girona: falta 'archivos_adjuntos' (al menos 1 archivo).")
 
         return DatosMulta(
-            email=email or "test@example.com",
-            num_denuncia=num_denuncia or "DEN/2024/001",
-            matricula=matricula or "1234ABC",
-            num_expediente=num_expediente or "EXP/2024/001",
-            motivos=motivos or "Alegación de prueba.",
+            email=_require("email", email),
+            num_denuncia=_require("num_denuncia", num_denuncia),
+            matricula=_require("matricula", matricula),
+            num_expediente=_require("num_expediente", num_expediente),
+            motivos=_require("motivos", motivos),
             archivos_adjuntos=paths,
-        )
-
-    def create_target_strict(
-        self,
-        email: str | None = None,
-        num_denuncia: str | None = None,
-        matricula: str | None = None,
-        num_expediente: str | None = None,
-        motivos: str | None = None,
-        archivos_adjuntos: list[Path] | list[str] | None = None,
-        **kwargs
-    ) -> DatosMulta:
-        paths = []
-        if archivos_adjuntos:
-            for a in archivos_adjuntos:
-                if isinstance(a, str):
-                    paths.append(Path(a))
-                else:
-                    paths.append(a)
-
-        return DatosMulta(
-            email=email or "",
-            num_denuncia=num_denuncia or "",
-            matricula=matricula or "",
-            num_expediente=num_expediente or "",
-            motivos=motivos or "",
-            archivos_adjuntos=paths,
-        )
-
-    def create_demo_data(self) -> DatosMulta:
-        return self.create_target(
-            email="test@example.com",
-            num_denuncia="DEN/2024/001",
-            matricula="1234ABC",
-            num_expediente="EXP/2024/001",
-            motivos="Alegación de prueba.",
-            archivos_adjuntos=[Path("pdfs-prueba") / "test1.pdf"]
         )
 
 

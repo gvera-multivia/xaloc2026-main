@@ -78,7 +78,7 @@ def main() -> int:
     fase = str(cfg.get("fase") or "").strip()
     limit = int(cfg.get("limit") or 0)
 
-    default_protocol = str(cfg.get("default_protocol_base_online") or "P1").strip().upper()
+    default_protocol = str(cfg.get("default_protocol_base_online") or "").strip().upper()
 
     output_csv = Path(str(cfg.get("output_csv") or "out/sync_preview.csv"))
     _ensure_parent(output_csv)

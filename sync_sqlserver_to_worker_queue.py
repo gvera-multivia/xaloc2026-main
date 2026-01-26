@@ -53,41 +53,33 @@ def get_motivos_por_fase(
     *,
     config_map: dict[str, Any],
 ) -> str:
-    """Lee config_motivos.json y compone el texto final para el campo motivos."""
+    """
+    Lee config_motivos.json y compone el texto final para el campo motivos.
+
+    Raises:
+        ValueError: Si no se encuentra la fase en config_motivos.json o los datos están incompletos.
+    """
     expediente_txt = str(expediente or "").strip()
+    fase_norm = normalize_text(fase_raw)
 
-    def _default() -> str:
-        return (
-            "ASUNTO: Recurso de reposicion\n\n"
-            f"EXPONE: Tramite para el expediente {expediente_txt}.\n\n"
-            "SOLICITA: Se admita el recurso."
-        )
+    selected: dict[str, Any] | None = None
+    for key, value in (config_map or {}).items():
+        # Coincidencia parcial (p. ej. "propuesta de resolucion" matchea variantes)
+        if key and key in fase_norm:
+            selected = value
+            break
 
-    try:
-        fase_norm = normalize_text(fase_raw)
+    if not selected:
+        raise ValueError(f"No se encontró configuración para la fase: {fase_raw}")
 
-        selected: dict[str, Any] | None = None
-        for key, value in (config_map or {}).items():
-            # Coincidencia parcial (p. ej. "propuesta de resolucion" matchea variantes)
-            if key and key in fase_norm:
-                selected = value
-                break
+    asunto = str(selected.get("asunto") or "").strip()
+    expone = str(selected.get("expone") or "").strip()
+    solicita = str(selected.get("solicita") or "").replace("{expediente}", expediente_txt).strip()
 
-        if not selected:
-            return _default()
+    if not (asunto and expone and solicita):
+        raise ValueError(f"Datos incompletos en config_motivos.json para la fase: {fase_raw}")
 
-        asunto = str(selected.get("asunto") or "").strip()
-        expone = str(selected.get("expone") or "").strip()
-        solicita = (
-            str(selected.get("solicita") or "").replace("{expediente}", expediente_txt).strip()
-        )
-
-        if not (asunto and expone and solicita):
-            return _default()
-
-        return f"ASUNTO: {asunto}\n\nEXPONE: {expone}\n\nSOLICITA: {solicita}"
-    except Exception:
-        return _default()
+    return f"ASUNTO: {asunto}\n\nEXPONE: {expone}\n\nSOLICITA: {solicita}"
 
 
 def build_query(*, fase: str | None) -> tuple[str, list[Any]]:
@@ -145,20 +137,29 @@ def _init_sqlite(db_path: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
     try:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS tramite_queue (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                site_id TEXT NOT NULL,
-                payload JSON NOT NULL,
-                status TEXT DEFAULT 'pending',
-                attempts INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                processed_at TIMESTAMP,
-                error_log TEXT
-            );
-            """
-        )
+        schema_path = Path("db/schema.sql")
+        if schema_path.exists():
+            conn.executescript(schema_path.read_text(encoding="utf-8"))
+        else:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS tramite_queue (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    site_id TEXT NOT NULL,
+                    protocol TEXT,
+                    payload JSON NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    attempts INTEGER DEFAULT 0,
+                    screenshot_path TEXT,
+                    error_log TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    processed_at TIMESTAMP,
+                    result JSON,
+                    attachments_count INTEGER DEFAULT 0,
+                    attachments_metadata JSON
+                );
+                """
+            )
         conn.commit()
     finally:
         conn.close()
@@ -169,8 +170,8 @@ def _insert_task(db_path: str, payload: dict[str, Any]) -> int:
     try:
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO tramite_queue (site_id, payload) VALUES (?, ?)",
-            ("xaloc_girona", json.dumps(payload, ensure_ascii=False, default=str)),
+            "INSERT INTO tramite_queue (site_id, protocol, payload) VALUES (?, ?, ?)",
+            ("xaloc_girona", None, json.dumps(payload, ensure_ascii=False, default=str)),
         )
         conn.commit()
         return int(cur.lastrowid)
@@ -299,16 +300,21 @@ def main(argv: Optional[list[str]] = None) -> int:
                 tasks_data[rid] = {
                     "row": row_dict,
                     "adjuntos": [],
+                    "errors": [],
                 }
 
             adj_id = row_dict.get("adjunto_id")
             if adj_id:
+                filename_clean = _clean_str(row_dict.get("adjunto_filename"))
+                if not filename_clean:
+                    tasks_data[rid]["errors"].append(
+                        f"Adjunto {adj_id} sin filename en SQL Server (no se permite fallback)."
+                    )
+                    continue
                 tasks_data[rid]["adjuntos"].append(
                     {
                         "id": adj_id,
-                        "filename": _clean_str(
-                            row_dict.get("adjunto_filename") or f"adjunto_{adj_id}.pdf"
-                        ),
+                        "filename": filename_clean,
                         "url": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf-adjuntos/{id}".format(
                             id=adj_id
                         ),
@@ -321,20 +327,16 @@ def main(argv: Optional[list[str]] = None) -> int:
                 if args.limit and matched >= args.limit:
                     break
 
+                if info.get("errors"):
+                    raise ValueError("; ".join(info["errors"]))
+
                 expediente = _clean_str(info["row"].get("Expedient"))
                 fase_raw = info["row"].get("FaseProcedimiento")
-                try:
-                    motivos_text = get_motivos_por_fase(
-                        fase_raw,
-                        expediente,
-                        config_map=motivos_config,
-                    )
-                except Exception:
-                    motivos_text = (
-                        "ASUNTO: Recurso de reposicion\n\n"
-                        f"EXPONE: Tramite para el expediente {expediente}.\n\n"
-                        "SOLICITA: Se admita el recurso."
-                    )
+                motivos_text = get_motivos_por_fase(
+                    fase_raw,
+                    expediente,
+                    config_map=motivos_config,
+                )
 
                 payload = _map_xaloc_payload(
                     info["row"],

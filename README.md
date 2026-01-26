@@ -72,7 +72,7 @@ python main.py --site base_online --protocol P3 `
   --p3-file pdfs-prueba/test3.pdf
 ```
 
-Nota: en `madrid` y `xaloc_girona`, los datos "demo" se generan en sus controladores (`sites/<site>/controller.py`). `main.py` solo pasa argumentos que el controlador declare en su firma.
+Nota: los datos de ejecuciÃ³n deben venir de la cola (SQLite) o de un JSON (p.ej. encolado con `enqueue_task.py`). Los controladores no generan datos "demo" ni aplican valores por defecto.
 
 ## Como funciona por dentro (arquitectura)
 

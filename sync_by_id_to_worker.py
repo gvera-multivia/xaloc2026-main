@@ -90,8 +90,9 @@ def _clean_str(value: Any) -> str:
 
 def _normalize_plate(value: Any) -> str:
     cleaned = re.sub(r"\s+", "", _clean_str(value)).upper()
-    # Si la matrícula está vacía o es NULL, usar "." porque no es necesaria
-    return cleaned if cleaned else "."
+    if not cleaned:
+        raise ValueError("Falta Matricula en el registro (no se permiten valores por defecto).")
+    return cleaned
 
 
 def _map_payload(
@@ -117,20 +118,29 @@ def _init_sqlite(db_path: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
     try:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS tramite_queue (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                site_id TEXT NOT NULL,
-                payload JSON NOT NULL,
-                status TEXT DEFAULT 'pending',
-                attempts INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                processed_at TIMESTAMP,
-                error_log TEXT
-            );
-            """
-        )
+        schema_path = Path("db/schema.sql")
+        if schema_path.exists():
+            conn.executescript(schema_path.read_text(encoding="utf-8"))
+        else:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS tramite_queue (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    site_id TEXT NOT NULL,
+                    protocol TEXT,
+                    payload JSON NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    attempts INTEGER DEFAULT 0,
+                    screenshot_path TEXT,
+                    error_log TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    processed_at TIMESTAMP,
+                    result JSON,
+                    attachments_count INTEGER DEFAULT 0,
+                    attachments_metadata JSON
+                );
+                """
+            )
         conn.commit()
     finally:
         conn.close()
@@ -141,8 +151,8 @@ def _insert_task(db_path: str, site_id: str, payload: dict[str, Any]) -> int:
     try:
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO tramite_queue (site_id, payload) VALUES (?, ?)",
-            (site_id, json.dumps(payload, ensure_ascii=False, default=str)),
+            "INSERT INTO tramite_queue (site_id, protocol, payload) VALUES (?, ?, ?)",
+            (site_id, None, json.dumps(payload, ensure_ascii=False, default=str)),
         )
         conn.commit()
         return int(cur.lastrowid)
@@ -283,11 +293,14 @@ def main(argv: Optional[list[str]] = None) -> int:
             # Agregar adjuntos si existen (solo datos de la consulta)
             adj_id = row_dict.get("adjunto_id")
             adj_filename = row_dict.get("adjunto_filename")
-            if adj_id and adj_filename:
+            if adj_id:
+                filename_clean = _clean_str(adj_filename)
+                if not filename_clean:
+                    raise ValueError(f"Adjunto {adj_id} sin filename en SQL Server (no se permite fallback).")
                 task_data["adjuntos"].append(
                     {
                         "id": adj_id,
-                        "filename": _clean_str(adj_filename),
+                        "filename": filename_clean,
                         "url": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf-adjuntos/{id}".format(
                             id=adj_id
                         ),
