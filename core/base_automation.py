@@ -5,6 +5,7 @@ BaseAutomation: orquestador reusable (Playwright + perfil persistente).
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -96,6 +97,12 @@ class BaseAutomation:
         self.logger.info("Navegador listo")
 
     async def _stop_browser(self) -> None:
+        # Debug: permitir dejar el navegador abierto al finalizar la ejecución.
+        # Uso: `set XALOC_KEEP_BROWSER_OPEN=1` (cmd) / `$env:XALOC_KEEP_BROWSER_OPEN='1'` (PowerShell)
+        if os.getenv("XALOC_KEEP_BROWSER_OPEN") == "1":
+            self.logger.info("Navegador NO cerrado (XALOC_KEEP_BROWSER_OPEN=1)")
+            return
+
         if self.context:
             try:
                 await self.context.close()
