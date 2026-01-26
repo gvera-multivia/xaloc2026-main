@@ -23,14 +23,16 @@ SELECT
     rs.idRecurso,
     rs.Expedient,
     rs.FaseProcedimiento,
-    rs.Matricula,
-    c.email,
+    e.matricula,       -- Ahora viene de la tabla expedientes
     rs.automatic_id,
+    c.email,
     att.id AS adjunto_id,
     att.Filename AS adjunto_filename
 FROM Recursos.RecursosExp rs
 INNER JOIN clientes c ON rs.numclient = c.numerocliente
+INNER JOIN expedientes e ON rs.idExp = e.idexpediente  -- Join para obtener la matrícula
 LEFT JOIN attachments_resource_documents att ON rs.automatic_id = att.automatic_id
+WHERE rs.idExp = ?
 """
 
 

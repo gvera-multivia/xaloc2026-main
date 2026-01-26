@@ -23,13 +23,14 @@ SELECT
     rs.idRecurso,
     rs.Expedient,
     rs.FaseProcedimiento,
-    rs.Matricula,
+    e.matricula,       -- Ahora viene de la tabla expedientes
     rs.automatic_id,
     c.email,
     att.id AS adjunto_id,
     att.Filename AS adjunto_filename
 FROM Recursos.RecursosExp rs
 INNER JOIN clientes c ON rs.numclient = c.numerocliente
+INNER JOIN expedientes e ON rs.idExp = e.idexpediente  -- Join para obtener la matrícula
 LEFT JOIN attachments_resource_documents att ON rs.automatic_id = att.automatic_id
 WHERE rs.idExp = ?
 """
@@ -49,8 +50,15 @@ def load_config_motivos(path: Path = Path("config_motivos.json")) -> dict[str, A
         return json.load(f)
 
 
+def _clean_str(value: Any) -> str:
+    return str(value).strip() if value is not None else ""
+
+
 def _normalize_literal_newlines(s: str) -> str:
-    # Convierte "\\n" literal a salto real, por si llega escapado desde JSON/otros
+    """
+    Convierte '\\n' literal (dos caracteres: barra + n) a salto real '\n'.
+    Útil si el JSON tiene "\\n\\n" o si algún paso lo escapa.
+    """
     return s.replace("\\n", "\n")
 
 
@@ -58,16 +66,16 @@ def _text_to_tinymce_html(text: str) -> str:
     """
     Convierte texto con saltos a HTML robusto para TinyMCE:
     - doble salto => nuevo párrafo
-    - salto simple => <br>
-    - escapado HTML para evitar que se inyecte markup accidental
+    - salto simple => <br />
+    - escape HTML para evitar inyección / markup accidental
     """
     text = _normalize_literal_newlines(text).replace("\r\n", "\n").replace("\r", "\n")
 
     blocks = re.split(r"\n\s*\n", text.strip())
     out: list[str] = []
     for b in blocks:
-        b = html.escape(b)              # evita que < > & rompan el editor
-        b = b.replace("\n", "<br />")   # saltos dentro del bloque
+        b = html.escape(b)
+        b = b.replace("\n", "<br />")
         out.append(f"<p>{b}</p>")
     return "".join(out)
 
@@ -77,7 +85,7 @@ def get_motivos_por_fase(
     expediente: str,
     *,
     config_map: dict[str, Any],
-    output: str = "text",  # "text" o "html"
+    output: str = "html",  # por defecto: HTML listo para TinyMCE
 ) -> str:
     """
     Lee config_motivos.json y compone el texto final para el campo motivos.
@@ -100,12 +108,16 @@ def get_motivos_por_fase(
     if not selected:
         raise ValueError(f"No se encontró configuración para la fase: {fase_raw}")
 
-    asunto = _clean_str(selected.get("asunto"))
-    expone = _clean_str(selected.get("expone"))
-    solicita = _clean_str(selected.get("solicita")).replace("{expediente}", expediente_txt)
+    asunto = _normalize_literal_newlines(_clean_str(selected.get("asunto")))
+    expone = _normalize_literal_newlines(_clean_str(selected.get("expone")))
+
+    solicita_tpl = _normalize_literal_newlines(_clean_str(selected.get("solicita")))
+    solicita = solicita_tpl.replace("{expediente}", expediente_txt)
 
     if not (asunto and expone and solicita):
-        raise ValueError(f"Datos incompletos en config_motivos.json para la fase: {fase_raw}")
+        raise ValueError(
+            f"Datos incompletos en config_motivos.json para la fase: {fase_raw}"
+        )
 
     text = f"ASUNTO: {asunto}\n\nEXPONE: {expone}\n\nSOLICITA: {solicita}"
 
@@ -113,10 +125,6 @@ def get_motivos_por_fase(
         return _text_to_tinymce_html(text)
 
     return text
-
-
-def _clean_str(value: Any) -> str:
-    return str(value).strip() if value is not None else ""
 
 
 FALLBACKS: dict[str, str] = {
@@ -145,6 +153,7 @@ def _map_payload(
         "denuncia_num": expediente,
         "plate_number": _normalize_plate(row.get("Matricula")),
         "expediente_num": expediente,
+        # OJO: aquí ya va HTML (si output="html"), para insertarlo como HTML en TinyMCE
         "motivos": motivos,
         "adjuntos": adjuntos_list or [],
     }
@@ -223,7 +232,12 @@ def _build_sqlserver_connection_string(
     database = (os.getenv("SQLSERVER_DATABASE") or "").strip()
     username = (os.getenv("SQLSERVER_USERNAME") or "").strip()
     password = (os.getenv("SQLSERVER_PASSWORD") or "").strip()
-    trusted = (os.getenv("SQLSERVER_TRUSTED_CONNECTION") or "").strip().lower() in {"1", "true", "yes", "y"}
+    trusted = (os.getenv("SQLSERVER_TRUSTED_CONNECTION") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "y",
+    }
 
     if not (server and database):
         raise ValueError(
@@ -286,10 +300,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     try:
         connection_string = _build_sqlserver_connection_string(direct=args.connection_string)
     except Exception as e:
-        print(
-            f"ERROR: No se pudo construir la conexión a SQL Server: {e}",
-            file=sys.stderr,
-        )
+        print(f"ERROR: No se pudo construir la conexión a SQL Server: {e}", file=sys.stderr)
         return 2
 
     # Inicializar SQLite
@@ -322,7 +333,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
         for row in rows:
             row_dict = dict(zip(columns, row))
-            
+
             # Guardar la primera fila como base
             if task_data["row"] is None:
                 task_data["row"] = row_dict
@@ -333,14 +344,17 @@ def main(argv: Optional[list[str]] = None) -> int:
             if adj_id:
                 filename_clean = _clean_str(adj_filename)
                 if not filename_clean:
-                    raise ValueError(f"Adjunto {adj_id} sin filename en SQL Server (no se permite fallback).")
+                    raise ValueError(
+                        f"Adjunto {adj_id} sin filename en SQL Server (no se permite fallback)."
+                    )
                 task_data["adjuntos"].append(
                     {
                         "id": adj_id,
                         "filename": filename_clean,
-                        "url": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf-adjuntos/{id}".format(
-                            id=adj_id
-                        ),
+                        "url": (
+                            "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/"
+                            "recursos/expedientes/pdf-adjuntos/{id}"
+                        ).format(id=adj_id),
                     }
                 )
 
@@ -348,17 +362,18 @@ def main(argv: Optional[list[str]] = None) -> int:
         try:
             expediente = _clean_str(task_data["row"].get("Expedient"))
             fase_raw = task_data["row"].get("FaseProcedimiento")
-            
-            # Obtener motivos sin fallback - solo lo que viene de config_motivos.json
-            motivos_text = get_motivos_por_fase(
+
+            # Motivos en HTML para TinyMCE (saltos visibles)
+            motivos_html = get_motivos_por_fase(
                 fase_raw,
                 expediente,
                 config_map=motivos_config,
+                output="html",
             )
 
             payload = _map_payload(
                 task_data["row"],
-                motivos_text,
+                motivos_html,
                 adjuntos_list=task_data["adjuntos"],
             )
 
@@ -373,9 +388,9 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(f"✓ Matrícula: {payload['plate_number']}")
             print(f"✓ Adjuntos encontrados: {len(task_data['adjuntos'])}")
             print(f"✓ Tarea insertada en SQLite con ID: {task_id}")
-            
+
             if args.verbose:
-                print(f"\nPayload completo:")
+                print("\nPayload completo:")
                 print(json.dumps(payload, indent=2, ensure_ascii=False))
 
             return 0
