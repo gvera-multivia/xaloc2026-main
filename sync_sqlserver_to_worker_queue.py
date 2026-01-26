@@ -1,6 +1,7 @@
 ﻿import argparse
 import json
 import os
+from pydoc import html
 import re
 import sqlite3
 import sys
@@ -47,24 +48,50 @@ def load_config_motivos(path: Path = Path("config_motivos.json")) -> dict[str, A
         return json.load(f)
 
 
+def _normalize_literal_newlines(s: str) -> str:
+    # Convierte "\\n" literal a salto real, por si llega escapado desde JSON/otros
+    return s.replace("\\n", "\n")
+
+
+def _text_to_tinymce_html(text: str) -> str:
+    """
+    Convierte texto con saltos a HTML robusto para TinyMCE:
+    - doble salto => nuevo párrafo
+    - salto simple => <br>
+    - escapado HTML para evitar que se inyecte markup accidental
+    """
+    text = _normalize_literal_newlines(text).replace("\r\n", "\n").replace("\r", "\n")
+
+    blocks = re.split(r"\n\s*\n", text.strip())
+    out: list[str] = []
+    for b in blocks:
+        b = html.escape(b)              # evita que < > & rompan el editor
+        b = b.replace("\n", "<br />")   # saltos dentro del bloque
+        out.append(f"<p>{b}</p>")
+    return "".join(out)
+
+
 def get_motivos_por_fase(
     fase_raw: Any,
     expediente: str,
     *,
     config_map: dict[str, Any],
+    output: str = "text",  # "text" o "html"
 ) -> str:
     """
     Lee config_motivos.json y compone el texto final para el campo motivos.
 
+    output="text": devuelve texto con \\n\\n
+    output="html": devuelve HTML <p>..</p> con <br /> para TinyMCE
+
     Raises:
         ValueError: Si no se encuentra la fase en config_motivos.json o los datos están incompletos.
     """
-    expediente_txt = str(expediente or "").strip()
+    expediente_txt = _clean_str(expediente)
     fase_norm = normalize_text(fase_raw)
 
     selected: dict[str, Any] | None = None
     for key, value in (config_map or {}).items():
-        # Coincidencia parcial (p. ej. "propuesta de resolucion" matchea variantes)
         if key and key in fase_norm:
             selected = value
             break
@@ -72,15 +99,19 @@ def get_motivos_por_fase(
     if not selected:
         raise ValueError(f"No se encontró configuración para la fase: {fase_raw}")
 
-    asunto = str(selected.get("asunto") or "").strip()
-    expone = str(selected.get("expone") or "").strip()
-    solicita = str(selected.get("solicita") or "").replace("{expediente}", expediente_txt).strip()
+    asunto = _clean_str(selected.get("asunto"))
+    expone = _clean_str(selected.get("expone"))
+    solicita = _clean_str(selected.get("solicita")).replace("{expediente}", expediente_txt)
 
     if not (asunto and expone and solicita):
         raise ValueError(f"Datos incompletos en config_motivos.json para la fase: {fase_raw}")
 
-    return f"ASUNTO: {asunto}\n\nEXPONE: {expone}\n\nSOLICITA: {solicita}"
+    text = f"ASUNTO: {asunto}\n\nEXPONE: {expone}\n\nSOLICITA: {solicita}"
 
+    if output == "html":
+        return _text_to_tinymce_html(text)
+
+    return text
 
 def build_query(*, fase: str | None) -> tuple[str, list[Any]]:
     """Construye la query filtrando por estado pendiente y tipo de expediente."""
