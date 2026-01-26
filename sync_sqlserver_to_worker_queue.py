@@ -110,8 +110,17 @@ def _clean_str(value: Any) -> str:
     return str(value).strip() if value is not None else ""
 
 
+FALLBACKS: dict[str, str] = {
+    # Solo se permiten fallbacks declarados explícitamente aquí.
+    "Matricula": ".",
+}
+
+
 def _normalize_plate(value: Any) -> str:
-    return re.sub(r"\s+", "", _clean_str(value)).upper()
+    cleaned = re.sub(r"\s+", "", _clean_str(value)).upper()
+    if not cleaned:
+        return FALLBACKS["Matricula"]
+    return cleaned
 
 
 def _map_xaloc_payload(
