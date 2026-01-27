@@ -162,37 +162,48 @@ async def _adjuntar_y_continuar(popup: Page, *, espera_cierre: bool = False) -> 
     except Exception as e:
         logging.warning(f"No se pudo confirmar el mensaje de subida: {e}")
     
-    # Espera adicional para asegurar que el JavaScript del popup termine completamente
-    await popup.wait_for_timeout(5000)  # 5 segundos para que todo se asiente
+    # CRÍTICO: NO esperar mucho tiempo aquí porque el popup se cierra automáticamente
+    # Hacer clic en "Continuar" INMEDIATAMENTE para guardar los documentos
+    logging.info("Buscando botón 'Continuar' inmediatamente...")
     
-    # Tras adjuntar todos los archivos, aparece "Continuar"
-    logging.info("Buscando botón 'Continuar'...")
-    continuar = popup.get_by_role("link", name=re.compile(r"^Continuar$", re.IGNORECASE)).first
-    await continuar.wait_for(state="visible", timeout=20000)
-    logging.info("Botón 'Continuar' visible")
+    try:
+        continuar = popup.get_by_role("link", name=re.compile(r"^Continuar$", re.IGNORECASE)).first
+        await continuar.wait_for(state="visible", timeout=5000)
+        logging.info("Botón 'Continuar' visible")
+        
+        # Pequeña espera para que el botón esté listo (500ms en lugar de 5s)
+        await popup.wait_for_timeout(500)
 
-    if espera_cierre:
-        logging.info("Ejecutando función continuar() vía JavaScript...")
-        try:
-            async with popup.expect_event("close", timeout=15000):
-                # CRÍTICO: Ejecutar directamente la función JavaScript continuar()
-                # en lugar de hacer clic en el elemento, porque el onclick no se dispara
-                await popup.evaluate("continuar()")
-                logging.info("Función continuar() ejecutada")
-            logging.info("Popup cerrado correctamente")
-        except TimeoutError:
-            logging.warning("Timeout esperando cierre del popup, intentando de nuevo...")
+        if espera_cierre:
+            logging.info("Ejecutando función continuar() vía JavaScript...")
             try:
-                await popup.evaluate("continuar()")
-                await popup.wait_for_timeout(1000)
+                async with popup.expect_event("close", timeout=15000):
+                    # CRÍTICO: Ejecutar directamente la función JavaScript continuar()
+                    # en lugar de hacer clic en el elemento, porque el onclick no se dispara
+                    await popup.evaluate("continuar()")
+                    logging.info("Función continuar() ejecutada")
+                logging.info("Popup cerrado correctamente")
+            except TimeoutError:
+                logging.warning("Timeout esperando cierre del popup, intentando de nuevo...")
+                try:
+                    await popup.evaluate("continuar()")
+                    await popup.wait_for_timeout(1000)
+                except PlaywrightError:
+                    return
+        else:
+            logging.info("Ejecutando función continuar() vía JavaScript...")
+            await popup.evaluate("continuar()")
+            try:
+                await popup.wait_for_load_state("domcontentloaded")
             except PlaywrightError:
-                return
-    else:
-        logging.info("Ejecutando función continuar() vía JavaScript...")
-        await popup.evaluate("continuar()")
-        try:
-            await popup.wait_for_load_state("domcontentloaded")
-        except PlaywrightError:
+                pass
+    except Exception as e:
+        logging.error(f"Error al hacer clic en Continuar: {e}")
+        # Si el popup ya se cerró, no hay problema
+        if "closed" in str(e).lower():
+            logging.warning("El popup se cerró automáticamente antes de hacer clic en Continuar")
+        else:
+            raise
             return
 
 
