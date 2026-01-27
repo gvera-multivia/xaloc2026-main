@@ -209,6 +209,25 @@ async def rellenar_formulario(page: Page, datos: DatosMulta) -> None:
         logging.info("Rellenando motivos (TinyMCE)...")
         await _rellenar_tinymce_motius(page, str(datos.motivos))
 
+        # CRÍTICO: Después de rellenar todos los campos, debemos asegurar que el botón
+        # "Adjuntar i signar" se vuelva visible. El JavaScript del formulario puede
+        # necesitar que hagamos scroll o que esperemos a que las validaciones terminen.
+        logging.info("Esperando a que las validaciones del formulario completen...")
+        
+        # 1. Hacer scroll hasta el final del formulario para disparar validaciones
+        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        await page.wait_for_timeout(1000)
+        
+        # 2. Esperar a que el botón de adjuntar se vuelva visible
+        try:
+            await page.wait_for_selector("a.docs", state="visible", timeout=5000)
+            logging.info("Botón 'Adjuntar i signar' ahora visible")
+        except Exception as e:
+            logging.warning(f"Botón 'Adjuntar i signar' no visible después de espera: {e}")
+            # Intentar forzar visibilidad haciendo clic en el último campo rellenado
+            await page.locator("#DinVarNUMEXP").click()
+            await page.wait_for_timeout(500)
+
         # NOTA: La subida de archivos se hace en una fase separada después de rellenar el formulario.
         # Esto evita problemas de sincronización con el navegador.
 
