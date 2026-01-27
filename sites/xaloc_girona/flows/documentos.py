@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import List, Optional, Sequence, Union
 
 from playwright.async_api import Error as PlaywrightError
+from playwright.async_api import Frame
 from playwright.async_api import Page, TimeoutError
 
 DELAY_MS = 500
@@ -42,19 +43,63 @@ async def _siguiente_input_vacio(popup: Page) -> Optional[int]:
     return None
 
 
-async def _seleccionar_archivos(popup: Page, archivos: List[Path]) -> None:
+async def _resolver_contexto_uploader(popup: Page) -> Page | Frame:
+    """
+    En STA el uploader puede estar en la página principal del popup o en un iframe.
+    Elegimos el contexto que realmente contiene los inputs de archivo y (si existe) los CTAs.
+    """
+    candidates: list[Page | Frame] = [popup]
+    for fr in popup.frames:
+        if fr == popup.main_frame:
+            continue
+        candidates.append(fr)
+
+    best: Page | Frame | None = None
+    best_score = -1
+    for ctx in candidates:
+        try:
+            inputs_count = await ctx.locator("input[type='file']").count()
+        except Exception:
+            continue
+
+        score = inputs_count
+
+        try:
+            if await ctx.locator("a", has_text=re.compile(r"^Clicar per adjuntar", re.IGNORECASE)).count() > 0:
+                score += 10
+            if await ctx.locator("#continuar a", has_text=re.compile(r"^Continuar$", re.IGNORECASE)).count() > 0:
+                score += 5
+        except Exception:
+            pass
+
+        try:
+            url = (ctx.url or "").lower()
+            if "upload" in url or "adjuntar" in url:
+                score += 3
+        except Exception:
+            pass
+
+        if score > best_score:
+            best = ctx
+            best_score = score
+
+    if best is None:
+        return popup
+
+    try:
+        logging.info(f"Contexto uploader seleccionado: {best.url}")
+    except Exception:
+        pass
+    return best
+
+
+async def _seleccionar_archivos(popup: Page, archivos: List[Path]) -> Page | Frame:
     # 1. Esperar a que el popup cargue realmente
     # Usamos 'domcontentloaded' para asegurar que la URL ha empezado a cargar
     await popup.wait_for_load_state("domcontentloaded", timeout=15000)
     
-    # 2. LOCALIZAR EL FRAME: En STA, el uploader suele estar en un iframe
-    target = popup
-    # Si hay más de un frame, buscamos el que tenga 'upload' en la URL
-    for frame in popup.frames:
-        if "upload" in frame.url.lower() or "adjuntar" in frame.url.lower():
-            target = frame
-            logging.info(f"Frame de subida detectado: {frame.url}")
-            break
+    # 2. LOCALIZAR CONTEXTO REAL DEL UPLOADER (page o iframe)
+    target = await _resolver_contexto_uploader(popup)
 
     # 3. Esperar al selector de archivos (aumentamos a 30s)
     selector = "input[type='file']"
@@ -97,6 +142,14 @@ async def _seleccionar_archivos(popup: Page, archivos: List[Path]) -> None:
         # Seleccionar el archivo
         logging.info(f"Archivo seleccionado en input[{input_index}]")
         await inputs.nth(input_index).set_input_files(archivo)
+        # Confirmar que el input retuvo el archivo (evita falsos positivos en logs)
+        try:
+            files_len = await inputs.nth(input_index).evaluate("(el) => (el.files ? el.files.length : 0)")
+            if int(files_len or 0) <= 0:
+                raise RuntimeError(f"El input[{input_index}] no retuvo el archivo tras set_input_files()")
+        except Exception as e:
+            logging.error(f"Selección no confirmada en input[{input_index}]: {e}")
+            raise
         # Espera corta entre selecciones de archivos
         await popup.wait_for_timeout(500)
     
@@ -104,7 +157,7 @@ async def _seleccionar_archivos(popup: Page, archivos: List[Path]) -> None:
     
     # CRÍTICO: Hacer clic en "Clicar per adjuntar" UNA SOLA VEZ después de seleccionar TODOS
     await popup.wait_for_timeout(1000)  # Espera para que el popup procese todas las selecciones
-    await _click_link(popup, r"^Clicar per adjuntar")
+    await _click_link(target, r"^Clicar per adjuntar")
     logging.info("Click en 'Clicar per adjuntar' ejecutado")
     
     # Espera larga para que el JavaScript del popup procese la subida de TODOS los archivos
@@ -112,36 +165,44 @@ async def _seleccionar_archivos(popup: Page, archivos: List[Path]) -> None:
     
     # Esperar confirmación de que los archivos se subieron correctamente
     logging.info("Esperando confirmación de subida...")
-    await _wait_upload_ok(popup)
+    await _wait_upload_ok(target)
     logging.info(f"Todos los archivos ({len(archivos)}) subidos correctamente")
+    return target
 
-async def _click_link(popup: Page, patron: str) -> None:
-    link = popup.get_by_role("link", name=re.compile(patron, re.IGNORECASE)).first
+async def _click_link(ctx: Page | Frame, patron: str) -> None:
+    link = ctx.locator("a", has_text=re.compile(patron, re.IGNORECASE)).first
     await link.wait_for(state="visible", timeout=20000)
     await link.click()
     try:
-        await popup.wait_for_timeout(DELAY_MS)
+        page = ctx if isinstance(ctx, Page) else ctx.page
+        await page.wait_for_timeout(DELAY_MS)
     except PlaywrightError:
         return
 
 
-async def _wait_upload_ok(popup: Page) -> None:
+async def _wait_upload_ok(ctx: Page | Frame) -> None:
     # En popup.html el estado se escribe en <div id="uploadResultado">... Document adjuntat</div>
+    page = ctx if isinstance(ctx, Page) else ctx.page
+
+    # Si no existe el indicador, no podemos validar por texto: damos un margen y seguimos.
     try:
-        await popup.wait_for_function(
-            """() => {
-                const el = document.getElementById('uploadResultado');
-                if (!el) return false;
-                return /Document\\s+adjuntat/i.test(el.textContent || '');
-            }""",
-            timeout=60000,
-        )
-    except Exception:
-        # Fallback suave: si no existe el div (variantes), no bloqueamos indefinidamente.
-        await popup.wait_for_timeout(500)
+        await ctx.wait_for_selector("#uploadResultado", state="attached", timeout=5000)
+    except TimeoutError:
+        await page.wait_for_timeout(1000)
+        return
+
+    # Si existe, entonces SÍ exigimos ver el OK para evitar "falsos verdes".
+    await ctx.wait_for_function(
+        """() => {
+            const el = document.getElementById('uploadResultado');
+            if (!el) return false;
+            return /Document\\s+adjuntat/i.test(el.textContent || '');
+        }""",
+        timeout=60000,
+    )
 
 
-async def _adjuntar_y_continuar(popup: Page, *, espera_cierre: bool = False) -> None:
+async def _adjuntar_y_continuar(popup: Page, *, ctx: Page | Frame, espera_cierre: bool = False) -> None:
     # Los archivos ya se adjuntaron en _seleccionar_archivos
     # Aquí solo necesitamos hacer clic en "Continuar" para cerrar el popup
     
@@ -150,7 +211,7 @@ async def _adjuntar_y_continuar(popup: Page, *, espera_cierre: bool = False) -> 
     # esperar a que aparezca el mensaje "Document adjuntat" antes de continuar
     logging.info("Esperando a que el popup procese completamente los archivos...")
     try:
-        await popup.wait_for_function(
+        await ctx.wait_for_function(
             """() => {
                 const resultado = document.getElementById('uploadResultado');
                 if (!resultado) return false;
@@ -168,7 +229,7 @@ async def _adjuntar_y_continuar(popup: Page, *, espera_cierre: bool = False) -> 
     
     # DIAGNÓSTICO: Verificar que los archivos estén correctamente en los inputs
     try:
-        file_values = await popup.evaluate("""() => {
+        file_values = await ctx.evaluate("""() => {
             const inputs = document.querySelectorAll('input[type="file"]');
             const values = [];
             inputs.forEach((input, i) => {
@@ -191,7 +252,16 @@ async def _adjuntar_y_continuar(popup: Page, *, espera_cierre: bool = False) -> 
         logging.warning(f"No se pudo verificar el estado de los inputs: {e}")
     
     try:
-        continuar = popup.get_by_role("link", name=re.compile(r"^Continuar$", re.IGNORECASE)).first
+        continuar = ctx.locator("#continuar a").first
+        if await continuar.count() == 0:
+            continuar = ctx.locator("a", has_text=re.compile(r"^Continuar$", re.IGNORECASE)).first
+
+        # Fallback si el botón no está en el contexto elegido (p.ej. iframe)
+        if await continuar.count() == 0:
+            continuar = popup.locator("#continuar a").first
+            if await continuar.count() == 0:
+                continuar = popup.locator("a", has_text=re.compile(r"^Continuar$", re.IGNORECASE)).first
+
         await continuar.wait_for(state="visible", timeout=5000)
         logging.info("Botón 'Continuar' visible")
         
@@ -294,19 +364,27 @@ async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]
     logging.info("Intentando hacer click en 'Adjuntar i signar'...")
     popup: Optional[Page] = None
     
-    # INTENTO 1: Click con JavaScript (el método que sabemos que funciona)
-    logging.info("Usando click vía JavaScript (botón oculto por CSS)...")
+    # INTENTO 1: Click Playwright (force=True) para mantener gesto de usuario (window.opener)
+    logging.info("Usando click Playwright(force=True) (botón oculto por CSS)...")
     try:
-        async with page.expect_popup(timeout=10000) as popup_info_js:
-            await page.evaluate("document.querySelector('a.docs').click()")
-            logging.info("Click JavaScript ejecutado.")
-        popup = await popup_info_js.value
-        logging.info(f"Popup detectado vía JS: {popup.url if popup else 'None'}")
+        async with page.expect_popup(timeout=10000) as popup_info_click:
+            await page.locator("a.docs").first.click(force=True)
+            logging.info("Click Playwright ejecutado.")
+        popup = await popup_info_click.value
+        logging.info(f"Popup detectado vía click: {popup.url if popup else 'None'}")
     except TimeoutError:
-        logging.error("Timeout: El popup no se abrió tras click JavaScript.")
-        popup = None
+        logging.warning("Timeout: El popup no se abrió tras click Playwright; probando click JavaScript...")
+        try:
+            async with page.expect_popup(timeout=10000) as popup_info_js:
+                await page.evaluate("document.querySelector('a.docs').click()")
+                logging.info("Click JavaScript ejecutado.")
+            popup = await popup_info_js.value
+            logging.info(f"Popup detectado vía JS: {popup.url if popup else 'None'}")
+        except TimeoutError:
+            logging.error("Timeout: El popup no se abrió tras click JavaScript.")
+            popup = None
     except Exception as e:
-        logging.error(f"Error en click JavaScript: {e}")
+        logging.error(f"Error abriendo popup: {e}")
         popup = None
 
 
@@ -320,8 +398,18 @@ async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]
         await popup.wait_for_load_state("domcontentloaded")
     except PlaywrightError:
         pass
-    await _seleccionar_archivos(popup, archivos)
-    await _adjuntar_y_continuar(popup, espera_cierre=True)
+
+    # Diagnóstico crítico: sin opener, el popup puede cerrar sin "devolver" los docs al formulario principal
+    try:
+        has_opener = await popup.evaluate("() => !!window.opener && !window.opener.closed")
+        logging.info(f"Popup tiene window.opener: {has_opener}")
+        if not has_opener:
+            logging.warning("El popup no tiene window.opener; 'Continuar' puede cerrar sin adjuntar documentos.")
+    except Exception as e:
+        logging.warning(f"No se pudo comprobar window.opener en popup: {e}")
+
+    ctx = await _seleccionar_archivos(popup, archivos)
+    await _adjuntar_y_continuar(popup, ctx=ctx, espera_cierre=True)
     
     # IMPORTANTE: NO cerramos el popup manualmente aquí
     # El botón "Continuar" ya lo cerró y guardó los documentos en el formulario principal
