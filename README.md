@@ -37,7 +37,7 @@ Variables de entorno (opcionales):
 
 - `REQUIRE_CLIENT_DOCS` (default `1`): `0/false` para desactivar.
 - `CLIENT_DOCS_BASE_PATH` (default `\\SERVER-DOC\clientes`): raíz de la carpeta de clientes.
-- `CLIENT_DOCS_MERGE` (default `1`): intenta fusionar varios documentos en un PDF.
+- `CLIENT_DOCS_MERGE` (default `0`): intenta fusionar varios documentos en un PDF.
 - `PDFTK_PATH` (default `C:\Program Files (x86)\PDFtk\bin\pdftk.exe`): ruta a PDFtk (si no existe, sube por separado).
 - `CLIENT_DOCS_OUTPUT_DIR` (default `tmp/client_docs`): salida de PDFs fusionados.
 - `CLIENT_DOCS_REQUIRE_ESCR` (default `0`): fuerza exigir `ESCR` para empresas.

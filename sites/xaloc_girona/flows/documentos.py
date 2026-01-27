@@ -287,11 +287,11 @@ async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]
         pass
     await _seleccionar_archivos(popup, archivos)
     await _adjuntar_y_continuar(popup, espera_cierre=True)
-    try:
-        if not popup.is_closed():
-            await popup.close()
-    except PlaywrightError:
-        pass
+    
+    # IMPORTANTE: NO cerramos el popup manualmente aquí
+    # El botón "Continuar" ya lo cerró y guardó los documentos en el formulario principal
+    # Si lo cerramos manualmente, se pierden los documentos adjuntados
+    logging.info("Popup cerrado por el botón 'Continuar'")
 
 
     # CRÍTICO: Espera larga después de cerrar el popup para que la página principal
@@ -302,6 +302,14 @@ async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]
         await page.wait_for_timeout(3000)  # 3 segundos para que STA procese
     except PlaywrightError:
         return
+    
+    # Screenshot para verificar que los documentos se adjuntaron correctamente
+    try:
+        await page.screenshot(path="debug_after_upload.png")
+        logging.info("Screenshot guardado: debug_after_upload.png")
+    except Exception as e:
+        logging.warning(f"No se pudo guardar screenshot: {e}")
+    
     logging.info("Documentos subidos y procesados por la página principal")
 
 

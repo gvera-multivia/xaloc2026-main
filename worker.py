@@ -158,7 +158,7 @@ async def process_task(
 
         # 3.1 AÑADIR DOCUMENTACIÓN OBLIGATORIA DEL CLIENTE (para todas las webs)
         require_client_docs = (os.getenv("REQUIRE_CLIENT_DOCS") or "1").strip().lower() not in {"0", "false", "no", "off"}
-        merge_client_docs = (os.getenv("CLIENT_DOCS_MERGE") or "1").strip().lower() not in {"0", "false", "no", "off"}
+        merge_client_docs = (os.getenv("CLIENT_DOCS_MERGE") or "0").strip().lower() not in {"0", "false", "no", "off"}
         if require_client_docs:
             try:
                 extra_docs = build_required_client_documents_for_payload(

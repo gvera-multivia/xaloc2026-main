@@ -202,7 +202,7 @@ def select_required_client_documents(
     ruta_docu: Path,
     is_company: bool,
     strict: bool = True,
-    merge_if_multiple: bool = True,
+    merge_if_multiple: bool = False,
     pdftk_path: str | Path = r"C:\Program Files (x86)\PDFtk\bin\pdftk.exe",
     output_dir: Path = Path("tmp/client_docs"),
     output_label: str = "client",
@@ -357,7 +357,7 @@ def build_required_client_documents_for_payload(
     payload: dict,
     *,
     strict: bool = True,
-    merge_if_multiple: bool = True,
+    merge_if_multiple: bool = False,
 ) -> list[Path]:
     """
     API de alto nivel: a partir del payload, localiza y devuelve los doc: obligatorios del cliente.
