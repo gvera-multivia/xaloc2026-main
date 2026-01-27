@@ -216,29 +216,16 @@ async def rellenar_formulario(page: Page, datos: DatosMulta) -> None:
         
         # 1. Esperar a que desaparezca cualquier overlay de carga si existe
         try:
-            await page.wait_for_load_state("networkidle", timeout=5000)
+            await page.wait_for_load_state("networkidle", timeout=3000)
         except Exception as e:
             logging.warning(f"Timeout esperando networkidle final: {e}")
         
         # 2. Hacer scroll hasta el final del formulario para disparar validaciones
         await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-        await page.wait_for_timeout(500)
         
-        # 3. Asegurarnos de que el botón de adjuntar esté realmente visible
-        try:
-            await page.wait_for_selector("a.docs", state="visible", timeout=10000)
-            logging.info("Botón 'Adjuntar i signar' visible y listo")
-        except Exception as e:
-            logging.warning(f"Botón 'Adjuntar i signar' no visible: {e}")
-            # Fallback: hacer clic en el último campo para forzar validación
-            try:
-                await page.locator("#DinVarNUMEXP").click()
-                await page.wait_for_timeout(500)
-            except Exception:
-                pass
-        
-        # 4. Un pequeño respiro final para que el JS de la página se asiente
-        await page.wait_for_timeout(1500)
+        # 3. Pequeña espera para que el JS se asiente (el botón está oculto por CSS,
+        #    así que no podemos esperar a que sea visible - usaremos click JS después)
+        await page.wait_for_timeout(1000)
         
         logging.info("Formulario completado y listo para adjuntar.")
 

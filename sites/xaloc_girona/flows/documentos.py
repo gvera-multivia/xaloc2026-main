@@ -179,8 +179,6 @@ async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]
 
     # DIAGNÓSTICO: Buscar el enlace de adjuntar documentos
     logging.info("Buscando enlace 'Adjuntar i signar'...")
-    # Usamos un selector más robusto que incluya la clase docs y que esté visible
-    docs_link = page.locator("a.docs:visible, a.boton-style.docs").first
     
     link_count = await page.locator("a.docs").count()
     logging.info(f"Enlaces encontrados con selector 'a.docs': {link_count}")
@@ -196,48 +194,25 @@ async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]
              logging.error(f"No se pudo obtener el contenido de la página: {e}")
          return
 
-    # Aseguramos que el botón esté en pantalla
-    try:
-        await docs_link.scroll_into_view_if_needed()
-        await page.wait_for_timeout(500)
-        is_visible = await docs_link.is_visible()
-        logging.info(f"Enlace 'Adjuntar i signar' visible: {is_visible}")
-    except Exception as e:
-        logging.error(f"Error preparando el enlace: {e}")
-
+    # NOTA: El botón está oculto por CSS, así que no intentamos scroll ni verificar visibilidad
+    # Vamos directamente al click con JavaScript que es lo que funciona
     logging.info("Intentando hacer click en 'Adjuntar i signar'...")
     popup: Optional[Page] = None
     
-    # INTENTO 1: Click normal con timeout aumentado a 15s
+    # INTENTO 1: Click con JavaScript (el método que sabemos que funciona)
+    logging.info("Usando click vía JavaScript (botón oculto por CSS)...")
     try:
-        async with page.expect_popup(timeout=15000) as popup_info:
-            # FORZAMOS EL CLICK: A veces click() normal falla en JS antiguos
-            await docs_link.click(force=True)
-            logging.info("Click en adjuntar enviado (force=True).")
-        popup = await popup_info.value
-        logging.info(f"Popup detectado: {popup.url if popup else 'None'}")
+        async with page.expect_popup(timeout=10000) as popup_info_js:
+            await page.evaluate("document.querySelector('a.docs').click()")
+            logging.info("Click JavaScript ejecutado.")
+        popup = await popup_info_js.value
+        logging.info(f"Popup detectado vía JS: {popup.url if popup else 'None'}")
     except TimeoutError:
-        logging.error("Timeout: El popup de subida no se abrió tras 15s.")
+        logging.error("Timeout: El popup no se abrió tras click JavaScript.")
         popup = None
     except Exception as e:
-        logging.error(f"Error durante el click: {e}")
+        logging.error(f"Error en click JavaScript: {e}")
         popup = None
-
-    # INTENTO 2: Fallback con JavaScript si el click normal falló
-    if popup is None:
-        logging.info("Intentando click vía JavaScript como fallback...")
-        try:
-            async with page.expect_popup(timeout=10000) as popup_info_js:
-                await page.evaluate("document.querySelector('a.docs').click()")
-                logging.info("Click JavaScript ejecutado.")
-            popup = await popup_info_js.value
-            logging.info(f"Popup detectado vía JS: {popup.url if popup else 'None'}")
-        except TimeoutError:
-            logging.error("Timeout en fallback JavaScript: El popup no se abrió.")
-            popup = None
-        except Exception as e:
-            logging.error(f"Error en fallback JavaScript: {e}")
-            popup = None
 
 
     if popup is None:
