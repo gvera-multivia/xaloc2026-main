@@ -112,23 +112,34 @@ async def _wait_upload_ok(popup: Page) -> None:
 
 async def _adjuntar_y_continuar(popup: Page, *, espera_cierre: bool = False) -> None:
     # En popup.html el CTA es un <a> con texto "Clicar per adjuntar"
+    logging.info("Buscando botón 'Clicar per adjuntar'...")
     await _click_link(popup, r"^Clicar per adjuntar")
+    logging.info("Click en 'Clicar per adjuntar' ejecutado")
+    
+    logging.info("Esperando confirmación de subida...")
     await _wait_upload_ok(popup)
+    logging.info("Confirmación de subida recibida")
 
     # Tras adjuntar, aparece "Continuar"
+    logging.info("Buscando botón 'Continuar'...")
     continuar = popup.get_by_role("link", name=re.compile(r"^Continuar$", re.IGNORECASE)).first
     await continuar.wait_for(state="visible", timeout=20000)
+    logging.info("Botón 'Continuar' visible")
 
     if espera_cierre:
+        logging.info("Haciendo click en 'Continuar' y esperando cierre del popup...")
         try:
             async with popup.expect_event("close", timeout=15000):
                 await continuar.click()
+            logging.info("Popup cerrado correctamente")
         except TimeoutError:
+            logging.warning("Timeout esperando cierre del popup, intentando click de nuevo...")
             try:
                 await continuar.click()
             except PlaywrightError:
                 return
     else:
+        logging.info("Haciendo click en 'Continuar'...")
         await continuar.click()
         try:
             await popup.wait_for_load_state("domcontentloaded")
