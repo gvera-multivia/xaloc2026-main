@@ -16,6 +16,7 @@ from core.sqlite_db import SQLiteDatabase
 from core.site_registry import get_site, get_site_controller
 from core.validation import ValidationEngine, DiscrepancyReporter, DocumentDownloader
 from core.attachments import AttachmentDownloader, AttachmentInfo
+from core.client_documentation import RequiredClientDocumentsError, build_required_client_documents_for_payload
 from core.xvia_auth import create_authenticated_session_in_place
 
 # Configuracion de URLs y Directorios
@@ -154,6 +155,30 @@ async def process_task(
             payload=payload,
             auth_session=auth_session,
         )
+
+        # 3.1 AÑADIR DOCUMENTACIÓN OBLIGATORIA DEL CLIENTE (para todas las webs)
+        require_client_docs = (os.getenv("REQUIRE_CLIENT_DOCS") or "1").strip().lower() not in {"0", "false", "no", "off"}
+        merge_client_docs = (os.getenv("CLIENT_DOCS_MERGE") or "1").strip().lower() not in {"0", "false", "no", "off"}
+        if require_client_docs:
+            try:
+                extra_docs = build_required_client_documents_for_payload(
+                    payload,
+                    strict=True,
+                    merge_if_multiple=merge_client_docs,
+                )
+
+                existing = {str(Path(p).resolve()).lower() for p in archivos_para_subir}
+                for p in extra_docs:
+                    key = str(Path(p).resolve()).lower()
+                    if key not in existing:
+                        archivos_para_subir.append(p)
+                        existing.add(key)
+
+                logger.info(
+                    f"Documentación cliente añadida: {len(extra_docs)} archivo(s). Total a subir: {len(archivos_para_subir)}"
+                )
+            except RequiredClientDocumentsError as e:
+                raise ValueError(f"Documentación obligatoria no disponible: {e}") from e
 
         # 4. PREPARAR AUTOMATIZACIÓN
         try:

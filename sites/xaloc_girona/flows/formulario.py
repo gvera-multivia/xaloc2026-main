@@ -165,7 +165,7 @@ async def rellenar_formulario(page: Page, datos: DatosMulta) -> None:
 
     try:
         await page.wait_for_selector("form#formulario", state="attached", timeout=20000)
-        await page.wait_for_selector("#contact21", state="visible", timeout=20000)
+        await page.wait_for_selector("#contact22", state="visible", timeout=20000)
 
         # CAMBIO DE ORDEN: Rellenar sección de mandatario PRIMERO
         # Esto es crítico porque el formulario puede tener validaciones JS que ocultan
@@ -173,12 +173,28 @@ async def rellenar_formulario(page: Page, datos: DatosMulta) -> None:
         if datos.mandatario:
             logging.info("Rellenando sección de mandatario PRIMERO...")
             await _rellenar_mandatario(page, datos.mandatario)
-            # Pequeña espera para que el DOM se actualice tras seleccionar mandatario
+            
+            # CRÍTICO: Después de seleccionar "Representant de Tercers", el formulario
+            # se RECARGA DINÁMICAMENTE. Debemos esperar a que se estabilice.
+            logging.info("Esperando a que el formulario se recargue tras seleccionar mandatario...")
+            
+            # Esperar a que la red se estabilice (indica que la recarga ha terminado)
+            try:
+                await page.wait_for_load_state("networkidle", timeout=10000)
+            except Exception as e:
+                logging.warning(f"Timeout esperando networkidle: {e}")
+            
+            # Esperar explícitamente a que el campo #contact21 vuelva a estar disponible
+            # (este campo desaparece durante la recarga y reaparece después)
+            await page.wait_for_selector("#contact22", state="visible", timeout=15000)
+            logging.info("Formulario recargado y estabilizado")
+            
+            # Pequeña espera adicional para asegurar que el DOM está completamente listo
             await page.wait_for_timeout(1000)
 
         # Ahora rellenamos el resto de campos
         logging.info(f"Email: {datos.email}")
-        await _rellenar_input(page, "#contact21", str(datos.email))
+        await _rellenar_input(page, "#contact22", str(datos.email))
 
         logging.info(f"Denuncia: {datos.num_denuncia}")
         await _rellenar_input(page, "#DinVarNUMDEN", str(datos.num_denuncia))

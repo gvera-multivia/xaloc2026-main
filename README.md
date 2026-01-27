@@ -23,6 +23,18 @@ Para `sync_sqlserver_to_worker_queue.py`, la conexion a SQL Server puede venir p
 
 Alternativamente, puedes seguir usando `--connection-string` o `SQLSERVER_CONNECTION_STRING`.
 
+## Documentación obligatoria del cliente (AUT/DNI/NIE/CIF/ESCR)
+
+El `worker.py` añade automáticamente la documentación del cliente a la lista de archivos a subir (para todos los sites). Busca los documentos en el servidor de documentación y, si es necesario, los sube como varios archivos o los fusiona en un único PDF.
+
+Variables de entorno (opcionales):
+
+- `REQUIRE_CLIENT_DOCS` (default `1`): `0/false` para desactivar.
+- `CLIENT_DOCS_BASE_PATH` (default `\\SERVER-DOC\clientes`): raíz de la carpeta de clientes.
+- `CLIENT_DOCS_MERGE` (default `1`): intenta fusionar varios documentos en un PDF.
+- `PDFTK_PATH` (default `C:\Program Files (x86)\PDFtk\bin\pdftk.exe`): ruta a PDFtk (si no existe, sube por separado).
+- `CLIENT_DOCS_OUTPUT_DIR` (default `tmp/client_docs`): salida de PDFs fusionados.
+
 ## Requisitos
 
 - Python **3.10+** (se usan type hints `str | None`).
