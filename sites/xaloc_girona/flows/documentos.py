@@ -153,23 +153,27 @@ async def _adjuntar_y_continuar(popup: Page, *, espera_cierre: bool = False) -> 
     
     # Espera adicional para asegurar que el botón está completamente listo
     logging.info("Esperando a que el botón 'Continuar' esté completamente listo...")
-    await popup.wait_for_timeout(1500)
+    await popup.wait_for_timeout(2000)  # Aumentado de 1.5s a 2s
 
     if espera_cierre:
-        logging.info("Haciendo click en 'Continuar' y esperando cierre del popup...")
+        logging.info("Ejecutando función continuar() vía JavaScript...")
         try:
             async with popup.expect_event("close", timeout=15000):
-                await continuar.click()
+                # CRÍTICO: Ejecutar directamente la función JavaScript continuar()
+                # en lugar de hacer clic en el elemento, porque el onclick no se dispara
+                await popup.evaluate("continuar()")
+                logging.info("Función continuar() ejecutada")
             logging.info("Popup cerrado correctamente")
         except TimeoutError:
-            logging.warning("Timeout esperando cierre del popup, intentando click de nuevo...")
+            logging.warning("Timeout esperando cierre del popup, intentando de nuevo...")
             try:
-                await continuar.click()
+                await popup.evaluate("continuar()")
+                await popup.wait_for_timeout(1000)
             except PlaywrightError:
                 return
     else:
-        logging.info("Haciendo click en 'Continuar'...")
-        await continuar.click()
+        logging.info("Ejecutando función continuar() vía JavaScript...")
+        await popup.evaluate("continuar()")
         try:
             await popup.wait_for_load_state("domcontentloaded")
         except PlaywrightError:
