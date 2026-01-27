@@ -99,84 +99,66 @@ async def _rellenar_input_mayusculas(page: Page, selector: str, valor: str) -> N
 
 
 async def _rellenar_persona_juridica(page: Page, m: DatosMandatario) -> None:
-    """Rellena campos para persona jurídica (CIF + Razón Social)."""
     logging.info("Tipo de persona: JURÍDICA")
     
-    # Click en radio "RJ" (Persona Jurídica)
-    radio_rj = page.locator("#tipoPersonaRepresented[value='RJ']")
+    # 1. Selector específico sin usar el ID '#' para evitar duplicados
+    selector_rj = "input[name='tipoPersonaRepresented'][value='RJ']"
+    radio_rj = page.locator(selector_rj)
+    
+    # Esperamos y clicamos una sola vez
     await radio_rj.wait_for(state="visible", timeout=10000)
     await radio_rj.click()
     await page.wait_for_timeout(DELAY_MS)
     
-    # CIF - Documento (primeros 8 caracteres)
+    # 2. Rellenar campos (estos IDs sí suelen ser únicos)
     await _rellenar_input_mayusculas(page, "#RepCIF", m.cif_documento or "")
-    
-    # CIF - Dígito de control (último carácter)
     await _rellenar_input_mayusculas(page, "#RepCIFCtrlDigit", m.cif_control or "")
-    
-    # Razón Social
     await _rellenar_input_mayusculas(page, "#RepRazonSoc", m.razon_social or "")
 
 
 async def _rellenar_persona_fisica(page: Page, m: DatosMandatario) -> None:
-    """Rellena campos para persona física (NIF/NIE + Nombre + Apellidos)."""
     logging.info("Tipo de persona: FÍSICA")
     
-    # Click en radio "RF" (Persona Física)
-    radio_rf = page.locator("#tipoPersonaRepresented[value='RF']")
+    # 1. Selector específico sin usar el ID '#' 
+    selector_rf = "input[name='tipoPersonaRepresented'][value='RF']"
+    radio_rf = page.locator(selector_rf)
+    
     await radio_rf.wait_for(state="visible", timeout=10000)
     await radio_rf.click()
     await page.wait_for_timeout(DELAY_MS)
     
-    # Seleccionar tipo de documento (NIF o PS)
+    # 2. Tipo de documento y datos personales
     tipo_doc_select = page.locator("#RepTipoDoc")
     await tipo_doc_select.wait_for(state="visible", timeout=10000)
     await tipo_doc_select.select_option(value=m.tipo_doc or "NIF")
     await page.wait_for_timeout(DELAY_MS)
     await tipo_doc_select.dispatch_event("change")
     
-    # Documento - Número (primeros 8 caracteres)
     await _rellenar_input_mayusculas(page, "#RepDocuNum", m.doc_numero or "")
-    
-    # Documento - Dígito de control (último carácter)
     await _rellenar_input_mayusculas(page, "#RepDigito", m.doc_control or "")
-    
-    # Nombre
     await _rellenar_input_mayusculas(page, "#RepNombre", m.nombre or "")
-    
-    # Primer Apellido
     await _rellenar_input_mayusculas(page, "#RepApellido1", m.apellido1 or "")
-    
-    # Segundo Apellido
     await _rellenar_input_mayusculas(page, "#RepApellido2", m.apellido2 or "")
 
 
 async def _rellenar_mandatario(page: Page, mandatario: DatosMandatario) -> None:
-    """
-    Rellena la sección de mandatario (Representante de Terceros).
-    
-    Pasos:
-    1. Seleccionar "Representant de Tercers" (tipoActuacion="RT")
-    2. Según tipo_persona, hacer click en el radio correspondiente
-    3. Rellenar los campos de identificación y datos personales
-    4. Ejecutar eventos blur/change para triggers JS del formulario
-    """
     logging.info("Rellenando sección de mandatario...")
     
-    # 1. CORRECCIÓN: Seleccionar Radio "Representant de Tercers"
-    # tipoActuacion es un grupo de radio buttons, no un select
+    # CORRECCIÓN: Buscamos el radio 'RT' de forma única
     selector_rt = "input[name='tipoActuacion'][value='RT']"
-    await page.wait_for_selector(selector_rt, state="visible", timeout=10000)
-    await page.locator(selector_rt).click()
+    radio_rt = page.locator(selector_rt)
+    
+    await radio_rt.wait_for(state="visible", timeout=10000)
+    await radio_rt.click()
     await page.wait_for_timeout(DELAY_MS)
     
+    # Llamamos a la sub-función correspondiente
     if mandatario.tipo_persona == "JURIDICA":
         await _rellenar_persona_juridica(page, mandatario)
     else:
         await _rellenar_persona_fisica(page, mandatario)
-    
-    logging.info("Mandatario completado")
 
+    logging.info("Mandatario completado")
 
 async def rellenar_formulario(page: Page, datos: DatosMulta) -> None:
     logging.info("Iniciando rellenado del formulario STA")
