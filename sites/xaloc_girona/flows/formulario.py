@@ -164,8 +164,9 @@ async def rellenar_formulario(page: Page, datos: DatosMulta) -> None:
     logging.info("Iniciando rellenado del formulario STA")
 
     try:
+        # Solo esperamos que el formulario esté presente, NO esperamos ningún campo específico
+        # porque los IDs de campos cambian después de seleccionar "Representant de Tercers"
         await page.wait_for_selector("form#formulario", state="attached", timeout=20000)
-        await page.wait_for_selector("#contact22", state="visible", timeout=20000)
 
         # CAMBIO DE ORDEN: Rellenar sección de mandatario PRIMERO
         # Esto es crítico porque el formulario puede tener validaciones JS que ocultan
@@ -184,8 +185,8 @@ async def rellenar_formulario(page: Page, datos: DatosMulta) -> None:
             except Exception as e:
                 logging.warning(f"Timeout esperando networkidle: {e}")
             
-            # Esperar explícitamente a que el campo #contact21 vuelva a estar disponible
-            # (este campo desaparece durante la recarga y reaparece después)
+            # Esperar explícitamente a que el campo #contact22 esté disponible
+            # (el ID cambia de #contact21 a #contact22 después de seleccionar mandatario)
             await page.wait_for_selector("#contact22", state="visible", timeout=15000)
             logging.info("Formulario recargado y estabilizado")
             
