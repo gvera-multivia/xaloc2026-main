@@ -23,9 +23,15 @@ Para `sync_sqlserver_to_worker_queue.py`, la conexion a SQL Server puede venir p
 
 Alternativamente, puedes seguir usando `--connection-string` o `SQLSERVER_CONNECTION_STRING`.
 
-## Documentación obligatoria del cliente (AUT/DNI/NIE/CIF/ESCR)
+## Documentación obligatoria del cliente (AUT + identidad)
 
 El `worker.py` añade automáticamente la documentación del cliente a la lista de archivos a subir (para todos los sites). Busca los documentos en el servidor de documentación y, si es necesario, los sube como varios archivos o los fusiona en un único PDF.
+
+Reglas (por defecto):
+
+- Particular: `AUT` + (`DNI` o `NIE`)
+- Empresa: `AUT` + (`CIF` o `NIF`) + (`DNI` o `NIE`)
+  - `ESCR` es opcional (se puede forzar con `CLIENT_DOCS_REQUIRE_ESCR=1`)
 
 Variables de entorno (opcionales):
 
@@ -34,6 +40,7 @@ Variables de entorno (opcionales):
 - `CLIENT_DOCS_MERGE` (default `1`): intenta fusionar varios documentos en un PDF.
 - `PDFTK_PATH` (default `C:\Program Files (x86)\PDFtk\bin\pdftk.exe`): ruta a PDFtk (si no existe, sube por separado).
 - `CLIENT_DOCS_OUTPUT_DIR` (default `tmp/client_docs`): salida de PDFs fusionados.
+- `CLIENT_DOCS_REQUIRE_ESCR` (default `0`): fuerza exigir `ESCR` para empresas.
 
 ## Requisitos
 

@@ -192,7 +192,25 @@ def select_required_client_documents(
     - Si faltan términos, lanza RequiredClientDocumentsError (si strict=True).
     - Si hay múltiples ficheros y merge_if_multiple=True, intenta fusionarlos con PDFtk si existe.
     """
-    terminos_requeridos = ["AUT", "CIF", "DNI", "NIF", "ESCR"] if is_company else ["AUT", "DNI", "NIE"]
+    # Reglas:
+    # - Particular: AUT + (DNI o NIE)
+    # - Empresa: AUT + (CIF o NIF) + (DNI o NIE)
+    #   (ESCR se considera opcional por defecto; si se quiere forzar, usar CLIENT_DOCS_REQUIRE_ESCR=1)
+    require_escr = (os.getenv("CLIENT_DOCS_REQUIRE_ESCR") or "0").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+    required_groups: list[set[str]]
+    optional_terms: set[str] = set()
+    if is_company:
+        required_groups = [{"AUT"}, {"CIF", "NIF"}, {"DNI", "NIE"}]
+        if require_escr:
+            required_groups.append({"ESCR"})
+        else:
+            optional_terms.add("ESCR")
+    else:
+        required_groups = [{"AUT"}, {"DNI", "NIE"}]
+
+    # Términos a detectar en nombres (requeridos + opcionales)
+    terminos_requeridos = sorted({t for g in required_groups for t in g} | optional_terms)
 
     archivos_encontrados: dict[str, dict | None] = defaultdict(lambda: None)
     archivo_principal: dict | None = None
@@ -240,11 +258,10 @@ def select_required_client_documents(
                     archivos_encontrados.get("AUT"),
                     {"path": file_path, "last_modified": last_modified},
                 )
-        elif is_company and ("cif" in file_name_lower or "nif" in file_name_lower):
-            archivos_encontrados["CIF"] = _pick_newer(
-                archivos_encontrados.get("CIF"),
-                {"path": file_path, "last_modified": last_modified},
-            )
+        elif is_company and "cif" in file_name_lower:
+            archivos_encontrados["CIF"] = _pick_newer(archivos_encontrados.get("CIF"), {"path": file_path, "last_modified": last_modified})
+        elif is_company and "nif" in file_name_lower:
+            archivos_encontrados["NIF"] = _pick_newer(archivos_encontrados.get("NIF"), {"path": file_path, "last_modified": last_modified})
         elif "dni" in file_name_lower:
             archivos_encontrados["DNI"] = _pick_newer(
                 archivos_encontrados.get("DNI"),
@@ -275,9 +292,16 @@ def select_required_client_documents(
                 covered_terms.append(term)
 
     missing_terms = [t for t in terminos_requeridos if t not in set(covered_terms)]
-    if missing_terms and strict:
+    # Validación por grupos (permite OR, p.ej. DNI o NIE)
+    missing_requirements: list[str] = []
+    covered_set = set(covered_terms)
+    for group in required_groups:
+        if not (covered_set & group):
+            missing_requirements.append(" o ".join(sorted(group)))
+
+    if missing_requirements and strict:
         raise RequiredClientDocumentsError(
-            f"Faltan documentos obligatorios ({', '.join(missing_terms)}) en {ruta_docu}."
+            f"Faltan documentos obligatorios ({', '.join(missing_requirements)}) en {ruta_docu}."
         )
 
     # Fusionar si procede (mejor subir 1 PDF que varios, si el entorno lo permite)
@@ -297,7 +321,7 @@ def select_required_client_documents(
     return SelectedClientDocuments(
         files_to_upload=archivos_para_subir,
         covered_terms=covered_terms,
-        missing_terms=missing_terms,
+        missing_terms=missing_requirements,
     )
 
 

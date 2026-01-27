@@ -33,7 +33,7 @@ class TestClientDocumentation(unittest.TestCase):
         root = self._make_tmp_dir()
         try:
             (root / "AUT.pdf").write_bytes(b"%PDF-1.4 fake")
-            # Falta DNI y NIE
+            # Falta DNI o NIE
             with self.assertRaises(RequiredClientDocumentsError):
                 select_required_client_documents(
                     ruta_docu=root,
