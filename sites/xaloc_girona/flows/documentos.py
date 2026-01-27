@@ -171,28 +171,28 @@ async def _adjuntar_y_continuar(popup: Page, *, espera_cierre: bool = False) -> 
         await continuar.wait_for(state="visible", timeout=5000)
         logging.info("Botón 'Continuar' visible")
         
-        # Pequeña espera para que el botón esté listo (500ms en lugar de 5s)
+        # Pequeña espera para que el botón esté listo
         await popup.wait_for_timeout(500)
 
         if espera_cierre:
-            logging.info("Ejecutando función continuar() vía JavaScript...")
+            logging.info("Haciendo clic FÍSICO en el botón 'Continuar'...")
             try:
                 async with popup.expect_event("close", timeout=15000):
-                    # CRÍTICO: Ejecutar directamente la función JavaScript continuar()
-                    # en lugar de hacer clic en el elemento, porque el onclick no se dispara
-                    await popup.evaluate("continuar()")
-                    logging.info("Función continuar() ejecutada")
+                    # CRÍTICO: Hacer clic FÍSICO en el botón para que el onclick se dispare
+                    # y la comunicación con opener funcione correctamente
+                    await continuar.click(force=True)
+                    logging.info("Clic en 'Continuar' ejecutado")
                 logging.info("Popup cerrado correctamente")
             except TimeoutError:
                 logging.warning("Timeout esperando cierre del popup, intentando de nuevo...")
                 try:
-                    await popup.evaluate("continuar()")
+                    await continuar.click(force=True)
                     await popup.wait_for_timeout(1000)
                 except PlaywrightError:
                     return
         else:
-            logging.info("Ejecutando función continuar() vía JavaScript...")
-            await popup.evaluate("continuar()")
+            logging.info("Haciendo clic FÍSICO en el botón 'Continuar'...")
+            await continuar.click(force=True)
             try:
                 await popup.wait_for_load_state("domcontentloaded")
             except PlaywrightError:
