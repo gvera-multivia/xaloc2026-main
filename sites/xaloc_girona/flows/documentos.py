@@ -178,31 +178,70 @@ async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]
             pass
         return
 
+    # DIAGNÓSTICO: Buscar el enlace de adjuntar documentos
+    logging.info("Buscando enlace 'Adjuntar i signar' (a.docs)...")
     docs_link = page.locator("a.docs").first
-    if await docs_link.count() == 0:
+    
+    link_count = await docs_link.count()
+    logging.info(f"Enlaces encontrados con selector 'a.docs': {link_count}")
+    
+    if link_count == 0:
          logging.warning("No se encuentra el enlace de adjuntar documentos (a.docs)")
-         # Try to debug/dump
-         try:
-             content = await page.content()
-             logging.debug(f"HTML Content snip: {content[:500]}")
-         except Exception as e:
-             logging.error(f"No se pudo obtener el contenido de la página: {e}")
-         return
+         # Try alternative selectors
+         logging.info("Intentando selector alternativo: a.boton-style.docs")
+         docs_link = page.locator("a.boton-style.docs").first
+         link_count = await docs_link.count()
+         logging.info(f"Enlaces encontrados con selector alternativo: {link_count}")
+         
+         if link_count == 0:
+             logging.error("CRÍTICO: No se encuentra ningún enlace de adjuntar documentos")
+             # Try to debug/dump
+             try:
+                 content = await page.content()
+                 logging.debug(f"HTML Content snip: {content[:1000]}")
+                 # Save full HTML for debugging
+                 with open("debug_page_content.html", "w", encoding="utf-8") as f:
+                     f.write(content)
+                 logging.info("Contenido HTML guardado en debug_page_content.html")
+             except Exception as e:
+                 logging.error(f"No se pudo obtener el contenido de la página: {e}")
+             return
 
+    # Check if element is visible
+    try:
+        is_visible = await docs_link.is_visible()
+        logging.info(f"Enlace 'Adjuntar i signar' visible: {is_visible}")
+        
+        if not is_visible:
+            logging.warning("El enlace existe pero NO es visible. Intentando scroll...")
+            await docs_link.scroll_into_view_if_needed()
+            await page.wait_for_timeout(500)
+    except Exception as e:
+        logging.error(f"Error verificando visibilidad del enlace: {e}")
+
+    logging.info("Intentando hacer click en 'Adjuntar i signar'...")
     popup: Optional[Page] = None
     try:
         async with page.expect_popup(timeout=7000) as popup_info:
             await docs_link.click()
+            logging.info("Click ejecutado, esperando popup...")
         popup = await popup_info.value
+        logging.info(f"Popup detectado: {popup.url if popup else 'None'}")
     except TimeoutError:
+        logging.warning("Timeout esperando popup después del click")
+        popup = None
+    except Exception as e:
+        logging.error(f"Error durante el click o espera de popup: {e}")
         popup = None
 
     if popup is None:
+        logging.info("No se detectó popup, intentando subida en la misma página...")
         # Fallback: si no hay popup, intentamos en la misma página.
         await page.wait_for_timeout(DELAY_MS)
         await _seleccionar_archivos(page, archivos)
         await _adjuntar_y_continuar(page, espera_cierre=False)
     else:
+        logging.info("Popup detectado correctamente, procediendo con subida...")
         try:
             await popup.wait_for_load_state("domcontentloaded")
         except PlaywrightError:
