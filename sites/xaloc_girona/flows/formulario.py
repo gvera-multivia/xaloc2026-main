@@ -209,24 +209,38 @@ async def rellenar_formulario(page: Page, datos: DatosMulta) -> None:
         logging.info("Rellenando motivos (TinyMCE)...")
         await _rellenar_tinymce_motius(page, str(datos.motivos))
 
-        # CRÍTICO: Después de rellenar todos los campos, debemos asegurar que el botón
-        # "Adjuntar i signar" se vuelva visible. El JavaScript del formulario puede
-        # necesitar que hagamos scroll o que esperemos a que las validaciones terminen.
-        logging.info("Esperando a que las validaciones del formulario completen...")
+        # CRÍTICO: Después de rellenar todos los campos, el botón "Adjuntar i signar"
+        # puede estar visible pero NO clicable debido a la recarga AJAX del mandatario.
+        # Debemos esperar a que el formulario se estabilice completamente.
+        logging.info("Esperando estabilización final del formulario...")
         
-        # 1. Hacer scroll hasta el final del formulario para disparar validaciones
-        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-        await page.wait_for_timeout(1000)
-        
-        # 2. Esperar a que el botón de adjuntar se vuelva visible
+        # 1. Esperar a que desaparezca cualquier overlay de carga si existe
         try:
-            await page.wait_for_selector("a.docs", state="visible", timeout=5000)
-            logging.info("Botón 'Adjuntar i signar' ahora visible")
+            await page.wait_for_load_state("networkidle", timeout=5000)
         except Exception as e:
-            logging.warning(f"Botón 'Adjuntar i signar' no visible después de espera: {e}")
-            # Intentar forzar visibilidad haciendo clic en el último campo rellenado
-            await page.locator("#DinVarNUMEXP").click()
-            await page.wait_for_timeout(500)
+            logging.warning(f"Timeout esperando networkidle final: {e}")
+        
+        # 2. Hacer scroll hasta el final del formulario para disparar validaciones
+        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        await page.wait_for_timeout(500)
+        
+        # 3. Asegurarnos de que el botón de adjuntar esté realmente visible
+        try:
+            await page.wait_for_selector("a.docs", state="visible", timeout=10000)
+            logging.info("Botón 'Adjuntar i signar' visible y listo")
+        except Exception as e:
+            logging.warning(f"Botón 'Adjuntar i signar' no visible: {e}")
+            # Fallback: hacer clic en el último campo para forzar validación
+            try:
+                await page.locator("#DinVarNUMEXP").click()
+                await page.wait_for_timeout(500)
+            except Exception:
+                pass
+        
+        # 4. Un pequeño respiro final para que el JS de la página se asiente
+        await page.wait_for_timeout(1500)
+        
+        logging.info("Formulario completado y listo para adjuntar.")
 
         # NOTA: La subida de archivos se hace en una fase separada después de rellenar el formulario.
         # Esto evita problemas de sincronización con el navegador.
