@@ -43,17 +43,47 @@ async def _siguiente_input_vacio(popup: Page) -> Optional[int]:
 
 
 async def _seleccionar_archivos(popup: Page, archivos: List[Path]) -> None:
-    await popup.wait_for_selector("input[type='file']", state="attached", timeout=20000)
-    for archivo in archivos:
-        idx = await _siguiente_input_vacio(popup)
-        if idx is None:
-            raise RuntimeError("No hay más inputs de archivo libres en el popup.")
-        await popup.locator("input[type='file']").nth(idx).set_input_files(archivo)
-        try:
-            await popup.wait_for_timeout(DELAY_MS)
-        except PlaywrightError:
-            return
+    # 1. Esperar a que el popup cargue realmente
+    await popup.wait_for_load_state("networkidle")
+    
+    # 2. Intentar encontrar el frame de subida (STA suele usar frames)
+    # Buscamos en todos los frames disponibles si el input no está en el principal
+    target = popup
+    if len(popup.frames) > 1:
+        for frame in popup.frames:
+            if "upload" in frame.url.lower() or "adjuntar" in frame.url.lower():
+                target = frame
+                logging.info(f"Frame de subida detectado: {frame.url}")
+                break
 
+    # 3. Esperar al selector con un timeout generoso
+    try:
+        selector = "input[type='file']"
+        await target.wait_for_selector(selector, state="attached", timeout=30000)
+    except TimeoutError:
+        logging.error("No se encontró el input de archivos. ¿El popup está en blanco?")
+        # Debug: Captura de pantalla del popup para ver qué hay realmente
+        await popup.screenshot(path="debug_popup_error.png")
+        raise
+
+    # 4. Subida de archivos
+    for archivo in archivos:
+        # Buscamos el primer input que esté vacío
+        inputs = target.locator("input[type='file']")
+        count = await inputs.count()
+        
+        input_index = None
+        for i in range(count):
+            vacio = await inputs.nth(i).evaluate("(el) => !el.files || el.files.length === 0")
+            if vacio:
+                input_index = i
+                break
+        
+        if input_index is None:
+            raise RuntimeError("No hay más huecos libres para subir archivos en este popup.")
+            
+        await inputs.nth(input_index).set_input_files(archivo)
+        await popup.wait_for_timeout(DELAY_MS)
 
 async def _click_link(popup: Page, patron: str) -> None:
     link = popup.get_by_role("link", name=re.compile(patron, re.IGNORECASE)).first
