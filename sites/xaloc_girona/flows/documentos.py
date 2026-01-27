@@ -166,6 +166,30 @@ async def _adjuntar_y_continuar(popup: Page, *, espera_cierre: bool = False) -> 
     # Hacer clic en "Continuar" INMEDIATAMENTE para guardar los documentos
     logging.info("Buscando botón 'Continuar' inmediatamente...")
     
+    # DIAGNÓSTICO: Verificar que los archivos estén correctamente en los inputs
+    try:
+        file_values = await popup.evaluate("""() => {
+            const inputs = document.querySelectorAll('input[type="file"]');
+            const values = [];
+            inputs.forEach((input, i) => {
+                values.push({
+                    index: i,
+                    value: input.value,
+                    files: input.files ? input.files.length : 0
+                });
+            });
+            return values;
+        }""")
+        logging.info(f"Estado de inputs de archivo: {file_values}")
+        
+        # Verificar que al menos un input tenga archivos
+        has_files = any(f['files'] > 0 for f in file_values)
+        if not has_files:
+            logging.error("¡CRÍTICO! Los inputs de archivo están vacíos antes de hacer clic en Continuar")
+            logging.error("Esto explica por qué los documentos no se guardan")
+    except Exception as e:
+        logging.warning(f"No se pudo verificar el estado de los inputs: {e}")
+    
     try:
         continuar = popup.get_by_role("link", name=re.compile(r"^Continuar$", re.IGNORECASE)).first
         await continuar.wait_for(state="visible", timeout=5000)
