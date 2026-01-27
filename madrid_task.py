@@ -1,4 +1,4 @@
-﻿import argparse
+import argparse
 import json
 import os
 from pydoc import html
@@ -23,16 +23,15 @@ SELECT
     rs.idRecurso,
     rs.Expedient,
     rs.FaseProcedimiento,
-    e.matricula,       -- Ahora viene de la tabla expedientes
+    e.matricula,
     rs.automatic_id,
     c.email,
     att.id AS adjunto_id,
     att.Filename AS adjunto_filename
 FROM Recursos.RecursosExp rs
 INNER JOIN clientes c ON rs.numclient = c.numerocliente
-INNER JOIN expedientes e ON rs.idExp = e.idexpediente  -- Join para obtener la matrícula
+INNER JOIN expedientes e ON rs.idExp = e.idexpediente
 LEFT JOIN attachments_resource_documents att ON rs.automatic_id = att.automatic_id
-WHERE rs.idExp = ?
 """
 
 
@@ -116,12 +115,12 @@ def get_motivos_por_fase(
     return text
 
 def build_query(*, fase: str | None) -> tuple[str, list[Any]]:
-    """Construye la query filtrando por estado pendiente y tipo de expediente."""
+    """Construye la query filtrando por estado pendiente y tipo de expediente para Madrid."""
     query = BASE_SELECT_QUERY.strip()
     params: list[Any] = []
 
     where_clauses = [
-        "rs.Organisme LIKE '%xaloc%'",
+        "rs.Organisme LIKE '%madrid%'",  # Filtro específico para Madrid
         "rs.Estado = 0",
         "rs.TExp IN (2, 3)",
         "rs.idRecurso IS NOT NULL",
@@ -156,7 +155,7 @@ def _normalize_plate(value: Any) -> str:
     return cleaned
 
 
-def _map_xaloc_payload(
+def _map_madrid_payload(
     row: dict[str, Any],
     motivos: str,
     adjuntos_list: list | None = None,
@@ -167,7 +166,7 @@ def _map_xaloc_payload(
         "idRecurso": row.get("idRecurso"),
         "user_email": _clean_str(row.get("email")),
         "denuncia_num": expediente,
-        "plate_number": _normalize_plate(row.get("Matricula")),
+        "plate_number": _normalize_plate(row.get("matricula")),
         "expediente_num": expediente,
         "motivos": motivos,
         "adjuntos": adjuntos_list or [],
@@ -213,7 +212,7 @@ def _insert_task(db_path: str, payload: dict[str, Any]) -> int:
         cur = conn.cursor()
         cur.execute(
             "INSERT INTO tramite_queue (site_id, protocol, payload) VALUES (?, ?, ?)",
-            ("xaloc_girona", None, json.dumps(payload, ensure_ascii=False, default=str)),
+            ("madrid", None, json.dumps(payload, ensure_ascii=False, default=str)),
         )
         conn.commit()
         return int(cur.lastrowid)
@@ -250,7 +249,7 @@ def _build_sqlserver_connection_string(
 
     if not (server and database):
         raise ValueError(
-            "Faltan datos de conexiÃ³n. Define SQLSERVER_SERVER y SQLSERVER_DATABASE (o SQLSERVER_CONNECTION_STRING)."
+            "Faltan datos de conexión. Define SQLSERVER_SERVER y SQLSERVER_DATABASE (o SQLSERVER_CONNECTION_STRING)."
         )
 
     parts = [
@@ -274,7 +273,7 @@ def _build_sqlserver_connection_string(
 
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Sincronizador exclusivo para XALOC GIRONA con agrupacion de adjuntos."
+        description="Sincronizador exclusivo para MADRID con agrupacion de adjuntos."
     )
     parser.add_argument(
         "--connection-string",
@@ -301,7 +300,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         connection_string = _build_sqlserver_connection_string(direct=args.connection_string)
     except Exception as e:
         print(
-            f"ERROR: No se pudo construir la conexiÃ³n a SQL Server: {e}",
+            f"ERROR: No se pudo construir la conexión a SQL Server: {e}",
             file=sys.stderr,
         )
         return 2
@@ -380,7 +379,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                     config_map=motivos_config,
                 )
 
-                payload = _map_xaloc_payload(
+                payload = _map_madrid_payload(
                     info["row"],
                     motivos_text,
                     adjuntos_list=info["adjuntos"],
@@ -406,7 +405,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     finally:
         conn.close()
 
-    print("\n=== Sincronizacion XALOC GIRONA (Con Adjuntos) ===")
+    print("\n=== Sincronizacion MADRID (Con Adjuntos) ===")
     print(f"- Filas SQL Server leidas: {scanned}")
     print(f"- Recursos unicos encontrados: {len(tasks_data)}")
     print(f"- Tareas mapeadas/encoladas: {matched}")

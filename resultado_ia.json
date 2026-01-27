@@ -1,0 +1,1002 @@
+[
+    {
+        "id": 1,
+        "Original": "C/ SANTA ANA, 22, , 3, IZQUIERDA, 48190, SOPUERTA, VIZCAYA",
+        "via": "CALLE",
+        "calle": "SANTA ANA",
+        "numero": "22",
+        "escalera": "",
+        "planta": "3",
+        "puerta": "IZQUIERDA"
+    },
+    {
+        "id": 2,
+        "Original": "Juhkentali Nº8 Kesklinna, , , , , 10132, ESTONIA, ESTONIA",
+        "via": "",
+        "calle": "Juhkentali",
+        "numero": "8",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 3,
+        "Original": "CALLE CAMP LLARG, 2, , , , , 8740, SANT ANDREU DE LA BARCA, BARCELONA",
+        "via": "CALLE",
+        "calle": "CAMP LLARG",
+        "numero": "2",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 4,
+        "Original": "CALLE CAMP LLARG, 2, , , , , 8740, SANT ANDREU DE LA BARCA, BARCELONA",
+        "via": "CALLE",
+        "calle": "CAMP LLARG",
+        "numero": "2",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 5,
+        "Original": "LUGAR MASIA QUITERI, S/N, , , , , 25613, CAMARASA, LLEIDA",
+        "via": "LUGAR",
+        "calle": "MASIA QUITERI",
+        "numero": "",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 6,
+        "Original": "CALLE LERMANDABIDEA, 9 - B, , , , , 1015, VITORIA-GASTEIZ, ALAVA",
+        "via": "CALLE",
+        "calle": "LERMANDABIDEA",
+        "numero": "9",
+        "escalera": "",
+        "planta": "",
+        "puerta": "B"
+    },
+    {
+        "id": 7,
+        "Original": "CALLE DEL PUERTO DE DESPEÑAPERROS, 807, , , , , 28729, VENTURADA, MADRID",
+        "via": "CALLE",
+        "calle": "DEL PUERTO DE DESPEÑAPERROS",
+        "numero": "807",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 8,
+        "Original": "CALLE CATALUNYA, 28, , , , , 8401, GRANOLLERS, BARCELONA",
+        "via": "CALLE",
+        "calle": "CATALUNYA",
+        "numero": "28",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 9,
+        "Original": "CALLE DE CALASSANÇ MARQUES, 33 - PISO 1 PTA. 2, , , , , 8303, MATARO, BARCELONA",
+        "via": "CALLE",
+        "calle": "DE CALASSANÇ MARQUES",
+        "numero": "33",
+        "escalera": "",
+        "planta": "1",
+        "puerta": "2"
+    },
+    {
+        "id": 10,
+        "Original": "C/ IGNACIO IGLESIAS Nº 13 NAVE 8, , , , , 8940, CORNELLA DE LLOBREGAT, BARCELONA",
+        "via": "CALLE",
+        "calle": "IGNACIO IGLESIAS",
+        "numero": "13",
+        "escalera": "",
+        "planta": "",
+        "puerta": "NAVE 8"
+    },
+    {
+        "id": 11,
+        "Original": "C/ IGNACIO IGLESIAS Nº 13 NAVE 8, , , , , 8940, CORNELLA DE LLOBREGAT, BARCELONA",
+        "via": "CALLE",
+        "calle": "IGNACIO IGLESIAS",
+        "numero": "13",
+        "escalera": "",
+        "planta": "",
+        "puerta": "NAVE 8"
+    },
+    {
+        "id": 12,
+        "Original": "C/ IGNACIO IGLESIAS Nº 13 NAVE 8, , , , , 8940, CORNELLA DE LLOBREGAT, BARCELONA",
+        "via": "CALLE",
+        "calle": "IGNACIO IGLESIAS",
+        "numero": "13",
+        "escalera": "",
+        "planta": "",
+        "puerta": "NAVE 8"
+    },
+    {
+        "id": 13,
+        "Original": "C/ IGNACIO IGLESIAS Nº 13 NAVE 8, , , , , 8940, CORNELLA DE LLOBREGAT, BARCELONA",
+        "via": "CALLE",
+        "calle": "IGNACIO IGLESIAS",
+        "numero": "13",
+        "escalera": "",
+        "planta": "",
+        "puerta": "NAVE 8"
+    },
+    {
+        "id": 14,
+        "Original": "CALLE QUINTANA I MILLAS, 2 - NAV G PLANTA 1, , , , , 8940, CORNELLA DE LLOBREGAT, BARCELONA",
+        "via": "CALLE",
+        "calle": "QUINTANA I MILLAS",
+        "numero": "2",
+        "escalera": "",
+        "planta": "1",
+        "puerta": "NAV G"
+    },
+    {
+        "id": 15,
+        "Original": "CASTOR URB LA CIERVA, 53, , , , 41410, CARMONA, SEVILLA",
+        "via": "",
+        "calle": "CASTOR URB LA CIERVA",
+        "numero": "53",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 16,
+        "Original": "AV. GENERALITAT, 35  POL. IND FONSANTA, , , , , 8970, SANT JOAN DESPI, BARCELONA",
+        "via": "AVENIDA",
+        "calle": "GENERALITAT",
+        "numero": "35",
+        "escalera": "",
+        "planta": "",
+        "puerta": "POL. IND FONSANTA"
+    },
+    {
+        "id": 17,
+        "Original": "AV. GENERALITAT, 35  POL. IND FONSANTA, , , , , 8970, SANT JOAN DESPI, BARCELONA",
+        "via": "AVENIDA",
+        "calle": "GENERALITAT",
+        "numero": "35",
+        "escalera": "",
+        "planta": "",
+        "puerta": "POL. IND FONSANTA"
+    },
+    {
+        "id": 18,
+        "Original": "AV. GENERALITAT, 35  POL. IND FONSANTA, , , , , 8970, SANT JOAN DESPI, BARCELONA",
+        "via": "AVENIDA",
+        "calle": "GENERALITAT",
+        "numero": "35",
+        "escalera": "",
+        "planta": "",
+        "puerta": "POL. IND FONSANTA"
+    },
+    {
+        "id": 19,
+        "Original": "PLAZA POETA SITJA, 4, PLATJA D ARO, , , , , 17250, PLATJA D ARO, GIRONA",
+        "via": "PLAZA",
+        "calle": "POETA SITJA",
+        "numero": "4",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 20,
+        "Original": "GRAN DE LA SAGRERA, 175, , , , 8027, BARCELONA, BARCELONA",
+        "via": "",
+        "calle": "GRAN DE LA SAGRERA",
+        "numero": "175",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 21,
+        "Original": "Av. DELS ALPS, 48, , , , 8940, CORNELLA DE LLOBREGAT, BARCELONA",
+        "via": "AVENIDA",
+        "calle": "DELS ALPS",
+        "numero": "48",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 22,
+        "Original": "Av. DELS ALPS,, 48, , , , 8940, CORNELLA DE LLOBREGAT, BARCELONA",
+        "via": "AVENIDA",
+        "calle": "DELS ALPS",
+        "numero": "48",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 23,
+        "Original": "CALLE HERCEGOVINA, 14, , , 4, 2, 8006, BARCELONA, BARCELONA",
+        "via": "CALLE",
+        "calle": "HERCEGOVINA",
+        "numero": "14",
+        "escalera": "",
+        "planta": "4",
+        "puerta": "2"
+    },
+    {
+        "id": 24,
+        "Original": "MONTSACOPA, 3, , , , , 17800, OLOT, GIRONA",
+        "via": "",
+        "calle": "MONTSACOPA",
+        "numero": "3",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 25,
+        "Original": "CARRENCA 29   1º2, , , , , 8017, BARCELONA, BARCELONA",
+        "via": "CALLE",
+        "calle": "CARRENCA",
+        "numero": "",
+        "escalera": "",
+        "planta": "1",
+        "puerta": "2"
+    },
+    {
+        "id": 26,
+        "Original": "CALLE BARRANQUET, 8, , , , , 43560, LA SENIA, TARRAGONA",
+        "via": "CALLE",
+        "calle": "BARRANQUET",
+        "numero": "8",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 27,
+        "Original": "CALLE CASTERAS, 34, , BJ, , 8028, BARCELONA, BARCELONA",
+        "via": "CALLE",
+        "calle": "CASTERAS",
+        "numero": "34",
+        "escalera": "",
+        "planta": "BAJO",
+        "puerta": ""
+    },
+    {
+        "id": 28,
+        "Original": "POMPEU FABRA, 56, , URBANIZACION, , 8191, RUBI, BARCELONA",
+        "via": "",
+        "calle": "POMPEU FABRA",
+        "numero": "56",
+        "escalera": "",
+        "planta": "PRINCIPAL",
+        "puerta": ""
+    },
+    {
+        "id": 29,
+        "Original": "POMPEU FABRA, 56, , URBANIZACION, , 8191, RUBI, BARCELONA",
+        "via": "",
+        "calle": "POMPEU FABRA",
+        "numero": "56",
+        "escalera": "",
+        "planta": "PRINCIPAL",
+        "puerta": ""
+    },
+    {
+        "id": 30,
+        "Original": "Av. DELS ALPS,, 48, , , , 8940, CORNELLA DE LLOBREGAT, BARCELONA",
+        "via": "AVENIDA",
+        "calle": "DELS ALPS",
+        "numero": "48",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 31,
+        "Original": "CALLE BRUC,  51 - 53, ,  ENTRESOL, , 8009, BARCELONA, BARCELONA",
+        "via": "CALLE",
+        "calle": "BRUC",
+        "numero": "51-53",
+        "escalera": "",
+        "planta": "ENTRESOL",
+        "puerta": ""
+    },
+    {
+        "id": 32,
+        "Original": "Calle Calatrava 1 1Izq, , , , , 41410, CARMONA, SEVILLA",
+        "via": "CALLE",
+        "calle": "CALATRAVA",
+        "numero": "1",
+        "escalera": "IZQ",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 33,
+        "Original": "BRAVO MURILLO, 122 PUESTO 347-348, , , , , 28020, MADRID, MADRID",
+        "via": "",
+        "calle": "BRAVO MURILLO",
+        "numero": "122",
+        "escalera": "",
+        "planta": "",
+        "puerta": "PUESTO 347-348"
+    },
+    {
+        "id": 34,
+        "Original": "ARAGON, 517, , 3º2º, , 8013, BARCELONA, BARCELONA",
+        "via": "",
+        "calle": "ARAGON",
+        "numero": "517",
+        "escalera": "",
+        "planta": "3",
+        "puerta": "2"
+    },
+    {
+        "id": 35,
+        "Original": "CARRE SANT ANTONI CLARET, 6, , P, 6, 8037, BARCELONA, BARCELONA",
+        "via": "CARRER",
+        "calle": "SANT ANTONI CLARET",
+        "numero": "6",
+        "escalera": "",
+        "planta": "PRINCIPAL",
+        "puerta": "6"
+    },
+    {
+        "id": 36,
+        "Original": "AVENIDA GAVA, 19 - PISO 6 PTA 1, , , , , 8840, VILADECANS, BARCELONA",
+        "via": "AVENIDA",
+        "calle": "GAVA",
+        "numero": "19",
+        "escalera": "",
+        "planta": "6",
+        "puerta": "1"
+    },
+    {
+        "id": 37,
+        "Original": "BENVIURE, 24, , , , , 8830, SANT BOI DE LLOBREGAT, BARCELONA",
+        "via": "",
+        "calle": "BENVIURE",
+        "numero": "24",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 38,
+        "Original": "CALLE VERGE DEL CARME, 16 - 5 1, , , , , 8760, MARTORELL, BARCELONA",
+        "via": "CALLE",
+        "calle": "VERGE DEL CARME",
+        "numero": "16",
+        "escalera": "",
+        "planta": "5",
+        "puerta": "1"
+    },
+    {
+        "id": 39,
+        "Original": "CALLE VERGE DEL CARME, 16 - 5 1, , , , , 8760, MARTORELL, BARCELONA",
+        "via": "CALLE",
+        "calle": "VERGE DEL CARME",
+        "numero": "16",
+        "escalera": "",
+        "planta": "5",
+        "puerta": "1"
+    },
+    {
+        "id": 40,
+        "Original": "ENRIC GRANADOS, 50, , CASA, , 8759, VALLIRANA, BARCELONA",
+        "via": "",
+        "calle": "ENRIC GRANADOS",
+        "numero": "50",
+        "escalera": "",
+        "planta": "CASA",
+        "puerta": ""
+    },
+    {
+        "id": 41,
+        "Original": "C/ JACOBEO 64 B 2º B, , , , , 28054, MADRID, MADRID",
+        "via": "CALLE",
+        "calle": "JACOBEO",
+        "numero": "64",
+        "escalera": "B",
+        "planta": "2",
+        "puerta": "B"
+    },
+    {
+        "id": 42,
+        "Original": "AVENIDA GAVA, 19 - PISO 6 PTA 1, , , , , 8840, VILADECANS, BARCELONA",
+        "via": "AVENIDA",
+        "calle": "GAVA",
+        "numero": "19",
+        "escalera": "",
+        "planta": "6",
+        "puerta": "1"
+    },
+    {
+        "id": 43,
+        "Original": "C/ JACOBEO 64 B 2º B, , , , , 28054, MADRID, MADRID",
+        "via": "CALLE",
+        "calle": "JACOBEO",
+        "numero": "64",
+        "escalera": "B",
+        "planta": "2",
+        "puerta": "B"
+    },
+    {
+        "id": 44,
+        "Original": "Av. DELS ALPS, 48, , , , 8940, CORNELLA DE LLOBREGAT, BARCELONA",
+        "via": "AVENIDA",
+        "calle": "DELS ALPS",
+        "numero": "48",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 45,
+        "Original": "C/NEPTU, 14-16, , P.BJ, , 8006, BARCELONA, BARCELONA",
+        "via": "CALLE",
+        "calle": "NEPTU",
+        "numero": "14-16",
+        "escalera": "",
+        "planta": "BAJO",
+        "puerta": ""
+    },
+    {
+        "id": 46,
+        "Original": "AVDA INGENIERIA, 9 NAVE 21, , , , , 41015, SEVILLA, SEVILLA",
+        "via": "AVDA",
+        "calle": "INGENIERIA",
+        "numero": "9",
+        "escalera": "",
+        "planta": "",
+        "puerta": "NAVE 21"
+    },
+    {
+        "id": 47,
+        "Original": "POLIGONO INDUSTRIAL SANTA RITA CALLE OPTICA 13 NAVE 8, , , , , 8755, CASTELLBISBAL, BARCELONA",
+        "via": "CALLE",
+        "calle": "OPTICA",
+        "numero": "13",
+        "escalera": "",
+        "planta": "",
+        "puerta": "NAVE 8"
+    },
+    {
+        "id": 48,
+        "Original": "C/VICTOR BALAGUER, 10, , LC1, , 8191, RUBI, BARCELONA",
+        "via": "CALLE",
+        "calle": "VICTOR BALAGUER",
+        "numero": "10",
+        "escalera": "",
+        "planta": "BAJO",
+        "puerta": "1"
+    },
+    {
+        "id": 49,
+        "Original": "POLIGONO INDUSTRIAL SANTA RITA CALLE OPTICA 13 NAVE 8, , , , , 8755, CASTELLBISBAL, BARCELONA",
+        "via": "CALLE",
+        "calle": "OPTICA",
+        "numero": "13",
+        "escalera": "",
+        "planta": "",
+        "puerta": "NAVE 8"
+    },
+    {
+        "id": 50,
+        "Original": "AVD. DIAGONAL, 650, , 4º, 1ª, 8017, BARCELONA, BARCELONA",
+        "via": "AVD",
+        "calle": "DIAGONAL",
+        "numero": "650",
+        "escalera": "",
+        "planta": "4",
+        "puerta": "1"
+    },
+    {
+        "id": 51,
+        "Original": "FAMADES, 72-74, , , , 8907, L'HOSPITALET DE LLOBREGAT, BARCELONA",
+        "via": "",
+        "calle": "FAMADES",
+        "numero": "72-74",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 52,
+        "Original": "C/ FRANCESC CAMBÓ, 41, , , , , 17310, LLORET DE MAR, GIRONA",
+        "via": "CALLE",
+        "calle": "FRANCESC CAMBÓ",
+        "numero": "41",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 53,
+        "Original": "C/ ALBA, 1 LOCAL 2-3, , , , , 8520, LES FRANQUESES DEL VALLES, BARCELONA",
+        "via": "CALLE",
+        "calle": "ALBA",
+        "numero": "1",
+        "escalera": "",
+        "planta": "",
+        "puerta": "LOCAL 2-3"
+    },
+    {
+        "id": 54,
+        "Original": "CAMI DEL MIG, 16, 1ºPIS, , , , , 8349, CABRERA DE MAR, Barcelona",
+        "via": "CAMI",
+        "calle": "DEL MIG",
+        "numero": "16",
+        "escalera": "",
+        "planta": "1",
+        "puerta": ""
+    },
+    {
+        "id": 55,
+        "Original": "CARRER DEL MIG,, 16, , 1º, , 8349, CABRERA DE MAR, BARCELONA",
+        "via": "CARRER",
+        "calle": "DEL MIG",
+        "numero": "16",
+        "escalera": "",
+        "planta": "1",
+        "puerta": ""
+    },
+    {
+        "id": 56,
+        "Original": "C/ NEPTU, 14-16, , P.BJ, , 8006, BARCELONA, BARCELONA",
+        "via": "CALLE",
+        "calle": "NEPTU",
+        "numero": "14-16",
+        "escalera": "",
+        "planta": "BAJO",
+        "puerta": ""
+    },
+    {
+        "id": 57,
+        "Original": "AVENIDA DOLÇE DE PROVENZA 26 NAVE C, , , , , 8629, TORRELLES DE LLOBREGAT, BARCELONA",
+        "via": "AVENIDA",
+        "calle": "DOLÇE DE PROVENZA",
+        "numero": "26",
+        "escalera": "",
+        "planta": "",
+        "puerta": "NAVE C"
+    },
+    {
+        "id": 58,
+        "Original": "AVENIDA DOLÇE DE PROVENZA 26 NAVE C, , , , , 8629, TORRELLES DE LLOBREGAT, BARCELONA",
+        "via": "AVENIDA",
+        "calle": "DOLÇE DE PROVENZA",
+        "numero": "26",
+        "escalera": "",
+        "planta": "",
+        "puerta": "NAVE C"
+    },
+    {
+        "id": 59,
+        "Original": "C CORCEGA, 573, , 2, 3, 8025, BARCELONA, BARCELONA",
+        "via": "CALLE",
+        "calle": "CORCEGA",
+        "numero": "573",
+        "escalera": "",
+        "planta": "2",
+        "puerta": "3"
+    },
+    {
+        "id": 60,
+        "Original": "C/ DE LA MENTA, 19, , 3, 1, 8950, ESPLUGUES DE LLOBREGAT, BARCELONA",
+        "via": "CALLE",
+        "calle": "DE LA MENTA",
+        "numero": "19",
+        "escalera": "",
+        "planta": "3",
+        "puerta": "1"
+    },
+    {
+        "id": 61,
+        "Original": "C/ RAFAEL CAMPALANS 7, 1, , 1, , 8903, L'HOSPITALET DE LLOBREGAT, BARCELONA",
+        "via": "CALLE",
+        "calle": "RAFAEL CAMPALANS",
+        "numero": "7",
+        "escalera": "",
+        "planta": "1",
+        "puerta": ""
+    },
+    {
+        "id": 62,
+        "Original": "C/ALCANO, 2, , , , 8191, RUBI, BARCELONA",
+        "via": "CALLE",
+        "calle": "ALCANO",
+        "numero": "2",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 63,
+        "Original": "ARTESANOS 17, , , , , 46120, ALBORAYA, VALENCIA",
+        "via": "",
+        "calle": "ARTESANOS",
+        "numero": "",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 64,
+        "Original": "CARRETERA DEL MONTSENY, 52, , 1, 1, 8461, SANT ESTEVE DE PALAUTORDERA, BARCELONA",
+        "via": "CARRETERA",
+        "calle": "DEL MONTSENY",
+        "numero": "52",
+        "escalera": "",
+        "planta": "1",
+        "puerta": "1"
+    },
+    {
+        "id": 65,
+        "Original": "RAMBLA, 130, , , , 8201, SABADELL, BARCELONA",
+        "via": "RAMBLA",
+        "calle": "",
+        "numero": "130",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 66,
+        "Original": "ULL DE LLEBRE, NAVE 40-42, , , , , 8758, CERVELLO, BARCELONA",
+        "via": "",
+        "calle": "ULL DE LLEBRE",
+        "numero": "",
+        "escalera": "",
+        "planta": "",
+        "puerta": "NAVE 40-42"
+    },
+    {
+        "id": 67,
+        "Original": "PATRAIX, S/N, BAJOS, , , , 46810, ENGUERA, VALENCIA",
+        "via": "",
+        "calle": "PATRAIX",
+        "numero": "",
+        "escalera": "",
+        "planta": "BAJOS",
+        "puerta": ""
+    },
+    {
+        "id": 68,
+        "Original": "CALLE JUAN BRAVO, 3 A, , , , , 28006, MADRID, MADRID",
+        "via": "CALLE",
+        "calle": "JUAN BRAVO",
+        "numero": "3",
+        "escalera": "A",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 69,
+        "Original": "JUAN BRAVO, 3 A, , , , , 28006, MADRID, MADRID",
+        "via": "",
+        "calle": "JUAN BRAVO",
+        "numero": "3",
+        "escalera": "A",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 70,
+        "Original": "CALLE JUAN BRAVO, 3 A, , , , , 28006, MADRID, MADRID",
+        "via": "CALLE",
+        "calle": "JUAN BRAVO",
+        "numero": "3",
+        "escalera": "A",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 71,
+        "Original": "C/ FELIPE II, 289, , 2, 6, 8016, BARCELONA, BARCELONA",
+        "via": "CALLE",
+        "calle": "FELIPE II",
+        "numero": "289",
+        "escalera": "",
+        "planta": "2",
+        "puerta": "6"
+    },
+    {
+        "id": 72,
+        "Original": "C/ LOTOS, 13  BAJOS, , , , , 29013, MALAGA, MALAGA",
+        "via": "CALLE",
+        "calle": "LOTOS",
+        "numero": "13",
+        "escalera": "",
+        "planta": "BAJOS",
+        "puerta": ""
+    },
+    {
+        "id": 73,
+        "Original": "C/ PONS I PONS Nº 25 CASA, , , , , 8923, SANTA COLOMA DE GRAMENET, BARCELONA",
+        "via": "CALLE",
+        "calle": "PONS I PONS",
+        "numero": "25",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 74,
+        "Original": "SAN SALVADOR, 17, , ENTRESUELO, 3, 8950, ESPLUGUES DE LLOBREGAT, BARCELONA",
+        "via": "",
+        "calle": "SAN SALVADOR",
+        "numero": "17",
+        "escalera": "",
+        "planta": "ENTRESUELO",
+        "puerta": "3"
+    },
+    {
+        "id": 75,
+        "Original": "CL MAYOR, 16, , 2º, 1ª, 8160, MONTMELO, BARCELONA",
+        "via": "CALLE",
+        "calle": "MAYOR",
+        "numero": "16",
+        "escalera": "",
+        "planta": "2",
+        "puerta": "1"
+    },
+    {
+        "id": 76,
+        "Original": "GRAN DE GRACIA, 16, , ENTRESUELO, 2, 8012, BARCELONA, BARCELONA",
+        "via": "",
+        "calle": "GRAN DE GRACIA",
+        "numero": "16",
+        "escalera": "",
+        "planta": "ENTRESUELO",
+        "puerta": "2"
+    },
+    {
+        "id": 77,
+        "Original": "C/ FRANCESC CAMBÓ, 41, , , , , 17310, LLORET DE MAR, GIRONA",
+        "via": "CALLE",
+        "calle": "FRANCESC CAMBÓ",
+        "numero": "41",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 78,
+        "Original": "CALLE TRAFALGAR, 25 - ENT PTA 2, , , , , 8010, BARCELONA, BARCELONA",
+        "via": "CALLE",
+        "calle": "TRAFALGAR",
+        "numero": "25",
+        "escalera": "",
+        "planta": "ENTRESUELO",
+        "puerta": "2"
+    },
+    {
+        "id": 79,
+        "Original": "PLAZA GALA PLACIDIA, 1, , , , , 8006, BARCELONA, BARCELONA",
+        "via": "PLAZA",
+        "calle": "GALA PLACIDIA",
+        "numero": "1",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 80,
+        "Original": "MOTORES, 16/18, , , , , 8040, BARCELONA, BARCELONA",
+        "via": "",
+        "calle": "MOTORES",
+        "numero": "16/18",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 81,
+        "Original": "POL. IN. COLL DE MONTCADA C/ CARGOL, 8-12, , , , , 8110, MONTCADA I REIXAC, BARCELONA",
+        "via": "CALLE",
+        "calle": "CARGOL",
+        "numero": "8-12",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 82,
+        "Original": "CARRER EDUARD GIBERT, 40, , LOCAL, , 8940, CORNELLA DE LLOBREGAT, BARCELONA",
+        "via": "CARRER",
+        "calle": "EDUARD GIBERT",
+        "numero": "40",
+        "escalera": "",
+        "planta": "LOCAL",
+        "puerta": ""
+    },
+    {
+        "id": 83,
+        "Original": "C/ IGLESIA, 17 CASA, , , , , 8296, CASTELLBELL I EL VILAR, BARCELONA",
+        "via": "CALLE",
+        "calle": "IGLESIA",
+        "numero": "17",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 84,
+        "Original": "FRESSER 7 P.I PLA D EN COLL, , , , , 8110, MONTCADA I REIXAC, BARCELONA",
+        "via": "",
+        "calle": "FRESSER",
+        "numero": "7",
+        "escalera": "",
+        "planta": "PLANTA INFERIOR",
+        "puerta": ""
+    },
+    {
+        "id": 85,
+        "Original": "C/ REIXAGO, 72, , BAJO, , 8110, MONTCADA I REIXAC, BARCELONA",
+        "via": "CALLE",
+        "calle": "REIXAGO",
+        "numero": "72",
+        "escalera": "",
+        "planta": "BAJO",
+        "puerta": ""
+    },
+    {
+        "id": 86,
+        "Original": "CR CLL SANT CELESTI 25, , , , , 43202, REUS, TARRAGONA",
+        "via": "CALLE",
+        "calle": "SANT CELESTI",
+        "numero": "25",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 87,
+        "Original": "CARRER MATAGALLS, 12, BAIXOS, , , , , 8461, SANT ESTEVE DE PALAUTORDERA, BARCELONA",
+        "via": "CARRER",
+        "calle": "MATAGALLS",
+        "numero": "12",
+        "escalera": "",
+        "planta": "BAJOS",
+        "puerta": ""
+    },
+    {
+        "id": 88,
+        "Original": "AV. ESTACION , 27 ESCALERA A PISO 3 PUERTA C, , , , , 17300, BLANES, GIRONA",
+        "via": "AVENIDA",
+        "calle": "ESTACION",
+        "numero": "27",
+        "escalera": "A",
+        "planta": "3",
+        "puerta": "C"
+    },
+    {
+        "id": 89,
+        "Original": "PLAÇA CONVENT, 6, , , , , 17400, BREDA, GIRONA",
+        "via": "PLAZA",
+        "calle": "CONVENT",
+        "numero": "6",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 90,
+        "Original": "REPUNTADORA, 2026-06-02 00:00:00, , LOCAL, 3, 8302, MATARO, BARCELONA",
+        "via": "",
+        "calle": "REPUNTADORA",
+        "numero": "",
+        "escalera": "",
+        "planta": "LOCAL",
+        "puerta": "3"
+    },
+    {
+        "id": 91,
+        "Original": "URB. LA SOLELLA C/ CANTABRIA BUSTIA, 14, , , , 17310, LLORET DE MAR, GIRONA",
+        "via": "CALLE",
+        "calle": "CANTABRIA BUSTIA",
+        "numero": "14",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 92,
+        "Original": "PASAJE TEIDE, S/N - BL 3. PTA 3, , , , , 8398, SANTA SUSANNA, BARCELONA",
+        "via": "PASAJE",
+        "calle": "TEIDE",
+        "numero": "",
+        "escalera": "BL 3",
+        "planta": "",
+        "puerta": "PTA 3"
+    },
+    {
+        "id": 93,
+        "Original": "C/ ALVARADO, 8, , , , , 8042, BARCELONA, BARCELONA",
+        "via": "CALLE",
+        "calle": "ALVARADO",
+        "numero": "8",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 94,
+        "Original": "REGAS, 13, , , , 8006, BARCELONA, BARCELONA",
+        "via": "",
+        "calle": "REGAS",
+        "numero": "13",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 95,
+        "Original": "REGAZ Nº13, , , , , 8006, BARCELONA, BARCELONA",
+        "via": "",
+        "calle": "REGAZ",
+        "numero": "13",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 96,
+        "Original": "CALLE SANT PERE MES ALT 47 - BJ, , , , , 8003, BARCELONA, BARCELONA",
+        "via": "CALLE",
+        "calle": "SANT PERE MES ALT",
+        "numero": "47",
+        "escalera": "",
+        "planta": "BAJO",
+        "puerta": ""
+    },
+    {
+        "id": 97,
+        "Original": "AVG/ DE LA SALLE, 45, , , , , 43205, REUS, TARRAGONA",
+        "via": "AVG",
+        "calle": "DE LA SALLE",
+        "numero": "45",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 98,
+        "Original": "CALLE FRANCESC CAMBO, 41 , , , , , 17310, LLORET DE MAR, GIRONA",
+        "via": "CALLE",
+        "calle": "FRANCESC CAMBO",
+        "numero": "41",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 99,
+        "Original": "c/ ALBER, 8 URB BRISES DEL MAR, , , , , 43893, ALTAFULLA, TARRAGONA",
+        "via": "CALLE",
+        "calle": "ALBER",
+        "numero": "8",
+        "escalera": "",
+        "planta": "",
+        "puerta": ""
+    },
+    {
+        "id": 100,
+        "Original": "SALVADOR ESPRIU, 23 5º1º, , , , , 8010, BARCELONA, BARCELONA",
+        "via": "",
+        "calle": "SALVADOR ESPRIU",
+        "numero": "23",
+        "escalera": "",
+        "planta": "5",
+        "puerta": "1"
+    }
+]

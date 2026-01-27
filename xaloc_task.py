@@ -1,7 +1,7 @@
-import argparse
-import html
+﻿import argparse
 import json
 import os
+from pydoc import html
 import re
 import sqlite3
 import sys
@@ -17,8 +17,8 @@ try:
 except Exception:  # pragma: no cover
     pyodbc = None
 
-# Query para obtener un único registro por idExp sin filtros de lógica de negocio
-SINGLE_ID_QUERY = """
+# Query simplificada para obtener solo lo necesario para el nuevo payload
+BASE_SELECT_QUERY = """
 SELECT 
     rs.idRecurso,
     rs.Expedient,
@@ -40,7 +40,6 @@ FROM Recursos.RecursosExp rs
 INNER JOIN clientes c ON rs.numclient = c.numerocliente
 INNER JOIN expedientes e ON rs.idExp = e.idexpediente  -- Join para obtener la matrícula
 LEFT JOIN attachments_resource_documents att ON rs.automatic_id = att.automatic_id
-WHERE rs.idExp = ?
 """
 
 
@@ -58,15 +57,8 @@ def load_config_motivos(path: Path = Path("config_motivos.json")) -> dict[str, A
         return json.load(f)
 
 
-def _clean_str(value: Any) -> str:
-    return str(value).strip() if value is not None else ""
-
-
 def _normalize_literal_newlines(s: str) -> str:
-    """
-    Convierte '\\n' literal (dos caracteres: barra + n) a salto real '\n'.
-    Útil si el JSON tiene "\\n\\n" o si algún paso lo escapa.
-    """
+    # Convierte "\\n" literal a salto real, por si llega escapado desde JSON/otros
     return s.replace("\\n", "\n")
 
 
@@ -74,16 +66,16 @@ def _text_to_tinymce_html(text: str) -> str:
     """
     Convierte texto con saltos a HTML robusto para TinyMCE:
     - doble salto => nuevo párrafo
-    - salto simple => <br />
-    - escape HTML para evitar inyección / markup accidental
+    - salto simple => <br>
+    - escapado HTML para evitar que se inyecte markup accidental
     """
     text = _normalize_literal_newlines(text).replace("\r\n", "\n").replace("\r", "\n")
 
     blocks = re.split(r"\n\s*\n", text.strip())
     out: list[str] = []
     for b in blocks:
-        b = html.escape(b)
-        b = b.replace("\n", "<br />")
+        b = html.escape(b)              # evita que < > & rompan el editor
+        b = b.replace("\n", "<br />")   # saltos dentro del bloque
         out.append(f"<p>{b}</p>")
     return "".join(out)
 
@@ -93,7 +85,7 @@ def get_motivos_por_fase(
     expediente: str,
     *,
     config_map: dict[str, Any],
-    output: str = "html",  # por defecto: HTML listo para TinyMCE
+    output: str = "text",  # "text" o "html"
 ) -> str:
     """
     Lee config_motivos.json y compone el texto final para el campo motivos.
@@ -116,16 +108,12 @@ def get_motivos_por_fase(
     if not selected:
         raise ValueError(f"No se encontró configuración para la fase: {fase_raw}")
 
-    asunto = _normalize_literal_newlines(_clean_str(selected.get("asunto")))
-    expone = _normalize_literal_newlines(_clean_str(selected.get("expone")))
-
-    solicita_tpl = _normalize_literal_newlines(_clean_str(selected.get("solicita")))
-    solicita = solicita_tpl.replace("{expediente}", expediente_txt)
+    asunto = _clean_str(selected.get("asunto"))
+    expone = _clean_str(selected.get("expone"))
+    solicita = _clean_str(selected.get("solicita")).replace("{expediente}", expediente_txt)
 
     if not (asunto and expone and solicita):
-        raise ValueError(
-            f"Datos incompletos en config_motivos.json para la fase: {fase_raw}"
-        )
+        raise ValueError(f"Datos incompletos en config_motivos.json para la fase: {fase_raw}")
 
     text = f"ASUNTO: {asunto}\n\nEXPONE: {expone}\n\nSOLICITA: {solicita}"
 
@@ -133,6 +121,33 @@ def get_motivos_por_fase(
         return _text_to_tinymce_html(text)
 
     return text
+
+def build_query(*, fase: str | None) -> tuple[str, list[Any]]:
+    """Construye la query filtrando por estado pendiente y tipo de expediente."""
+    query = BASE_SELECT_QUERY.strip()
+    params: list[Any] = []
+
+    where_clauses = [
+        "rs.Organisme LIKE '%xaloc%'",
+        "rs.Estado = 0",
+        "rs.TExp IN (2, 3)",
+        "rs.idRecurso IS NOT NULL",
+        "rs.Expedient IS NOT NULL AND LTRIM(RTRIM(rs.Expedient)) <> ''",
+        "rs.Matricula IS NOT NULL AND LTRIM(RTRIM(rs.Matricula)) <> ''",
+        "c.email IS NOT NULL AND LTRIM(RTRIM(c.email)) <> ''",
+    ]
+
+    fase_norm = (fase or "").strip()
+    if fase_norm:
+        where_clauses.append("LTRIM(RTRIM(rs.FaseProcedimiento)) = ?")
+        params.append(fase_norm)
+
+    full_query = f"{query}\nWHERE " + " AND ".join(where_clauses)
+    return full_query, params
+
+
+def _clean_str(value: Any) -> str:
+    return str(value).strip() if value is not None else ""
 
 
 FALLBACKS: dict[str, str] = {
@@ -229,7 +244,7 @@ def _build_mandatario_data(row: dict) -> dict:
     return mandatario
 
 
-def _map_payload(
+def _map_xaloc_payload(
     row: dict[str, Any],
     motivos: str,
     adjuntos_list: list | None = None,
@@ -245,7 +260,6 @@ def _map_payload(
         "denuncia_num": expediente,
         "plate_number": _normalize_plate(row.get("matricula")),
         "expediente_num": expediente,
-        # OJO: aquí ya va HTML (si output="html"), para insertarlo como HTML en TinyMCE
         "motivos": motivos,
         "adjuntos": adjuntos_list or [],
         "mandatario": mandatario,  # NUEVO
@@ -285,19 +299,18 @@ def _init_sqlite(db_path: str) -> None:
         conn.close()
 
 
-def _insert_task(db_path: str, site_id: str, payload: dict[str, Any]) -> int:
+def _insert_task(db_path: str, payload: dict[str, Any]) -> int:
     conn = sqlite3.connect(Path(db_path))
     try:
         cur = conn.cursor()
         cur.execute(
             "INSERT INTO tramite_queue (site_id, protocol, payload) VALUES (?, ?, ?)",
-            (site_id, None, json.dumps(payload, ensure_ascii=False, default=str)),
+            ("xaloc_girona", None, json.dumps(payload, ensure_ascii=False, default=str)),
         )
         conn.commit()
         return int(cur.lastrowid)
     finally:
         conn.close()
-
 
 def _build_sqlserver_connection_string(
     *,
@@ -325,16 +338,11 @@ def _build_sqlserver_connection_string(
     database = (os.getenv("SQLSERVER_DATABASE") or "").strip()
     username = (os.getenv("SQLSERVER_USERNAME") or "").strip()
     password = (os.getenv("SQLSERVER_PASSWORD") or "").strip()
-    trusted = (os.getenv("SQLSERVER_TRUSTED_CONNECTION") or "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "y",
-    }
+    trusted = (os.getenv("SQLSERVER_TRUSTED_CONNECTION") or "").strip().lower() in {"1", "true", "yes", "y"}
 
     if not (server and database):
         raise ValueError(
-            "Faltan datos de conexión. Define SQLSERVER_SERVER y SQLSERVER_DATABASE (o SQLSERVER_CONNECTION_STRING)."
+            "Faltan datos de conexiÃ³n. Define SQLSERVER_SERVER y SQLSERVER_DATABASE (o SQLSERVER_CONNECTION_STRING)."
         )
 
     parts = [
@@ -358,19 +366,7 @@ def _build_sqlserver_connection_string(
 
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Sincroniza un único registro por idRecurso sin aplicar filtros de lógica de negocio."
-    )
-    parser.add_argument(
-        "--id",
-        type=int,
-        required=True,
-        help="El idExp que queremos buscar (obligatorio).",
-    )
-    parser.add_argument(
-        "--site-id",
-        type=str,
-        required=True,
-        help="Identificador del sitio (ej. 'madrid', 'xaloc_girona', 'base_online').",
+        description="Sincronizador exclusivo para XALOC GIRONA con agrupacion de adjuntos."
     )
     parser.add_argument(
         "--connection-string",
@@ -380,7 +376,10 @@ def main(argv: Optional[list[str]] = None) -> int:
             "SQLSERVER_{DRIVER,SERVER,DATABASE,USERNAME,PASSWORD} (opcional SQLSERVER_TRUSTED_CONNECTION=1)."
         ),
     )
+    parser.add_argument("--fase", default="", help="Filtro opcional rs.FaseProcedimiento.")
     parser.add_argument("--sqlite-db", default="db/xaloc_database.db", help="Ruta SQLite.")
+    parser.add_argument("--dry-run", action="store_true", help="No inserta tareas en la base de datos.")
+    parser.add_argument("--limit", type=int, default=0, help="Limite de registros a procesar.")
     parser.add_argument("--verbose", action="store_true", help="Log detallado de errores.")
 
     args = parser.parse_args(argv)
@@ -393,109 +392,122 @@ def main(argv: Optional[list[str]] = None) -> int:
     try:
         connection_string = _build_sqlserver_connection_string(direct=args.connection_string)
     except Exception as e:
-        print(f"ERROR: No se pudo construir la conexión a SQL Server: {e}", file=sys.stderr)
+        print(
+            f"ERROR: No se pudo construir la conexiÃ³n a SQL Server: {e}",
+            file=sys.stderr,
+        )
         return 2
 
-    # Inicializar SQLite
+    # 1. Preparar Query, cargar config de motivos e iniciar SQLite
+    query, query_params = build_query(fase=args.fase)
     _init_sqlite(args.sqlite_db)
 
-    # Cargar config de motivos
     try:
         motivos_config = load_config_motivos()
     except Exception as e:
         print(f"ERROR: no se pudo cargar config_motivos.json: {e}", file=sys.stderr)
         return 2
 
-    # Conectar a SQL Server y buscar el idRecurso
+    scanned = 0
+    matched = 0
+    row_errors = 0
+    inserted_ids: list[int] = []
+
+    tasks_data: dict[Any, dict[str, Any]] = {}
+
     conn = pyodbc.connect(connection_string)
     try:
         cursor = conn.cursor()
-        cursor.execute(SINGLE_ID_QUERY, (args.id,))
+        cursor.execute(query, tuple(query_params))
         columns = [c[0] for c in cursor.description]
 
-        rows = cursor.fetchall()
-        if not rows:
-            print(f"ERROR: No se encontró ningún registro con idExp = {args.id}", file=sys.stderr)
-            return 1
-
-        # Agrupar adjuntos por idExp (aunque solo hay uno, puede tener múltiples adjuntos)
-        task_data = {
-            "row": None,
-            "adjuntos": [],
-        }
-
-        for row in rows:
+        # 2. Fase de Lectura y Agrupacion
+        for row in cursor:
+            scanned += 1
             row_dict = dict(zip(columns, row))
+            rid = row_dict.get("idRecurso")
 
-            # Guardar la primera fila como base
-            if task_data["row"] is None:
-                task_data["row"] = row_dict
+            if not rid:
+                continue
 
-            # Agregar adjuntos si existen (solo datos de la consulta)
+            if rid not in tasks_data:
+                tasks_data[rid] = {
+                    "row": row_dict,
+                    "adjuntos": [],
+                    "errors": [],
+                }
+
             adj_id = row_dict.get("adjunto_id")
-            adj_filename = row_dict.get("adjunto_filename")
             if adj_id:
-                filename_clean = _clean_str(adj_filename)
+                filename_clean = _clean_str(row_dict.get("adjunto_filename"))
                 if not filename_clean:
-                    raise ValueError(
+                    tasks_data[rid]["errors"].append(
                         f"Adjunto {adj_id} sin filename en SQL Server (no se permite fallback)."
                     )
-                task_data["adjuntos"].append(
+                    continue
+                tasks_data[rid]["adjuntos"].append(
                     {
                         "id": adj_id,
                         "filename": filename_clean,
-                        "url": (
-                            "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/"
-                            "recursos/expedientes/pdf-adjuntos/{id}"
-                        ).format(id=adj_id),
+                        "url": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf-adjuntos/{id}".format(
+                            id=adj_id
+                        ),
                     }
                 )
 
-        # Mapear el payload
-        try:
-            expediente = _clean_str(task_data["row"].get("Expedient"))
-            fase_raw = task_data["row"].get("FaseProcedimiento")
+        # 3. Fase de Mapeo e Insercion en SQLite
+        for rid, info in tasks_data.items():
+            try:
+                if args.limit and matched >= args.limit:
+                    break
 
-            # Motivos en HTML para TinyMCE (saltos visibles)
-            motivos_html = get_motivos_por_fase(
-                fase_raw,
-                expediente,
-                config_map=motivos_config,
-                output="html",
-            )
+                if info.get("errors"):
+                    raise ValueError("; ".join(info["errors"]))
 
-            payload = _map_payload(
-                task_data["row"],
-                motivos_html,
-                adjuntos_list=task_data["adjuntos"],
-            )
+                expediente = _clean_str(info["row"].get("Expedient"))
+                fase_raw = info["row"].get("FaseProcedimiento")
+                motivos_text = get_motivos_por_fase(
+                    fase_raw,
+                    expediente,
+                    config_map=motivos_config,
+                )
 
-            # Insertar en SQLite
-            task_id = _insert_task(args.sqlite_db, args.site_id, payload)
+                payload = _map_xaloc_payload(
+                    info["row"],
+                    motivos_text,
+                    adjuntos_list=info["adjuntos"],
+                )
 
-            print("\n=== Sincronización por ID ===")
-            print(f"✓ idRecurso encontrado: {args.id}")
-            print(f"✓ Site ID: {args.site_id}")
-            print(f"✓ Expediente: {expediente}")
-            print(f"✓ Email: {payload['user_email']}")
-            print(f"✓ Matrícula: {payload['plate_number']}")
-            print(f"✓ Adjuntos encontrados: {len(task_data['adjuntos'])}")
-            print(f"✓ Tarea insertada en SQLite con ID: {task_id}")
+                matched += 1
 
-            if args.verbose:
-                print("\nPayload completo:")
-                print(json.dumps(payload, indent=2, ensure_ascii=False))
+                if not args.dry_run:
+                    task_id = _insert_task(args.sqlite_db, payload)
+                    inserted_ids.append(task_id)
+                else:
+                    if args.verbose:
+                        print(
+                            f"[DRY-RUN] Tarea detectada para ID {rid} con {len(info['adjuntos'])} adjuntos."
+                        )
 
-            return 0
-
-        except Exception as e:
-            print(f"ERROR procesando idExp {args.id}: {e}", file=sys.stderr)
-            if args.verbose:
-                traceback.print_exc()
-            return 1
+            except Exception as e:
+                row_errors += 1
+                if args.verbose:
+                    print(f"Error procesando idRecurso {rid}: {e}", file=sys.stderr)
+                    traceback.print_exc()
 
     finally:
         conn.close()
+
+    print("\n=== Sincronizacion XALOC GIRONA (Con Adjuntos) ===")
+    print(f"- Filas SQL Server leidas: {scanned}")
+    print(f"- Recursos unicos encontrados: {len(tasks_data)}")
+    print(f"- Tareas mapeadas/encoladas: {matched}")
+    if not args.dry_run:
+        print(f"- IDs insertados en SQLite: {len(inserted_ids)}")
+    if row_errors:
+        print(f"- Errores detectados: {row_errors}")
+
+    return 0 if row_errors == 0 else 1
 
 
 if __name__ == "__main__":

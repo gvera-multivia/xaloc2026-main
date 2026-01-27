@@ -1,0 +1,2002 @@
+[
+    {
+        "id": 1,
+        "Original": "CALLE SANTA ANA, Numero 22, Piso 3, Puerta IZQUIERDA, SOPUERTA",
+        "Tipo via": "CALLE",
+        "Domicilio": "SANTA ANA",
+        "Numero": "22",
+        "Escalera": "",
+        "Planta": "3",
+        "Puerta": "IZQUIERDA"
+    },
+    {
+        "id": 2,
+        "Original": "Juhkentali Nº8 Kesklinna, ESTONIA",
+        "Tipo via": "CALLE",
+        "Domicilio": "JUHKENTALI Nº8",
+        "Numero": "",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 3,
+        "Original": "CALLE CAMP LLARG, 2, SANT ANDREU DE LA BARCA",
+        "Tipo via": "CALLE",
+        "Domicilio": "CAMP LLARG",
+        "Numero": "2",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 4,
+        "Original": "CALLE CAMP LLARG, 2, SANT ANDREU DE LA BARCA",
+        "Tipo via": "CALLE",
+        "Domicilio": "CAMP LLARG",
+        "Numero": "2",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 5,
+        "Original": "LUGAR MASIA QUITERI, S/N, CAMARASA",
+        "Tipo via": "LUGAR",
+        "Domicilio": "MASIA QUITERI",
+        "Numero": "S/N",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 6,
+        "Original": "CALLE LERMANDABIDEA, 9 - B, VITORIA-GASTEIZ",
+        "Tipo via": "CALLE",
+        "Domicilio": "LERMANDABIDEA",
+        "Numero": "9 B",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 7,
+        "Original": "CALLE DEL PUERTO DE DESPEÑAPERROS, 807, VENTURADA",
+        "Tipo via": "CALLE",
+        "Domicilio": "DEL PUERTO DE DESPEÑAPERROS",
+        "Numero": "807",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 8,
+        "Original": "CALLE CATALUNYA, 28, GRANOLLERS",
+        "Tipo via": "CALLE",
+        "Domicilio": "CATALUNYA",
+        "Numero": "28",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 9,
+        "Original": "CALLE DE CALASSANÇ MARQUES, 33 - PISO 1 PTA. 2, MATARO",
+        "Tipo via": "CALLE",
+        "Domicilio": "DE CALASSANÇ MARQUES",
+        "Numero": "33",
+        "Escalera": "",
+        "Planta": "1",
+        "Puerta": "2"
+    },
+    {
+        "id": 10,
+        "Original": "CALLE IGNACIO IGLESIAS Nº 13 , Puerta NAVE 8, CORNELLA DE LLOBREGAT",
+        "Tipo via": "CALLE",
+        "Domicilio": "IGNACIO IGLESIAS",
+        "Numero": "N 13",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 11,
+        "Original": "CALLE IGNACIO IGLESIAS Nº 13 , Puerta NAVE 8, CORNELLA DE LLOBREGAT",
+        "Tipo via": "CALLE",
+        "Domicilio": "IGNACIO IGLESIAS",
+        "Numero": "N 13",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 12,
+        "Original": "CALLE IGNACIO IGLESIAS Nº 13 , Puerta NAVE 8, CORNELLA DE LLOBREGAT",
+        "Tipo via": "CALLE",
+        "Domicilio": "IGNACIO IGLESIAS",
+        "Numero": "N 13",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 13,
+        "Original": "CALLE IGNACIO IGLESIAS Nº 13 , Puerta NAVE 8, CORNELLA DE LLOBREGAT",
+        "Tipo via": "CALLE",
+        "Domicilio": "IGNACIO IGLESIAS",
+        "Numero": "N 13",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 14,
+        "Original": "CALLE QUINTANA I MILLAS, 2 - NAV G PLANTA 1, CORNELLA DE LLOBREGAT",
+        "Tipo via": "CALLE",
+        "Domicilio": "NAV",
+        "Numero": "2",
+        "Escalera": "",
+        "Planta": "G  1",
+        "Puerta": ""
+    },
+    {
+        "id": 15,
+        "Original": "CASTOR URB LA CIERVA, Numero 53, CARMONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "URB LA CIERVA",
+        "Numero": "53",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 16,
+        "Original": "AV. GENERALITAT, 35  POL. IND FONSANTA, SANT JOAN DESPI",
+        "Tipo via": "AVENIDA",
+        "Domicilio": "GENERALITAT 35 POL. IND FONSANTA",
+        "Numero": "",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 17,
+        "Original": "AV. GENERALITAT, 35  POL. IND FONSANTA, SANT JOAN DESPI",
+        "Tipo via": "AVENIDA",
+        "Domicilio": "GENERALITAT 35 POL. IND FONSANTA",
+        "Numero": "",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 18,
+        "Original": "AV. GENERALITAT, 35  POL. IND FONSANTA, SANT JOAN DESPI",
+        "Tipo via": "AVENIDA",
+        "Domicilio": "GENERALITAT 35 POL. IND FONSANTA",
+        "Numero": "",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 19,
+        "Original": "PLAZA POETA SITJA, 4, PLATJA D ARO, PLATJA D ARO",
+        "Tipo via": "PLAZA",
+        "Domicilio": "PLATJA D ARO PLATJA D ARO",
+        "Numero": "4",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 20,
+        "Original": "GRAN DE LA SAGRERA, Numero 175, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "GRAN DE LA SAGRERA",
+        "Numero": "175",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 21,
+        "Original": "Av. DELS ALPS, Numero 48, CORNELLA DE LLOBREGAT",
+        "Tipo via": "AVENIDA",
+        "Domicilio": "DELS ALPS",
+        "Numero": "48",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 22,
+        "Original": "Av. DELS ALPS, Numero 48, CORNELLA DE LLOBREGAT",
+        "Tipo via": "AVENIDA",
+        "Domicilio": "DELS ALPS",
+        "Numero": "48",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 23,
+        "Original": "CALLE HERCEGOVINA, 14, Piso 4, Puerta 2, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "HERCEGOVINA",
+        "Numero": "14",
+        "Escalera": "",
+        "Planta": "4",
+        "Puerta": "2"
+    },
+    {
+        "id": 24,
+        "Original": "MONTSACOPA, 3, OLOT",
+        "Tipo via": "CALLE",
+        "Domicilio": "MONTSACOPA",
+        "Numero": "3",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 25,
+        "Original": "CARRENCA 29   1º2, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "CARRENCA",
+        "Numero": "29",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 26,
+        "Original": "CALLE BARRANQUET, 8, LA SENIA",
+        "Tipo via": "CALLE",
+        "Domicilio": "BARRANQUET",
+        "Numero": "8",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 27,
+        "Original": "CALLE CASTERAS, Numero 34, Piso BJ, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "CASTERAS",
+        "Numero": "34",
+        "Escalera": "",
+        "Planta": "BAJO",
+        "Puerta": ""
+    },
+    {
+        "id": 28,
+        "Original": "POMPEU FABRA, Numero 56, Piso URBANIZACION, RUBI",
+        "Tipo via": "CALLE",
+        "Domicilio": "POMPEU FABRA",
+        "Numero": "56",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 29,
+        "Original": "POMPEU FABRA, Numero 56, Piso URBANIZACION, RUBI",
+        "Tipo via": "CALLE",
+        "Domicilio": "POMPEU FABRA",
+        "Numero": "56",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 30,
+        "Original": "Av. DELS ALPS, Numero 48, CORNELLA DE LLOBREGAT",
+        "Tipo via": "AVENIDA",
+        "Domicilio": "DELS ALPS",
+        "Numero": "48",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 31,
+        "Original": "CALLE BRUC, Numero 51 - 53, Piso ENTRESOL, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "BRUC",
+        "Numero": "51 53",
+        "Escalera": "",
+        "Planta": "ENTRESOL",
+        "Puerta": ""
+    },
+    {
+        "id": 32,
+        "Original": "Calle Calatrava 1 1Izq, CARMONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "CALATRAVA",
+        "Numero": "1",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 33,
+        "Original": "BRAVO MURILLO, 122 PUESTO 347-348, MADRID",
+        "Tipo via": "CALLE",
+        "Domicilio": "BRAVO MURILLO, 122 PUESTO 347-348",
+        "Numero": "",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 34,
+        "Original": "ARAGON, Numero 517, Piso Piso 3, Puerta 2, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "ARAGON",
+        "Numero": "517",
+        "Escalera": "",
+        "Planta": "3",
+        "Puerta": "2"
+    },
+    {
+        "id": 35,
+        "Original": "CARRE SANT ANTONI CLARET, Numero 6, Piso P, Puerta 6, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "CARRE SANT ANTONI CLARET",
+        "Numero": "6",
+        "Escalera": "",
+        "Planta": "PRINCIPAL",
+        "Puerta": "6"
+    },
+    {
+        "id": 36,
+        "Original": "AVENIDA GAVA, 19 - PISO 6 PTA 1, VILADECANS",
+        "Tipo via": "AVENIDA",
+        "Domicilio": "GAVA",
+        "Numero": "19",
+        "Escalera": "",
+        "Planta": "6",
+        "Puerta": "1"
+    },
+    {
+        "id": 37,
+        "Original": "BENVIURE, 24, SANT BOI DE LLOBREGAT",
+        "Tipo via": "CALLE",
+        "Domicilio": "BENVIURE",
+        "Numero": "24",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 38,
+        "Original": "CALLE VERGE DEL CARME, 16 - 5 1, MARTORELL",
+        "Tipo via": "CALLE",
+        "Domicilio": "VERGE DEL CARME",
+        "Numero": "16 5 1",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 39,
+        "Original": "CALLE VERGE DEL CARME, 16 - 5 1, MARTORELL",
+        "Tipo via": "CALLE",
+        "Domicilio": "VERGE DEL CARME",
+        "Numero": "16 5 1",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 40,
+        "Original": "ENRIC GRANADOS, Numero 50, Piso CASA, VALLIRANA",
+        "Tipo via": "CALLE",
+        "Domicilio": "ENRIC GRANADOS",
+        "Numero": "50",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": "CASA VALLIRANA"
+    },
+    {
+        "id": 41,
+        "Original": "CALLE JACOBEO 64 B 2º B, MADRID",
+        "Tipo via": "CALLE",
+        "Domicilio": "JACOBEO",
+        "Numero": "64 B",
+        "Escalera": "",
+        "Planta": "2 B",
+        "Puerta": ""
+    },
+    {
+        "id": 42,
+        "Original": "AVENIDA GAVA, 19 - PISO 6 PTA 1, VILADECANS",
+        "Tipo via": "AVENIDA",
+        "Domicilio": "GAVA",
+        "Numero": "19",
+        "Escalera": "",
+        "Planta": "6",
+        "Puerta": "1"
+    },
+    {
+        "id": 43,
+        "Original": "CALLE JACOBEO 64 B 2º B, MADRID",
+        "Tipo via": "CALLE",
+        "Domicilio": "JACOBEO",
+        "Numero": "64 B",
+        "Escalera": "",
+        "Planta": "2 B",
+        "Puerta": ""
+    },
+    {
+        "id": 44,
+        "Original": "Av. DELS ALPS, Numero 48, CORNELLA DE LLOBREGAT",
+        "Tipo via": "AVENIDA",
+        "Domicilio": "DELS ALPS",
+        "Numero": "48",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 45,
+        "Original": "CALLE NEPTU, Numero 14-16, Piso P.BJ, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "NEPTU",
+        "Numero": "14-16",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 46,
+        "Original": "AVDA INGENIERIA, 9 , Puerta NAVE 21, SEVILLA",
+        "Tipo via": "AVENIDA",
+        "Domicilio": "INGENIERIA",
+        "Numero": "21",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": "NAVE"
+    },
+    {
+        "id": 47,
+        "Original": "POLIGONO INDUSTRIAL SANTA RITA CALLE OPTICA 13 , Puerta NAVE 8, CASTELLBISBAL",
+        "Tipo via": "CALLE",
+        "Domicilio": "OPTICA",
+        "Numero": "8",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": "NAVE"
+    },
+    {
+        "id": 48,
+        "Original": "CALLE VICTOR BALAGUER, Numero 10, Piso LC1, RUBI",
+        "Tipo via": "CALLE",
+        "Domicilio": "VICTOR BALAGUER",
+        "Numero": "10",
+        "Escalera": "",
+        "Planta": "LC1",
+        "Puerta": ""
+    },
+    {
+        "id": 49,
+        "Original": "POLIGONO INDUSTRIAL SANTA RITA CALLE OPTICA 13 , Puerta NAVE 8, CASTELLBISBAL",
+        "Tipo via": "CALLE",
+        "Domicilio": "OPTICA",
+        "Numero": "8",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": "NAVE"
+    },
+    {
+        "id": 50,
+        "Original": "AVD. DIAGONAL, Numero 650, Piso 4º, Puerta 1ª, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "AVD. DIAGONAL",
+        "Numero": "650",
+        "Escalera": "",
+        "Planta": "4",
+        "Puerta": "1"
+    },
+    {
+        "id": 51,
+        "Original": "FAMADES, Numero 72-74, L'HOSPITALET DE LLOBREGAT",
+        "Tipo via": "CALLE",
+        "Domicilio": "FAMADES",
+        "Numero": "72-74",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 52,
+        "Original": "CALLE FRANCESC CAMBÓ, 41, LLORET DE MAR",
+        "Tipo via": "CALLE",
+        "Domicilio": "FRANCESC CAMBÓ",
+        "Numero": "41",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 53,
+        "Original": "CALLE ALBA, 1 , Puerta LOCAL 2-3, LES FRANQUESES DEL VALLES",
+        "Tipo via": "CALLE",
+        "Domicilio": "ALBA",
+        "Numero": "2-3",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": "LOCAL"
+    },
+    {
+        "id": 54,
+        "Original": "CAMI DEL MIG, 16, 1ºPIS, CABRERA DE MAR",
+        "Tipo via": "CALLE",
+        "Domicilio": "CAMI DEL MIG",
+        "Numero": "16",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 55,
+        "Original": "CARRER DEL MIG, Numero 16, Piso 1º, CABRERA DE MAR",
+        "Tipo via": "CALLE",
+        "Domicilio": "DEL MIG",
+        "Numero": "16",
+        "Escalera": "",
+        "Planta": "1",
+        "Puerta": ""
+    },
+    {
+        "id": 56,
+        "Original": "CALLE NEPTU, Numero 14-16, Piso P.BJ, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "NEPTU",
+        "Numero": "14-16",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 57,
+        "Original": "AVENIDA DOLÇE DE PROVENZA 26 , Puerta NAVE C, TORRELLES DE LLOBREGAT",
+        "Tipo via": "AVENIDA",
+        "Domicilio": "DOLÇE DE PROVENZA",
+        "Numero": "26",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": "NAVE C"
+    },
+    {
+        "id": 58,
+        "Original": "AVENIDA DOLÇE DE PROVENZA 26 , Puerta NAVE C, TORRELLES DE LLOBREGAT",
+        "Tipo via": "AVENIDA",
+        "Domicilio": "DOLÇE DE PROVENZA",
+        "Numero": "26",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": "NAVE C"
+    },
+    {
+        "id": 59,
+        "Original": "C CORCEGA, Numero 573, Piso 2, Puerta 3, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "CORCEGA",
+        "Numero": "573",
+        "Escalera": "",
+        "Planta": "2",
+        "Puerta": "3"
+    },
+    {
+        "id": 60,
+        "Original": "CALLE DE LA MENTA, Numero 19, Piso 3, Puerta 1, ESPLUGUES DE LLOBREGAT",
+        "Tipo via": "CALLE",
+        "Domicilio": "DE LA MENTA",
+        "Numero": "19",
+        "Escalera": "",
+        "Planta": "3",
+        "Puerta": "1"
+    },
+    {
+        "id": 61,
+        "Original": "CALLE RAFAEL CAMPALANS 7, Numero 1, Piso 1, L'HOSPITALET DE LLOBREGAT",
+        "Tipo via": "CALLE",
+        "Domicilio": "RAFAEL CAMPALANS 7",
+        "Numero": "1",
+        "Escalera": "",
+        "Planta": "1",
+        "Puerta": ""
+    },
+    {
+        "id": 62,
+        "Original": "CALLE ALCANO, Numero 2, RUBI",
+        "Tipo via": "CALLE",
+        "Domicilio": "ALCANO",
+        "Numero": "2",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 63,
+        "Original": "ARTESANOS 17, ALBORAYA",
+        "Tipo via": "CALLE",
+        "Domicilio": "ARTESANOS",
+        "Numero": "17",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 64,
+        "Original": "CARRETERA DEL MONTSENY, Numero 52, Piso 1, Puerta 1, SANT ESTEVE DE PALAUTORDERA",
+        "Tipo via": "CARRETERA",
+        "Domicilio": "DEL MONTSENY",
+        "Numero": "52",
+        "Escalera": "",
+        "Planta": "1",
+        "Puerta": "1"
+    },
+    {
+        "id": 65,
+        "Original": "RAMBLA, Numero 130, SABADELL",
+        "Tipo via": "RAMBLA",
+        "Domicilio": "",
+        "Numero": "130",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 66,
+        "Original": "ULL DE LLEBRE, Puerta NAVE 40-42, CERVELLO",
+        "Tipo via": "CALLE",
+        "Domicilio": "ULL DE LLEBRE, NAVE 40-42",
+        "Numero": "40-42",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 67,
+        "Original": "PATRAIX, S/N, Numero BAJOS, ENGUERA",
+        "Tipo via": "CALLE",
+        "Domicilio": "PATRAIX S/N",
+        "Numero": "BAJO",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 68,
+        "Original": "CALLE JUAN BRAVO, 3 A, MADRID",
+        "Tipo via": "CALLE",
+        "Domicilio": "JUAN BRAVO",
+        "Numero": "3 A",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 69,
+        "Original": "JUAN BRAVO, 3 A, MADRID",
+        "Tipo via": "CALLE",
+        "Domicilio": "JUAN BRAVO",
+        "Numero": "3 A",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 70,
+        "Original": "CALLE JUAN BRAVO, 3 A, MADRID",
+        "Tipo via": "CALLE",
+        "Domicilio": "JUAN BRAVO",
+        "Numero": "3 A",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 71,
+        "Original": "CALLE FELIPE II, Numero 289, Piso 2, Puerta 6, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "FELIPE II",
+        "Numero": "289",
+        "Escalera": "",
+        "Planta": "2",
+        "Puerta": "6"
+    },
+    {
+        "id": 72,
+        "Original": "CALLE LOTOS, 13  BAJOS, MALAGA",
+        "Tipo via": "CALLE",
+        "Domicilio": "LOTOS",
+        "Numero": "13",
+        "Escalera": "",
+        "Planta": "BAJO",
+        "Puerta": ""
+    },
+    {
+        "id": 73,
+        "Original": "CALLE PONS I PONS Nº 25 CASA, SANTA COLOMA DE GRAMENET",
+        "Tipo via": "CALLE",
+        "Domicilio": "PONS I PONS",
+        "Numero": "N 25",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 74,
+        "Original": "SAN SALVADOR, Numero 17, Piso ENTRESUELO, Puerta 3, ESPLUGUES DE LLOBREGAT",
+        "Tipo via": "CALLE",
+        "Domicilio": "SAN SALVADOR",
+        "Numero": "17",
+        "Escalera": "",
+        "Planta": "ENTRESUELO",
+        "Puerta": "3"
+    },
+    {
+        "id": 75,
+        "Original": "CL MAYOR, Numero 16, Piso 2º, Puerta 1ª, MONTMELO",
+        "Tipo via": "CALLE",
+        "Domicilio": "MAYOR",
+        "Numero": "16",
+        "Escalera": "",
+        "Planta": "2",
+        "Puerta": "1"
+    },
+    {
+        "id": 76,
+        "Original": "GRAN DE GRACIA, Numero 16, Piso ENTRESUELO, Puerta 2, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "GRAN DE GRACIA",
+        "Numero": "16",
+        "Escalera": "",
+        "Planta": "ENTRESUELO",
+        "Puerta": "2"
+    },
+    {
+        "id": 77,
+        "Original": "CALLE FRANCESC CAMBÓ, 41, LLORET DE MAR",
+        "Tipo via": "CALLE",
+        "Domicilio": "FRANCESC CAMBÓ",
+        "Numero": "41",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 78,
+        "Original": "CALLE TRAFALGAR, 25 - ENT PTA 2, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "ENT",
+        "Numero": "25",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": "2"
+    },
+    {
+        "id": 79,
+        "Original": "PLAZA GALA PLACIDIA, 1, BARCELONA",
+        "Tipo via": "PLAZA",
+        "Domicilio": "GALA PLACIDIA",
+        "Numero": "1",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 80,
+        "Original": "MOTORES, 16/18, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "MOTORES",
+        "Numero": "16/18",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 81,
+        "Original": "POL. IN. COLL DE MONTCADA CALLE CARGOL, 8-12, MONTCADA I REIXAC",
+        "Tipo via": "CALLE",
+        "Domicilio": "CARGOL",
+        "Numero": "8-12",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 82,
+        "Original": "CARRER EDUARD GIBERT, Numero 40, Piso LOCAL, CORNELLA DE LLOBREGAT",
+        "Tipo via": "CALLE",
+        "Domicilio": "EDUARD GIBERT",
+        "Numero": "40",
+        "Escalera": "",
+        "Planta": "LOCAL",
+        "Puerta": ""
+    },
+    {
+        "id": 83,
+        "Original": "CALLE IGLESIA, 17 CASA, CASTELLBELL I EL VILAR",
+        "Tipo via": "CALLE",
+        "Domicilio": "IGLESIA",
+        "Numero": "17",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": "CASA CASTELLBELL"
+    },
+    {
+        "id": 84,
+        "Original": "FRESSER 7 P.I PLA D EN COLL, MONTCADA I REIXAC",
+        "Tipo via": "CALLE",
+        "Domicilio": "P.I PLA D EN COLL",
+        "Numero": "7",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 85,
+        "Original": "CALLE REIXAGO, Numero 72, Piso BAJO, MONTCADA I REIXAC",
+        "Tipo via": "CALLE",
+        "Domicilio": "REIXAGO",
+        "Numero": "72",
+        "Escalera": "",
+        "Planta": "BAJO",
+        "Puerta": ""
+    },
+    {
+        "id": 86,
+        "Original": "CR CLL SANT CELESTI 25, REUS",
+        "Tipo via": "CALLE",
+        "Domicilio": "CR CLL SANT CELESTI",
+        "Numero": "25",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 87,
+        "Original": "CARRER MATAGALLS, 12, BAIXOS, SANT ESTEVE DE PALAUTORDERA",
+        "Tipo via": "CALLE",
+        "Domicilio": "MATAGALLS",
+        "Numero": "12",
+        "Escalera": "",
+        "Planta": "BAIXOS",
+        "Puerta": ""
+    },
+    {
+        "id": 88,
+        "Original": "AV. ESTACION , 27 ESCALERA A PISO 3 PUERTA C, BLANES",
+        "Tipo via": "AVENIDA",
+        "Domicilio": "ESTACION",
+        "Numero": "27",
+        "Escalera": "A",
+        "Planta": "3",
+        "Puerta": "C"
+    },
+    {
+        "id": 89,
+        "Original": "PLAÇA CONVENT, 6, BREDA",
+        "Tipo via": "PLAZA",
+        "Domicilio": "CONVENT",
+        "Numero": "6",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 90,
+        "Original": "REPUNTADORA, Numero 2026-06-02 00:00:00, Piso LOCAL, Puerta 3, MATARO",
+        "Tipo via": "CALLE",
+        "Domicilio": "REPUNTADORA",
+        "Numero": "2026-06-02 00 00 00",
+        "Escalera": "",
+        "Planta": "LOCAL",
+        "Puerta": "3"
+    },
+    {
+        "id": 91,
+        "Original": "URB. LA SOLELLA CALLE CANTABRIA BUSTIA, Numero 14, LLORET DE MAR",
+        "Tipo via": "CALLE",
+        "Domicilio": "CANTABRIA BUSTIA",
+        "Numero": "14",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 92,
+        "Original": "PASAJE TEIDE, S/N - BL 3. PTA 3, SANTA SUSANNA",
+        "Tipo via": "CALLE",
+        "Domicilio": "PASAJE TEIDE S/N BL",
+        "Numero": "3",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": "3"
+    },
+    {
+        "id": 93,
+        "Original": "CALLE ALVARADO, 8, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "ALVARADO",
+        "Numero": "8",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 94,
+        "Original": "REGAS, Numero 13, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "REGAS",
+        "Numero": "13",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 95,
+        "Original": "REGAZ Nº13, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "REGAZ Nº13",
+        "Numero": "",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 96,
+        "Original": "CALLE SANT PERE MES ALT 47 - BJ, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "BJ BARCELONA",
+        "Numero": "47",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 97,
+        "Original": "AVG/ DE LA SALLE, 45, REUS",
+        "Tipo via": "CALLE",
+        "Domicilio": "AVG/ DE LA SALLE",
+        "Numero": "45",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 98,
+        "Original": "CALLE FRANCESC CAMBO, 41, LLORET DE MAR",
+        "Tipo via": "CALLE",
+        "Domicilio": "FRANCESC CAMBO",
+        "Numero": "41",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 99,
+        "Original": "CALLE ALBER, 8 URB BRISES DEL MAR, ALTAFULLA",
+        "Tipo via": "CALLE",
+        "Domicilio": "URB BRISES DEL MAR",
+        "Numero": "8",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 100,
+        "Original": "SALVADOR ESPRIU, 23 Piso 5, Puerta 1, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "SALVADOR ESPRIU",
+        "Numero": "23",
+        "Escalera": "",
+        "Planta": "5",
+        "Puerta": "1"
+    },
+    {
+        "id": 101,
+        "Original": "CRTA. DE LA VILA, 8., VILADECANS",
+        "Tipo via": "CARRETERA",
+        "Domicilio": "DE LA VILA",
+        "Numero": "8",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 102,
+        "Original": "POLG.INDT.BUFAVENT CALLE RAMON FARGUELL, Numero 56, MANRESA",
+        "Tipo via": "CALLE",
+        "Domicilio": "POLG.INDT.BUFAVENT CALLE RAMON FARGUELL",
+        "Numero": "56",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 103,
+        "Original": "PASEO SANT GERVASI, 90, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "PASEO SANT GERVASI",
+        "Numero": "90",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 104,
+        "Original": "SALVADOR ESPRIU, 23 Piso 5, Puerta 1, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "SALVADOR ESPRIU",
+        "Numero": "23",
+        "Escalera": "",
+        "Planta": "5",
+        "Puerta": "1"
+    },
+    {
+        "id": 105,
+        "Original": "CARRE BERGUEDA 15 9A -1, SANTA PERPETUA DE MOGODA",
+        "Tipo via": "CALLE",
+        "Domicilio": "CARRE BERGUEDA",
+        "Numero": "-1",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": "9A"
+    },
+    {
+        "id": 106,
+        "Original": "CARRE BERGUEDA 15 9A -1, SANTA PERPETUA DE MOGODA",
+        "Tipo via": "CALLE",
+        "Domicilio": "CARRE BERGUEDA",
+        "Numero": "-1",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": "9A"
+    },
+    {
+        "id": 107,
+        "Original": "RIALL BELLSOLELL, Numero 30, ARENYS DE MUNT",
+        "Tipo via": "CALLE",
+        "Domicilio": "RIALL BELLSOLELL",
+        "Numero": "30",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 108,
+        "Original": "PARIS, Numero 146, Escalera B, Piso 2, Puerta 4, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "PARIS",
+        "Numero": "146",
+        "Escalera": "B",
+        "Planta": "2",
+        "Puerta": "4"
+    },
+    {
+        "id": 109,
+        "Original": "MILA, Numero 106-116, Piso 2, Puerta 2, BADALONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "MILA",
+        "Numero": "106-116",
+        "Escalera": "",
+        "Planta": "2",
+        "Puerta": "2"
+    },
+    {
+        "id": 110,
+        "Original": "TRABAJO, Numero 238-242, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "TRABAJO",
+        "Numero": "238-242",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 111,
+        "Original": "SANT MARC, Numero 1, Piso 1º, Puerta 2º, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "SANT MARC",
+        "Numero": "1",
+        "Escalera": "",
+        "Planta": "2",
+        "Puerta": ""
+    },
+    {
+        "id": 112,
+        "Original": "BALMES, Numero 357, Piso 4, Puerta 5, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "BALMES",
+        "Numero": "357",
+        "Escalera": "",
+        "Planta": "4",
+        "Puerta": "5"
+    },
+    {
+        "id": 113,
+        "Original": "CALLE SANT PERE MES ALT 47 - BJ, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "BJ BARCELONA",
+        "Numero": "47",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 114,
+        "Original": "CARRE POETA PUNSOLA, Numero 10, Piso 1º, Puerta 2ª, MATARO",
+        "Tipo via": "CALLE",
+        "Domicilio": "CARRE POETA PUNSOLA",
+        "Numero": "10",
+        "Escalera": "",
+        "Planta": "1",
+        "Puerta": "2"
+    },
+    {
+        "id": 115,
+        "Original": "CALLE RODERA, Numero 3, SANT CLIMENT DE LLOBREGAT",
+        "Tipo via": "CALLE",
+        "Domicilio": "RODERA",
+        "Numero": "3",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 116,
+        "Original": "CALLE PUIG PUIGVELL, Numero 18, ANGLES",
+        "Tipo via": "CALLE",
+        "Domicilio": "PUIG PUIGVELL",
+        "Numero": "18",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 117,
+        "Original": "DRAC, 2 Piso 2, Puerta 1, BADALONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "DRAC",
+        "Numero": "2",
+        "Escalera": "",
+        "Planta": "2",
+        "Puerta": "1"
+    },
+    {
+        "id": 118,
+        "Original": "AVDA. MIMOSAS Nº 45 CASA, BORMUJOS",
+        "Tipo via": "AVENIDA",
+        "Domicilio": "MIMOSAS",
+        "Numero": "N 45",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": "CASA BORMUJOS"
+    },
+    {
+        "id": 119,
+        "Original": "APARTADO DE CORREOS 771 SANTA EULALIA, SANTA EULALIA DEL RIO",
+        "Tipo via": "CALLE",
+        "Domicilio": "APARTADO DE CORREOS 771 SANTA EULALIA",
+        "Numero": "",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 120,
+        "Original": "CALLE ALVARADO, Numero 8, Piso BJ, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "ALVARADO",
+        "Numero": "8",
+        "Escalera": "",
+        "Planta": "BAJO",
+        "Puerta": ""
+    },
+    {
+        "id": 121,
+        "Original": "ESCIPIO 61 3º 1ª, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "ESCIPIO",
+        "Numero": "61",
+        "Escalera": "",
+        "Planta": "3",
+        "Puerta": "1"
+    },
+    {
+        "id": 122,
+        "Original": "AVD. CARDENAL VICENTE ENRIQUE TARANCON, 10 BAJOS, BURRIANA",
+        "Tipo via": "CALLE",
+        "Domicilio": "AVD. CARDENAL VICENTE ENRIQUE TARANCON",
+        "Numero": "10",
+        "Escalera": "",
+        "Planta": "BAJO",
+        "Puerta": ""
+    },
+    {
+        "id": 123,
+        "Original": "CALLE DOCTOR SAPENA, Numero 54, Piso 3, ALACANT-ALICANTE",
+        "Tipo via": "CALLE",
+        "Domicilio": "DOCTOR SAPENA",
+        "Numero": "54",
+        "Escalera": "",
+        "Planta": "3",
+        "Puerta": ""
+    },
+    {
+        "id": 124,
+        "Original": "LEPANTO, Numero 15, Piso 2, Puerta B, BOROX",
+        "Tipo via": "CALLE",
+        "Domicilio": "LEPANTO",
+        "Numero": "15",
+        "Escalera": "",
+        "Planta": "2",
+        "Puerta": "B"
+    },
+    {
+        "id": 125,
+        "Original": "CALLE GRAN VIA DE LES CORTS CATALANES, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "GRAN VIA DE LES CORTS CATALANES",
+        "Numero": "",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 126,
+        "Original": "CALLE RES, Numero 65, Piso 1, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "RES",
+        "Numero": "65",
+        "Escalera": "",
+        "Planta": "1",
+        "Puerta": ""
+    },
+    {
+        "id": 127,
+        "Original": "CALLE ALGAR DEL PALANCIA, 4 PUERTA 16, VALENCIA",
+        "Tipo via": "CALLE",
+        "Domicilio": "ALGAR DEL PALANCIA",
+        "Numero": "4",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": "16"
+    },
+    {
+        "id": 128,
+        "Original": "CALLE BALMES, Numero 365, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "BALMES",
+        "Numero": "365",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 129,
+        "Original": "CTRA. N. II   KM. 556,5 NAU8 POL.IND.PLA, ODENA",
+        "Tipo via": "CARRETERA",
+        "Domicilio": "POL.IND.PLA",
+        "Numero": "NAU8",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 130,
+        "Original": "CALLE SIGLO XX   76   2    1, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "SIGLO XX",
+        "Numero": "76 2 1",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 131,
+        "Original": "CALLE PALLARS, 193 - ED SPACES, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "PALLARS",
+        "Numero": "193",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 132,
+        "Original": "CALLE BERGUEDA, Numero 15, Piso 9A, Puerta 1, SANTA PERPETUA DE MOGODA",
+        "Tipo via": "CALLE",
+        "Domicilio": "BERGUEDA",
+        "Numero": "15",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": "9A  1"
+    },
+    {
+        "id": 133,
+        "Original": "Villaroel, Numero 220, Piso 6, Puerta 2, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "VILLAROEL",
+        "Numero": "220",
+        "Escalera": "",
+        "Planta": "6",
+        "Puerta": "2"
+    },
+    {
+        "id": 134,
+        "Original": "RONDA SANT ANTONI, Numero 59, Piso 8, Puerta 2, BARCELONA",
+        "Tipo via": "RONDA",
+        "Domicilio": "SANT ANTONI",
+        "Numero": "59",
+        "Escalera": "",
+        "Planta": "8",
+        "Puerta": "2"
+    },
+    {
+        "id": 135,
+        "Original": "ANTONIO GAUDI, Numero 5, SANT VICENC DELS HORTS",
+        "Tipo via": "CALLE",
+        "Domicilio": "ANTONIO GAUDI",
+        "Numero": "5",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 136,
+        "Original": "CARRETERA DE COLL BLANC, Numero 2026-07-05 00:00:00, Piso 1, Puerta 3, L'HOSPITALET DE LLOBREGAT",
+        "Tipo via": "CARRETERA",
+        "Domicilio": "DE COLL BLANC",
+        "Numero": "2026-07-05 00 00 00",
+        "Escalera": "",
+        "Planta": "1",
+        "Puerta": "3"
+    },
+    {
+        "id": 137,
+        "Original": "CARRETERA DE COLLBLANC, Numero 2026-07-05 00:00:00, Piso 1, Puerta 3, L'HOSPITALET DE LLOBREGAT",
+        "Tipo via": "CARRETERA",
+        "Domicilio": "DE COLLBLANC",
+        "Numero": "2026-07-05 00 00 00",
+        "Escalera": "",
+        "Planta": "1",
+        "Puerta": "3"
+    },
+    {
+        "id": 138,
+        "Original": "AVDA. MADRID, Numero 203, BARCELONA",
+        "Tipo via": "AVENIDA",
+        "Domicilio": "MADRID",
+        "Numero": "203",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 139,
+        "Original": "GALVANI, Numero 88, Piso 1, Puerta 1, TERRASSA",
+        "Tipo via": "CALLE",
+        "Domicilio": "GALVANI",
+        "Numero": "88",
+        "Escalera": "",
+        "Planta": "1",
+        "Puerta": "1"
+    },
+    {
+        "id": 140,
+        "Original": "CALLE PICASSO, Numero 25, SANTA MARIA DE PALAUTORDERA",
+        "Tipo via": "CALLE",
+        "Domicilio": "PICASSO",
+        "Numero": "25",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 141,
+        "Original": "CARRER NOU, Numero 5, Piso LOCAL, SANT ESTEVE DE PALAUTORD",
+        "Tipo via": "CALLE",
+        "Domicilio": "NOU",
+        "Numero": "5",
+        "Escalera": "",
+        "Planta": "LOCAL",
+        "Puerta": ""
+    },
+    {
+        "id": 142,
+        "Original": "CL EUSEBI PLANTAS, Numero 7, Piso 3º, Puerta 2ª, MARTORELL",
+        "Tipo via": "CALLE",
+        "Domicilio": "EUSEBI PLANTAS",
+        "Numero": "7",
+        "Escalera": "",
+        "Planta": "3",
+        "Puerta": "2"
+    },
+    {
+        "id": 143,
+        "Original": "DIAGONAL, Numero 612, Piso 2, Puerta 11, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "DIAGONAL",
+        "Numero": "612",
+        "Escalera": "",
+        "Planta": "2",
+        "Puerta": "11"
+    },
+    {
+        "id": 144,
+        "Original": "FONT DE SANT LLORENÇ, Numero 13, VILAFRANCA DEL PENEDES",
+        "Tipo via": "CALLE",
+        "Domicilio": "FONT DE SANT LLORENÇ",
+        "Numero": "13",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 145,
+        "Original": "SAMSO, Numero 8, Piso 1, Puerta 2, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "SAMSO",
+        "Numero": "8",
+        "Escalera": "",
+        "Planta": "1",
+        "Puerta": "2"
+    },
+    {
+        "id": 146,
+        "Original": "CR MAJOR, Numero 19, Piso BAJOS, SANT PERE DE RIBES",
+        "Tipo via": "CALLE",
+        "Domicilio": "CR MAJOR",
+        "Numero": "19",
+        "Escalera": "",
+        "Planta": "BAJO",
+        "Puerta": ""
+    },
+    {
+        "id": 147,
+        "Original": "MESTRE CARBO, Numero 4, L'HOSPITALET DE LLOBREGAT",
+        "Tipo via": "CALLE",
+        "Domicilio": "MESTRE CARBO",
+        "Numero": "4",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 148,
+        "Original": "CARRE BERGUEDA 15 9A -1, SANTA PERPETUA DE MOGODA",
+        "Tipo via": "CALLE",
+        "Domicilio": "CARRE BERGUEDA",
+        "Numero": "-1",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": "9A"
+    },
+    {
+        "id": 149,
+        "Original": "CALLE PERE IV, Numero 110, Piso EDIFICIO, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "PERE IV",
+        "Numero": "110",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 150,
+        "Original": "CARRETERA ANTIGA DE SABADELL, Numero 8, MONTCADA I REIXAC",
+        "Tipo via": "CARRETERA",
+        "Domicilio": "ANTIGA DE SABADELL",
+        "Numero": "8",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 151,
+        "Original": "SUGRANYES, Numero 117, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "SUGRANYES",
+        "Numero": "117",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 152,
+        "Original": "AIGUA, Numero 4, VILANOVA I LA GELTRU",
+        "Tipo via": "CALLE",
+        "Domicilio": "AIGUA",
+        "Numero": "4",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 153,
+        "Original": "CTRA. NAC. 340   KM.1196, CASTELLET I LA GORNAL",
+        "Tipo via": "CARRETERA",
+        "Domicilio": "NAC. 340 KM.1196",
+        "Numero": "",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 154,
+        "Original": "AVDA MARESME, Numero 107, BADALONA",
+        "Tipo via": "AVENIDA",
+        "Domicilio": "MARESME",
+        "Numero": "107",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 155,
+        "Original": "AVDA MARESME, Numero 107, BADALONA",
+        "Tipo via": "AVENIDA",
+        "Domicilio": "MARESME",
+        "Numero": "107",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 156,
+        "Original": "PJE COMPOSITOR SCHUMANN PLG 4, RUBI",
+        "Tipo via": "CALLE",
+        "Domicilio": "PJE COMPOSITOR SCHUMANN PLG",
+        "Numero": "4",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 157,
+        "Original": "FRANCESC LLUNELL, Numero 4, ESPLUGUES DE LLOBREGAT",
+        "Tipo via": "CALLE",
+        "Domicilio": "FRANCESC LLUNELL",
+        "Numero": "4",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 158,
+        "Original": "PLAZA SANLLEHI, Numero 5, Piso LOCAL, BARCELONA",
+        "Tipo via": "PLAZA",
+        "Domicilio": "SANLLEHI",
+        "Numero": "5",
+        "Escalera": "",
+        "Planta": "LOCAL",
+        "Puerta": ""
+    },
+    {
+        "id": 159,
+        "Original": "CALABRIA, Numero 165-167, Piso 6, Puerta 3, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "CALABRIA",
+        "Numero": "165-167",
+        "Escalera": "",
+        "Planta": "6",
+        "Puerta": "3"
+    },
+    {
+        "id": 160,
+        "Original": "CARRER NOU 5 LOCAL, SANT ESTEVE DE PALAUTORDERA",
+        "Tipo via": "CALLE",
+        "Domicilio": "NOU",
+        "Numero": "",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": "5 LOCAL"
+    },
+    {
+        "id": 161,
+        "Original": "VIA EUROPA, Numero 98, Piso OFICINA, MATARO",
+        "Tipo via": "VIA",
+        "Domicilio": "EUROPA",
+        "Numero": "98",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": "OFICINA MATARO"
+    },
+    {
+        "id": 162,
+        "Original": "CALLER FIRAL, Numero 43, Piso BAJOS, SARRIÀ DE TER",
+        "Tipo via": "CALLE",
+        "Domicilio": "CALLER FIRAL",
+        "Numero": "43",
+        "Escalera": "",
+        "Planta": "BAJO",
+        "Puerta": ""
+    },
+    {
+        "id": 163,
+        "Original": "TERRASSA, Numero 21, RUBI",
+        "Tipo via": "CALLE",
+        "Domicilio": "TERRASSA",
+        "Numero": "21",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 164,
+        "Original": "SANTIAGO DE COMPOSTELA, Numero 27, Piso AT2, L'HOSPITALET DE LLOBREGAT",
+        "Tipo via": "CALLE",
+        "Domicilio": "SANTIAGO DE COMPOSTELA",
+        "Numero": "27",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 165,
+        "Original": "POL. IND. VALLMORENA CALLE SALVADOR AL, Numero 3, VILASSAR DE DALT",
+        "Tipo via": "CALLE",
+        "Domicilio": "SALVADOR AL",
+        "Numero": "3",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 166,
+        "Original": "CALLE GIRONA, Numero 15, VILASSAR DE DALT",
+        "Tipo via": "CALLE",
+        "Domicilio": "GIRONA",
+        "Numero": "15",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 167,
+        "Original": "POL IND SECTOR, Numero 13, RIBA-ROJA DE TURIA",
+        "Tipo via": "CALLE",
+        "Domicilio": "POL IND SECTOR NUMERO 13",
+        "Numero": "13",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 168,
+        "Original": "POL CAN MASSAGUER PARCELA, Numero 9, LA ROCA DEL VALLES",
+        "Tipo via": "CALLE",
+        "Domicilio": "POL CAN MASSAGUER PARCELA",
+        "Numero": "9",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 169,
+        "Original": "CALLE REINA LEONOR, Numero 120, Piso BAJOS, SABADELL",
+        "Tipo via": "CALLE",
+        "Domicilio": "REINA LEONOR",
+        "Numero": "120",
+        "Escalera": "",
+        "Planta": "BAJO",
+        "Puerta": ""
+    },
+    {
+        "id": 170,
+        "Original": "MALLORCA, Numero 114/116, Escalera C, Piso PP, Puerta 1, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "MALLORCA",
+        "Numero": "114/116",
+        "Escalera": "C",
+        "Planta": "PP",
+        "Puerta": "1"
+    },
+    {
+        "id": 171,
+        "Original": "CALLE CABALLERO, Numero 75-77, Piso BAJOS, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "CABALLERO",
+        "Numero": "75-77",
+        "Escalera": "",
+        "Planta": "BAJO",
+        "Puerta": ""
+    },
+    {
+        "id": 172,
+        "Original": "COLLADO DEL TEJAILLO, Numero 7, ZUBIA (LA)",
+        "Tipo via": "CALLE",
+        "Domicilio": "ZUBIA LA",
+        "Numero": "7",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 173,
+        "Original": "PZA. MAINERROTA, Numero 5, ARAMAIO",
+        "Tipo via": "PLAZA",
+        "Domicilio": "MAINERROTA",
+        "Numero": "5",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 174,
+        "Original": "METALL PARCELA, Numero 3, SANT ANDREU DE LA BARCA",
+        "Tipo via": "CALLE",
+        "Domicilio": "METALL PARCELA",
+        "Numero": "3",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 175,
+        "Original": "CALLE BARRERAS, Numero 9, Piso BAIXOS, MANRESA",
+        "Tipo via": "CALLE",
+        "Domicilio": "BARRERAS",
+        "Numero": "9",
+        "Escalera": "",
+        "Planta": "BAIXOS",
+        "Puerta": ""
+    },
+    {
+        "id": 176,
+        "Original": "CAPITAN ARENAS, Numero 42-46, Piso 3, Puerta 1, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "CAPITAN ARENAS",
+        "Numero": "42-46",
+        "Escalera": "",
+        "Planta": "3",
+        "Puerta": "1"
+    },
+    {
+        "id": 177,
+        "Original": "CALLE ALCALDE PASCUAL, Numero 15, Piso 1, Puerta 2, REUS",
+        "Tipo via": "CALLE",
+        "Domicilio": "ALCALDE PASCUAL",
+        "Numero": "15",
+        "Escalera": "",
+        "Planta": "1",
+        "Puerta": "2"
+    },
+    {
+        "id": 178,
+        "Original": "POL.IND. LA PEDROSA  PARCELA 9, MASQUEFA",
+        "Tipo via": "CALLE",
+        "Domicilio": "POL.IND. LA PEDROSA PARCELA",
+        "Numero": "9",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 179,
+        "Original": "CALLE SANT ISCLE, Numero 27, Puerta C, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "SANT ISCLE",
+        "Numero": "27",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": "C"
+    },
+    {
+        "id": 180,
+        "Original": "CALLE CIUDAD DE FRIAS, Numero 2013-11-01 00:00:00, Piso , Puerta NAVE 0, MADRID",
+        "Tipo via": "CALLE",
+        "Domicilio": "CIUDAD DE FRIAS",
+        "Numero": "0",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": "NAVE"
+    },
+    {
+        "id": 181,
+        "Original": "CTRA. DE VALENCIA, Numero 197, TARRAGONA",
+        "Tipo via": "CARRETERA",
+        "Domicilio": "DE VALENCIA",
+        "Numero": "197",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 182,
+        "Original": "JUAN DE SADA, Numero 20, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "JUAN DE SADA",
+        "Numero": "20",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 183,
+        "Original": "CALLE BOTERS (Parc Tecnologic del Valles), Numero 3, CERDANYOLA DEL VALLES",
+        "Tipo via": "CALLE",
+        "Domicilio": "BOTERS PARC TECNOLOGIC DEL VALLES",
+        "Numero": "3",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 184,
+        "Original": "MOSSEN JACINT VERDAGUER, Numero 15, HOSTALETS DE BALENYA",
+        "Tipo via": "CALLE",
+        "Domicilio": "MOSSEN JACINT VERDAGUER",
+        "Numero": "15",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 185,
+        "Original": "BARRIO LAS ARENAS, Numero 25, VALDALIGA",
+        "Tipo via": "CALLE",
+        "Domicilio": "BARRIO LAS ARENAS",
+        "Numero": "25",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 186,
+        "Original": "ORION, Numero 2, TERRASSA",
+        "Tipo via": "CALLE",
+        "Domicilio": "ORION",
+        "Numero": "2",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 187,
+        "Original": "PASAJE DEL AYUNTAMIENTO, Numero 10, MONTORNES DEL VALLES",
+        "Tipo via": "CALLE",
+        "Domicilio": "PASAJE DEL AYUNTAMIENTO",
+        "Numero": "10",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 188,
+        "Original": "DOCTOR VILA, Numero 3, Piso BAJOS, SANT ANDREU DE LA BARCA",
+        "Tipo via": "CALLE",
+        "Domicilio": "DOCTOR VILA",
+        "Numero": "3",
+        "Escalera": "",
+        "Planta": "BAJO",
+        "Puerta": ""
+    },
+    {
+        "id": 189,
+        "Original": "CALLE ARIBAU, Numero 9, Piso TORRE, EL PAPIOL",
+        "Tipo via": "CALLE",
+        "Domicilio": "ARIBAU",
+        "Numero": "9",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 190,
+        "Original": "CALLE PERE COLL I GUITÓ, Numero 4, Piso BAJOS, SALT",
+        "Tipo via": "CALLE",
+        "Domicilio": "PERE COLL I GUITÓ",
+        "Numero": "4",
+        "Escalera": "",
+        "Planta": "BAJO",
+        "Puerta": ""
+    },
+    {
+        "id": 191,
+        "Original": "ALEGRE DE DALT, Numero 56, Piso 1, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "ALEGRE DE DALT",
+        "Numero": "56",
+        "Escalera": "",
+        "Planta": "1",
+        "Puerta": ""
+    },
+    {
+        "id": 192,
+        "Original": "CALLE CASANOVAS I BOSCH, Numero 58, Piso BJ, SABADELL",
+        "Tipo via": "CALLE",
+        "Domicilio": "CASANOVAS I BOSCH",
+        "Numero": "58",
+        "Escalera": "",
+        "Planta": "BAJO",
+        "Puerta": ""
+    },
+    {
+        "id": 193,
+        "Original": "CTRA. CASTELAR, Numero 346, TERRASSA",
+        "Tipo via": "CARRETERA",
+        "Domicilio": "CASTELAR",
+        "Numero": "346",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 194,
+        "Original": "AVDA. PRINCIPAL, Numero OFIC.34, ALTEA LA VIEJA",
+        "Tipo via": "AVENIDA",
+        "Domicilio": "PRINCIPAL",
+        "Numero": "OFIC34",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 195,
+        "Original": "POL IND PLA DEL COS CAMI ANGLE, Numero , Puerta NAVE 32, NAVARCLES",
+        "Tipo via": "CALLE",
+        "Domicilio": "POL IND PLA DEL COS CAMI ANGLE",
+        "Numero": "32",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": "NUMERO  NAVE"
+    },
+    {
+        "id": 196,
+        "Original": "CULTURA, Numero 7, SANTA COLOMA DE GRAMENET",
+        "Tipo via": "CALLE",
+        "Domicilio": "CULTURA",
+        "Numero": "7",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 197,
+        "Original": "APARTADO CORREOS, Numero 18, EL PRAT DE LLOBREGAT",
+        "Tipo via": "CALLE",
+        "Domicilio": "APARTADO CORREOS",
+        "Numero": "18",
+        "Escalera": "",
+        "Planta": "",
+        "Puerta": ""
+    },
+    {
+        "id": 198,
+        "Original": "CALLE AVENIR, Numero ENTLO, Piso ENTLO, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "AVENIR",
+        "Numero": "",
+        "Escalera": "",
+        "Planta": "ENTLO  ENTLO",
+        "Puerta": ""
+    },
+    {
+        "id": 199,
+        "Original": "TORRODELLA DE MONGRI, Numero 21, Piso 11, Puerta D, BARCELONA",
+        "Tipo via": "CALLE",
+        "Domicilio": "TORRODELLA DE MONGRI",
+        "Numero": "21",
+        "Escalera": "",
+        "Planta": "11",
+        "Puerta": "D"
+    },
+    {
+        "id": 200,
+        "Original": "GRAN VIA DE ORTALEZA, Numero 60-D, Piso 1, Puerta Q, MADRID",
+        "Tipo via": "CALLE",
+        "Domicilio": "GRAN VIA DE ORTALEZA",
+        "Numero": "60-D",
+        "Escalera": "",
+        "Planta": "1",
+        "Puerta": "Q"
+    }
+]
