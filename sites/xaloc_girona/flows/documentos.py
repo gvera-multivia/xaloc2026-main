@@ -145,15 +145,31 @@ async def _adjuntar_y_continuar(popup: Page, *, espera_cierre: bool = False) -> 
     # Los archivos ya se adjuntaron en _seleccionar_archivos
     # Aquí solo necesitamos hacer clic en "Continuar" para cerrar el popup
     
+    # CRÍTICO: Esperar a que el popup procese completamente los archivos subidos
+    # El popup usa Ajax para subir archivos de forma asíncrona, así que debemos
+    # esperar a que aparezca el mensaje "Document adjuntat" antes de continuar
+    logging.info("Esperando a que el popup procese completamente los archivos...")
+    try:
+        await popup.wait_for_function(
+            """() => {
+                const resultado = document.getElementById('uploadResultado');
+                if (!resultado) return false;
+                return resultado.textContent.includes('Document adjuntat');
+            }""",
+            timeout=30000
+        )
+        logging.info("Archivos procesados correctamente por el popup")
+    except Exception as e:
+        logging.warning(f"No se pudo confirmar el mensaje de subida: {e}")
+    
+    # Espera adicional para asegurar que el JavaScript del popup termine completamente
+    await popup.wait_for_timeout(5000)  # 5 segundos para que todo se asiente
+    
     # Tras adjuntar todos los archivos, aparece "Continuar"
-    logging.info("Todos los archivos adjuntados. Buscando botón 'Continuar'...")
+    logging.info("Buscando botón 'Continuar'...")
     continuar = popup.get_by_role("link", name=re.compile(r"^Continuar$", re.IGNORECASE)).first
     await continuar.wait_for(state="visible", timeout=20000)
     logging.info("Botón 'Continuar' visible")
-    
-    # Espera adicional para asegurar que el botón está completamente listo
-    logging.info("Esperando a que el botón 'Continuar' esté completamente listo...")
-    await popup.wait_for_timeout(2000)  # Aumentado de 1.5s a 2s
 
     if espera_cierre:
         logging.info("Ejecutando función continuar() vía JavaScript...")
