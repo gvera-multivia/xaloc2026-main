@@ -168,6 +168,29 @@ def _pick_newer(existing: dict | None, candidate: dict) -> dict:
     return existing
 
 
+def _pick_prefer_single_term(existing: dict | None, candidate: dict) -> dict:
+    """
+    Selecciona un candidato preferiblemente "de un solo término" (p.ej. AUTORIZACION.pdf en vez de AUTDNI.pdf),
+    y a igualdad, el más reciente.
+    """
+    if not existing:
+        return candidate
+
+    existing_terms = int(existing.get("term_count") or 0)
+    cand_terms = int(candidate.get("term_count") or 0)
+
+    if existing_terms != cand_terms:
+        # preferimos term_count=1 si existe
+        if cand_terms == 1:
+            return candidate
+        if existing_terms == 1:
+            return existing
+
+    if candidate.get("last_modified", 0) > existing.get("last_modified", 0):
+        return candidate
+    return existing
+
+
 def _iter_files(root: Path) -> Iterable[Path]:
     for dirpath, _dirnames, filenames in os.walk(root):
         for filename in filenames:
@@ -213,7 +236,6 @@ def select_required_client_documents(
     terminos_requeridos = sorted({t for g in required_groups for t in g} | optional_terms)
 
     archivos_encontrados: dict[str, dict | None] = defaultdict(lambda: None)
-    archivo_principal: dict | None = None
 
     max_file_size = 7 * 1024 * 1024
 
@@ -230,68 +252,74 @@ def select_required_client_documents(
         last_modified = int(stat.st_mtime * 1000)
         file_size = int(stat.st_size)
 
-        # CRITERIO PRINCIPAL: AUT + termina en COMP o CMP (PDF)
-        if "aut" in file_name_lower and (file_name_lower.endswith("comp.pdf") or file_name_lower.endswith("cmp.pdf")):
-            archivo_principal = {"path": file_path, "last_modified": last_modified, "terminos": ["AUT"]}
-            break
-
         encontrado_terminos = [t for t in terminos_requeridos if t.lower() in file_name_lower]
-
-        # Si contiene múltiples términos, preferimos ese como principal
-        if len(encontrado_terminos) > 1:
-            candidate = {"path": file_path, "last_modified": last_modified, "terminos": encontrado_terminos}
-            if (not archivo_principal) or (len(encontrado_terminos) > len(archivo_principal.get("terminos", []))):
-                archivo_principal = candidate
-                for term in encontrado_terminos:
-                    archivos_encontrados.pop(term, None)
-            elif archivo_principal and len(encontrado_terminos) == len(archivo_principal.get("terminos", [])):
-                archivo_principal = _pick_newer(archivo_principal, candidate)
-            continue
 
         # Selección por término (uno a uno)
         if file_size > max_file_size:
             continue
 
+        # Candidato "combinado" (p.ej. AUTDNI.pdf) puede cubrir varios requisitos, pero preferimos
+        # archivos separados si existen (AUTORIZACION.pdf + DNI....pdf).
+        candidate = {
+            "path": file_path,
+            "last_modified": last_modified,
+            "term_count": len(encontrado_terminos) if encontrado_terminos else 0,
+        }
+
+        # Caso especial: AUT + COMP/CMP => suele ser el "AUT" bueno; lo tratamos como AUT (sin atajos).
+        if "aut" in file_name_lower and (file_name_lower.endswith("comp.pdf") or file_name_lower.endswith("cmp.pdf")):
+            archivos_encontrados["AUT"] = _pick_prefer_single_term(archivos_encontrados.get("AUT"), candidate | {"term_count": 1})
+
         if "aut" in file_name_lower:
             if (is_company and "part" not in file_name_lower) or (not is_company and "empr" not in file_name_lower):
-                archivos_encontrados["AUT"] = _pick_newer(
-                    archivos_encontrados.get("AUT"),
-                    {"path": file_path, "last_modified": last_modified},
-                )
-        elif is_company and "cif" in file_name_lower:
-            archivos_encontrados["CIF"] = _pick_newer(archivos_encontrados.get("CIF"), {"path": file_path, "last_modified": last_modified})
-        elif is_company and "nif" in file_name_lower:
-            archivos_encontrados["NIF"] = _pick_newer(archivos_encontrados.get("NIF"), {"path": file_path, "last_modified": last_modified})
-        elif "dni" in file_name_lower:
-            archivos_encontrados["DNI"] = _pick_newer(
-                archivos_encontrados.get("DNI"),
-                {"path": file_path, "last_modified": last_modified},
-            )
-        elif "nie" in file_name_lower and "daniel" not in file_name_lower:
-            archivos_encontrados["NIE"] = _pick_newer(
-                archivos_encontrados.get("NIE"),
-                {"path": file_path, "last_modified": last_modified},
-            )
-        elif is_company and "escr" in file_name_lower:
-            archivos_encontrados["ESCR"] = _pick_newer(
-                archivos_encontrados.get("ESCR"),
-                {"path": file_path, "last_modified": last_modified},
-            )
+                archivos_encontrados["AUT"] = _pick_prefer_single_term(archivos_encontrados.get("AUT"), candidate)
+
+        if is_company and "cif" in file_name_lower:
+            archivos_encontrados["CIF"] = _pick_prefer_single_term(archivos_encontrados.get("CIF"), candidate)
+        if is_company and "nif" in file_name_lower:
+            archivos_encontrados["NIF"] = _pick_prefer_single_term(archivos_encontrados.get("NIF"), candidate)
+
+        if "dni" in file_name_lower:
+            archivos_encontrados["DNI"] = _pick_prefer_single_term(archivos_encontrados.get("DNI"), candidate)
+        if "nie" in file_name_lower and "daniel" not in file_name_lower:
+            archivos_encontrados["NIE"] = _pick_prefer_single_term(archivos_encontrados.get("NIE"), candidate)
+
+        if is_company and "escr" in file_name_lower:
+            archivos_encontrados["ESCR"] = _pick_prefer_single_term(archivos_encontrados.get("ESCR"), candidate)
 
     covered_terms: list[str] = []
     archivos_para_subir: list[Path] = []
 
-    if archivo_principal:
-        archivos_para_subir = [Path(archivo_principal["path"])]
-        covered_terms = [t.upper() for t in (archivo_principal.get("terminos") or [])]
-    else:
-        for term in terminos_requeridos:
-            item = archivos_encontrados.get(term)
-            if item and item.get("path"):
-                archivos_para_subir.append(Path(item["path"]))
-                covered_terms.append(term)
+    # Resolver requisitos por grupos (OR) para decidir qué subir.
+    selected_paths: list[Path] = []
+    for group in required_groups:
+        best: dict | None = None
+        best_term: str | None = None
+        for term in sorted(group):
+            cand = archivos_encontrados.get(term)
+            if cand and cand.get("path"):
+                best = _pick_prefer_single_term(best, cand)
+                best_term = term if best == cand else best_term
+        if best and best.get("path"):
+            selected_paths.append(Path(best["path"]))
+            # Marcar como cubierto el término del grupo (si sabemos cuál), para diagnóstico
+            covered_terms.append(best_term or next(iter(group)))
 
-    missing_terms = [t for t in terminos_requeridos if t not in set(covered_terms)]
+    # Añadir opcionales si existen (p.ej. ESCR cuando no es obligatorio)
+    for term in sorted(optional_terms):
+        item = archivos_encontrados.get(term)
+        if item and item.get("path"):
+            selected_paths.append(Path(item["path"]))
+            covered_terms.append(term)
+
+    # Dedup, manteniendo orden
+    seen = set()
+    for p in selected_paths:
+        key = str(p).lower()
+        if key not in seen:
+            archivos_para_subir.append(p)
+            seen.add(key)
+
     # Validación por grupos (permite OR, p.ej. DNI o NIE)
     missing_requirements: list[str] = []
     covered_set = set(covered_terms)

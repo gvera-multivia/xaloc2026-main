@@ -24,8 +24,11 @@ class TestClientDocumentation(unittest.TestCase):
                 strict=False,
                 merge_if_multiple=False,
             )
-            self.assertEqual(len(selected.files_to_upload), 1)
-            self.assertTrue(selected.files_to_upload[0].name.lower().endswith("cmp.pdf"))
+            # AUT (comp/cmp) + (DNI o NIE)
+            self.assertEqual(len(selected.files_to_upload), 2)
+            names = {p.name.lower() for p in selected.files_to_upload}
+            self.assertIn("aut_cmp.pdf", names)
+            self.assertIn("dni.pdf", names)
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
@@ -57,9 +60,32 @@ class TestClientDocumentation(unittest.TestCase):
                 strict=True,
                 merge_if_multiple=False,
             )
-            self.assertEqual(len(selected.files_to_upload), 3)
-            self.assertEqual(set(selected.covered_terms), {"AUT", "DNI", "NIE"})
+            # Regla: AUT + (DNI o NIE) → se suben 2 archivos.
+            self.assertEqual(len(selected.files_to_upload), 2)
+            self.assertIn("AUT", set(selected.covered_terms))
+            self.assertTrue(set(selected.covered_terms) & {"DNI", "NIE"})
             self.assertEqual(selected.missing_terms, [])
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_prefers_split_docs_over_combined(self):
+        root = self._make_tmp_dir()
+        try:
+            # "AUTDNI" combinado + ficheros separados
+            (root / "AUTDNI.pdf").write_bytes(b"%PDF-1.4 fake")
+            (root / "AUTORIZACION.pdf").write_bytes(b"%PDF-1.4 fake")
+            (root / "DNI 1-7-31.pdf").write_bytes(b"%PDF-1.4 fake")
+
+            selected = select_required_client_documents(
+                ruta_docu=root,
+                is_company=False,
+                strict=True,
+                merge_if_multiple=False,
+            )
+            names = {p.name.lower() for p in selected.files_to_upload}
+            self.assertIn("autorizacion.pdf", names)
+            self.assertIn("dni 1-7-31.pdf", names)
+            self.assertNotIn("autdni.pdf", names)
         finally:
             shutil.rmtree(root, ignore_errors=True)
 

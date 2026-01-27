@@ -65,10 +65,20 @@ async def _seleccionar_archivos(popup: Page, archivos: List[Path]) -> None:
         await popup.screenshot(path="error_popup_vacio.png")
         raise
 
-    # 4. Subida de archivos - IMPORTANTE: Después de seleccionar cada archivo,
-    #    debemos hacer clic en "Clicar per adjuntar" y esperar confirmación
+    # 4. Subida de archivos - IMPORTANTE: El botón "Clicar per adjuntar" solo se puede
+    #    usar UNA VEZ después de seleccionar TODOS los archivos
+    #    
+    #    Flujo correcto:
+    #    1. Seleccionar archivo 1
+    #    2. Seleccionar archivo 2
+    #    3. Seleccionar archivo N
+    #    4. UNA SOLA VEZ: Hacer clic en "Clicar per adjuntar"
+    #    5. Esperar confirmación
+    
+    logging.info(f"Seleccionando {len(archivos)} archivo(s)...")
+    
     for idx, archivo in enumerate(archivos, 1):
-        logging.info(f"Subiendo archivo {idx}/{len(archivos)}: {archivo.name}")
+        logging.info(f"Seleccionando archivo {idx}/{len(archivos)}: {archivo.name}")
         
         # Buscamos el primer input que esté vacío
         inputs = target.locator("input[type='file']")
@@ -85,24 +95,25 @@ async def _seleccionar_archivos(popup: Page, archivos: List[Path]) -> None:
             raise RuntimeError("No hay más huecos libres para subir archivos en este popup.")
         
         # Seleccionar el archivo
-        logging.info(f"Seleccionando archivo en input[{input_index}]...")
+        logging.info(f"Archivo seleccionado en input[{input_index}]")
         await inputs.nth(input_index).set_input_files(archivo)
-        # Espera más larga para que el popup procese el archivo seleccionado
-        await popup.wait_for_timeout(1500)
-        
-        # CRÍTICO: Hacer clic en "Clicar per adjuntar" inmediatamente después de seleccionar
-        logging.info("Haciendo clic en 'Clicar per adjuntar'...")
-        await _click_link(popup, r"^Clicar per adjuntar")
-        # Espera larga para que el JavaScript del popup procese la subida
-        await popup.wait_for_timeout(2000)
-        
-        # Esperar confirmación de que el archivo se subió correctamente
-        logging.info("Esperando confirmación de subida...")
-        await _wait_upload_ok(popup)
-        logging.info(f"Archivo {idx}/{len(archivos)} subido correctamente")
-        
-        # Espera antes de procesar el siguiente archivo (si hay)
-        await popup.wait_for_timeout(1000)
+        # Espera corta entre selecciones de archivos
+        await popup.wait_for_timeout(500)
+    
+    logging.info(f"Todos los archivos seleccionados ({len(archivos)}). Ahora haciendo clic en 'Clicar per adjuntar'...")
+    
+    # CRÍTICO: Hacer clic en "Clicar per adjuntar" UNA SOLA VEZ después de seleccionar TODOS
+    await popup.wait_for_timeout(1000)  # Espera para que el popup procese todas las selecciones
+    await _click_link(popup, r"^Clicar per adjuntar")
+    logging.info("Click en 'Clicar per adjuntar' ejecutado")
+    
+    # Espera larga para que el JavaScript del popup procese la subida de TODOS los archivos
+    await popup.wait_for_timeout(2000)
+    
+    # Esperar confirmación de que los archivos se subieron correctamente
+    logging.info("Esperando confirmación de subida...")
+    await _wait_upload_ok(popup)
+    logging.info(f"Todos los archivos ({len(archivos)}) subidos correctamente")
 
 async def _click_link(popup: Page, patron: str) -> None:
     link = popup.get_by_role("link", name=re.compile(patron, re.IGNORECASE)).first
