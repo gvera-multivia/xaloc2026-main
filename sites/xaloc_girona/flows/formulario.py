@@ -167,6 +167,16 @@ async def rellenar_formulario(page: Page, datos: DatosMulta) -> None:
         await page.wait_for_selector("form#formulario", state="attached", timeout=20000)
         await page.wait_for_selector("#contact21", state="visible", timeout=20000)
 
+        # CAMBIO DE ORDEN: Rellenar sección de mandatario PRIMERO
+        # Esto es crítico porque el formulario puede tener validaciones JS que ocultan
+        # el botón de adjuntar documentos hasta que los campos de mandatario estén completos
+        if datos.mandatario:
+            logging.info("Rellenando sección de mandatario PRIMERO...")
+            await _rellenar_mandatario(page, datos.mandatario)
+            # Pequeña espera para que el DOM se actualice tras seleccionar mandatario
+            await page.wait_for_timeout(1000)
+
+        # Ahora rellenamos el resto de campos
         logging.info(f"Email: {datos.email}")
         await _rellenar_input(page, "#contact21", str(datos.email))
 
@@ -181,10 +191,6 @@ async def rellenar_formulario(page: Page, datos: DatosMulta) -> None:
 
         logging.info("Rellenando motivos (TinyMCE)...")
         await _rellenar_tinymce_motius(page, str(datos.motivos))
-
-        # NUEVO: Rellenar sección de mandatario
-        if datos.mandatario:
-            await _rellenar_mandatario(page, datos.mandatario)
 
         # NOTA: La subida de archivos se hace en una fase separada después de rellenar el formulario.
         # Esto evita problemas de sincronización con el navegador.
