@@ -246,17 +246,18 @@ async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]
     
     # Si llegamos aquí, el popup se abrió correctamente
     logging.info("Popup detectado correctamente, procediendo con subida...")
-        try:
-            await popup.wait_for_load_state("domcontentloaded")
-        except PlaywrightError:
-            pass
-        await _seleccionar_archivos(popup, archivos)
-        await _adjuntar_y_continuar(popup, espera_cierre=True)
-        try:
-            if not popup.is_closed():
-                await popup.close()
-        except PlaywrightError:
-            pass
+    try:
+        await popup.wait_for_load_state("domcontentloaded")
+    except PlaywrightError:
+        pass
+    await _seleccionar_archivos(popup, archivos)
+    await _adjuntar_y_continuar(popup, espera_cierre=True)
+    try:
+        if not popup.is_closed():
+            await popup.close()
+    except PlaywrightError:
+        pass
+
 
     # Espera corta a que el STA reciba el resultado del uploader (evitamos 'networkidle', suele ser lento).
     try:
