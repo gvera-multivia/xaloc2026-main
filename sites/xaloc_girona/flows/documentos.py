@@ -274,12 +274,15 @@ async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]
         pass
 
 
-    # Espera corta a que el STA reciba el resultado del uploader (evitamos 'networkidle', suele ser lento).
+    # CRÍTICO: Espera larga después de cerrar el popup para que la página principal
+    # tenga tiempo de procesar que los documentos se adjuntaron correctamente.
+    # Si continuamos demasiado rápido, la página no registra los documentos.
+    logging.info("Esperando a que la página principal procese los documentos adjuntados...")
     try:
-        await page.wait_for_timeout(DELAY_MS)
+        await page.wait_for_timeout(3000)  # 3 segundos para que STA procese
     except PlaywrightError:
         return
-    logging.info("Documentos subidos")
+    logging.info("Documentos subidos y procesados por la página principal")
 
 
 __all__ = ["subir_documento"]
