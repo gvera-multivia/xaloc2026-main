@@ -87,18 +87,22 @@ async def _seleccionar_archivos(popup: Page, archivos: List[Path]) -> None:
         # Seleccionar el archivo
         logging.info(f"Seleccionando archivo en input[{input_index}]...")
         await inputs.nth(input_index).set_input_files(archivo)
-        await popup.wait_for_timeout(500)
+        # Espera más larga para que el popup procese el archivo seleccionado
+        await popup.wait_for_timeout(1500)
         
         # CRÍTICO: Hacer clic en "Clicar per adjuntar" inmediatamente después de seleccionar
         logging.info("Haciendo clic en 'Clicar per adjuntar'...")
         await _click_link(popup, r"^Clicar per adjuntar")
+        # Espera larga para que el JavaScript del popup procese la subida
+        await popup.wait_for_timeout(2000)
         
         # Esperar confirmación de que el archivo se subió correctamente
         logging.info("Esperando confirmación de subida...")
         await _wait_upload_ok(popup)
         logging.info(f"Archivo {idx}/{len(archivos)} subido correctamente")
         
-        await popup.wait_for_timeout(DELAY_MS)
+        # Espera antes de procesar el siguiente archivo (si hay)
+        await popup.wait_for_timeout(1000)
 
 async def _click_link(popup: Page, patron: str) -> None:
     link = popup.get_by_role("link", name=re.compile(patron, re.IGNORECASE)).first
@@ -135,6 +139,10 @@ async def _adjuntar_y_continuar(popup: Page, *, espera_cierre: bool = False) -> 
     continuar = popup.get_by_role("link", name=re.compile(r"^Continuar$", re.IGNORECASE)).first
     await continuar.wait_for(state="visible", timeout=20000)
     logging.info("Botón 'Continuar' visible")
+    
+    # Espera adicional para asegurar que el botón está completamente listo
+    logging.info("Esperando a que el botón 'Continuar' esté completamente listo...")
+    await popup.wait_for_timeout(1500)
 
     if espera_cierre:
         logging.info("Haciendo click en 'Continuar' y esperando cierre del popup...")
