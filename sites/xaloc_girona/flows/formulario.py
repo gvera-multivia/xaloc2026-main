@@ -163,12 +163,12 @@ async def _rellenar_mandatario(page: Page, mandatario: DatosMandatario) -> None:
     """
     logging.info("Rellenando sección de mandatario...")
     
-    # 1. Seleccionar Tipo de Actuación = Representant de Tercers
-    tipo_actuacion = page.locator("#tipoActuacion")
-    await tipo_actuacion.wait_for(state="visible", timeout=10000)
-    await tipo_actuacion.select_option(value="RT")
+    # 1. CORRECCIÓN: Seleccionar Radio "Representant de Tercers"
+    # tipoActuacion es un grupo de radio buttons, no un select
+    selector_rt = "input[name='tipoActuacion'][value='RT']"
+    await page.wait_for_selector(selector_rt, state="visible", timeout=10000)
+    await page.locator(selector_rt).click()
     await page.wait_for_timeout(DELAY_MS)
-    await tipo_actuacion.dispatch_event("change")
     
     if mandatario.tipo_persona == "JURIDICA":
         await _rellenar_persona_juridica(page, mandatario)
