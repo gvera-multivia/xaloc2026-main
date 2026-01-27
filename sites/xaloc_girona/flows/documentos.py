@@ -65,8 +65,11 @@ async def _seleccionar_archivos(popup: Page, archivos: List[Path]) -> None:
         await popup.screenshot(path="error_popup_vacio.png")
         raise
 
-    # 4. Subida de archivos
-    for archivo in archivos:
+    # 4. Subida de archivos - IMPORTANTE: Después de seleccionar cada archivo,
+    #    debemos hacer clic en "Clicar per adjuntar" y esperar confirmación
+    for idx, archivo in enumerate(archivos, 1):
+        logging.info(f"Subiendo archivo {idx}/{len(archivos)}: {archivo.name}")
+        
         # Buscamos el primer input que esté vacío
         inputs = target.locator("input[type='file']")
         count = await inputs.count()
@@ -80,8 +83,21 @@ async def _seleccionar_archivos(popup: Page, archivos: List[Path]) -> None:
         
         if input_index is None:
             raise RuntimeError("No hay más huecos libres para subir archivos en este popup.")
-            
+        
+        # Seleccionar el archivo
+        logging.info(f"Seleccionando archivo en input[{input_index}]...")
         await inputs.nth(input_index).set_input_files(archivo)
+        await popup.wait_for_timeout(500)
+        
+        # CRÍTICO: Hacer clic en "Clicar per adjuntar" inmediatamente después de seleccionar
+        logging.info("Haciendo clic en 'Clicar per adjuntar'...")
+        await _click_link(popup, r"^Clicar per adjuntar")
+        
+        # Esperar confirmación de que el archivo se subió correctamente
+        logging.info("Esperando confirmación de subida...")
+        await _wait_upload_ok(popup)
+        logging.info(f"Archivo {idx}/{len(archivos)} subido correctamente")
+        
         await popup.wait_for_timeout(DELAY_MS)
 
 async def _click_link(popup: Page, patron: str) -> None:
@@ -111,17 +127,11 @@ async def _wait_upload_ok(popup: Page) -> None:
 
 
 async def _adjuntar_y_continuar(popup: Page, *, espera_cierre: bool = False) -> None:
-    # En popup.html el CTA es un <a> con texto "Clicar per adjuntar"
-    logging.info("Buscando botón 'Clicar per adjuntar'...")
-    await _click_link(popup, r"^Clicar per adjuntar")
-    logging.info("Click en 'Clicar per adjuntar' ejecutado")
+    # Los archivos ya se adjuntaron en _seleccionar_archivos
+    # Aquí solo necesitamos hacer clic en "Continuar" para cerrar el popup
     
-    logging.info("Esperando confirmación de subida...")
-    await _wait_upload_ok(popup)
-    logging.info("Confirmación de subida recibida")
-
-    # Tras adjuntar, aparece "Continuar"
-    logging.info("Buscando botón 'Continuar'...")
+    # Tras adjuntar todos los archivos, aparece "Continuar"
+    logging.info("Todos los archivos adjuntados. Buscando botón 'Continuar'...")
     continuar = popup.get_by_role("link", name=re.compile(r"^Continuar$", re.IGNORECASE)).first
     await continuar.wait_for(state="visible", timeout=20000)
     logging.info("Botón 'Continuar' visible")
