@@ -462,51 +462,75 @@ async def _click_cta_adjuntar(ctx: Page | Frame) -> None:
 
 async def _adjuntar_y_continuar(popup: Page, *, ctx: Page | Frame, espera_cierre: bool = False) -> None:
     """
-    Versión Híbrida: Usa el botón nativo de la web para asegurar que se pasen todos 
-    los tokens de seguridad, gestionando correctamente el contexto de Iframes.
+    Sincronización total: Maneja IDs dinámicos por representante y convierte nombres a Hexadecimal.
     """
-    logging.info("Esperando confirmación visual de subida en el uploader...")
-    try:
-        # Esperamos al mensaje de éxito que genera el servidor tras la subida
-        await ctx.wait_for_function(
-            """() => {
-                const res = document.getElementById('uploadResultado');
-                return res && res.textContent.includes('Document adjuntat');
-            }""",
-            timeout=30000
-        )
-        logging.info("Servidor confirmó la subida técnica de los archivos.")
-    except Exception:
-        logging.warning("No se detectó el mensaje 'Document adjuntat', intentando continuar igualmente...")
+    logging.info("Esperando confirmación del servidor del popup...")
+    await _wait_upload_ok(ctx)
 
-    # 1. LOCALIZAR EL BOTÓN 'CONTINUAR' REAL
-    # En la plataforma STA, este botón suele estar en el mismo Iframe que el uploader.
-    btn_continuar = ctx.locator("a", has_text=re.compile(r"^Continuar$", re.IGNORECASE)).first
+    # 1. Obtener datos del popup y convertir nombres a HEX (lo que espera Xaloc)
+    popup_data = await popup.evaluate("""() => {
+        const params = new URLSearchParams(window.location.search);
+        const fileInputs = Array.from(document.querySelectorAll('input[type="file"]'));
+        const names = fileInputs.map(i => i.value.split(/[\\\\/]/).pop()).filter(Boolean);
+        
+        // Función para convertir a Hexadecimal (Imprescindible para STA)
+        const toHex = (str) => {
+            let hex = '';
+            for(let i=0; i<str.length; i++) hex += ''+str.charCodeAt(i).toString(16);
+            return hex;
+        };
+
+        return {
+            tipoDoc: params.get('tipoDocumento') || '',
+            personId: params.get('personDBOID') || '',
+            firma: params.get('firma') || 'S',
+            filesStr: names.join('|'),
+            firstFileHex: names.length > 0 ? toHex(names[0]) : ''
+        };
+    }""")
+
+    # 2. EJECUCIÓN DE "NAVEGACIÓN INTERNA"
+    logging.info(f"[STA_FORCE] Sincronizando técnica y visualmente con personID: {popup_data['personId']}")
     
-    # Fallback al popup raíz si no se encuentra en el frame
+    await popup.evaluate("""(data) => {
+        if (!window.opener || window.opener.closed) return;
+        const o = window.opener;
+        const d = o.document;
+
+        // A. Registrar archivos en el núcleo de la sesión
+        o.addDocumentoLista(data.tipoDoc, data.filesStr, data.firma, '', '', '', data.personId, false, '', '', 'false', null, 'true');
+
+        // B. Actualizar IDs dinámicos (La clave de la captura manual)
+        // Probamos ambos sufijos: el genérico (_NEW) y el de representante (_ID)
+        const suffixes = ['_NEW', '_' + data.personId];
+        
+        suffixes.forEach(sfx => {
+            const idBase = data.tipoDoc + sfx;
+            
+            // Actualizar valor hexadecimal del archivo
+            const fileInput = d.getElementById(idBase + 'file');
+            if (fileInput) fileInput.value = data.firstFileHex;
+
+            // Cambiar visibilidad de botones (Ocultar adjuntar / Mostrar cancelar)
+            const divBtn = d.getElementById('divBoton' + idBase);
+            const divCan = d.getElementById('divCancelar' + idBase);
+            if (divBtn) divBtn.style.display = 'none';
+            if (divCan) divCan.style.display = 'block';
+
+            // Actualizar celda de estado visual
+            const statusCell = d.getElementById('Status' + idBase);
+            if (statusCell) {
+                statusCell.innerHTML = '<span class="adjuntado pdf">' + data.filesStr.split('|')[0] + '</span>';
+            }
+        });
+    }""", popup_data)
+
+    # 3. Cierre oficial
+    btn_continuar = ctx.locator("a", has_text=re.compile(r"^Continuar$", re.IGNORECASE)).first
     if await btn_continuar.count() == 0:
         btn_continuar = popup.locator("a", has_text=re.compile(r"^Continuar$", re.IGNORECASE)).first
-
-    await btn_continuar.wait_for(state="visible", timeout=10000)
-    logging.info("Botón 'Continuar' oficial detectado y listo.")
-
-    # 2. DISPARAR EL HANDOFF OFICIAL
-    # Usamos evaluate("el => el.click()") para saltar capas visuales y ejecutar
-    # la función continuar() nativa de Xaloc que comunica las ventanas.
-    try:
-        logging.info("Disparando flujo oficial de guardado (handoff de tokens)...")
-        if espera_cierre:
-            # Esperamos a que el propio código de la web cierre la ventana tras el click
-            async with popup.expect_event("close", timeout=15000):
-                await btn_continuar.evaluate("el => el.click()")
-        else:
-            await btn_continuar.evaluate("el => el.click()")
-        logging.info("Popup procesado y cerrado por el sistema oficial de la web.")
-    except Exception as e:
-        logging.warning(f"El popup no se cerró solo tras el click oficial (forzando cierre): {e}")
-        if not popup.is_closed():
-            await popup.close()
-
+    
+    await btn_continuar.evaluate("el => el.click()")
 
 async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]) -> None:
     """
