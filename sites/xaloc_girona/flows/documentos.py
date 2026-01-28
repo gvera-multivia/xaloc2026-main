@@ -14,6 +14,32 @@ from playwright.async_api import Frame
 from playwright.async_api import Page, TimeoutError
 
 DELAY_MS = 500
+POPUP_TIMEOUT_MS = 15000
+
+
+def _attach_gemini_console_logger(page: Page) -> None:
+    """
+    Captura console.log del navegador para diagnóstico remoto.
+    Solo registra mensajes que empiecen por 'GEMINI_DEBUG:'.
+    """
+    try:
+        # Evitar duplicar listeners si se llama más de una vez.
+        if getattr(page, "_gemini_console_logger_attached", False):
+            return
+        setattr(page, "_gemini_console_logger_attached", True)
+    except Exception:
+        # Si Playwright/objetos proxied no permiten atributos, ignoramos.
+        return
+
+    def _on_console(msg):  # type: ignore[no-untyped-def]
+        try:
+            text = msg.text()
+            if isinstance(text, str) and text.startswith("GEMINI_DEBUG:"):
+                logging.info(text)
+        except Exception:
+            return
+
+    page.on("console", _on_console)
 
 
 def _normalizar_archivos(archivos: Union[None, Path, Sequence[Path]]) -> List[Path]:
@@ -320,6 +346,7 @@ async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]
         _validar_extension(a)
 
     logging.info(f"Adjuntando {len(archivos)} documento(s)")
+    _attach_gemini_console_logger(page)
     
     # Verify page is still valid
     try:
@@ -364,27 +391,66 @@ async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]
     logging.info("Intentando hacer click en 'Adjuntar i signar'...")
     popup: Optional[Page] = None
     
-    # INTENTO 1: Click Playwright (force=True) para mantener gesto de usuario (window.opener)
-    logging.info("Usando click Playwright(force=True) (botón oculto por CSS)...")
+    # Seleccionar el enlace correcto (hay múltiples a.docs en el DOM)
     try:
-        async with page.expect_popup(timeout=10000) as popup_info_click:
-            await page.locator("a.docs").first.click(force=True)
-            logging.info("Click Playwright ejecutado.")
-        popup = await popup_info_click.value
-        logging.info(f"Popup detectado vía click: {popup.url if popup else 'None'}")
-    except TimeoutError:
-        logging.warning("Timeout: El popup no se abrió tras click Playwright; probando click JavaScript...")
-        try:
-            async with page.expect_popup(timeout=10000) as popup_info_js:
-                await page.evaluate("document.querySelector('a.docs').click()")
-                logging.info("Click JavaScript ejecutado.")
-            popup = await popup_info_js.value
-            logging.info(f"Popup detectado vía JS: {popup.url if popup else 'None'}")
-        except TimeoutError:
-            logging.error("Timeout: El popup no se abrió tras click JavaScript.")
-            popup = None
+        idx = await page.evaluate(
+            """() => {
+                const links = Array.from(document.querySelectorAll('a.docs'));
+                for (let i = 0; i < links.length; i++) {
+                    const el = links[i];
+                    const t = (el.textContent || '').trim().toLowerCase();
+                    const oc = (el.getAttribute('onclick') || '');
+                    if (t.includes('adjuntar') && oc.includes('openUploader')) return i;
+                }
+                return 0;
+            }"""
+        )
+        await page.evaluate(
+            """(i) => {
+                const el = document.querySelectorAll('a.docs')[i];
+                if (!el) return null;
+                const cs = window.getComputedStyle(el);
+                const r = el.getBoundingClientRect();
+                console.log(
+                    'GEMINI_DEBUG: docs link style',
+                    JSON.stringify({
+                        index: i,
+                        display: cs.display,
+                        visibility: cs.visibility,
+                        opacity: cs.opacity,
+                        pointerEvents: cs.pointerEvents,
+                        rect: { x: r.x, y: r.y, w: r.width, h: r.height },
+                        text: (el.textContent || '').trim(),
+                        onclick: (el.getAttribute('onclick') || '').slice(0, 120)
+                    })
+                );
+                return true;
+            }""",
+            idx,
+        )
     except Exception as e:
-        logging.error(f"Error abriendo popup: {e}")
+        logging.warning(f"No se pudo resolver índice de a.docs; se usará el primero. Detalle: {e}")
+        idx = 0
+
+    # INTENTO 1: Click DOM desde evaluate (no depende de visibilidad; dispara onclick/openUploader)
+    logging.info("Abriendo popup con click DOM (evaluate) sobre a.docs...")
+    try:
+        async with page.expect_popup(timeout=POPUP_TIMEOUT_MS) as popup_info_js:
+            await page.evaluate(
+                """(i) => {
+                    const el = document.querySelectorAll('a.docs')[i] || document.querySelector('a.docs');
+                    if (!el) throw new Error('No existe a.docs');
+                    el.click();
+                }""",
+                idx,
+            )
+        popup = await popup_info_js.value
+        logging.info(f"Popup detectado: {popup.url if popup else 'None'}")
+    except TimeoutError:
+        logging.error("Timeout: El popup no se abrió tras click DOM (evaluate).")
+        popup = None
+    except Exception as e:
+        logging.error(f"Error abriendo popup (evaluate): {e}")
         popup = None
 
 

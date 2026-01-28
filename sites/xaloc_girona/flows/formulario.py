@@ -191,7 +191,7 @@ async def rellenar_formulario(page: Page, datos: DatosMulta) -> None:
             logging.info("Formulario recargado y estabilizado")
             
             # Pequeña espera adicional para asegurar que el DOM está completamente listo
-            await page.wait_for_timeout(1000)
+            await page.wait_for_timeout(1500)
 
         # Ahora rellenamos el resto de campos
         logging.info(f"Email: {datos.email}")
@@ -222,6 +222,11 @@ async def rellenar_formulario(page: Page, datos: DatosMulta) -> None:
         
         # 2. Hacer scroll hasta el final del formulario para disparar validaciones
         await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        # Disparar blur explícito para activar validaciones JS antes de adjuntar
+        try:
+            await page.locator("#DinVarNUMEXP").dispatch_event("blur")
+        except Exception:
+            pass
         
         # 3. Pequeña espera para que el JS se asiente (el botón está oculto por CSS,
         #    así que no podemos esperar a que sea visible - usaremos click JS después)
