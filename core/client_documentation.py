@@ -21,6 +21,7 @@ class RequiredClientDocumentsError(RuntimeError):
 @dataclass(frozen=True)
 class ClientIdentity:
     is_company: bool
+    sujeto_recurso: str | None = None
     empresa: str | None = None
     nombre: str | None = None
     apellido1: str | None = None
@@ -36,6 +37,9 @@ class SelectedClientDocuments:
 
 def client_identity_from_payload(payload: dict) -> ClientIdentity:
     """Extrae la identidad del cliente del payload (soporta varios formatos)."""
+    sujeto_recurso = (
+        (payload.get("sujeto_recurso") or payload.get("SujetoRecurso") or "")
+    ).strip() or None
     mandatario = payload.get("mandatario") or {}
     if isinstance(mandatario, dict) and (mandatario.get("tipo_persona") or "").strip():
         tipo = str(mandatario.get("tipo_persona")).strip().upper()
@@ -43,24 +47,36 @@ def client_identity_from_payload(payload: dict) -> ClientIdentity:
             empresa = (mandatario.get("razon_social") or "").strip()
             if not empresa:
                 raise RequiredClientDocumentsError("Falta razón social para persona JURÍDICA.")
-            return ClientIdentity(is_company=True, empresa=empresa)
+            return ClientIdentity(is_company=True, sujeto_recurso=sujeto_recurso, empresa=empresa)
         if tipo == "FISICA":
             nombre = (mandatario.get("nombre") or "").strip()
             ap1 = (mandatario.get("apellido1") or "").strip()
             ap2 = (mandatario.get("apellido2") or "").strip()
             if not (nombre and ap1 and ap2):
                 raise RequiredClientDocumentsError("Faltan datos completos para persona FÍSICA.")
-            return ClientIdentity(is_company=False, nombre=nombre, apellido1=ap1, apellido2=ap2)
+            return ClientIdentity(
+                is_company=False,
+                sujeto_recurso=sujeto_recurso,
+                nombre=nombre,
+                apellido1=ap1,
+                apellido2=ap2,
+            )
 
     # Fallbacks de nombres directos
     empresa = (payload.get("empresa") or payload.get("razon_social") or "").strip()
-    if empresa: return ClientIdentity(is_company=True, empresa=empresa)
+    if empresa: return ClientIdentity(is_company=True, sujeto_recurso=sujeto_recurso, empresa=empresa)
 
     nombre = (payload.get("cliente_nombre") or "").strip()
     ap1 = (payload.get("cliente_apellido1") or payload.get("apellido1") or "").strip()
     ap2 = (payload.get("cliente_apellido2") or payload.get("apellido2") or "").strip()
     if nombre and ap1 and ap2:
-        return ClientIdentity(is_company=False, nombre=nombre, apellido1=ap1, apellido2=ap2)
+        return ClientIdentity(
+            is_company=False,
+            sujeto_recurso=sujeto_recurso,
+            nombre=nombre,
+            apellido1=ap1,
+            apellido2=ap2,
+        )
 
     raise RequiredClientDocumentsError("No se pudo inferir la identidad del cliente.")
 
@@ -80,12 +96,21 @@ def get_ruta_cliente_documentacion(client: ClientIdentity, base_path: str | Path
         if char in "VWXYZ": return "V-Z"
         return "Desconocido"
 
-    if client.is_company:
+    def _first_alnum_char(value: str) -> str:
+        for ch in (value or "").strip():
+            if ch.isalnum():
+                return ch
+        return (value or "").strip()[:1] or "?"
+
+    if client.sujeto_recurso:
+        folder_name = re.sub(r"\s+", " ", client.sujeto_recurso.strip()).rstrip("!.,?;:")
+        folder = base / _get_alpha_folder(_first_alnum_char(folder_name)) / folder_name
+    elif client.is_company:
         name = client.empresa.strip().rstrip("!.,?;:")
-        folder = base / _get_alpha_folder(name[0]) / name
+        folder = base / _get_alpha_folder(_first_alnum_char(name)) / name
     else:
         full_name = f"{client.nombre} {client.apellido1.upper()} {client.apellido2.upper()}".strip()
-        folder = base / _get_alpha_folder(client.nombre[0]) / full_name
+        folder = base / _get_alpha_folder(_first_alnum_char(client.nombre)) / full_name
 
     # Jerarquía de carpetas: RECURSOS es la máxima prioridad
     for subname in ["DOCUMENTACION RECURSOS", "DOCUMENTACION", "DOCUMENTACIÓN"]:

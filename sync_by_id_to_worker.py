@@ -24,8 +24,9 @@ SELECT
     rs.Expedient,
     rs.FaseProcedimiento,
     e.matricula,       -- Ahora viene de la tabla expedientes
-    rs.automatic_id,
-    -- NUEVOS CAMPOS PARA MANDATARIO --
+	    rs.automatic_id,
+	    rs.SujetoRecurso AS sujeto_recurso,
+	    -- NUEVOS CAMPOS PARA MANDATARIO --
     rs.cif,              -- Para determinar JURIDICA vs FISICA
     rs.Empresa,          -- Razón social (persona jurídica)
     c.nif AS cliente_nif,       -- NIF/NIE de persona física
@@ -238,6 +239,7 @@ def _map_payload(
         "denuncia_num": expediente,
         "plate_number": _normalize_plate(row.get("matricula")),
         "expediente_num": expediente,
+        "sujeto_recurso": _clean_str(row.get("sujeto_recurso")),
         # OJO: aquí ya va HTML (si output="html"), para insertarlo como HTML en TinyMCE
         "motivos": motivos,
         "adjuntos": adjuntos_list or [],

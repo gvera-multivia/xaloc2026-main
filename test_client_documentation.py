@@ -3,7 +3,12 @@ import uuid
 import shutil
 from pathlib import Path
 
-from core.client_documentation import RequiredClientDocumentsError, select_required_client_documents
+from core.client_documentation import (
+    RequiredClientDocumentsError,
+    client_identity_from_payload,
+    get_ruta_cliente_documentacion,
+    select_required_client_documents,
+)
 
 
 class TestClientDocumentation(unittest.TestCase):
@@ -105,6 +110,29 @@ class TestClientDocumentation(unittest.TestCase):
             names = {p.name.lower() for p in selected.files_to_upload}
             self.assertIn("aut.pdf", names)
             self.assertNotIn("aut_solo.pdf", names)
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_ruta_prefers_sujeto_recurso_for_folder_navigation(self):
+        root = self._make_tmp_dir()
+        try:
+            sujeto = "JOAN GARCIA PEREZ"
+            expected = root / "F-J" / sujeto / "DOCUMENTACION"
+            expected.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "sujeto_recurso": sujeto,
+                "mandatario": {
+                    "tipo_persona": "FISICA",
+                    "nombre": "Pepe",
+                    "apellido1": "Lopez",
+                    "apellido2": "Sanchez",
+                },
+            }
+
+            client = client_identity_from_payload(payload)
+            ruta = get_ruta_cliente_documentacion(client, base_path=root)
+            self.assertEqual(ruta, expected)
         finally:
             shutil.rmtree(root, ignore_errors=True)
 

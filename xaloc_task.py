@@ -19,17 +19,18 @@ except Exception:  # pragma: no cover
 
 # Query simplificada para obtener solo lo necesario para el nuevo payload
 BASE_SELECT_QUERY = """
-SELECT 
-    rs.idRecurso,
-    rs.Expedient,
-    rs.FaseProcedimiento,
-    e.matricula,       -- Ahora viene de la tabla expedientes
-    rs.automatic_id,
-    -- NUEVOS CAMPOS PARA MANDATARIO --
-    rs.cif,              -- Para determinar JURIDICA vs FISICA
-    rs.Empresa,          -- Razón social (persona jurídica)
-    c.nif AS cliente_nif,       -- NIF/NIE de persona física
-    c.Nombre AS cliente_nombre,
+	SELECT 
+	    rs.idRecurso,
+	    rs.Expedient,
+	    rs.FaseProcedimiento,
+	    e.matricula,       -- Ahora viene de la tabla expedientes
+	    rs.automatic_id,
+	    rs.SujetoRecurso AS sujeto_recurso,
+	    -- NUEVOS CAMPOS PARA MANDATARIO --
+	    rs.cif,              -- Para determinar JURIDICA vs FISICA
+	    rs.Empresa,          -- Razón social (persona jurídica)
+	    c.nif AS cliente_nif,       -- NIF/NIE de persona física
+	    c.Nombre AS cliente_nombre,
     c.Apellido1 AS cliente_apellido1,
     c.Apellido2 AS cliente_apellido2,
     -- FIN NUEVOS CAMPOS --
@@ -257,6 +258,7 @@ def _map_xaloc_payload(
         "denuncia_num": expediente,
         "plate_number": _normalize_plate(row.get("matricula")),
         "expediente_num": expediente,
+        "sujeto_recurso": _clean_str(row.get("sujeto_recurso")),
         "motivos": motivos,
         "adjuntos": adjuntos_list or [],
         "mandatario": mandatario,  # NUEVO

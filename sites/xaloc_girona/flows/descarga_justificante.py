@@ -75,78 +75,58 @@ async def _obtener_url_justificante(page: Page) -> str:
 
 async def _descargar_pdf_desde_url(page: Page, url: str, destino: Path) -> None:
     """
-    Descarga el PDF del justificante usando CDP Print to PDF.
+    Descarga el PDF ejecutando un fetch desde el navegador para mantener la sesión.
     
-    El justificante se muestra a través de un plugin de Chrome PDF embebido,
-    por lo que necesitamos usar el protocolo CDP para imprimir correctamente.
+    Este método usa fetch() dentro del contexto del navegador, lo que permite:
+    - Mantener las cookies de sesión activas
+    - Descargar el PDF original sin necesidad de impresión virtual
+    - Evitar problemas de navegación y timeouts
     
     Args:
         page: Página de Playwright
         url: URL del justificante
         destino: Ruta donde guardar el PDF temporalmente
     """
-    logger.info(f"Descargando justificante desde: {url}")
+    logger.info(f"Descargando justificante vía fetch interno desde: {url}")
     
     try:
-        # Navegar a la URL del justificante
-        logger.info("Navegando al visor del justificante...")
-        await page.goto(url, wait_until="load", timeout=JUSTIFICANTE_TIMEOUT_MS)
+        # Script JS para descargar el archivo como Base64 sin navegar
+        # Se ejecuta en el contexto de la página actual, manteniendo la sesión
+        js_download_script = """
+        async (url) => {
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            const blob = await response.blob();
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result.split(',')[1]);
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+            });
+        }
+        """
         
-        # Esperar a que el plugin de Chrome PDF se cargue completamente
-        # El embed puede tardar en renderizar el contenido
-        logger.info("Esperando a que el plugin PDF se cargue...")
+        # Ejecutar el fetch en el contexto de la página actual
+        logger.info("Ejecutando fetch en contexto del navegador...")
+        base64_data = await page.evaluate(js_download_script, url)
         
-        # Esperar a que el elemento embed esté presente
-        try:
-            await page.wait_for_selector(
-                'embed[type="application/x-google-chrome-pdf"], embed#plugin',
-                timeout=15000,
-                state="attached"
-            )
-            logger.info("Plugin PDF detectado")
-        except Exception:
-            logger.warning("No se detectó elemento embed, continuando...")
-        
-        # Espera adicional para que el PDF se renderice completamente en el plugin
-        await page.wait_for_timeout(5000)
-        
-        # Usar CDP (Chrome DevTools Protocol) para imprimir a PDF
-        # Este método captura correctamente el contenido del plugin PDF
-        logger.info("Generando PDF mediante CDP Print...")
-        
-        # Obtener el cliente CDP
-        cdp = await page.context.new_cdp_session(page)
-        
-        # Ejecutar comando de impresión
-        result = await cdp.send("Page.printToPDF", {
-            "printBackground": True,
-            "paperWidth": 8.27,  # A4 width en inches
-            "paperHeight": 11.69,  # A4 height en inches
-            "marginTop": 0,
-            "marginBottom": 0,
-            "marginLeft": 0,
-            "marginRight": 0,
-            "preferCSSPageSize": True,
-        })
-        
-        # Guardar el PDF
+        # Decodificar y guardar el PDF
         import base64
-        pdf_data = base64.b64decode(result["data"])
+        pdf_bytes = base64.b64decode(base64_data)
         
         with open(destino, "wb") as f:
-            f.write(pdf_data)
+            f.write(pdf_bytes)
         
-        # Verificar que el PDF no esté vacío
         file_size = destino.stat().st_size
-        if file_size < 1000:  # Menos de 1KB probablemente está corrupto
-            raise RuntimeError(f"PDF generado pero parece estar vacío ({file_size} bytes)")
+        logger.info(f"✓ Archivo recuperado con éxito ({file_size} bytes)")
         
-        logger.info(f"✓ Justificante descargado correctamente ({file_size} bytes): {destino}")
-        await cdp.detach()
+        # Validación de tamaño
+        if file_size < 2000:
+            logger.warning("⚠️ El archivo es sospechosamente pequeño, revisa el contenido.")
         
     except Exception as e:
-        logger.error(f"Error en descarga CDP: {e}")
-        raise RuntimeError(f"No se pudo descargar el justificante: {e}") from e
+        logger.error(f"Error en la descarga por fetch: {e}")
+        raise RuntimeError(f"No se pudo descargar el PDF por fetch: {e}") from e
 
 
 def _construir_ruta_recursos_telematicos(payload: dict) -> Path:
@@ -230,6 +210,9 @@ async def descargar_y_guardar_justificante(page: Page, payload: dict) -> str:
     """
     Descarga el justificante de registro y lo guarda en la carpeta del cliente.
     
+    Usa fetch() en el contexto del navegador para mantener la sesión activa
+    y descargar el PDF original sin necesidad de impresión virtual.
+    
     Args:
         page: Página de Playwright (debe estar en la URL del justificante)
         payload: Diccionario con datos del trámite
@@ -241,7 +224,7 @@ async def descargar_y_guardar_justificante(page: Page, payload: dict) -> str:
         ValueError: Si faltan datos necesarios en el payload
         RuntimeError: Si falla la descarga o guardado del justificante
     """
-    logger.info("=== Iniciando descarga del justificante ===")
+    logger.info("=== Iniciando descarga del justificante (MODO FETCH) ===")
     
     # Verificar que estamos en la página correcta
     if "TramitaJustif" not in page.url:
@@ -249,13 +232,14 @@ async def descargar_y_guardar_justificante(page: Page, payload: dict) -> str:
             f"No estamos en la página del justificante. URL actual: {page.url}"
         )
     
-    # Extraer número de expediente del payload
-    num_expediente = payload.get("expediente_num") or payload.get("denuncia_num")
-    if not num_expediente:
+    # Extraer y LIMPIAR el número de expediente
+    raw_expediente = payload.get("expediente_num") or payload.get("denuncia_num")
+    if not raw_expediente:
         raise ValueError("Falta 'expediente_num' o 'denuncia_num' en el payload")
     
-    num_expediente = str(num_expediente).strip()
-    logger.info(f"Número de expediente: {num_expediente}")
+    # Reemplazar / y \ por guiones para que Windows no los interprete como carpetas
+    num_expediente = str(raw_expediente).replace("/", "-").replace("\\", "-").strip()
+    logger.info(f"Número de expediente procesado: {num_expediente}")
     
     try:
         # 1. Esperar a que el iframe esté cargado
@@ -267,8 +251,8 @@ async def descargar_y_guardar_justificante(page: Page, payload: dict) -> str:
         # 3. Construir ruta de destino
         ruta_recursos = _construir_ruta_recursos_telematicos(payload)
         
-        # 4. Descargar a archivo temporal
-        temporal = Path("tmp") / f"justificante_temp_{num_expediente}.pdf"
+        # 4. Descargar a archivo temporal (nombre limpio para evitar problemas)
+        temporal = Path("tmp") / f"temp_justif_{num_expediente}.pdf"
         temporal.parent.mkdir(parents=True, exist_ok=True)
         
         await _descargar_pdf_desde_url(page, url_justificante, temporal)
@@ -278,7 +262,7 @@ async def descargar_y_guardar_justificante(page: Page, payload: dict) -> str:
             temporal, num_expediente, ruta_recursos
         )
         
-        logger.info(f"✓ Justificante descargado exitosamente: {ruta_final}")
+        logger.info(f"✓ Proceso completado: {ruta_final}")
         return str(ruta_final)
         
     except Exception as e:
