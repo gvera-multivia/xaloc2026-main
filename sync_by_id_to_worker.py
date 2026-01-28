@@ -93,17 +93,8 @@ def get_motivos_por_fase(
     expediente: str,
     *,
     config_map: dict[str, Any],
-    output: str = "html",  # por defecto: HTML listo para TinyMCE
+    output: str = "text",
 ) -> str:
-    """
-    Lee config_motivos.json y compone el texto final para el campo motivos.
-
-    output="text": devuelve texto con \\n\\n
-    output="html": devuelve HTML <p>..</p> con <br /> para TinyMCE
-
-    Raises:
-        ValueError: Si no se encuentra la fase en config_motivos.json o los datos están incompletos.
-    """
     expediente_txt = _clean_str(expediente)
     fase_norm = normalize_text(fase_raw)
 
@@ -116,21 +107,24 @@ def get_motivos_por_fase(
     if not selected:
         raise ValueError(f"No se encontró configuración para la fase: {fase_raw}")
 
-    asunto = _normalize_literal_newlines(_clean_str(selected.get("asunto")))
-    expone = _normalize_literal_newlines(_clean_str(selected.get("expone")))
-
-    solicita_tpl = _normalize_literal_newlines(_clean_str(selected.get("solicita")))
-    solicita = solicita_tpl.replace("{expediente}", expediente_txt)
+    asunto = _clean_str(selected.get("asunto"))
+    expone = _clean_str(selected.get("expone"))
+    solicita = _clean_str(selected.get("solicita")).replace("{expediente}", expediente_txt)
 
     if not (asunto and expone and solicita):
-        raise ValueError(
-            f"Datos incompletos en config_motivos.json para la fase: {fase_raw}"
-        )
+        raise ValueError(f"Datos incompletos en config_motivos.json para la fase: {fase_raw}")
 
+    # Construimos el texto con saltos de línea reales (\n)
+    # Usamos \n para un salto simple o \n\n para separar bloques
     text = f"ASUNTO: {asunto}\n\nEXPONE: {expone}\n\nSOLICITA: {solicita}"
 
+    # Si por alguna razón necesitas procesar saltos para un sistema que use HTML 
+    # pero NO quieres etiquetas <p>, podrías usar solo <br />, 
+    # pero para texto plano lo normal es devolver 'text'.
     if output == "html":
-        return _text_to_tinymce_html(text)
+        # Esta es una versión alternativa si el destino final es una web 
+        # pero no quieres párrafos, solo saltos de línea.
+        return text.replace("\n", "<br />")
 
     return text
 
@@ -461,7 +455,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 fase_raw,
                 expediente,
                 config_map=motivos_config,
-                output="html",
+                output="text",
             )
 
             payload = _map_payload(

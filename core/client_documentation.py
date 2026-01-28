@@ -94,9 +94,17 @@ def get_ruta_cliente_documentacion(client: ClientIdentity, base_path: str | Path
 
 # --- Nueva Heurística de Selección ---
 
-def _calculate_file_score(path: Path) -> int:
+def _analyze_file_categories(name: str, categories_map: dict) -> list[str]:
+    """Determina a cuántas categorías pertenece un nombre de archivo."""
+    found = []
+    for cat, keywords in categories_map.items():
+        if any(k in name.lower() for k in keywords):
+            found.append(cat)
+    return found
+
+def _calculate_file_score(path: Path, categories_found: list[str]) -> int:
     """
-    Asigna una puntuación de calidad al archivo.
+    Calcula el score priorizando archivos específicos sobre combos.
     Valores altos = Documento con alta probabilidad de ser el correcto.
     """
     score = 0
@@ -106,23 +114,38 @@ def _calculate_file_score(path: Path) -> int:
     # 1. Filtro de extensión (PROHIBIDO WORD)
     if ext == ".pdf": score += 50
     elif ext in [".jpg", ".jpeg", ".png"]: score += 20
-    else: return -1000 # Descarte automático
+    else: return -1000  # Descarte automático
 
-    # 2. Filtro de tamaño (evitar logos de 10KB o manuales de 50MB)
+    # 2. ESPECIFICIDAD vs COMBOS (El matiz clave)
+    if len(categories_found) > 1:
+        score -= 40  # Penalizamos archivos tipo "AUTDNI.pdf"
+    elif len(categories_found) == 1:
+        score += 30  # Premiamos archivos específicos como "AUTORIZACION.pdf"
+
+    # 3. Filtro de tamaño (evitar logos de 10KB o manuales de 50MB)
     try:
         size_kb = path.stat().st_size / 1024
-        if size_kb < 40: return -500 # Probablemente un logo de firma
-        if size_kb > 10000: score -= 30 # Penalizar archivos gigantes (>10MB)
-        if 200 < size_kb < 4000: score += 25 # "Sweet spot" de un escaneo normal
-    except OSError: return -1000
+        if size_kb < 40: return -500  # Probablemente un logo de firma
+        if size_kb > 10000: score -= 30  # Penalizar archivos gigantes (>10MB)
+        if 200 < size_kb < 4000: score += 25  # "Sweet spot" de un escaneo normal
+    except OSError:
+        return -1000
 
-    # 3. Keywords de calidad
-    if any(k in name for k in ["comp", "cmp", "completo", "firmado", "actual"]): score += 40
-    if any(k in name for k in ["anverso", "reverso", "cara", "part", "front", "back", "darrera"]): score += 10
+    # 4. Keywords de Confianza
+    if any(k in name for k in ["firmada", "firmat", "recursos", "original"]):
+        score += 50
+    if any(k in name for k in ["comp", "completo"]):
+        score += 20
     
-    # 4. Keywords de penalización
-    if any(k in name for k in ["old", "antiguo", "copia", "instrucciones", "vencido"]): score -= 100
-    
+    # 5. Keywords de Fragmento (Indican que es una parte de algo)
+    # Añadido 'darrera' para catalán y 'trasera' para español
+    if any(k in name for k in ["anverso", "reverso", "cara", "part", "front", "back", "darrera", "trasera"]):
+        score += 15
+
+    # 6. Penalización de archivos antiguos
+    if any(k in name for k in ["old", "antiguo", "vencido", "copia"]):
+        score -= 100
+
     return score
 
 def select_required_client_documents(
@@ -159,22 +182,26 @@ def select_required_client_documents(
     # Cubetas para clasificar candidatos
     buckets: dict[str, list[dict]] = defaultdict(list)
 
-    # 1. Escaneo y puntuación
+    # 1. Clasificación y Puntuación
     for file_path in ruta_docu.rglob("*"):
         if not file_path.is_file(): continue
         
-        score = _calculate_file_score(file_path)
+        cats_found = _analyze_file_categories(file_path.name, categories_map)
+        if not cats_found: continue
+
+        score = _calculate_file_score(file_path, cats_found)
         if score < 0: continue
 
-        name_lower = file_path.name.lower()
-        for cat, keywords in categories_map.items():
-            if any(k in name_lower for k in keywords):
-                is_fragment = any(x in name_lower for x in ["anverso", "reverso", "cara", "part"])
-                buckets[cat].append({
-                    "path": file_path,
-                    "score": score,
-                    "is_fragment": is_fragment
-                })
+        for cat in cats_found:
+            # Detectamos si es un fragmento (DNI miquel darrera, DNI anverso, etc.)
+            is_fragment = any(x in file_path.name.lower() for x in [
+                "anverso", "reverso", "cara", "part", "darrera", "trasera", "front", "back"
+            ])
+            buckets[cat].append({
+                "path": file_path,
+                "score": score,
+                "is_fragment": is_fragment
+            })
 
     final_files: list[Path] = []
     covered: list[str] = []
