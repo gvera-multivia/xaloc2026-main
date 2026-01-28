@@ -41,6 +41,70 @@ def _attach_gemini_console_logger(page: Page) -> None:
 
     page.on("console", _on_console)
 
+async def _install_sta_main_hooks(page: Page) -> None:
+    """
+    Instala hooks en la página principal ANTES de abrir el popup.
+    El popup llama a funciones del opener (p.ej. addDocumentoLista), y queremos ver sus argumentos.
+    """
+    try:
+        await page.evaluate(
+            """() => {
+                if (window.__GEMINI_STA_HOOKS_INSTALLED) return;
+                window.__GEMINI_STA_HOOKS_INSTALLED = true;
+
+                function installHook(fnName) {
+                    function wrapAndLog(fn) {
+                        return function() {
+                            try {
+                                console.log('GEMINI_DEBUG: ' + fnName + '_args ' + JSON.stringify(Array.from(arguments)));
+                            } catch (e) {}
+                            return fn.apply(this, arguments);
+                        };
+                    }
+
+                    try {
+                        const existing = window[fnName];
+                        if (typeof existing === 'function') {
+                            window[fnName] = wrapAndLog(existing);
+                            console.log('GEMINI_DEBUG: hook_installed ' + fnName + ' (direct)');
+                            return;
+                        }
+                    } catch (e) {}
+
+                    // Si aún no existe, definimos setter para envolver cuando se asigne.
+                    try {
+                        let current;
+                        Object.defineProperty(window, fnName, {
+                            configurable: true,
+                            enumerable: true,
+                            get: () => current,
+                            set: (v) => {
+                                try {
+                                    if (typeof v === 'function') {
+                                        current = wrapAndLog(v);
+                                        console.log('GEMINI_DEBUG: hook_installed ' + fnName + ' (setter)');
+                                    } else {
+                                        current = v;
+                                    }
+                                } catch (e) {
+                                    current = v;
+                                }
+                            },
+                        });
+                        console.log('GEMINI_DEBUG: hook_waiting ' + fnName);
+                    } catch (e) {
+                        console.log('GEMINI_DEBUG: hook_failed ' + fnName + ' ' + String(e && e.message ? e.message : e));
+                    }
+                }
+
+                // Funciones relevantes para el puente popup -> opener
+                installHook('addDocumentoLista');
+                installHook('openUploader');
+            }"""
+        )
+    except Exception as e:
+        logging.warning(f"No se pudo instalar hooks STA en la página principal: {e}")
+
 def _sta_sanitize_filename(name: str) -> str:
     # Mismo sanitize que en el JS del popup: fileName.replace(/[^a-zA-Z0-9-_\.]/g, '')
     return re.sub(r"[^a-zA-Z0-9\-_.]", "", name or "")
@@ -487,6 +551,7 @@ async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]
 
     logging.info(f"Adjuntando {len(archivos)} documento(s)")
     _attach_gemini_console_logger(page)
+    await _install_sta_main_hooks(page)
     
     # Verify page is still valid
     try:
