@@ -6,6 +6,9 @@ from __future__ import annotations
 
 import logging
 import re
+import shutil
+import time
+import uuid
 from pathlib import Path
 from typing import List, Optional, Sequence, Union
 
@@ -15,6 +18,7 @@ from playwright.async_api import Page, TimeoutError
 
 DELAY_MS = 500
 POPUP_TIMEOUT_MS = 15000
+UPLOADS_TRANSIT_DIR = Path("tmp/web_uploads")
 
 
 def _attach_gemini_console_logger(page: Page) -> None:
@@ -108,6 +112,31 @@ async def _install_sta_main_hooks(page: Page) -> None:
 def _sta_sanitize_filename(name: str) -> str:
     # Mismo sanitize que en el JS del popup: fileName.replace(/[^a-zA-Z0-9-_\.]/g, '')
     return re.sub(r"[^a-zA-Z0-9\-_.]", "", name or "")
+
+def _preparar_copias_sanitizadas(archivos_originales: List[Path]) -> List[Path]:
+    """
+    Copia los archivos a una carpeta temporal con nombres 100% compatibles con STA
+    (misma sanitización que aplica el popup al construir la lista de archivos).
+    """
+    run_dir = UPLOADS_TRANSIT_DIR / f"{int(time.time())}_{uuid.uuid4().hex[:8]}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    archivos_limpios: list[Path] = []
+    for i, ruta_orig in enumerate(archivos_originales, 1):
+        nombre_limpio = _sta_sanitize_filename(ruta_orig.name)
+        if not nombre_limpio:
+            nombre_limpio = f"file_{i}"
+
+        destino = run_dir / nombre_limpio
+        # Evitar colisiones si dos ficheros acaban con el mismo nombre sanitizado
+        if destino.exists():
+            destino = run_dir / f"{i}_{nombre_limpio}"
+
+        shutil.copy2(ruta_orig, destino)
+        logging.info(f"[UPLOAD_TRANSIT] Copia temporal: {ruta_orig} -> {destino.name}")
+        archivos_limpios.append(destino)
+
+    return archivos_limpios
 
 
 async def _debug_dump_popup_state(ctx: Page | Frame, *, label: str, expected_files: list[str]) -> None:
@@ -498,6 +527,69 @@ async def _adjuntar_y_continuar(popup: Page, *, ctx: Page | Frame, espera_cierre
         # Pequeña espera para que el botón esté listo
         await popup.wait_for_timeout(500)
 
+        # Forzar el puente popup -> opener con la misma llamada que hace continuar().
+        # Esto cubre casos en los que el onclick falla silenciosamente o la UI no se refresca.
+        try:
+            popup_params = await popup.evaluate(
+                """() => {
+                    try {
+                        const params = new URLSearchParams(window.location.search || '');
+                        return {
+                            tipoDocumento: params.get('tipoDocumento') || '',
+                            personDBOID: params.get('personDBOID') || '',
+                            firma: params.get('firma') || 'S',
+                        };
+                    } catch (e) { return { tipoDocumento: '', personDBOID: '', firma: 'S' }; }
+                }"""
+            )
+            uploaded_files = await ctx.evaluate(
+                """() => {
+                    const inputs = Array.from(document.querySelectorAll('input[type="file"]'));
+                    const names = [];
+                    for (const i of inputs) {
+                        if (i.files) for (const f of i.files) names.push(f.name);
+                    }
+                    return names.filter(Boolean);
+                }"""
+            )
+            files_str = "|".join([_sta_sanitize_filename(str(n)) for n in (uploaded_files or []) if str(n)])
+            if files_str and popup_params and (popup_params.get("tipoDocumento") and popup_params.get("personDBOID")):
+                logging.info(f"[STA_FORCE] addDocumentoLista: tipoDocumento={popup_params.get('tipoDocumento')} personDBOID={popup_params.get('personDBOID')} files={files_str}")
+                await popup.evaluate(
+                    """(p) => {
+                        try {
+                            if (!window.opener || window.opener.closed) return;
+                            const tipoDocumento = String(p.tipoDocumento || '');
+                            const ficheroName = String(p.filesStr || '');
+                            const firma = String(p.firma || 'S');
+                            const personDBOID = String(p.personDBOID || '');
+                            if (!tipoDocumento || !ficheroName || !personDBOID) return;
+                            window.opener.addDocumentoLista(
+                                tipoDocumento,
+                                ficheroName,
+                                firma,
+                                '', '', '',
+                                personDBOID,
+                                false, '', '',
+                                'false',
+                                null,
+                                'true'
+                            );
+                            console.log('GEMINI_DEBUG: addDocumentoLista_forced ' + JSON.stringify([tipoDocumento, ficheroName, firma, personDBOID]));
+                        } catch (e) {
+                            console.log('GEMINI_DEBUG: addDocumentoLista_forced_error ' + String(e && e.message ? e.message : e));
+                        }
+                    }""",
+                    {
+                        "tipoDocumento": popup_params.get("tipoDocumento"),
+                        "personDBOID": popup_params.get("personDBOID"),
+                        "firma": popup_params.get("firma") or "S",
+                        "filesStr": files_str,
+                    },
+                )
+        except Exception as e:
+            logging.warning(f"[STA_FORCE] No se pudo forzar addDocumentoLista: {e}")
+
         if espera_cierre:
             logging.info("Haciendo clic FÍSICO en el botón 'Continuar'...")
             try:
@@ -539,15 +631,18 @@ async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]
     (siguiente input <type=file> vacío), y solo al final pulsa "Clicar per adjuntar".
     """
 
-    archivos = _normalizar_archivos(archivo)
-    if not archivos:
+    archivos_originales = _normalizar_archivos(archivo)
+    if not archivos_originales:
         logging.info("Sin archivos para adjuntar, saltando...")
         return
 
-    for a in archivos:
+    for a in archivos_originales:
         if not a.exists():
             raise FileNotFoundError(str(a))
         _validar_extension(a)
+
+    # Usar copias sanitizadas para que el nombre que "ve" STA coincida con su propia sanitización
+    archivos = _preparar_copias_sanitizadas(archivos_originales)
 
     logging.info(f"Adjuntando {len(archivos)} documento(s)")
     _attach_gemini_console_logger(page)
