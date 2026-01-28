@@ -138,8 +138,12 @@ def _calculate_file_score(path: Path, categories_found: list[str]) -> int:
         score += 20
     
     # 5. Keywords de Fragmento (Indican que es una parte de algo)
-    # Añadido 'darrera' para catalán y 'trasera' para español
-    if any(k in name for k in ["anverso", "reverso", "cara", "part", "front", "back", "darrera", "trasera"]):
+    # Incluye términos en catalán, español e inglés
+    if any(k in name for k in [
+        "anverso", "reverso", "cara", "part", "front", "back", 
+        "darrera", "trasera", "frontal", "cara1", "cara2", 
+        "page1", "pág1", "página1"
+    ]):
         score += 15
 
     # 6. Penalización de archivos antiguos
@@ -147,6 +151,25 @@ def _calculate_file_score(path: Path, categories_found: list[str]) -> int:
         score -= 100
 
     return score
+
+def _log_score_table(buckets: dict[str, list[dict]], cat: str) -> None:
+    """Imprime una tabla de scores para debugging y trazabilidad."""
+    if not buckets.get(cat):
+        return
+    
+    logger.info(f"\n{'='*80}")
+    logger.info(f"Score Table para categoría: {cat}")
+    logger.info(f"{'-'*80}")
+    logger.info(f"{'Archivo':<50} {'Score':>8} {'Fragmento':>12}")
+    logger.info(f"{'-'*80}")
+    
+    for item in sorted(buckets[cat], key=lambda x: x["score"], reverse=True):
+        filename = item["path"].name[:48]  # Truncar si es muy largo
+        score = item["score"]
+        is_frag = "Sí" if item["is_fragment"] else "No"
+        logger.info(f"{filename:<50} {score:>8} {is_frag:>12}")
+    
+    logger.info(f"{'='*80}\n")
 
 def select_required_client_documents(
     *,
@@ -193,9 +216,11 @@ def select_required_client_documents(
         if score < 0: continue
 
         for cat in cats_found:
-            # Detectamos si es un fragmento (DNI miquel darrera, DNI anverso, etc.)
+            # Detectamos si es un fragmento con keywords ampliados
             is_fragment = any(x in file_path.name.lower() for x in [
-                "anverso", "reverso", "cara", "part", "darrera", "trasera", "front", "back"
+                "anverso", "reverso", "cara", "part", "darrera", "trasera", 
+                "front", "back", "frontal", "cara1", "cara2", 
+                "page1", "pág1", "página1"
             ])
             buckets[cat].append({
                 "path": file_path,
@@ -206,24 +231,50 @@ def select_required_client_documents(
     final_files: list[Path] = []
     covered: list[str] = []
     missing: list[str] = []
+    
+    # Variable de entorno para activar logging detallado
+    debug_scoring = os.getenv("CLIENT_DOCS_DEBUG_SCORING", "0").lower() in ("1", "true", "y")
 
-    # 2. Selección inteligente por cubeta
+    # 2. Selección inteligente por cubeta usando ESTRATEGIA DE VECINDAD
     for cat in required_cats:
         cands = buckets.get(cat, [])
         if not cands:
             missing.append(cat)
             continue
         
+        # Logging de scores para debugging
+        if debug_scoring:
+            _log_score_table(buckets, cat)
+        
         # Ordenar por puntuación (mejor primero)
         cands.sort(key=lambda x: x["score"], reverse=True)
         best = cands[0]
 
-        # LÓGICA DE FRAGMENTOS: Si el mejor es un fragmento, intentamos buscar su "pareja"
+        # --- ESTRATEGIA DE VECINDAD ---
+        # Si el mejor es un fragmento, asumimos que el documento está dividido.
+        # Nos llevamos todos los archivos específicos (no combos) con buen score.
         if best["is_fragment"]:
-            # Recogemos todos los que tengan un score decente y sean fragmentos
-            fragments = [c["path"] for c in cands if c["is_fragment"] and c["score"] > (best["score"] - 40)]
-            final_files.extend(fragments)
+            logger.info(f"[{cat}] Fragmento detectado: {best['path'].name} (score: {best['score']})")
+            logger.info(f"[{cat}] Aplicando estrategia de vecindad (tolerancia: -60)")
+            
+            # Ventana de tolerancia: archivos con score cercano al mejor
+            tolerance_threshold = best["score"] - 60
+            relacionados = [
+                c["path"] for c in cands 
+                if c["score"] > tolerance_threshold
+                # Esto incluirá tanto fragmentos como archivos específicos sin etiqueta
+            ]
+            
+            if debug_scoring or len(relacionados) > 1:
+                logger.info(
+                    f"[{cat}] Seleccionados {len(relacionados)} archivo(s) relacionados: "
+                    + ", ".join(p.name for p in relacionados)
+                )
+            
+            final_files.extend(relacionados)
         else:
+            # Si el mejor no es fragmento (ej: DNI_COMPLETO.pdf), es el ganador único
+            logger.info(f"[{cat}] Archivo único seleccionado: {best['path'].name} (score: {best['score']})")
             final_files.append(best["path"])
         
         covered.append(cat)
