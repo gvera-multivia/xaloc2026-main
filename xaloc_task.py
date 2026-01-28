@@ -25,7 +25,6 @@ SELECT
     rs.FaseProcedimiento,
     e.matricula,       -- Ahora viene de la tabla expedientes
     rs.automatic_id,
-    c.email,
     -- NUEVOS CAMPOS PARA MANDATARIO --
     rs.cif,              -- Para determinar JURIDICA vs FISICA
     rs.Empresa,          -- Razón social (persona jurídica)
@@ -132,7 +131,7 @@ def build_query(*, fase: str | None) -> tuple[str, list[Any]]:
         "rs.idRecurso IS NOT NULL",
         "rs.Expedient IS NOT NULL AND LTRIM(RTRIM(rs.Expedient)) <> ''",
         "rs.Matricula IS NOT NULL AND LTRIM(RTRIM(rs.Matricula)) <> ''",
-        "c.email IS NOT NULL AND LTRIM(RTRIM(c.email)) <> ''",
+        # Email validation removed - using fixed company email instead
     ]
 
     fase_norm = (fase or "").strip()
@@ -254,7 +253,7 @@ def _map_xaloc_payload(
 
     return {
         "idRecurso": row.get("idRecurso"),
-        "user_email": _clean_str(row.get("email")),
+        "user_email": "INFO@XVIA-SERVICIOSJURIDICOS.COM",  # Email fijo de la empresa
         "denuncia_num": expediente,
         "plate_number": _normalize_plate(row.get("matricula")),
         "expediente_num": expediente,
