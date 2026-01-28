@@ -25,7 +25,6 @@ SELECT
     rs.FaseProcedimiento,
     e.matricula,       -- Ahora viene de la tabla expedientes
     rs.automatic_id,
-    c.email,
     -- NUEVOS CAMPOS PARA MANDATARIO --
     rs.cif,              -- Para determinar JURIDICA vs FISICA
     rs.Empresa,          -- Razón social (persona jurídica)
@@ -235,7 +234,7 @@ def _map_payload(
 
     return {
         "idRecurso": row.get("idRecurso"),
-        "user_email": _clean_str(row.get("email")),
+        "user_email": "INFO@XVIA-SERVICIOSJURIDICOS.COM",
         "denuncia_num": expediente,
         "plate_number": _normalize_plate(row.get("matricula")),
         "expediente_num": expediente,
