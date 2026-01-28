@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -74,7 +75,10 @@ async def _obtener_url_justificante(page: Page) -> str:
 
 async def _descargar_pdf_desde_url(page: Page, url: str, destino: Path) -> None:
     """
-    Descarga el PDF del justificante navegando al iframe y guardándolo como PDF.
+    Descarga el PDF del justificante usando CDP Print to PDF.
+    
+    El justificante se muestra a través de un plugin de Chrome PDF embebido,
+    por lo que necesitamos usar el protocolo CDP para imprimir correctamente.
     
     Args:
         page: Página de Playwright
@@ -84,44 +88,65 @@ async def _descargar_pdf_desde_url(page: Page, url: str, destino: Path) -> None:
     logger.info(f"Descargando justificante desde: {url}")
     
     try:
-        # Método principal: Navegar al iframe y usar print-to-PDF
-        # Este método es más confiable que intentar una descarga directa
-        logger.info("Navegando al iframe del justificante...")
-        await page.goto(url, wait_until="networkidle", timeout=JUSTIFICANTE_TIMEOUT_MS)
+        # Navegar a la URL del justificante
+        logger.info("Navegando al visor del justificante...")
+        await page.goto(url, wait_until="load", timeout=JUSTIFICANTE_TIMEOUT_MS)
         
-        # Esperar a que el contenido del PDF se cargue
-        await page.wait_for_timeout(2000)
+        # Esperar a que el plugin de Chrome PDF se cargue completamente
+        # El embed puede tardar en renderizar el contenido
+        logger.info("Esperando a que el plugin PDF se cargue...")
         
-        # Guardar la página como PDF usando el motor de impresión de Chromium
-        logger.info("Guardando justificante como PDF...")
-        await page.pdf(
-            path=destino,
-            format="A4",
-            print_background=True,
-            prefer_css_page_size=True
-        )
-        logger.info(f"✓ Justificante descargado correctamente en: {destino}")
+        # Esperar a que el elemento embed esté presente
+        try:
+            await page.wait_for_selector(
+                'embed[type="application/x-google-chrome-pdf"], embed#plugin',
+                timeout=15000,
+                state="attached"
+            )
+            logger.info("Plugin PDF detectado")
+        except Exception:
+            logger.warning("No se detectó elemento embed, continuando...")
+        
+        # Espera adicional para que el PDF se renderice completamente en el plugin
+        await page.wait_for_timeout(5000)
+        
+        # Usar CDP (Chrome DevTools Protocol) para imprimir a PDF
+        # Este método captura correctamente el contenido del plugin PDF
+        logger.info("Generando PDF mediante CDP Print...")
+        
+        # Obtener el cliente CDP
+        cdp = await page.context.new_cdp_session(page)
+        
+        # Ejecutar comando de impresión
+        result = await cdp.send("Page.printToPDF", {
+            "printBackground": True,
+            "paperWidth": 8.27,  # A4 width en inches
+            "paperHeight": 11.69,  # A4 height en inches
+            "marginTop": 0,
+            "marginBottom": 0,
+            "marginLeft": 0,
+            "marginRight": 0,
+            "preferCSSPageSize": True,
+        })
+        
+        # Guardar el PDF
+        import base64
+        pdf_data = base64.b64decode(result["data"])
+        
+        with open(destino, "wb") as f:
+            f.write(pdf_data)
+        
+        # Verificar que el PDF no esté vacío
+        file_size = destino.stat().st_size
+        if file_size < 1000:  # Menos de 1KB probablemente está corrupto
+            raise RuntimeError(f"PDF generado pero parece estar vacío ({file_size} bytes)")
+        
+        logger.info(f"✓ Justificante descargado correctamente ({file_size} bytes): {destino}")
+        await cdp.detach()
         
     except Exception as e:
-        logger.error(f"Error en descarga principal: {e}")
-        
-        # Método de respaldo: intentar con descarga directa
-        logger.warning("Intentando método de descarga alternativo...")
-        try:
-            download_url = url.replace("ACTION=view", "ACTION=view&method=download")
-            
-            async with page.expect_download(timeout=JUSTIFICANTE_TIMEOUT_MS) as download_info:
-                # Usar evaluate para forzar la descarga sin navegar
-                await page.evaluate(f"window.location.href = '{download_url}'")
-                download = await download_info.value
-                
-                # Guardar el archivo descargado
-                await download.save_as(destino)
-                logger.info(f"✓ Justificante descargado mediante método alternativo en: {destino}")
-                
-        except Exception as e2:
-            logger.error(f"Error en método alternativo: {e2}")
-            raise RuntimeError(f"No se pudo descargar el justificante: {e}") from e
+        logger.error(f"Error en descarga CDP: {e}")
+        raise RuntimeError(f"No se pudo descargar el justificante: {e}") from e
 
 
 def _construir_ruta_recursos_telematicos(payload: dict) -> Path:
@@ -161,6 +186,9 @@ def _renombrar_y_mover_justificante(
     """
     Renombra el justificante temporal y lo mueve a la carpeta de destino.
     
+    Usa shutil.copy2 en lugar de rename() para permitir movimiento entre
+    unidades diferentes (ej: tmp local -> \\SERVER-DOC red).
+    
     Args:
         temporal: Ruta del archivo temporal descargado
         num_expediente: Número de expediente para el nombre del archivo
@@ -173,16 +201,28 @@ def _renombrar_y_mover_justificante(
     nombre_final = f"JUSTIFICANTE {num_expediente}.pdf"
     ruta_final = destino_dir / nombre_final
     
-    logger.info(f"Renombrando justificante a: {nombre_final}")
+    logger.info(f"Copiando justificante a: {nombre_final}")
     
-    # Mover y renombrar
+    # Eliminar archivo existente si existe
     if ruta_final.exists():
         logger.warning(f"El archivo {ruta_final} ya existe, será sobrescrito")
         ruta_final.unlink()
     
-    temporal.rename(ruta_final)
-    logger.info(f"Justificante guardado en: {ruta_final}")
+    # Usar shutil.copy2 para copiar entre unidades diferentes
+    # En Windows, rename() falla con WinError 17 al intentar mover entre unidades
+    try:
+        shutil.copy2(temporal, ruta_final)
+        logger.info(f"✓ Justificante copiado exitosamente")
+        
+        # Eliminar el archivo temporal después de copiarlo
+        temporal.unlink()
+        logger.info(f"✓ Archivo temporal eliminado")
+        
+    except Exception as e:
+        logger.error(f"Error al copiar justificante: {e}")
+        raise RuntimeError(f"No se pudo copiar el justificante a {ruta_final}: {e}") from e
     
+    logger.info(f"✓ Justificante guardado en: {ruta_final}")
     return ruta_final
 
 
