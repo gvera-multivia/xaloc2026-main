@@ -159,11 +159,31 @@ async def _pulsar_boton_enviar(page: Page) -> None:
     """
     logging.info("🚀 Localizando botón de envío...")
     
-    # Esperar a que el botón esté visible
-    boton_enviar = page.locator("input[type='button'][value*='Enviar']").first
-    await boton_enviar.wait_for(state="visible", timeout=30000)
-    await boton_enviar.scroll_into_view_if_needed()
+    # Intentar diferentes selectores para localizar el botón
+    selectores = [
+        "a.boton-style.naranja[onclick*='comprobar']",  # Selector específico para el botón de enviar
+        "a[onclick*='comprobar()']",  # Fallback: cualquier enlace con onclick comprobar
+        "a.naranja:has-text('Enviar')",  # Fallback: enlace naranja con texto Enviar
+        "input[type='button'][value*='Enviar']",  # Fallback: el selector antiguo por si acaso
+    ]
     
+    boton_enviar = None
+    for selector in selectores:
+        try:
+            locator = page.locator(selector).first
+            await locator.wait_for(state="visible", timeout=5000)
+            boton_enviar = locator
+            logging.info(f"✓ Botón encontrado con selector: {selector}")
+            break
+        except TimeoutError:
+            logging.info(f"!! No se encontró el botón con selector: {selector}")
+            continue
+    
+    if not boton_enviar:
+        logging.error("❌ No se pudo localizar el botón de envío con ningún selector")
+        raise TimeoutError("No se encontró el botón de envío")
+    
+    await boton_enviar.scroll_into_view_if_needed()
     logging.info("📤 Pulsando botón de ENVIAR...")
     
     try:
