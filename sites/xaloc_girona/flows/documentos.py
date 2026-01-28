@@ -42,6 +42,72 @@ def _attach_gemini_console_logger(page: Page) -> None:
     page.on("console", _on_console)
 
 
+async def _debug_dump_popup_state(ctx: Page | Frame, *, label: str, expected_files: list[str]) -> None:
+    """
+    Log (Python + console) del estado del popup/iframe, para diagnosticar por qué desaparecen adjuntos.
+    """
+    try:
+        state = await ctx.evaluate(
+            """({ label, expectedFiles }) => {
+                const safeText = (el) => (el && (el.textContent || '') || '').trim();
+                const safeStyle = (el) => {
+                    if (!el) return null;
+                    const cs = window.getComputedStyle(el);
+                    return {
+                        display: cs.display,
+                        visibility: cs.visibility,
+                        opacity: cs.opacity,
+                        pointerEvents: cs.pointerEvents,
+                    };
+                };
+
+                const inputs = Array.from(document.querySelectorAll('input[type="file"]')).map((input) => {
+                    const files = input.files ? Array.from(input.files).map((f) => ({ name: f.name, size: f.size })) : [];
+                    return {
+                        id: input.id || null,
+                        name: input.name || null,
+                        value: input.value || '',
+                        filesCount: files.length,
+                        files,
+                    };
+                });
+
+                const uploadResultado = document.getElementById('uploadResultado');
+                const continuarDiv = document.getElementById('continuar');
+                const fileHidden = document.getElementById('file');
+
+                const expectedPresence = (expectedFiles || []).map((f) => ({
+                    file: f,
+                    inAnyInputValue: inputs.some((i) => (i.value || '').toLowerCase().includes(String(f).toLowerCase())),
+                    inAnyFileName: inputs.some((i) => (i.files || []).some((ff) => (ff.name || '').toLowerCase().includes(String(f).toLowerCase()))),
+                }));
+
+                const payload = {
+                    label,
+                    url: String(document.location),
+                    inputs,
+                    uploadResultado: {
+                        text: safeText(uploadResultado),
+                        style: safeStyle(uploadResultado),
+                    },
+                    continuar: {
+                        style: safeStyle(continuarDiv),
+                        hasLink: !!(continuarDiv && continuarDiv.querySelector('a')),
+                    },
+                    hiddenFile: fileHidden ? { value: fileHidden.value || '' } : null,
+                    expectedPresence,
+                };
+
+                console.log('GEMINI_DEBUG: popup_state ' + JSON.stringify(payload));
+                return payload;
+            }""",
+            {"label": label, "expectedFiles": expected_files},
+        )
+        logging.info(f"[POPUP_STATE] {label}: inputs={len(state.get('inputs', []))}, continuar={state.get('continuar')}")
+    except Exception as e:
+        logging.warning(f"No se pudo dumpear estado del popup ({label}): {e}")
+
+
 def _normalizar_archivos(archivos: Union[None, Path, Sequence[Path]]) -> List[Path]:
     if archivos is None:
         return []
@@ -148,6 +214,8 @@ async def _seleccionar_archivos(popup: Page, archivos: List[Path]) -> Page | Fra
     #    4. UNA SOLA VEZ: Hacer clic en "Clicar per adjuntar"
     #    5. Esperar confirmación
     
+    expected_names = [a.name for a in archivos]
+    await _debug_dump_popup_state(target, label="before_select", expected_files=expected_names)
     logging.info(f"Seleccionando {len(archivos)} archivo(s)...")
     
     for idx, archivo in enumerate(archivos, 1):
@@ -191,13 +259,17 @@ async def _seleccionar_archivos(popup: Page, archivos: List[Path]) -> Page | Fra
             raise
         # Espera corta entre selecciones de archivos
         await popup.wait_for_timeout(500)
+
+        await _debug_dump_popup_state(target, label=f"after_select_{idx}", expected_files=expected_names)
     
     logging.info(f"Todos los archivos seleccionados ({len(archivos)}). Ahora haciendo clic en 'Clicar per adjuntar'...")
     
     # CRÍTICO: Hacer clic en "Clicar per adjuntar" UNA SOLA VEZ después de seleccionar TODOS
     await popup.wait_for_timeout(1000)  # Espera para que el popup procese todas las selecciones
+    await _debug_dump_popup_state(target, label="before_click_adjuntar", expected_files=expected_names)
     await _click_cta_adjuntar(target)
     logging.info("Click en 'Clicar per adjuntar' ejecutado")
+    await _debug_dump_popup_state(target, label="after_click_adjuntar", expected_files=expected_names)
     
     # Espera larga para que el JavaScript del popup procese la subida de TODOS los archivos
     await popup.wait_for_timeout(2000)
@@ -206,6 +278,7 @@ async def _seleccionar_archivos(popup: Page, archivos: List[Path]) -> Page | Fra
     logging.info("Esperando confirmación de subida...")
     await _wait_upload_ok(target)
     logging.info(f"Todos los archivos ({len(archivos)}) subidos correctamente")
+    await _debug_dump_popup_state(target, label="after_upload_ok", expected_files=expected_names)
     return target
 
 async def _click_link(ctx: Page | Frame, patron: str) -> None:
@@ -337,7 +410,23 @@ async def _adjuntar_y_continuar(popup: Page, *, ctx: Page | Frame, espera_cierre
 
         await continuar.wait_for(state="visible", timeout=5000)
         logging.info("Botón 'Continuar' visible")
-        
+
+        # Dump antes de continuar (aquí es donde suelen "desaparecer" al cerrar)
+        try:
+            expected = await popup.evaluate(
+                """() => {
+                    const inputs = Array.from(document.querySelectorAll('input[type="file"]'));
+                    const names = [];
+                    for (const i of inputs) {
+                        if (i.files) for (const f of i.files) names.push(f.name);
+                    }
+                    return names;
+                }"""
+            )
+            await _debug_dump_popup_state(ctx, label="before_click_continuar", expected_files=[str(x) for x in (expected or [])])
+        except Exception:
+            pass
+
         # Pequeña espera para que el botón esté listo
         await popup.wait_for_timeout(500)
 
@@ -511,6 +600,7 @@ async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]
         await popup.wait_for_load_state("domcontentloaded")
     except PlaywrightError:
         pass
+    _attach_gemini_console_logger(popup)
 
     # Diagnóstico crítico: sin opener, el popup puede cerrar sin "devolver" los docs al formulario principal
     try:
@@ -538,6 +628,31 @@ async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]
         await page.wait_for_timeout(3000)  # 3 segundos para que STA procese
     except PlaywrightError:
         return
+
+    # Diagnóstico: comprobar si los nombres de archivo aparecen en el DOM del formulario principal
+    try:
+        expected_names = [a.name for a in archivos]
+        presence = await page.evaluate(
+            """(names) => {
+                const text = (document.body && (document.body.innerText || document.body.textContent) || '');
+                const html = (document.body && document.body.innerHTML || '');
+                const lowerText = text.toLowerCase();
+                const lowerHtml = html.toLowerCase();
+                return (names || []).map((n) => {
+                    const ln = String(n).toLowerCase();
+                    return {
+                        file: n,
+                        inText: lowerText.includes(ln),
+                        inHtml: lowerHtml.includes(ln),
+                    };
+                });
+            }""",
+            expected_names,
+        )
+        logging.info(f"[MAIN_AFTER_POPUP] presencia_nombres={presence}")
+        await page.evaluate("console.log('GEMINI_DEBUG: main_after_popup ' + JSON.stringify(arguments[0]))", presence)
+    except Exception as e:
+        logging.warning(f"No se pudo verificar presencia de archivos en la página principal: {e}")
     
     # Screenshot para verificar que los documentos se adjuntaron correctamente
     try:
