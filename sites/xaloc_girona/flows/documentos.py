@@ -64,7 +64,18 @@ async def _install_sta_main_hooks(page: Page) -> None:
                             try {
                                 console.log('GEMINI_DEBUG: ' + fnName + '_args ' + JSON.stringify(Array.from(arguments)));
                             } catch (e) {}
-                            return fn.apply(this, arguments);
+                            try {
+                                const res = fn.apply(this, arguments);
+                                try {
+                                    console.log('GEMINI_DEBUG: ' + fnName + '_ok');
+                                } catch (e) {}
+                                return res;
+                            } catch (e) {
+                                try {
+                                    console.log('GEMINI_DEBUG: ' + fnName + '_throw ' + String(e && e.message ? e.message : e));
+                                } catch (e2) {}
+                                throw e;
+                            }
                         };
                     }
 
@@ -563,13 +574,13 @@ async def _adjuntar_y_continuar(popup: Page, *, ctx: Page | Frame, espera_cierre
                     """(p) => {
                         try {
                             if (!window.opener || window.opener.closed) return;
-                            const o = window.opener;
+                            const opener = window.opener;
                             const tipoDocumento = String(p.tipoDocumento || '');
                             const ficheroName = String(p.filesStr || '');
                             const firma = String(p.firma || 'S');
                             const personDBOID = String(p.personDBOID || '');
                             if (!tipoDocumento || !ficheroName || !personDBOID) return;
-                            o.addDocumentoLista(
+                            opener.addDocumentoLista(
                                 tipoDocumento,
                                 ficheroName,
                                 firma,
@@ -582,24 +593,62 @@ async def _adjuntar_y_continuar(popup: Page, *, ctx: Page | Frame, espera_cierre
                             );
                             console.log('GEMINI_DEBUG: addDocumentoLista_forced ' + JSON.stringify([tipoDocumento, ficheroName, firma, personDBOID]));
 
-                            // Intentar refresco visual si existe (nombres desconocidos según versión STA)
+                            // Intentar refresco visual (nombres pueden variar por versión STA).
+                            // Probamos en opener y, si existe, en opener.parent/top también.
+                            const targets = [];
+                            targets.push({ name: 'opener', obj: opener });
+                            try {
+                                if (opener.parent && opener.parent !== opener) targets.push({ name: 'opener.parent', obj: opener.parent });
+                            } catch (e) {}
+                            try {
+                                if (opener.top && opener.top !== opener) targets.push({ name: 'opener.top', obj: opener.top });
+                            } catch (e) {}
+
                             const refreshFns = [
                                 'actualizarEstadoDoc',
                                 'actualizarEstadoDocumento',
+                                'cargarDocumentacion',
+                                'cargarDocumentación',
                                 'refrescarDocumentos',
                                 'recargarDocumentos',
+                                'recargarDocumentacion',
+                                'recargarDocumentación',
+                                'recargarTabla',
+                                'recargarTaula',
                                 'reloadDocumentos',
                                 'updateDocumentos',
                                 'repaintDocumentos',
                             ];
-                            for (const fnName of refreshFns) {
+
+                            const called = [];
+                            for (const t of targets) {
+                                for (const fnName of refreshFns) {
+                                    try {
+                                        const fn = t.obj && t.obj[fnName];
+                                        if (typeof fn !== 'function') continue;
+
+                                        // Algunas versiones aceptan (tipoDocumento); otras no aceptan args.
+                                        let ok = false;
+                                        try { fn.call(t.obj, tipoDocumento); ok = true; } catch (e1) {}
+                                        if (!ok) {
+                                            try { fn.call(t.obj); ok = true; } catch (e2) {}
+                                        }
+                                        if (ok) {
+                                            called.push(t.name + '.' + fnName);
+                                            console.log('GEMINI_DEBUG: opener_refresh_called ' + t.name + '.' + fnName);
+                                        }
+                                    } catch (e) {}
+                                }
+                            }
+
+                            // Diagnóstico: si no encontramos ninguna función, listamos candidatos por nombre.
+                            if (!called.length) {
                                 try {
-                                    const fn = o[fnName];
-                                    if (typeof fn === 'function') {
-                                        fn(tipoDocumento);
-                                        console.log('GEMINI_DEBUG: opener_refresh_called ' + fnName);
-                                        break;
-                                    }
+                                    const keys = Object.keys(opener || {});
+                                    const candidates = keys
+                                        .filter((k) => /doc|document|adjunt|pendent|cargar|carregar|recargar|recarregar|tabla|taula|refresh|reload|update/i.test(k))
+                                        .slice(0, 30);
+                                    console.log('GEMINI_DEBUG: opener_refresh_candidates ' + JSON.stringify(candidates));
                                 } catch (e) {}
                             }
                         } catch (e) {
