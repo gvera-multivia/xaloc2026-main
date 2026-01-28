@@ -60,10 +60,10 @@ class TestClientDocumentation(unittest.TestCase):
                 strict=True,
                 merge_if_multiple=False,
             )
-            # Regla: AUT + (DNI o NIE) → se suben 2 archivos.
-            self.assertEqual(len(selected.files_to_upload), 2)
+            # Regla: AUT + documentación identificativa (puede seleccionar más de 1 si están en el top).
+            self.assertGreaterEqual(len(selected.files_to_upload), 2)
             self.assertIn("AUT", set(selected.covered_terms))
-            self.assertTrue(set(selected.covered_terms) & {"DNI", "NIE"})
+            self.assertIn("DNI", set(selected.covered_terms))
             self.assertEqual(selected.missing_terms, [])
         finally:
             shutil.rmtree(root, ignore_errors=True)
@@ -86,6 +86,25 @@ class TestClientDocumentation(unittest.TestCase):
             self.assertIn("autorizacion.pdf", names)
             self.assertIn("dni 1-7-31.pdf", names)
             self.assertNotIn("autdni.pdf", names)
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_aut_prefers_non_solo_variant(self):
+        root = self._make_tmp_dir()
+        try:
+            (root / "AUT_SOLO.pdf").write_bytes(b"%PDF-1.4 fake")
+            (root / "AUT.pdf").write_bytes(b"%PDF-1.4 fake")
+            (root / "DNI.pdf").write_bytes(b"%PDF-1.4 fake")
+
+            selected = select_required_client_documents(
+                ruta_docu=root,
+                is_company=False,
+                strict=True,
+                merge_if_multiple=False,
+            )
+            names = {p.name.lower() for p in selected.files_to_upload}
+            self.assertIn("aut.pdf", names)
+            self.assertNotIn("aut_solo.pdf", names)
         finally:
             shutil.rmtree(root, ignore_errors=True)
 

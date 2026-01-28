@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import subprocess
 from collections import defaultdict
 from dataclasses import dataclass
@@ -109,46 +110,68 @@ def _calculate_file_score(path: Path, categories_found: list[str]) -> int:
     """
     score = 0
     name = path.name.lower()
+    path_upper = str(path).upper()
     ext = path.suffix.lower()
 
-    # 1. Filtro de extensión (PROHIBIDO WORD)
-    if ext == ".pdf": score += 50
-    elif ext in [".jpg", ".jpeg", ".png"]: score += 20
-    else: return -1000  # Descarte automático
-
-    # 2. ESPECIFICIDAD vs COMBOS (El matiz clave)
-    if len(categories_found) > 1:
-        score -= 40  # Penalizamos archivos tipo "AUTDNI.pdf"
-    elif len(categories_found) == 1:
-        score += 30  # Premiamos archivos específicos como "AUTORIZACION.pdf"
-
-    # 3. Filtro de tamaño (evitar logos de 10KB o manuales de 50MB)
-    try:
-        size_kb = path.stat().st_size / 1024
-        if size_kb < 40: return -500  # Probablemente un logo de firma
-        if size_kb > 10000: score -= 30  # Penalizar archivos gigantes (>10MB)
-        if 200 < size_kb < 4000: score += 25  # "Sweet spot" de un escaneo normal
-    except OSError:
+    # 1. Filtro de extensión
+    if ext == ".pdf":
+        score += 50
+    elif ext in [".jpg", ".jpeg", ".png"]:
+        score += 20
+    else:
         return -1000
 
+    # 2. PRIORIDAD RECURSOS (Bonus masivo)
+    if "RECURSOS" in path_upper:
+        score += 1000
+
+    # 3. Especificidad vs Combos
+    if len(categories_found) > 1:
+        score -= 45
+    elif len(categories_found) == 1:
+        score += 35
+
     # 4. Keywords de Confianza
-    if any(k in name for k in ["firmada", "firmat", "recursos", "original"]):
+    if any(k in name for k in ["firmad", "firmat", "original", "completo"]):
         score += 50
-    if any(k in name for k in ["comp", "completo"]):
+
+    # REGLA "SOLO": penaliza para que pierda contra la versión normal
+    if "_solo_" in name or " solo " in name or name.endswith("solo.pdf"):
+        score -= 10
+
+    if (
+        "comp." in name
+        or "comprimido" in name
+        or "_cmp" in name
+        or " cmp" in name
+        or name.endswith("cmp.pdf")
+    ):
         score += 20
-    
-    # 5. Keywords de Fragmento (Indican que es una parte de algo)
-    # Incluye términos en catalán, español e inglés
-    if any(k in name for k in [
-        "anverso", "reverso", "cara", "part", "front", "back", 
-        "darrera", "trasera", "frontal", "cara1", "cara2", 
-        "page1", "pág1", "página1"
-    ]):
+
+    # 5. Detección de fragmentos
+    is_frag = any(
+        k in name
+        for k in [
+            "anverso",
+            "reverso",
+            "cara",
+            "part",
+            "darrera",
+            "trasera",
+            "front",
+            "back",
+            "pag",
+            "pág",
+            "página",
+        ]
+    )
+    has_num = bool(re.search(r"[\s_-][0-9]{1,2}($|\.)", name))
+    if is_frag or has_num:
         score += 15
 
-    # 6. Penalización de archivos antiguos
+    # 6. Penalización de basura / antiguos
     if any(k in name for k in ["old", "antiguo", "vencido", "copia"]):
-        score -= 100
+        score -= 200
 
     return score
 
@@ -194,7 +217,7 @@ def select_required_client_documents(
         "AUT": ["aut"],
         "DNI": ["dni", "nie", "pasaporte"],
         "CIF": ["cif", "nif"] if is_company else [],
-        "ESCR": ["escr", "constitu"] if is_company else []
+        "ESCR": ["escr", "constitu", "titularidad", "notar", "poder", "acta", "mercantil"] if is_company else [],
     }
     
     required_cats = ["AUT", "DNI"]
@@ -206,8 +229,20 @@ def select_required_client_documents(
     buckets: dict[str, list[dict]] = defaultdict(list)
 
     # 1. Clasificación y Puntuación
-    for file_path in ruta_docu.rglob("*"):
-        if not file_path.is_file(): continue
+    all_files = [p for p in ruta_docu.rglob("*") if p.is_file()]
+
+    # --- REGLA DE ORO: SI HAY RECURSOS, IGNORAMOS EL RESTO ---
+    has_recursos = any("DOCUMENTACION RECURSOS" in str(p).upper() for p in all_files)
+    if has_recursos:
+        filtered: list[Path] = []
+        for p in all_files:
+            up = str(p).upper()
+            if ("DOCUMENTACION" in up or "DOCUMENTACIÓN" in up) and "RECURSOS" not in up:
+                continue
+            filtered.append(p)
+        all_files = filtered
+
+    for file_path in all_files:
         
         cats_found = _analyze_file_categories(file_path.name, categories_map)
         if not cats_found: continue
@@ -216,12 +251,23 @@ def select_required_client_documents(
         if score < 0: continue
 
         for cat in cats_found:
-            # Detectamos si es un fragmento con keywords ampliados
-            is_fragment = any(x in file_path.name.lower() for x in [
-                "anverso", "reverso", "cara", "part", "darrera", "trasera", 
-                "front", "back", "frontal", "cara1", "cara2", 
-                "page1", "pág1", "página1"
-            ])
+            low = file_path.name.lower()
+            is_fragment = any(
+                x in low
+                for x in [
+                    "anverso",
+                    "reverso",
+                    "cara",
+                    "part",
+                    "darrera",
+                    "trasera",
+                    "front",
+                    "back",
+                    "pag",
+                    "pág",
+                    "página",
+                ]
+            ) or bool(re.search(r"[\s_-][0-9]{1,2}($|\.)", low))
             buckets[cat].append({
                 "path": file_path,
                 "score": score,
@@ -235,7 +281,7 @@ def select_required_client_documents(
     # Variable de entorno para activar logging detallado
     debug_scoring = os.getenv("CLIENT_DOCS_DEBUG_SCORING", "0").lower() in ("1", "true", "y")
 
-    # 2. Selección inteligente por cubeta usando ESTRATEGIA DE VECINDAD
+    # 2. Selección inteligente por cubeta (misma lógica que correr_test.py)
     for cat in required_cats:
         cands = buckets.get(cat, [])
         if not cands:
@@ -248,34 +294,34 @@ def select_required_client_documents(
         
         # Ordenar por puntuación (mejor primero)
         cands.sort(key=lambda x: x["score"], reverse=True)
+
+        # --- LÓGICA ESPECIAL PARA AUTORIZACIONES "SOLO" ---
+        if cat == "AUT" and len(cands) > 1:
+            sin_solo = [c for c in cands if "solo" not in c["path"].name.lower()]
+            if sin_solo:
+                best_sin_solo_score = sin_solo[0]["score"]
+                cands = [
+                    c
+                    for c in cands
+                    if "solo" not in c["path"].name.lower() or c["score"] > best_sin_solo_score
+                ]
+                cands.sort(key=lambda x: x["score"], reverse=True)
+
+        if not cands:
+            if cat not in missing:
+                missing.append(cat)
+            continue
+
         best = cands[0]
 
-        # --- ESTRATEGIA DE VECINDAD ---
-        # Si el mejor es un fragmento, asumimos que el documento está dividido.
-        # Nos llevamos todos los archivos específicos (no combos) con buen score.
+        # --- SELECCIÓN MULTI-SOCIO (Ventana de 20 pts) ---
+        top_tier = [c["path"] for c in cands if c["score"] > (best["score"] - 20)]
+        final_files.extend(top_tier)
+
+        # --- SELECCIÓN FRAGMENTOS (Ventana de 65 pts) ---
         if best["is_fragment"]:
-            logger.info(f"[{cat}] Fragmento detectado: {best['path'].name} (score: {best['score']})")
-            logger.info(f"[{cat}] Aplicando estrategia de vecindad (tolerancia: -60)")
-            
-            # Ventana de tolerancia: archivos con score cercano al mejor
-            tolerance_threshold = best["score"] - 60
-            relacionados = [
-                c["path"] for c in cands 
-                if c["score"] > tolerance_threshold
-                # Esto incluirá tanto fragmentos como archivos específicos sin etiqueta
-            ]
-            
-            if debug_scoring or len(relacionados) > 1:
-                logger.info(
-                    f"[{cat}] Seleccionados {len(relacionados)} archivo(s) relacionados: "
-                    + ", ".join(p.name for p in relacionados)
-                )
-            
-            final_files.extend(relacionados)
-        else:
-            # Si el mejor no es fragmento (ej: DNI_COMPLETO.pdf), es el ganador único
-            logger.info(f"[{cat}] Archivo único seleccionado: {best['path'].name} (score: {best['score']})")
-            final_files.append(best["path"])
+            fragmentos = [c["path"] for c in cands if c["is_fragment"] and c["score"] > (best["score"] - 65)]
+            final_files.extend(fragmentos)
         
         covered.append(cat)
 
