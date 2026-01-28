@@ -74,7 +74,7 @@ async def _obtener_url_justificante(page: Page) -> str:
 
 async def _descargar_pdf_desde_url(page: Page, url: str, destino: Path) -> None:
     """
-    Descarga el PDF del justificante desde la URL proporcionada.
+    Descarga el PDF del justificante navegando al iframe y guardándolo como PDF.
     
     Args:
         page: Página de Playwright
@@ -83,29 +83,45 @@ async def _descargar_pdf_desde_url(page: Page, url: str, destino: Path) -> None:
     """
     logger.info(f"Descargando justificante desde: {url}")
     
-    # Navegar a la URL con el parámetro de descarga
-    download_url = url.replace("ACTION=view", "ACTION=view&method=download")
-    
     try:
-        async with page.expect_download(timeout=JUSTIFICANTE_TIMEOUT_MS) as download_info:
-            await page.goto(download_url, wait_until="domcontentloaded")
-            download = await download_info.value
-            
-            # Guardar el archivo descargado
-            await download.save_as(destino)
-            logger.info(f"Justificante descargado correctamente en: {destino}")
-            
-    except TimeoutError:
-        # Método alternativo: usar CDP para obtener el PDF
-        logger.warning("Método de descarga estándar falló, intentando método alternativo...")
+        # Método principal: Navegar al iframe y usar print-to-PDF
+        # Este método es más confiable que intentar una descarga directa
+        logger.info("Navegando al iframe del justificante...")
+        await page.goto(url, wait_until="networkidle", timeout=JUSTIFICANTE_TIMEOUT_MS)
         
-        # Navegar a la URL del iframe
-        await page.goto(url, wait_until="networkidle")
+        # Esperar a que el contenido del PDF se cargue
         await page.wait_for_timeout(2000)
         
-        # Intentar guardar como PDF
-        await page.pdf(path=destino, format="A4")
-        logger.info(f"Justificante guardado mediante método alternativo en: {destino}")
+        # Guardar la página como PDF usando el motor de impresión de Chromium
+        logger.info("Guardando justificante como PDF...")
+        await page.pdf(
+            path=destino,
+            format="A4",
+            print_background=True,
+            prefer_css_page_size=True
+        )
+        logger.info(f"✓ Justificante descargado correctamente en: {destino}")
+        
+    except Exception as e:
+        logger.error(f"Error en descarga principal: {e}")
+        
+        # Método de respaldo: intentar con descarga directa
+        logger.warning("Intentando método de descarga alternativo...")
+        try:
+            download_url = url.replace("ACTION=view", "ACTION=view&method=download")
+            
+            async with page.expect_download(timeout=JUSTIFICANTE_TIMEOUT_MS) as download_info:
+                # Usar evaluate para forzar la descarga sin navegar
+                await page.evaluate(f"window.location.href = '{download_url}'")
+                download = await download_info.value
+                
+                # Guardar el archivo descargado
+                await download.save_as(destino)
+                logger.info(f"✓ Justificante descargado mediante método alternativo en: {destino}")
+                
+        except Exception as e2:
+            logger.error(f"Error en método alternativo: {e2}")
+            raise RuntimeError(f"No se pudo descargar el justificante: {e}") from e
 
 
 def _construir_ruta_recursos_telematicos(payload: dict) -> Path:
