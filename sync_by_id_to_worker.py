@@ -27,7 +27,8 @@ SELECT
 	    rs.automatic_id,
 	    rs.SujetoRecurso AS sujeto_recurso,
 	    -- NUEVOS CAMPOS PARA MANDATARIO --
-    rs.cif,              -- Para determinar JURIDICA vs FISICA
+    rs.cif,              -- Para determinar JURIDICA vs FISICA - puede ser NULL
+    c.nifempresa,        -- Fallback para CIF si rs.cif es NULL
     rs.Empresa,          -- Razón social (persona jurídica) - puede ser NULL
     c.Nombrefiscal,      -- Fallback para razón social si rs.Empresa es NULL
     c.nif AS cliente_nif,       -- NIF/NIE de persona física
@@ -192,7 +193,8 @@ def _build_mandatario_data(row: dict) -> dict:
     """Construye el diccionario de mandatario a partir de una fila de DB."""
     import logging
     
-    cif_raw = row.get("cif")
+    # Usar rs.cif si existe, sino usar c.nifempresa como fallback
+    cif_raw = row.get("cif") or row.get("nifempresa")
     # Usar rs.Empresa si existe, sino usar c.Nombrefiscal como fallback
     empresa_raw = row.get("Empresa") or row.get("Nombrefiscal")
     
