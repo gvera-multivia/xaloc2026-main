@@ -142,10 +142,16 @@ def _normalize_plate(value: Any) -> str:
     return cleaned
 
 
-def _determinar_tipo_persona(cif_value: str | None) -> Literal["FISICA", "JURIDICA"]:
-    """Determina el tipo de persona basándose en el CIF."""
+def _determinar_tipo_persona(cif_value: str | None, empresa_value: str | None = None) -> Literal["FISICA", "JURIDICA"]:
+    """Determina el tipo de persona basándose en el CIF y/o nombre de empresa.
+    
+    Si CUALQUIERA de los dos tiene valor, se considera JURIDICA.
+    Esto evita problemas cuando el CIF está vacío pero sí hay nombre de empresa.
+    """
     cif_clean = (cif_value or "").strip()
-    if cif_clean:
+    empresa_clean = (empresa_value or "").strip()
+    
+    if cif_clean or empresa_clean:
         return "JURIDICA"
     return "FISICA"
 
@@ -183,23 +189,40 @@ def _detectar_tipo_documento(nif_nie: str) -> Literal["NIF", "PS"]:
 
 def _build_mandatario_data(row: dict) -> dict:
     """Construye el diccionario de mandatario a partir de una fila de DB."""
+    import logging
+    
     cif_raw = row.get("cif")
-    tipo_persona = _determinar_tipo_persona(cif_raw)
+    empresa_raw = row.get("Empresa")
+    
+    # Determinar tipo de persona usando AMBOS campos
+    tipo_persona = _determinar_tipo_persona(cif_raw, empresa_raw)
     
     mandatario: dict = {"tipo_persona": tipo_persona}
     
     if tipo_persona == "JURIDICA":
-        # Persona jurídica: usar CIF y Razón Social
-        cif_clean = (cif_raw or "").strip().upper()
-        if not cif_clean:
-            raise ValueError("Persona jurídica sin CIF válido")
+        # Persona jurídica: usar CIF (si existe) y Razón Social
+        razon_social = (empresa_raw or "").strip().upper()
+        if not razon_social:
+            raise ValueError("Persona jurídica sin razón social válida")
         
-        doc_numero, doc_control = _extraer_documento_control(cif_clean)
-        mandatario.update({
-            "cif_documento": doc_numero,
-            "cif_control": doc_control,
-            "razon_social": (row.get("Empresa") or "").strip().upper(),
-        })
+        cif_clean = (cif_raw or "").strip().upper()
+        
+        # Si hay CIF, lo separamos en documento + control
+        if cif_clean:
+            doc_numero, doc_control = _extraer_documento_control(cif_clean)
+            mandatario.update({
+                "cif_documento": doc_numero,
+                "cif_control": doc_control,
+            })
+        else:
+            # Si no hay CIF, dejamos los campos vacíos (el formulario puede permitirlo)
+            logging.warning(f"Empresa '{razon_social}' sin CIF en la base de datos")
+            mandatario.update({
+                "cif_documento": "",
+                "cif_control": "",
+            })
+        
+        mandatario["razon_social"] = razon_social
         
     else:
         # Persona física: usar NIF/NIE de la tabla clientes
