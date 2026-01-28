@@ -93,6 +93,8 @@ async def _resolver_contexto_uploader(popup: Page) -> Page | Frame:
         try:
             if await ctx.locator("a", has_text=re.compile(r"^Clicar per adjuntar", re.IGNORECASE)).count() > 0:
                 score += 10
+            if await ctx.locator("a[onclick*='uploadFile']").count() > 0:
+                score += 10
             if await ctx.locator("#continuar a", has_text=re.compile(r"^Continuar$", re.IGNORECASE)).count() > 0:
                 score += 5
         except Exception:
@@ -168,6 +170,17 @@ async def _seleccionar_archivos(popup: Page, archivos: List[Path]) -> Page | Fra
         # Seleccionar el archivo
         logging.info(f"Archivo seleccionado en input[{input_index}]")
         await inputs.nth(input_index).set_input_files(archivo)
+        # Disparar lógica STA (algunos inputs se crean dinámicamente y el onchange puede fallar)
+        try:
+            await inputs.nth(input_index).evaluate(
+                """(el) => {
+                    try {
+                        if (typeof stepAfterSelect === 'function') stepAfterSelect(el);
+                    } catch (e) {}
+                }"""
+            )
+        except Exception:
+            pass
         # Confirmar que el input retuvo el archivo (evita falsos positivos en logs)
         try:
             files_len = await inputs.nth(input_index).evaluate("(el) => (el.files ? el.files.length : 0)")
@@ -183,7 +196,7 @@ async def _seleccionar_archivos(popup: Page, archivos: List[Path]) -> Page | Fra
     
     # CRÍTICO: Hacer clic en "Clicar per adjuntar" UNA SOLA VEZ después de seleccionar TODOS
     await popup.wait_for_timeout(1000)  # Espera para que el popup procese todas las selecciones
-    await _click_link(target, r"^Clicar per adjuntar")
+    await _click_cta_adjuntar(target)
     logging.info("Click en 'Clicar per adjuntar' ejecutado")
     
     # Espera larga para que el JavaScript del popup procese la subida de TODOS los archivos
@@ -226,6 +239,40 @@ async def _wait_upload_ok(ctx: Page | Frame) -> None:
         }""",
         timeout=60000,
     )
+
+async def _click_cta_adjuntar(ctx: Page | Frame) -> None:
+    """
+    En el popup hay varios enlaces con el mismo texto "Clicar per adjuntar":
+    - el de adjuntar (onclick uploadFile) suele ser el correcto
+    - el de firma (onclick procesoFirma) puede estar oculto (display:none)
+    Por eso NO podemos basarnos solo en el texto ni en `visible`.
+    """
+    candidates = [
+        "#adjuntar a[onclick*='uploadFile']",
+        "a[onclick*='uploadFile']",
+        "#firmaBoton a[onclick*='procesoFirma']",
+        "a[onclick*='procesoFirma']",
+    ]
+
+    for css in candidates:
+        loc = ctx.locator(css).first
+        try:
+            if await loc.count() <= 0:
+                continue
+            await loc.wait_for(state="attached", timeout=20000)
+            # click via DOM to bypass visibility constraints (STA oculta/mostrar por CSS)
+            await loc.evaluate(
+                """(el) => {
+                    try { el.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (e) {}
+                    el.click();
+                }"""
+            )
+            return
+        except Exception:
+            continue
+
+    # Último fallback: por texto (puede dar el oculto, pero al menos deja trazas)
+    await _click_link(ctx, r"^Clicar per adjuntar")
 
 
 async def _adjuntar_y_continuar(popup: Page, *, ctx: Page | Frame, espera_cierre: bool = False) -> None:
