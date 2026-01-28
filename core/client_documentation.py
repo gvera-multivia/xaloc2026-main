@@ -40,6 +40,10 @@ def client_identity_from_payload(payload: dict) -> ClientIdentity:
     sujeto_recurso = (
         (payload.get("sujeto_recurso") or payload.get("SujetoRecurso") or "")
     ).strip() or None
+    
+    # Debug logging para trazar el valor de sujeto_recurso
+    logger.debug(f"[ClientIdentity] payload keys: {list(payload.keys())}")
+    logger.debug(f"[ClientIdentity] sujeto_recurso extraído: '{sujeto_recurso}'")
     mandatario = payload.get("mandatario") or {}
     if isinstance(mandatario, dict) and (mandatario.get("tipo_persona") or "").strip():
         tipo = str(mandatario.get("tipo_persona")).strip().upper()
@@ -105,17 +109,22 @@ def get_ruta_cliente_documentacion(client: ClientIdentity, base_path: str | Path
     if client.sujeto_recurso:
         folder_name = re.sub(r"\s+", " ", client.sujeto_recurso.strip()).rstrip("!.,?;:")
         folder = base / _get_alpha_folder(_first_alnum_char(folder_name)) / folder_name
+        logger.info(f"[Ruta Docs] Usando SUJETO_RECURSO: '{folder_name}' -> {folder}")
     elif client.is_company:
         name = client.empresa.strip().rstrip("!.,?;:")
         folder = base / _get_alpha_folder(_first_alnum_char(name)) / name
+        logger.info(f"[Ruta Docs] Usando EMPRESA: '{name}' -> {folder}")
     else:
         full_name = f"{client.nombre} {client.apellido1.upper()} {client.apellido2.upper()}".strip()
         folder = base / _get_alpha_folder(_first_alnum_char(client.nombre)) / full_name
+        logger.info(f"[Ruta Docs] Usando NOMBRE+APELLIDOS: '{full_name}' -> {folder}")
 
     # Jerarquía de carpetas: RECURSOS es la máxima prioridad
     for subname in ["DOCUMENTACION RECURSOS", "DOCUMENTACION", "DOCUMENTACIÓN"]:
         if (folder / subname).exists():
+            logger.info(f"[Ruta Docs] Subcarpeta encontrada: {folder / subname}")
             return folder / subname
+    logger.info(f"[Ruta Docs] Sin subcarpeta DOCUMENTACION, usando: {folder}")
     return folder
 
 # --- Nueva Heurística de Selección ---
