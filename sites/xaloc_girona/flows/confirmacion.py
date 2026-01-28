@@ -1,16 +1,18 @@
 """
-Flujo de confirmación final (sin envío real)
+Flujo de confirmación final con pausa interactiva y envío real
 """
 
 from __future__ import annotations
 
 import logging
+import sys
 from datetime import datetime
 from pathlib import Path
 
 from playwright.async_api import Page, TimeoutError
 
 DELAY_MS = 500
+RECEIPT_WAIT_TIMEOUT_MS = 60000
 
 
 async def _wait_mask_hidden(page: Page, timeout_ms: int = 8000) -> None:
@@ -123,12 +125,98 @@ async def _wait_boton_continuar(page: Page) -> None:
     logging.info("-> Botón 'Continuar' detectado y visible")
 
 
-async def confirmar_tramite(page: Page, screenshots_dir: Path) -> str:
+def _esperar_confirmacion_usuario() -> None:
     """
-    Confirma el trámite y toma screenshot (NO ENVÍA).
+    Pausa la ejecución esperando que el usuario presione Enter para confirmar el envío.
+    """
+    print("\n" + "="*80)
+    print("⚠️  PAUSA INTERACTIVA")
+    print("="*80)
+    print("")
+    print("El formulario está listo para enviar.")
+    print("")
+    print("🔍 Por favor, revisa que todo esté correcto en el navegador.")
+    print("")
+    print("IMPORTANTE: Una vez que presiones Enter, se enviará el formulario REALMENTE.")
+    print("")
+    print("👉 Presiona Enter para CONFIRMAR el envío y continuar...")
+    print("   (o presiona Ctrl+C para cancelar)")
+    print("")
+    print("="*80)
+    
+    try:
+        input()
+        logging.info("✓ Usuario confirmó el envío. Procediendo...")
+    except KeyboardInterrupt:
+        logging.warning("⚠️  Usuario canceló el envío con Ctrl+C")
+        print("\n\n❌ Proceso cancelado por el usuario.")
+        sys.exit(0)
+
+
+async def _pulsar_boton_enviar(page: Page) -> None:
+    """
+    Pulsa el botón de enviar en la página TramitaSign.
+    """
+    logging.info("🚀 Localizando botón de envío...")
+    
+    # Esperar a que el botón esté visible
+    boton_enviar = page.locator("input[type='button'][value*='Enviar']").first
+    await boton_enviar.wait_for(state="visible", timeout=30000)
+    await boton_enviar.scroll_into_view_if_needed()
+    
+    logging.info("📤 Pulsando botón de ENVIAR...")
+    
+    try:
+        # Esperamos navegación tras el click
+        async with page.expect_navigation(wait_until="domcontentloaded", timeout=RECEIPT_WAIT_TIMEOUT_MS):
+            await boton_enviar.click()
+        logging.info("✓ Formulario enviado exitosamente")
+    except TimeoutError:
+        # Si no hay navegación inmediata, intentar click de todas formas
+        logging.warning("Timeout esperando navegación, intentando click directo...")
+        await boton_enviar.click()
+        await page.wait_for_timeout(2000)
+    
+    await page.wait_for_timeout(DELAY_MS)
+
+
+async def _esperar_pagina_justificante(page: Page, timeout_ms: int = RECEIPT_WAIT_TIMEOUT_MS) -> None:
+    """
+    Espera a que la página redirija automáticamente a la página del justificante.
+    """
+    logging.info("⏳ Esperando redirección automática a página del justificante...")
+    
+    try:
+        await page.wait_for_url("**/TramitaJustif**", timeout=timeout_ms)
+        logging.info("✓ Redirigido a página del justificante")
+    except TimeoutError:
+        current_url = page.url
+        logging.error(f"❌ Timeout esperando redirección. URL actual: {current_url}")
+        raise TimeoutError(
+            f"No se redirigió a la página del justificante. URL actual: {current_url}"
+        )
+    
+    # Esperar a que la página esté completamente cargada
+    await page.wait_for_load_state("networkidle", timeout=30000)
+    logging.info("✓ Página del justificante cargada completamente")
+
+
+async def confirmar_tramite(
+    page: Page,
+    screenshots_dir: Path,
+    *,
+    tiempo_espera_post_envio: int = 10,
+) -> str:
+    """
+    Confirma el trámite con pausa interactiva y envía el formulario realmente.
+    
+    Args:
+        page: Página de Playwright
+        screenshots_dir: Carpeta donde guardar screenshots
+        tiempo_espera_post_envio: Segundos a esperar tras enviar antes de proceder
 
     Returns:
-        Ruta del screenshot guardado
+        Ruta del screenshot de la página del justificante
     """
 
     logging.info("Marcando aceptación LOPD")
@@ -152,14 +240,33 @@ async def confirmar_tramite(page: Page, screenshots_dir: Path) -> str:
         await page.wait_for_url("**/TramitaSign**", timeout=60000)
     await page.wait_for_load_state("networkidle")
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    screenshot_path = screenshots_dir / f"xaloc_final_{timestamp}.png"
-    await page.screenshot(path=screenshot_path, full_page=True)
+    # Screenshot ANTES del envío
+    timestamp_pre = datetime.now().strftime("%Y%m%d_%H%M%S")
+    screenshot_pre = screenshots_dir / f"xaloc_pre_envio_{timestamp_pre}.png"
+    await page.screenshot(path=screenshot_pre, full_page=True)
+    logging.info(f"Screenshot pre-envío guardado: {screenshot_pre}")
 
-    logging.warning("PROCESO DETENIDO - Screenshot guardado")
-    logging.warning("Botón 'Enviar' NO pulsado (modo testing)")
+    # ⚠️ PAUSA INTERACTIVA ⚠️
+    _esperar_confirmacion_usuario()
 
-    return str(screenshot_path)
+    # Enviar formulario REALMENTE
+    await _pulsar_boton_enviar(page)
+    
+    # Esperar tiempo configurable para que la página procese el envío
+    if tiempo_espera_post_envio > 0:
+        logging.info(f"⏳ Esperando {tiempo_espera_post_envio}s para que la página se actualice...")
+        await page.wait_for_timeout(tiempo_espera_post_envio * 1000)
+    
+    # Esperar redirección automática a página del justificante
+    await _esperar_pagina_justificante(page)
+
+    # Screenshot de la página del justificante
+    timestamp_post = datetime.now().strftime("%Y%m%d_%H%M%S")
+    screenshot_post = screenshots_dir / f"xaloc_justificante_{timestamp_post}.png"
+    await page.screenshot(path=screenshot_post, full_page=True)
+    logging.info(f"✓ Screenshot del justificante guardado: {screenshot_post}")
+
+    return str(screenshot_post)
 
 
 __all__ = ["confirmar_tramite"]
