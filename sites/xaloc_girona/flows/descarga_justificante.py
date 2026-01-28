@@ -5,6 +5,7 @@ Flujo de descarga del justificante de registro tras el envío del trámite.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -122,8 +123,11 @@ def _construir_ruta_recursos_telematicos(payload: dict) -> Path:
     # Obtener identidad del cliente desde el payload
     client = client_identity_from_payload(payload)
     
+    # Obtener base_path desde variables de entorno o usar valor por defecto
+    base_path = os.getenv("CLIENT_DOCS_BASE_PATH") or r"\\SERVER-DOC\clientes"
+    
     # Obtener ruta base del cliente (apunta a DOCUMENTACION)
-    ruta_cliente_base = get_ruta_cliente_documentacion(client)
+    ruta_cliente_base = get_ruta_cliente_documentacion(client, base_path=base_path)
     
     # Subir un nivel y entrar en RECURSOS TELEMATICOS
     ruta_recursos = ruta_cliente_base.parent / "RECURSOS TELEMATICOS"
