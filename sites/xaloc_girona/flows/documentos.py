@@ -459,73 +459,74 @@ async def _click_cta_adjuntar(ctx: Page | Frame) -> None:
     # Último fallback: por texto (puede dar el oculto, pero al menos deja trazas)
     await _click_link(ctx, r"^Clicar per adjuntar")
 
-
 async def _adjuntar_y_continuar(popup: Page, *, ctx: Page | Frame, espera_cierre: bool = False) -> None:
     """
-    Sincronización total: Maneja IDs dinámicos por representante y convierte nombres a Hexadecimal.
+    Sincronización Multi-archivo: Convierte la lista completa a Hexadecimal y 
+    actualiza el DOM para mostrar todos los adjuntos.
     """
     logging.info("Esperando confirmación del servidor del popup...")
     await _wait_upload_ok(ctx)
 
-    # 1. Obtener datos del popup y convertir nombres a HEX (lo que espera Xaloc)
+    # 1. Obtener datos y convertir la LISTA COMPLETA a HEX
     popup_data = await popup.evaluate("""() => {
         const params = new URLSearchParams(window.location.search);
         const fileInputs = Array.from(document.querySelectorAll('input[type="file"]'));
         const names = fileInputs.map(i => i.value.split(/[\\\\/]/).pop()).filter(Boolean);
         
-        // Función para convertir a Hexadecimal (Imprescindible para STA)
         const toHex = (str) => {
             let hex = '';
             for(let i=0; i<str.length; i++) hex += ''+str.charCodeAt(i).toString(16);
             return hex;
         };
 
+        const fullString = names.join('|');
         return {
             tipoDoc: params.get('tipoDocumento') || '',
             personId: params.get('personDBOID') || '',
             firma: params.get('firma') || 'S',
-            filesStr: names.join('|'),
-            firstFileHex: names.length > 0 ? toHex(names[0]) : ''
+            filesStr: fullString,
+            allFilesHex: toHex(fullString), // Convertimos la cadena completa "A.pdf|B.pdf|C.pdf"
+            displayNames: names.join(', ')
         };
     }""")
 
-    # 2. EJECUCIÓN DE "NAVEGACIÓN INTERNA"
-    logging.info(f"[STA_FORCE] Sincronizando técnica y visualmente con personID: {popup_data['personId']}")
+    # 2. INYECCIÓN NATIVA COMPLETA
+    logging.info(f"[STA_FORCE] Sincronizando multi-archivo: {popup_data['filesStr']}")
     
     await popup.evaluate("""(data) => {
         if (!window.opener || window.opener.closed) return;
         const o = window.opener;
         const d = o.document;
 
-        // A. Registrar archivos en el núcleo de la sesión
+        // A. Registrar la lista completa en el sistema técnico
         o.addDocumentoLista(data.tipoDoc, data.filesStr, data.firma, '', '', '', data.personId, false, '', '', 'false', null, 'true');
 
-        // B. Actualizar IDs dinámicos (La clave de la captura manual)
-        // Probamos ambos sufijos: el genérico (_NEW) y el de representante (_ID)
+        // B. Actualizar IDs dinámicos (Soportando particular y representante)
         const suffixes = ['_NEW', '_' + data.personId];
         
         suffixes.forEach(sfx => {
             const idBase = data.tipoDoc + sfx;
             
-            // Actualizar valor hexadecimal del archivo
+            // Inyectar el HEX de TODOS los archivos (esto es lo que faltaba)
             const fileInput = d.getElementById(idBase + 'file');
-            if (fileInput) fileInput.value = data.firstFileHex;
+            if (fileInput) fileInput.value = data.allFilesHex;
 
-            // Cambiar visibilidad de botones (Ocultar adjuntar / Mostrar cancelar)
+            // Gestión de botones
             const divBtn = d.getElementById('divBoton' + idBase);
             const divCan = d.getElementById('divCancelar' + idBase);
             if (divBtn) divBtn.style.display = 'none';
             if (divCan) divCan.style.display = 'block';
 
-            // Actualizar celda de estado visual
+            // Actualización visual de la tabla con todos los nombres
             const statusCell = d.getElementById('Status' + idBase);
             if (statusCell) {
-                statusCell.innerHTML = '<span class="adjuntado pdf">' + data.filesStr.split('|')[0] + '</span>';
+                statusCell.innerHTML = '<span class="adjuntado pdf">' + data.displayNames + '</span>';
             }
         });
+        console.log('GEMINI_DEBUG: Sincronización multi-archivo completada en el DOM');
     }""", popup_data)
 
-    # 3. Cierre oficial
+    # 3. Cierre oficial para asegurar persistencia de cookies/sesión
     btn_continuar = ctx.locator("a", has_text=re.compile(r"^Continuar$", re.IGNORECASE)).first
     if await btn_continuar.count() == 0:
         btn_continuar = popup.locator("a", has_text=re.compile(r"^Continuar$", re.IGNORECASE)).first
