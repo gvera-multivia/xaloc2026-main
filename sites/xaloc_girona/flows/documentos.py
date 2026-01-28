@@ -41,6 +41,10 @@ def _attach_gemini_console_logger(page: Page) -> None:
 
     page.on("console", _on_console)
 
+def _sta_sanitize_filename(name: str) -> str:
+    # Mismo sanitize que en el JS del popup: fileName.replace(/[^a-zA-Z0-9-_\.]/g, '')
+    return re.sub(r"[^a-zA-Z0-9\-_.]", "", name or "")
+
 
 async def _debug_dump_popup_state(ctx: Page | Frame, *, label: str, expected_files: list[str]) -> None:
     """
@@ -602,6 +606,32 @@ async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]
         pass
     _attach_gemini_console_logger(popup)
 
+    # Hook diagnóstico: interceptar addDocumentoLista para ver qué nombres envía "continuar()"
+    try:
+        await popup.evaluate(
+            """() => {
+                try {
+                    if (!window.opener) return;
+                    const o = window.opener;
+                    if (o.__GEMINI_addDocumentoLista_hooked) return;
+                    const orig = o.addDocumentoLista;
+                    if (typeof orig !== 'function') return;
+                    o.addDocumentoLista = function() {
+                        try {
+                            console.log('GEMINI_DEBUG: addDocumentoLista_args ' + JSON.stringify(Array.from(arguments)));
+                        } catch (e) {}
+                        return orig.apply(this, arguments);
+                    };
+                    o.__GEMINI_addDocumentoLista_hooked = true;
+                    console.log('GEMINI_DEBUG: addDocumentoLista_hooked true');
+                } catch (e) {
+                    console.log('GEMINI_DEBUG: addDocumentoLista_hook_failed ' + String(e && e.message ? e.message : e));
+                }
+            }"""
+        )
+    except Exception as e:
+        logging.warning(f"No se pudo instalar hook de addDocumentoLista: {e}")
+
     # Diagnóstico crítico: sin opener, el popup puede cerrar sin "devolver" los docs al formulario principal
     try:
         has_opener = await popup.evaluate("() => !!window.opener && !window.opener.closed")
@@ -632,6 +662,8 @@ async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]
     # Diagnóstico: comprobar si los nombres de archivo aparecen en el DOM del formulario principal
     try:
         expected_names = [a.name for a in archivos]
+        expected_names_sanitized = [_sta_sanitize_filename(n) for n in expected_names]
+        expected_all = list(dict.fromkeys([*expected_names, *expected_names_sanitized]))
         presence = await page.evaluate(
             """(names) => {
                 const text = (document.body && (document.body.innerText || document.body.textContent) || '');
@@ -647,10 +679,15 @@ async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]
                     };
                 });
             }""",
-            expected_names,
+            expected_all,
         )
         logging.info(f"[MAIN_AFTER_POPUP] presencia_nombres={presence}")
-        await page.evaluate("console.log('GEMINI_DEBUG: main_after_popup ' + JSON.stringify(arguments[0]))", presence)
+        await page.evaluate(
+            """(presence) => {
+                console.log('GEMINI_DEBUG: main_after_popup ' + JSON.stringify(presence));
+            }""",
+            presence,
+        )
     except Exception as e:
         logging.warning(f"No se pudo verificar presencia de archivos en la página principal: {e}")
     
