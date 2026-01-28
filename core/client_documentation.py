@@ -243,6 +243,7 @@ def select_required_client_documents(
         raise RequiredClientDocumentsError(f"Ruta no encontrada: {ruta_docu}")
 
     # Definir requisitos
+    # SOLO AUT es estrictamente obligatorio - el resto son opcionales
     # Si es empresa, ESCR es opcional a menos que se fuerce por env
     require_escr = os.getenv("CLIENT_DOCS_REQUIRE_ESCR", "0").lower() in ("1", "true", "y")
     
@@ -254,10 +255,18 @@ def select_required_client_documents(
         "ESCR": ["escr", "constitu", "titularidad", "notar", "poder", "acta", "mercantil"] if is_company else [],
     }
     
-    required_cats = ["AUT", "DNI"]
+    # Solo AUT es obligatorio; DNI, CIF, ESCR son opcionales (se añaden si existen)
+    strictly_required = ["AUT"]
+    optional_cats = ["DNI"]
     if is_company:
-        required_cats.append("CIF")
-        if require_escr: required_cats.append("ESCR")
+        optional_cats.append("CIF")
+        if require_escr:
+            strictly_required.append("ESCR")  # Solo si se fuerza por env
+        else:
+            optional_cats.append("ESCR")
+    
+    # Buscamos tanto los obligatorios como los opcionales
+    required_cats = strictly_required + optional_cats
 
     # Cubetas para clasificar candidatos
     buckets: dict[str, list[dict]] = defaultdict(list)
@@ -373,8 +382,15 @@ def select_required_client_documents(
             archivos_unicos.append(p)
             seen.add(p)
 
-    if missing and strict:
-        raise RequiredClientDocumentsError(f"Faltan docs en {ruta_docu.name}: {', '.join(missing)}")
+    # Solo fallar si falta documentación ESTRICTAMENTE obligatoria (AUT)
+    missing_strict = [cat for cat in missing if cat in strictly_required]
+    if missing_strict and strict:
+        raise RequiredClientDocumentsError(f"Faltan docs obligatorios en {ruta_docu.name}: {', '.join(missing_strict)}")
+    
+    # Log de documentos opcionales no encontrados (no es error)
+    missing_optional = [cat for cat in missing if cat not in strictly_required]
+    if missing_optional:
+        logger.info(f"[Docs Opcionales] No encontrados (OK): {', '.join(missing_optional)}")
 
     # 3. Fusión con PDFtk
     if merge_if_multiple and len(archivos_unicos) > 1:
