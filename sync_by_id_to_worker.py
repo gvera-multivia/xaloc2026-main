@@ -28,7 +28,8 @@ SELECT
 	    rs.SujetoRecurso AS sujeto_recurso,
 	    -- NUEVOS CAMPOS PARA MANDATARIO --
     rs.cif,              -- Para determinar JURIDICA vs FISICA
-    rs.Empresa,          -- Razón social (persona jurídica)
+    rs.Empresa,          -- Razón social (persona jurídica) - puede ser NULL
+    c.Nombrefiscal,      -- Fallback para razón social si rs.Empresa es NULL
     c.nif AS cliente_nif,       -- NIF/NIE de persona física
     c.Nombre AS cliente_nombre,
     c.Apellido1 AS cliente_apellido1,
@@ -192,7 +193,8 @@ def _build_mandatario_data(row: dict) -> dict:
     import logging
     
     cif_raw = row.get("cif")
-    empresa_raw = row.get("Empresa")
+    # Usar rs.Empresa si existe, sino usar c.Nombrefiscal como fallback
+    empresa_raw = row.get("Empresa") or row.get("Nombrefiscal")
     
     # Determinar tipo de persona usando AMBOS campos
     tipo_persona = _determinar_tipo_persona(cif_raw, empresa_raw)
