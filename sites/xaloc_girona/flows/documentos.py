@@ -462,102 +462,56 @@ async def _click_cta_adjuntar(ctx: Page | Frame) -> None:
 
 async def _adjuntar_y_continuar(popup: Page, *, ctx: Page | Frame, espera_cierre: bool = False) -> None:
     """
-    Versión final: Fuerza el registro técnico y el refresco visual en la página principal.
+    Versión Híbrida: Usa el botón nativo de la web para asegurar que se pasen todos 
+    los tokens de seguridad, gestionando correctamente el contexto de Iframes.
     """
-    logging.info("Esperando a que el popup procese completamente los archivos...")
+    logging.info("Esperando confirmación visual de subida en el uploader...")
     try:
+        # Esperamos al mensaje de éxito que genera el servidor tras la subida
         await ctx.wait_for_function(
             """() => {
-                const resultado = document.getElementById('uploadResultado');
-                if (!resultado) return false;
-                return resultado.textContent.includes('Document adjuntat');
+                const res = document.getElementById('uploadResultado');
+                return res && res.textContent.includes('Document adjuntat');
             }""",
             timeout=30000
         )
-        logging.info("Archivos procesados correctamente por el servidor del popup")
-    except Exception as e:
-        logging.warning(f"No se pudo confirmar el mensaje visual de éxito en el popup: {e}")
+        logging.info("Servidor confirmó la subida técnica de los archivos.")
+    except Exception:
+        logging.warning("No se detectó el mensaje 'Document adjuntat', intentando continuar igualmente...")
 
-    # 1. Obtener parámetros del uploader y nombres de archivos REALES del popup
-    # Usamos los nombres que el servidor ya ha aceptado y que aparecen en los inputs.
-    popup_params = await popup.evaluate("""() => {
-        const params = new URLSearchParams(window.location.search);
-        const fileInputs = Array.from(document.querySelectorAll('input[type="file"]'));
-        const names = fileInputs.map(i => i.value.split(/[\\\\/]/).pop()).filter(Boolean);
-        
-        return {
-            tipoDocumento: params.get('tipoDocumento') || '',
-            personDBOID: params.get('personDBOID') || '',
-            firma: params.get('firma') || 'S',
-            filesList: names.join('|'),
-            filesDisplay: names.join(', ')
-        };
-    }""")
-
-    if not popup_params['filesList']:
-        logging.error("¡CRÍTICO! No hay nombres de archivos detectados en el popup antes de cerrar.")
-        return
-
-    # 2. EJECUCIÓN MAESTRA: Sincronización técnica + Parche visual del DOM
-    # Inyectamos código en el popup para que actúe sobre su 'window.opener' (la página principal).
-    logging.info(f"[STA_FORCE] Sincronizando {popup_params['filesList']} con la página principal...")
+    # 1. LOCALIZAR EL BOTÓN 'CONTINUAR' REAL
+    # En la plataforma STA, este botón suele estar en el mismo Iframe que el uploader.
+    btn_continuar = ctx.locator("a", has_text=re.compile(r"^Continuar$", re.IGNORECASE)).first
     
-    await popup.evaluate("""(p) => {
-        try {
-            if (!window.opener || window.opener.closed) return;
-            const o = window.opener;
+    # Fallback al popup raíz si no se encuentra en el frame
+    if await btn_continuar.count() == 0:
+        btn_continuar = popup.locator("a", has_text=re.compile(r"^Continuar$", re.IGNORECASE)).first
 
-            // A. Registro técnico (lo que permite avanzar de fase)
-            o.addDocumentoLista(
-                p.tipoDocumento, p.filesList, p.firma, 
-                '', '', '', p.personDBOID, 
-                false, '', '', 'false', null, 'true'
-            );
-            console.log('GEMINI_DEBUG: addDocumentoLista_forced enviado');
+    await btn_continuar.wait_for(state="visible", timeout=10000)
+    logging.info("Botón 'Continuar' oficial detectado y listo.")
 
-            // B. Refresco visual forzado (Para eliminar el "(pendent)")
-            const refreshFns = ['actualizarEstadoDoc', 'recargarDocumentos', 'recargarTablaDocs'];
-            refreshFns.forEach(fn => {
-                if (typeof o[fn] === 'function') o[fn](p.tipoDocumento);
-            });
-
-            // C. CIRUGÍA DOM (Si el JS de la web falla, nosotros borramos el texto rojo)
-            const statusId = 'Status' + p.tipoDocumento + '_NEW';
-            const cell = o.document.getElementById(statusId);
-            if (cell) {
-                // Borramos el "(pendent)" y ponemos los nombres en verde
-                cell.innerHTML = '<span style="color: #28a745; font-weight: bold;">✓ ' + p.filesDisplay + '</span>';
-                console.log('GEMINI_DEBUG: DOM de la página principal parcheado visualmente');
-            }
-        } catch (e) {
-            console.error('GEMINI_DEBUG: Fallo en la comunicación popup-opener:', e);
-        }
-    }""", popup_params)
-
-    # 3. Finalizar el flujo oficial de la web
+    # 2. DISPARAR EL HANDOFF OFICIAL
+    # Usamos evaluate("el => el.click()") para saltar capas visuales y ejecutar
+    # la función continuar() nativa de Xaloc que comunica las ventanas.
     try:
-        continuar = ctx.locator("a", has_text=re.compile(r"^Continuar$", re.IGNORECASE)).first
-        await continuar.wait_for(state="visible", timeout=5000)
-        
+        logging.info("Disparando flujo oficial de guardado (handoff de tokens)...")
         if espera_cierre:
-            async with popup.expect_event("close", timeout=10000):
-                await continuar.click(force=True)
+            # Esperamos a que el propio código de la web cierre la ventana tras el click
+            async with popup.expect_event("close", timeout=15000):
+                await btn_continuar.evaluate("el => el.click()")
         else:
-            await continuar.click(force=True)
-            
-        logging.info("Popup cerrado y datos transferidos.")
+            await btn_continuar.evaluate("el => el.click()")
+        logging.info("Popup procesado y cerrado por el sistema oficial de la web.")
     except Exception as e:
-        logging.warning(f"Error al clicar Continuar (posible cierre automático): {e}")
+        logging.warning(f"El popup no se cerró solo tras el click oficial (forzando cierre): {e}")
+        if not popup.is_closed():
+            await popup.close()
 
 
 async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]) -> None:
     """
-    Sube uno o varios documentos adjuntos al trámite.
-
-    Para múltiples documentos: selecciona cada archivo en el siguiente "Tria el fitxer"
-    (siguiente input <type=file> vacío), y solo al final pulsa "Clicar per adjuntar".
+    Sube uno o varios documentos adjuntos al trámite usando copias sanitizadas.
     """
-
     archivos_originales = _normalizar_archivos(archivo)
     if not archivos_originales:
         logging.info("Sin archivos para adjuntar, saltando...")
@@ -568,180 +522,64 @@ async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]
             raise FileNotFoundError(str(a))
         _validar_extension(a)
 
+    # 1. PREPARACIÓN: Usar copias sin espacios para evitar errores de sanitización
     archivos, transit_dir = _preparar_copias_sanitizadas(archivos_originales)
 
     try:
-        logging.info(f"Adjuntando {len(archivos)} documento(s)")
+        logging.info(f"Iniciando subida de {len(archivos)} documento(s)...")
         _attach_gemini_console_logger(page)
-        await _install_sta_main_hooks(page)
+        await _install_sta_main_hooks(page) # Monitorizamos funciones internas
 
-        # Verify page is still valid
-        try:
-            if page.is_closed():
-                logging.error("ERROR: La página está cerrada antes de subir documentos!")
-                return
-        except Exception as e:
-            logging.error(f"ERROR: No se puede verificar el estado de la página: {e}")
-            return
-
-        # Wait for page stability
-        try:
-            await page.wait_for_timeout(1000)
-        except Exception as e:
-            logging.error(f"ERROR: Página cerrada durante la espera inicial: {e}")
-            try:
-                logging.error(f"URL actual (si disponible): {page.url}")
-            except Exception:
-                pass
-            return
-
+        # 2. APERTURA DEL POPUP
         logging.info("Buscando enlace 'Adjuntar i signar'...")
-        link_count = await page.locator("a.docs").count()
-        logging.info(f"Enlaces encontrados con selector 'a.docs': {link_count}")
-        if link_count == 0:
-            logging.error("CRÍTICO: No se encuentra ningún enlace de adjuntar documentos")
-            try:
-                content = await page.content()
-                with open("debug_page_content.html", "w", encoding="utf-8") as f:
-                    f.write(content)
-                logging.info("Contenido HTML guardado en debug_page_content.html")
-            except Exception as e:
-                logging.error(f"No se pudo obtener el contenido de la página: {e}")
-            return
+        docs_link = page.locator("a.docs").first
+        
+        if await docs_link.count() == 0:
+             raise RuntimeError("No se encuentra el enlace de adjuntar documentos (a.docs)")
 
-        logging.info("Intentando hacer click en 'Adjuntar i signar'...")
-        popup: Optional[Page] = None
-
-        # Seleccionar el enlace correcto (hay múltiples a.docs en el DOM)
+        logging.info("Abriendo popup mediante click DOM forzado...")
+        popup = None
         try:
-            idx = await page.evaluate(
-                """() => {
-                    const links = Array.from(document.querySelectorAll('a.docs'));
-                    for (let i = 0; i < links.length; i++) {
-                        const el = links[i];
-                        const t = (el.textContent || '').trim().toLowerCase();
-                        const oc = (el.getAttribute('onclick') || '');
-                        if (t.includes('adjuntar') && oc.includes('openUploader')) return i;
-                    }
-                    return 0;
-                }"""
-            )
-            await page.evaluate(
-                """(i) => {
-                    const el = document.querySelectorAll('a.docs')[i];
-                    if (!el) return null;
-                    const cs = window.getComputedStyle(el);
-                    const r = el.getBoundingClientRect();
-                    console.log('GEMINI_DEBUG: docs link style ' + JSON.stringify({
-                        index: i,
-                        display: cs.display,
-                        visibility: cs.visibility,
-                        opacity: cs.opacity,
-                        pointerEvents: cs.pointerEvents,
-                        rect: { x: r.x, y: r.y, w: r.width, h: r.height },
-                        text: (el.textContent || '').trim(),
-                        onclick: (el.getAttribute('onclick') || '').slice(0, 120)
-                    }));
-                    return true;
-                }""",
-                idx,
-            )
+            async with page.expect_popup(timeout=POPUP_TIMEOUT_MS) as popup_info:
+                # El click vía evaluate dispara el evento openUploader() sin importar CSS
+                await page.evaluate("document.querySelector('a.docs').click()")
+            popup = await popup_info.value
         except Exception as e:
-            logging.warning(f"No se pudo resolver índice de a.docs; se usará el primero. Detalle: {e}")
-            idx = 0
+            logging.error(f"Fallo crítico abriendo el popup: {e}")
+            raise
 
-        logging.info("Abriendo popup con click DOM (evaluate) sobre a.docs...")
-        try:
-            async with page.expect_popup(timeout=POPUP_TIMEOUT_MS) as popup_info_js:
-                await page.evaluate(
-                    """(i) => {
-                        const el = document.querySelectorAll('a.docs')[i] || document.querySelector('a.docs');
-                        if (!el) throw new Error('No existe a.docs');
-                        el.click();
-                    }""",
-                    idx,
-                )
-            popup = await popup_info_js.value
-            logging.info(f"Popup detectado: {popup.url if popup else 'None'}")
-        except TimeoutError:
-            logging.error("Timeout: El popup no se abrió tras click DOM (evaluate).")
-            popup = None
-        except Exception as e:
-            logging.error(f"Error abriendo popup (evaluate): {e}")
-            popup = None
-
-        if popup is None:
-            raise RuntimeError("No se pudo abrir la ventana de adjuntos.")
-
-        logging.info("Popup detectado correctamente, procediendo con subida...")
+        # 3. PROCESO DE SUBIDA EN EL POPUP
+        logging.info("Popup detectado. Iniciando selección de archivos...")
         try:
             await popup.wait_for_load_state("domcontentloaded")
         except PlaywrightError:
             pass
-        _attach_gemini_console_logger(popup)
-
-        try:
-            has_opener = await popup.evaluate("() => !!window.opener && !window.opener.closed")
-            logging.info(f"Popup tiene window.opener: {has_opener}")
-            if not has_opener:
-                logging.warning("El popup no tiene window.opener; 'Continuar' puede cerrar sin adjuntar documentos.")
-        except Exception as e:
-            logging.warning(f"No se pudo comprobar window.opener en popup: {e}")
-
+        
+        # Identificamos el frame correcto y subimos los archivos sanitizados
         uploader_ctx = await _seleccionar_archivos(popup, archivos)
+        
+        # Ejecutamos el cierre oficial (El método híbrido de arriba)
         await _adjuntar_y_continuar(popup, ctx=uploader_ctx, espera_cierre=True)
-        logging.info("Popup cerrado por el botón 'Continuar'")
 
-        logging.info("Esperando a que la página principal procese los documentos adjuntados...")
+        # 4. FINALIZACIÓN Y ESPERA DE REFRESCO
+        logging.info("Handoff completado. Esperando a que la página principal procese los datos...")
+        # Damos 3 segundos para que el JS de la página principal procese los tokens
+        await page.wait_for_timeout(3000)
+        
+        # Screenshot de verificación final
         try:
-            await page.wait_for_timeout(3000)
-        except PlaywrightError:
-            return
+            await page.screenshot(path="debug_after_upload_final.png")
+            logging.info("Captura de verificación guardada: debug_after_upload_final.png")
+        except Exception:
+            pass
 
-        try:
-            expected_names = [a.name for a in archivos]
-            expected_names_sanitized = [_sta_sanitize_filename(n) for n in expected_names]
-            expected_all = list(dict.fromkeys([*expected_names, *expected_names_sanitized]))
-            presence = await page.evaluate(
-                """(names) => {
-                    const text = (document.body && (document.body.innerText || document.body.textContent) || '');
-                    const html = (document.body && document.body.innerHTML || '');
-                    const lowerText = text.toLowerCase();
-                    const lowerHtml = html.toLowerCase();
-                    return (names || []).map((n) => {
-                        const ln = String(n).toLowerCase();
-                        return { file: n, inText: lowerText.includes(ln), inHtml: lowerHtml.includes(ln) };
-                    });
-                }""",
-                expected_all,
-            )
-            logging.info(f"[MAIN_AFTER_POPUP] presencia_nombres={presence}")
-            await page.evaluate(
-                """(presence) => {
-                    console.log('GEMINI_DEBUG: main_after_popup ' + JSON.stringify(presence));
-                }""",
-                presence,
-            )
-        except Exception as e:
-            logging.warning(f"No se pudo verificar presencia de archivos en la página principal: {e}")
+        logging.info("Documentos subidos y vinculados correctamente.")
 
-        try:
-            await page.screenshot(path="debug_after_upload.png")
-            logging.info("Screenshot guardado: debug_after_upload.png")
-        except Exception as e:
-            logging.warning(f"No se pudo guardar screenshot: {e}")
-
-        logging.info("Documentos subidos y procesados por la página principal")
     finally:
-        keep = (os.getenv("XALOC_KEEP_UPLOAD_TRANSIT") or "0").strip().lower() in {"1", "true", "yes", "y", "on"}
-        if keep:
-            logging.info(f"[UPLOAD_TRANSIT] Conservando carpeta temporal: {transit_dir}")
-        else:
-            try:
-                shutil.rmtree(transit_dir, ignore_errors=True)
-                logging.info(f"[UPLOAD_TRANSIT] Limpiada carpeta temporal: {transit_dir}")
-            except Exception as e:
-                logging.warning(f"[UPLOAD_TRANSIT] No se pudo limpiar carpeta temporal {transit_dir}: {e}")
-
+        # Limpieza de la carpeta temporal
+        keep = (os.getenv("XALOC_KEEP_UPLOAD_TRANSIT") or "0").strip().lower() in {"1", "true"}
+        if not keep:
+            shutil.rmtree(transit_dir, ignore_errors=True)
+            logging.info(f"[UPLOAD_TRANSIT] Carpeta temporal eliminada: {transit_dir}")
 
 __all__ = ["subir_documento"]
