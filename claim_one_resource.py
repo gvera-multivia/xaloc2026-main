@@ -54,8 +54,8 @@ logger = logging.getLogger("claim_one")
 # CONSULTAS SQL SERVER
 # =============================================================================
 
-SQL_FETCH_ONE_RECURSO = """
-SELECT TOP 1
+SQL_FETCH_RECURSOS = """
+SELECT 
     rs.idRecurso,
     rs.idExp,
     rs.Expedient,
@@ -96,13 +96,13 @@ def build_sqlserver_connection_string() -> str:
 
 
 def fetch_one_resource(config: dict, conn_str: str) -> dict:
-    """Busca UN recurso disponible."""
-    logger.info("🔍 Buscando UN recurso disponible...")
+    """Busca UN recurso disponible que cumpla el regex."""
+    logger.info("🔍 Buscando recursos disponibles...")
     
     texp_values = [int(x.strip()) for x in config["filtro_texp"].split(",")]
     texp_placeholders = ",".join(["?"] * len(texp_values))
     
-    query = SQL_FETCH_ONE_RECURSO.format(texp_list=texp_placeholders)
+    query = SQL_FETCH_RECURSOS.format(texp_list=texp_placeholders)
     
     try:
         conn = pyodbc.connect(conn_str)
@@ -110,32 +110,40 @@ def fetch_one_resource(config: dict, conn_str: str) -> dict:
         cursor.execute(query, [config["query_organisme"]] + texp_values)
         
         columns = [column[0] for column in cursor.description]
-        row = cursor.fetchone()
-        
-        if not row:
-            conn.close()
-            logger.warning("No se encontraron recursos disponibles")
-            return None
-        
-        record = dict(zip(columns, row))
-        expediente = record.get("Expedient", "")
-        
-        # Validar formato de expediente
         regex = re.compile(config["regex_expediente"])
-        if not expediente or not regex.match(expediente):
-            conn.close()
-            logger.warning(f"Expediente {expediente} no cumple regex")
-            return None
+        
+        # Iterar sobre TODOS los recursos hasta encontrar uno válido
+        valid_count = 0
+        invalid_count = 0
+        
+        for row in cursor.fetchall():
+            record = dict(zip(columns, row))
+            expediente = record.get("Expedient", "")
+            
+            # Validar formato de expediente
+            if expediente and regex.match(expediente):
+                # ¡Encontramos uno válido!
+                conn.close()
+                
+                logger.info(f"✓ Recurso válido encontrado (después de revisar {invalid_count} inválidos):")
+                logger.info(f"  ID: {record['idRecurso']}")
+                logger.info(f"  Expediente: {record['Expedient']}")
+                logger.info(f"  Organismo: {record['Organisme']}")
+                logger.info(f"  Fase: {record.get('FaseProcedimiento', 'N/A')}")
+                
+                return record
+            else:
+                invalid_count += 1
+                logger.debug(f"  Descartado ({invalid_count}): {expediente} (no cumple regex)")
         
         conn.close()
         
-        logger.info(f"✓ Recurso encontrado:")
-        logger.info(f"  ID: {record['idRecurso']}")
-        logger.info(f"  Expediente: {record['Expedient']}")
-        logger.info(f"  Organismo: {record['Organisme']}")
-        logger.info(f"  Fase: {record.get('FaseProcedimiento', 'N/A')}")
+        if invalid_count > 0:
+            logger.warning(f"Se revisaron {invalid_count} recursos pero ninguno cumple el regex")
+        else:
+            logger.warning("No se encontraron recursos disponibles")
         
-        return record
+        return None
         
     except Exception as e:
         logger.error(f"Error consultando SQL Server: {e}")
