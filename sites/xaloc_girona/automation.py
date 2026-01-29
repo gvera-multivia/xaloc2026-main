@@ -57,6 +57,7 @@ class XalocGironaAutomation(BaseAutomation):
             payload_descarga = {
                 "expediente_num": datos.num_expediente,
                 "mandatario": datos.mandatario.__dict__ if datos.mandatario else None,
+                "fase_procedimiento": datos.fase_procedimiento,
             }
             
             try:

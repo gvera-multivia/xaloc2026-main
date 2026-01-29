@@ -43,6 +43,7 @@ class XalocGironaController:
         motivos: str | None,
         archivos_adjuntos: list[Path] | list[str] | None,
         mandatario: dict | None = None,
+        fase_procedimiento: str | None = None,
         **kwargs,
     ) -> DatosMulta:
         def _require(name: str, value: str | None) -> str:
@@ -71,6 +72,7 @@ class XalocGironaController:
             motivos=_require("motivos", motivos),
             archivos_adjuntos=paths,
             mandatario=datos_mandatario,
+            fase_procedimiento=fase_procedimiento,
         )
 
 

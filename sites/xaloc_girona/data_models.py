@@ -33,6 +33,7 @@ class DatosMulta:
     motivos: str
     archivos_adjuntos: Optional[List[Path]] = None
     mandatario: Optional[DatosMandatario] = None  # NUEVO: Datos del mandatario
+    fase_procedimiento: Optional[str] = None  # NUEVO: Para organizar justificantes
 
     @property
     def archivos_para_subir(self) -> List[Path]:
