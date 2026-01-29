@@ -178,14 +178,25 @@ def _extraer_documento_control(documento: str) -> tuple[str, str]:
     return doc_numero, doc_control
 
 
-def _detectar_tipo_documento(nif_nie: str) -> Literal["NIF", "PS"]:
+def _detectar_tipo_documento(doc: str) -> Literal["NIF", "PS"]:
     """
-    Detecta si un documento es NIF o NIE (Pasaporte no aplica aquí).
-    NIE empieza con X, Y o Z.
+    Detecta el tipo de documento.
+    - PS (Pasaporte): Si cumple el patrón de 3 letras iniciales seguidas de números.
+    - NIF: Para DNI estándar y NIE (X, Y, Z), tratándolos como identificadores fiscales.
     """
-    first_char = (nif_nie or "").strip().upper()[:1]
-    if first_char in ("X", "Y", "Z"):
-        return "PS"  # NIE se marca como PS (Pasaporte) según el formulario
+    if not doc:
+        return "NIF"
+
+    # Limpieza básica
+    doc = doc.strip().upper()
+
+    # 1. Patrón Pasaporte (PS): 3 letras + números
+    # Ejemplo: 'ABC123456'
+    if re.match(r'^[A-Z]{3}[0-9]+', doc):
+        return "PS"
+
+    # 2. Todo lo demás (incluyendo NIEs con X, Y, Z) se clasifica como NIF
+    # ya que no cumplen el patrón específico de pasaporte de 3 letras.
     return "NIF"
 
 
