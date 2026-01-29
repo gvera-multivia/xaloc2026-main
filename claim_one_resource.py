@@ -65,8 +65,22 @@ SELECT
     rs.numclient,
     rs.SujetoRecurso,
     rs.FaseProcedimiento,
-    rs.UsuarioAsignado
+    rs.UsuarioAsignado,
+    e.matricula,
+    rs.cif,
+    c.nifempresa,
+    rs.Empresa,
+    c.Nombrefiscal,
+    c.nif AS cliente_nif,
+    c.Nombre AS cliente_nombre,
+    c.Apellido1 AS cliente_apellido1,
+    c.Apellido2 AS cliente_apellido2,
+    att.id AS adjunto_id,
+    att.Filename AS adjunto_filename
 FROM Recursos.RecursosExp rs
+INNER JOIN clientes c ON rs.numclient = c.numerocliente
+INNER JOIN expedientes e ON rs.idExp = e.idexpediente
+LEFT JOIN attachments_resource_documents att ON rs.automatic_id = att.automatic_id
 WHERE rs.Organisme LIKE ?
   AND rs.TExp IN ({texp_list})
   AND rs.Estado IN (0, 1)
@@ -136,16 +150,41 @@ def fetch_one_resource(config: dict, conn_str: str, authenticated_user: str = No
         columns = [column[0] for column in cursor.description]
         regex = re.compile(config["regex_expediente"])
         
-        # Iterar sobre TODOS los recursos hasta encontrar uno válido
-        valid_count = 0
-        invalid_count = 0
+        # Agrupar filas por idRecurso (puede haber múltiples filas por adjuntos)
+        recursos_map = {}
         
         for row in cursor.fetchall():
             record = dict(zip(columns, row))
-            expediente_raw = record.get("Expedient", "")
+            id_recurso = record.get("idRecurso")
+            
+            if not id_recurso:
+                continue
+            
+            # Si es la primera vez que vemos este recurso, lo agregamos
+            if id_recurso not in recursos_map:
+                recursos_map[id_recurso] = {
+                    **record,
+                    "adjuntos": []
+                }
+            
+            # Agregar adjunto si existe
+            adj_id = record.get("adjunto_id")
+            if adj_id:
+                recursos_map[id_recurso]["adjuntos"].append({
+                    "id": adj_id,
+                    "filename": record.get("adjunto_filename")
+                })
+        
+        conn.close()
+        
+        # Ahora iterar sobre los recursos agrupados
+        invalid_count = 0
+        
+        for id_recurso, recurso in recursos_map.items():
+            expediente_raw = recurso.get("Expedient", "")
             expediente = expediente_raw.strip() if expediente_raw else ""
-            estado = record.get("Estado", 0)
-            usuario = str(record.get("UsuarioAsignado", "")).strip()
+            estado = recurso.get("Estado", 0)
+            usuario = str(recurso.get("UsuarioAsignado", "")).strip()
             
             # Validar formato de expediente
             if expediente and regex.match(expediente):
@@ -157,25 +196,21 @@ def fetch_one_resource(config: dict, conn_str: str, authenticated_user: str = No
                         continue
                 
                 # ¡Encontramos uno válido!
-                conn.close()
-                
                 if estado == 0:
                     status_str = "LIBRE"
                 else:
                     status_str = f"EN PROCESO (Asignado a ti: {usuario})"
                 
                 logger.info(f"✓ Recurso válido encontrado ({status_str}):")
-                logger.info(f"  ID: {record['idRecurso']}")
+                logger.info(f"  ID: {recurso['idRecurso']}")
                 logger.info(f"  Expediente: '{expediente}'")
-                logger.info(f"  Organismo: {record['Organisme']}")
-                logger.info(f"  Fase: {record.get('FaseProcedimiento', 'N/A')}")
+                logger.info(f"  Organismo: {recurso['Organisme']}")
+                logger.info(f"  Fase: {recurso.get('FaseProcedimiento', 'N/A')}")
+                logger.info(f"  Adjuntos: {len(recurso['adjuntos'])}")
                 
-                return record
+                return recurso
             else:
                 invalid_count += 1
-                # logger.debug(f"  [DEBUG] Descartado: '{expediente}' (Regex no coincide)")
-        
-        conn.close()
         
         if invalid_count > 0:
             logger.warning(f"Se revisaron {invalid_count} recursos pero ninguno cumple los criterios")
@@ -265,27 +300,218 @@ def verify_claim(id_recurso: int, conn_str: str) -> bool:
         return False
 
 
+
+
+# =============================================================================
+# FUNCIONES AUXILIARES PARA PAYLOAD (de xaloc_task.py)
+# =============================================================================
+
+def _clean_str(value) -> str:
+    return str(value).strip() if value is not None else ""
+
+
+def _normalize_plate(value) -> str:
+    import re
+    cleaned = re.sub(r"\s+", "", _clean_str(value)).upper()
+    if not cleaned:
+        return "."  # Fallback
+    return cleaned
+
+
+def _determinar_tipo_persona(cif_value: str | None, empresa_value: str | None = None):
+    """Determina el tipo de persona basándose en el CIF y/o nombre de empresa."""
+    cif_clean = (cif_value or "").strip()
+    empresa_clean = (empresa_value or "").strip()
+    
+    if cif_clean or empresa_clean:
+        return "JURIDICA"
+    return "FISICA"
+
+
+def _extraer_documento_control(documento: str) -> tuple[str, str]:
+    """Separa un documento (NIF/NIE/CIF) en número + dígito de control."""
+    doc_clean = documento.strip().upper()
+    if len(doc_clean) < 2:
+        raise ValueError(f"Documento demasiado corto: {documento}")
+    
+    doc_numero = doc_clean[:-1]
+    doc_control = doc_clean[-1]
+    
+    return doc_numero, doc_control
+
+
+def _detectar_tipo_documento(doc: str):
+    """Detecta el tipo de documento (NIF o PS)."""
+    import re
+    if not doc:
+        return "NIF"
+    
+    doc = doc.strip().upper()
+    
+    # Patrón Pasaporte (PS): 3 letras + números
+    if re.match(r'^[A-Z]{3}[0-9]+', doc):
+        return "PS"
+    
+    return "NIF"
+
+
+def _build_mandatario_data(row: dict) -> dict:
+    """Construye el diccionario de mandatario a partir de una fila de DB."""
+    cif_raw = row.get("cif") or row.get("nifempresa")
+    empresa_raw = row.get("Empresa") or row.get("Nombrefiscal")
+    
+    tipo_persona = _determinar_tipo_persona(cif_raw, empresa_raw)
+    
+    mandatario: dict = {"tipo_persona": tipo_persona}
+    
+    if tipo_persona == "JURIDICA":
+        razon_social = (empresa_raw or "").strip().upper()
+        if not razon_social:
+            raise ValueError("Persona jurídica sin razón social válida")
+        
+        cif_clean = (cif_raw or "").strip().upper()
+        
+        if cif_clean:
+            doc_numero, doc_control = _extraer_documento_control(cif_clean)
+            mandatario.update({
+                "cif_documento": doc_numero,
+                "cif_control": doc_control,
+            })
+        else:
+            logger.warning(f"Empresa '{razon_social}' sin CIF en la base de datos")
+            mandatario.update({
+                "cif_documento": "",
+                "cif_control": "",
+            })
+        
+        mandatario["razon_social"] = razon_social
+        
+    else:
+        nif_raw = row.get("cliente_nif")
+        nif_clean = (nif_raw or "").strip().upper()
+        if not nif_clean:
+            raise ValueError("Persona física sin NIF/NIE válido")
+        
+        doc_numero, doc_control = _extraer_documento_control(nif_clean)
+        tipo_doc = _detectar_tipo_documento(nif_clean)
+        
+        mandatario.update({
+            "tipo_doc": tipo_doc,
+            "doc_numero": doc_numero,
+            "doc_control": doc_control,
+            "nombre": (row.get("cliente_nombre") or "").strip().upper(),
+            "apellido1": (row.get("cliente_apellido1") or "").strip().upper(),
+            "apellido2": (row.get("cliente_apellido2") or "").strip().upper(),
+        })
+    
+    return mandatario
+
+
+def load_config_motivos():
+    """Carga config_motivos.json."""
+    import json
+    from pathlib import Path
+    
+    config_path = Path("config_motivos.json")
+    if not config_path.exists():
+        raise FileNotFoundError("config_motivos.json no encontrado")
+    
+    with open(config_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def get_motivos_por_fase(fase_raw, expediente: str, config_map: dict) -> str:
+    """Obtiene los motivos según la fase del procedimiento."""
+    import unicodedata
+    
+    def normalize_text(text) -> str:
+        if not text:
+            return ""
+        text = str(text).strip().lower()
+        return "".join(
+            c for c in unicodedata.normalize("NFD", text) if unicodedata.category(c) != "Mn"
+        )
+    
+    fase_norm = normalize_text(fase_raw)
+    
+    selected = None
+    for key, value in (config_map or {}).items():
+        if key and key in fase_norm:
+            selected = value
+            break
+    
+    if not selected:
+        raise ValueError(f"No se encontró configuración para la fase: {fase_raw}")
+    
+    asunto = _clean_str(selected.get("asunto"))
+    expone = _clean_str(selected.get("expone"))
+    solicita = _clean_str(selected.get("solicita")).replace("{expediente}", _clean_str(expediente))
+    
+    if not (asunto and expone and solicita):
+        raise ValueError(f"Datos incompletos en config_motivos.json para la fase: {fase_raw}")
+    
+    return f"ASUNTO: {asunto}\n\nEXPONE: {expone}\n\nSOLICITA: {solicita}"
+
+
+# =============================================================================
+# ENCOLADO DE TAREAS
+# =============================================================================
+
 def enqueue_task(db: SQLiteDatabase, site_id: str, recurso: dict, dry_run: bool = False) -> int:
-    """Encola la tarea en tramite_queue."""
-    # Convertir Decimal a int para evitar errores de serialización JSON
-    payload = {
-        "idRecurso": int(recurso["idRecurso"]) if recurso.get("idRecurso") else None,
-        "idExp": int(recurso["idExp"]) if recurso.get("idExp") else None,
-        "expediente": recurso["Expedient"],
-        "numclient": int(recurso["numclient"]) if recurso.get("numclient") else None,
-        "sujeto_recurso": recurso.get("SujetoRecurso"),
-        "fase_procedimiento": recurso.get("FaseProcedimiento"),
-        "source": "claim_one_resource",
-        "claimed_at": datetime.now().isoformat()
-    }
-    
-    if dry_run:
-        logger.info(f"[DRY-RUN] Encolado simulado: {payload['expediente']}")
-        return -1
-    
-    task_id = db.insert_task(site_id, None, payload)
-    logger.info(f"📥 Tarea {task_id} encolada: {payload['expediente']}")
-    return task_id
+    """Encola la tarea en tramite_queue con payload completo para Xaloc Girona."""
+    try:
+        # Cargar configuración de motivos
+        motivos_config = load_config_motivos()
+        
+        # Obtener motivos según la fase
+        expediente = _clean_str(recurso.get("Expedient"))
+        fase_raw = recurso.get("FaseProcedimiento")
+        
+        motivos_text = get_motivos_por_fase(
+            fase_raw,
+            expediente,
+            config_map=motivos_config
+        )
+        
+        # Construir datos del mandatario
+        mandatario = _build_mandatario_data(recurso)
+        
+        # Construir payload completo
+        payload = {
+            "idRecurso": int(recurso["idRecurso"]) if recurso.get("idRecurso") else None,
+            "idExp": int(recurso["idExp"]) if recurso.get("idExp") else None,
+            "user_email": "INFO@XVIA-SERVICIOSJURIDICOS.COM",
+            "denuncia_num": expediente,
+            "plate_number": _normalize_plate(recurso.get("matricula")),
+            "expediente_num": expediente,
+            "expediente": expediente,  # Alias
+            "numclient": int(recurso["numclient"]) if recurso.get("numclient") else None,
+            "sujeto_recurso": _clean_str(recurso.get("SujetoRecurso")),
+            "fase_procedimiento": _clean_str(fase_raw),
+            "motivos": motivos_text,
+            "mandatario": mandatario,
+            "adjuntos": [],  # Se llenarán en el worker si existen
+            "source": "claim_one_resource",
+            "claimed_at": datetime.now().isoformat()
+        }
+        
+        if dry_run:
+            logger.info(f"[DRY-RUN] Encolado simulado: {payload['expediente']}")
+            logger.info(f"  Email: {payload['user_email']}")
+            logger.info(f"  Matrícula: {payload['plate_number']}")
+            logger.info(f"  Mandatario: {mandatario['tipo_persona']}")
+            return -1
+        
+        task_id = db.insert_task(site_id, None, payload)
+        logger.info(f"📥 Tarea {task_id} encolada: {payload['expediente']}")
+        logger.info(f"  ✓ Email: {payload['user_email']}")
+        logger.info(f"  ✓ Matrícula: {payload['plate_number']}")
+        logger.info(f"  ✓ Mandatario: {mandatario['tipo_persona']}")
+        return task_id
+        
+    except Exception as e:
+        logger.error(f"Error construyendo payload: {e}")
+        raise
 
 
 # =============================================================================
