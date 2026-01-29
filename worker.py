@@ -43,41 +43,38 @@ def _call_with_supported_kwargs(fn, **kwargs):
     return fn(**supported)
 
 def apply_url_cert_config():
-    """
-    Ejecuta el script de configuracion de certificados leyendo el archivo:
-    url-cert-config.txt (que contiene comandos CMD tal cual).
-    Solo aplica en Windows.
-    """
     if sys.platform != "win32":
         logger.info("apply_url_cert_config: no es Windows; se omite.")
         return
 
-    script_path = Path("url-cert-config.txt")
+    # Cambiamos la extensión a .bat
+    script_path = Path("url-cert-config.bat")
+    
     if not script_path.exists():
-        raise FileNotFoundError(f"No existe {script_path.resolve()}")
+        raise FileNotFoundError(f"No existe el archivo de configuración: {script_path.resolve()}")
 
-    logger.info(f"Aplicando configuracion de AutoSelectCertificateForUrls desde: {script_path.resolve()}")
+    logger.info(f"Ejecutando script de certificados: {script_path.name}")
 
-    # Ejecuta el archivo con cmd.exe para que soporte 'set', 'rem', expansion %CN%, etc.
-    # /d -> no auto-run, /s -> manejo de comillas, /c -> ejecutar y salir
-    completed = subprocess.run(
-        ["cmd.exe", "/d", "/s", "/c", str(script_path.resolve())],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
+    # Al ser .bat, lo ejecutamos directamente a través de shell=True
+    # Esto evita problemas con las comillas y las variables de entorno %CN%
+    try:
+        completed = subprocess.run(
+            [str(script_path.resolve())],
+            capture_output=True,
+            text=True,
+            shell=True, # Importante para archivos .bat
+            check=True  # Lanza excepción si el código de salida no es 0
+        )
+        
+        if completed.stdout:
+            logger.info(f"Salida: {completed.stdout.strip()}")
 
-    if completed.stdout:
-        logger.info(f"[url-cert-config stdout]\n{completed.stdout.strip()}")
-    if completed.stderr:
-        logger.warning(f"[url-cert-config stderr]\n{completed.stderr.strip()}")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Error al ejecutar el script (Código {e.returncode}): {e.stderr}")
+        raise RuntimeError(f"Fallo en la configuración de certificados.")
 
-    if completed.returncode != 0:
-        raise RuntimeError(f"url-cert-config.txt fallo con codigo {completed.returncode}")
-
-    logger.info("Configuracion de certificados aplicada correctamente.")
-
+    logger.info("Configuración de certificados aplicada correctamente.")
+    
 async def _download_document_and_attachments(
     *,
     payload: dict,

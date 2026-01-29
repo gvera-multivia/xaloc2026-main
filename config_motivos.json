@@ -1,18 +1,18 @@
 {
     "identificacion": {
         "asunto": "Identificación de conductor",
-        "expone": "Que, habiendo recibido una notificación por una multa de tráfico, se procede a identificar al conductor responsable.",
-        "solicita": "Se tenga por presentada la identificación que se adjunta. \n\n Expediente: {expediente}"
+        "expone": "Que he recibido denuncia procedente de una multa de tráfico, se procede a identificar al conductor responsable.",
+        "solicita": "Se tenga por presentado el escrito de identificación, exp: {expediente}"
     },
     "denuncia": {
-        "asunto": "Escrito de alegaciones frente a una denuncia",
-        "expone": "Que, habiendo recibido una notificación de denuncia, se procede a presentar el escrito de alegaciones frente a la misma.",
-        "solicita": "Se tenga por presentado el escrito de alegaciones que se adjunta. \n\n Expediente: {expediente}"
+        "asunto": "Alegaciones al expediente {expediente}",
+        "expone": "Que notificada DENUNCIA a nombre de {sujeto_recurso} procedente de una multa de tráfico se presenta Alegaciones a la misma, actuando MULTIVIA en su representación.",
+        "solicita": "Solicitando se tenga por presentado el Escrito de Alegaciones EXP: {expediente}"
     },
     "propuesta de resolucion": {
         "asunto": "Escrito de alegaciones frente a propuesta de resolución",
-        "expone": "Que, habiendo recibido una notificación de propuesta de resolución, se procede a presentar el escrito de alegaciones frente a la misma.",
-        "solicita": "Se tenga por presentado el escrito de alegaciones que se adjunta. \n\n Expediente: {expediente}"
+        "expone": "Se presenta escrito de alegaciones frente a propuesta de resolución.",
+        "solicita": "Se tenga por presentado recurso adjunto. Expediente: {expediente}"
     },
     "extraordinario de revision": {
         "asunto": "Escrito extraordinario de revisión",
@@ -25,28 +25,28 @@
         "solicita": "Se tenga por presentado el escrito de subsanación que se adjunta. \n\n Expediente: {expediente}"
     },
     "reclamaciones": {
-        "asunto": "Reclamación económico-administrativa",
-        "expone": "Que, habiendo recibido una notificación que desestima el recurso de reposición interpuesto, se procede a presentar la siguiente reclamación económico-administrativa frente a la misma.",
-        "solicita": "Se tenga por presentada la reclamación económico-administrativa que se adjunta. \n\n Expediente: {expediente}"
+        "asunto": "Recurso de Reposición frente a la Reclamación Económica Administrativa",
+        "expone": "Que he recibido Reclamación Económica Administrativa procedente de una multa de tráfico. Se interpone RECLAMACION ECONOMICO-ADMINISTRATIVA frente a la DESESTIMACION de recurso de reposición.",
+        "solicita": "Solicitamos se admita a trámite la misma. Se tenga por presentado el Recurso Adjunto a la presente Reclamación Económica Administrativa EXP: {expediente}"
     },
     "requerimiento embargo": {
-        "asunto": "Solicitud de prescripción frente al requerimiento de información para el embargo",
-        "expone": "Que, habiendo recibido una notificación de requerimiento de información para el embargo, se procede a presentar la siguiente solicitud de prescripción frente al mismo.",
-        "solicita": "Se tenga por presentada la solicitud de prescripción que se adjunta. \n\n Expediente: {expediente}"
+        "asunto": "Recurso de Reposición frente al Requerimiento de Pago e Información",
+        "expone": "Que he recibido Requerimiento de Pago e Información procedente de una multa de tráfico.",
+        "solicita": "Se tenga por presentado el Recurso Adjunto al presente Requerimiento de Pago e Información. Expediente: {expediente}"
     },
     "sancion": {
-        "asunto": "Recurso de reposición frente a sanción",
-        "expone": "Que, habiendo recibido una notificación de sanción, se procede a presentar el recurso de reposición frente a la misma. Que esta parte solicita que la resolución al indicado recurso sea remitida a la dirección de notificaciones indicada en el cuerpo del mismo, así como en el presente formulario.",
-        "solicita": "Se tenga por presentado el recurso de reposición que se adjunta. \n\n Expediente: {expediente}"
+        "asunto": "Recurso de Reposición frente a Sanción",
+        "expone": "Que he recibido RESOLUCION SANCIONADORA procedente de una multa de tráfico, se presenta Recurso de Reposición frente a la Sanción.",
+        "solicita": "Se tenga por presentado el Recurso Adjunto a la presente Sanción, con número de expediente: {expediente}"
     },
     "apremio": {
-        "asunto": "Recurso de reposición frente a apremio",
-        "expone": "Que, habiendo recibido una notificación de apremio, se procede a presentar el recurso de reposición frente a la misma.",
-        "solicita": "Se tenga por presentado el recurso de reposición que se adjunta. \n\n Expediente: {expediente}"
+        "asunto": "Recurso de Reposición frente a Providencia de Apremio",
+        "expone": "Que he recibido Providencia de Apremio procedente de una multa de tráfico.",
+        "solicita": "Se tenga por presentado el Recurso Adjunto a la presente Providencia de Apremio con número de expediente: {expediente}"
     },
     "embargo": {
-        "asunto": "Recurso de reposición frente a embargo",
-        "expone": "Que, habiendo recibido una notificación de embargo, se procede a presentar el recurso de reposición frente a la misma.",
-        "solicita": "Se tenga por presentado el recurso de reposición que se adjunta. \n\n Expediente: {expediente}"
+        "asunto": "Recurso de reposición frente a Embargo",
+        "expone": "Que he recibido Embargo procedente de una multa de tráfico, presento recurso de reposición.",
+        "solicita": "Se tenga por presentado el Recurso Adjunto a la presente notificación de Embargo con número de expediente: {expediente}"
     }
 }
