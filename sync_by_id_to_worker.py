@@ -17,7 +17,7 @@ try:
 except Exception:  # pragma: no cover
     pyodbc = None
 
-# Query para obtener un único registro por idExp sin filtros de lógica de negocio
+# Query para obtener un único registro por idRecurso sin filtros de lógica de negocio
 SINGLE_ID_QUERY = """
 SELECT 
     rs.idRecurso,
@@ -42,7 +42,7 @@ FROM Recursos.RecursosExp rs
 INNER JOIN clientes c ON rs.numclient = c.numerocliente
 INNER JOIN expedientes e ON rs.idExp = e.idexpediente  -- Join para obtener la matrícula
 LEFT JOIN attachments_resource_documents att ON rs.automatic_id = att.automatic_id
-WHERE rs.idExp = ?
+WHERE rs.idRecurso = ?
 """
 
 
@@ -398,7 +398,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         "--id",
         type=int,
         required=True,
-        help="El idExp que queremos buscar (obligatorio).",
+        help="El idRecurso que queremos buscar (obligatorio).",
     )
     parser.add_argument(
         "--site-id",
@@ -449,10 +449,10 @@ def main(argv: Optional[list[str]] = None) -> int:
 
         rows = cursor.fetchall()
         if not rows:
-            print(f"ERROR: No se encontró ningún registro con idExp = {args.id}", file=sys.stderr)
+            print(f"ERROR: No se encontró ningún registro con idRecurso = {args.id}", file=sys.stderr)
             return 1
 
-        # Agrupar adjuntos por idExp (aunque solo hay uno, puede tener múltiples adjuntos)
+        # Agrupar adjuntos por idRecurso (aunque solo hay uno, puede tener múltiples adjuntos)
         task_data = {
             "row": None,
             "adjuntos": [],
@@ -523,7 +523,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             return 0
 
         except Exception as e:
-            print(f"ERROR procesando idExp {args.id}: {e}", file=sys.stderr)
+            print(f"ERROR procesando idRecurso {args.id}: {e}", file=sys.stderr)
             if args.verbose:
                 traceback.print_exc()
             return 1
