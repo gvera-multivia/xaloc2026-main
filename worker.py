@@ -19,6 +19,7 @@ from core.validation import ValidationEngine, DiscrepancyReporter, DocumentDownl
 from core.attachments import AttachmentDownloader, AttachmentInfo
 from core.client_documentation import RequiredClientDocumentsError, build_required_client_documents_for_payload
 from core.xvia_auth import create_authenticated_session_in_place
+from core.sqlserver_utils import build_sqlserver_connection_string
 
 # Configuracion de URLs y Directorios
 DOCUMENT_URL_TEMPLATE = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf/{idRecurso}"
@@ -35,6 +36,10 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger("worker")
+
+# Cargar credenciales GESDOC desde .env
+GESDOC_USER = os.getenv("GESDOC_USER")
+GESDOC_PWD = os.getenv("GESDOC_PWD")
 
 def _call_with_supported_kwargs(fn, **kwargs):
     """Llama a fn solo con los argumentos que acepta."""
@@ -155,8 +160,12 @@ async def process_task(
         merge_client_docs = (os.getenv("CLIENT_DOCS_MERGE") or "0").strip().lower() not in {"0", "false", "no", "off"}
         if require_client_docs:
             try:
-                extra_docs = build_required_client_documents_for_payload(
+                # MODIFICADO: Ahora es async y acepta credenciales GESDOC
+                extra_docs = await build_required_client_documents_for_payload(
                     payload,
+                    gesdoc_user=GESDOC_USER,
+                    gesdoc_pwd=GESDOC_PWD,
+                    sqlserver_conn_str=build_sqlserver_connection_string(),
                     strict=True,
                     merge_if_multiple=merge_client_docs,
                 )
@@ -173,6 +182,17 @@ async def process_task(
                 )
             except RequiredClientDocumentsError as e:
                 raise ValueError(f"Documentación obligatoria no disponible: {e}") from e
+            except ValueError as e:
+                # Distinguir entre errores de GESDOC y otros errores
+                error_msg = str(e)
+                if "No se pudo obtener autorización" in error_msg:
+                    logger.error(f"❌ Error de GESDOC: {e}")
+                    raise ValueError(f"Error obteniendo autorización vía GESDOC: {e}") from e
+                elif "Credenciales GESDOC no configuradas" in error_msg:
+                    logger.error(f"❌ GESDOC no configurado en .env")
+                    raise ValueError(f"GESDOC no configurado: {e}") from e
+                else:
+                    raise
 
         # 4. PREPARAR AUTOMATIZACIÓN
         try:

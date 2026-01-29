@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -7,6 +8,15 @@ import subprocess
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
+
+# Imports para GESDOC
+from core.gesdoc_auth import create_gesdoc_session, trigger_client_authorization, close_gesdoc_session
+from core.authorization_fetcher import (
+    find_authorization_in_tmp,
+    move_authorization_to_destinations,
+    get_client_type_from_db
+)
 
 logger = logging.getLogger(__name__)
 
@@ -250,6 +260,165 @@ def select_required_client_documents(
 
 def build_required_client_documents_for_payload(payload: dict, **kwargs) -> list[Path]:
     client = client_identity_from_payload(payload)
+    base_path = os.getenv("CLIENT_DOCS_BASE_PATH") or r"\\SERVER-DOC\clientes"
+    ruta = get_ruta_cliente_documentacion(client, base_path=base_path)
+    selected = select_required_client_documents(
+        ruta_docu=ruta,
+        is_company=client.is_company,
+        output_label=str(payload.get("idRecurso", "client")),
+        **kwargs,
+    )
+    return selected.files_to_upload
+
+
+# =============================================================================
+# INTEGRACIÓN GESDOC - Obtención Automática de Autorizaciones
+# =============================================================================
+
+async def fetch_missing_authorization_via_gesdoc(
+    numclient: int,
+    expediente: str,
+    gesdoc_user: str,
+    gesdoc_pwd: str,
+    sqlserver_conn_str: str,
+    max_polling_retries: int = 5,
+    polling_interval: float = 2.0
+) -> Optional[Path]:
+    """
+    Obtiene autorización de cliente vía GESDOC cuando no está disponible localmente.
+    
+    ⚠️ IMPORTANTE: Solo hace UN POST para evitar múltiples emails al cliente.
+    Los reintentos son solo para verificar si el archivo se generó.
+    
+    Flujo:
+    1. Determinar tipo de cliente desde SQL Server
+    2. Buscar en carpetas temporales (tmp_pdf)
+    3. Si no existe:
+       a. Login en GESDOC
+       b. POST búsqueda de cliente (UNA SOLA VEZ)
+       c. Polling para verificar generación del PDF (solo lectura)
+    4. Mover a carpetas correctas
+    
+    Args:
+        numclient: Número de cliente
+        expediente: Número de expediente
+        gesdoc_user: Usuario de GESDOC
+        gesdoc_pwd: Contraseña de GESDOC
+        sqlserver_conn_str: Connection string de SQL Server
+        max_polling_retries: Intentos máximos de polling (solo lectura)
+        polling_interval: Tiempo de espera entre intentos (segundos)
+    
+    Returns:
+        Path del archivo de autorización o None si falla
+    """
+    logger.info(f"Intentando obtener autorización para cliente {numclient} vía GESDOC")
+    
+    # 1. Determinar tipo de cliente desde SQL Server
+    client_type = get_client_type_from_db(numclient, sqlserver_conn_str)
+    logger.info(f"Tipo de cliente: {client_type}")
+    
+    # 2. Buscar primero en tmp (puede que ya exista)
+    auth_file = find_authorization_in_tmp(numclient, client_type)
+    if auth_file:
+        logger.info(f"✓ Autorización ya existe en tmp: {auth_file.name}")
+        if move_authorization_to_destinations(auth_file, expediente, numclient, client_type):
+            return auth_file
+        else:
+            logger.warning("No se pudo mover la autorización, pero existe")
+            return auth_file
+    
+    # 3. No existe, generar vía GESDOC (UNA SOLA VEZ)
+    logger.warning(f"⚠️ Enviando solicitud de autorización a GESDOC (se enviará email al cliente)")
+    try:
+        session = await create_gesdoc_session(gesdoc_user, gesdoc_pwd)
+        success = await trigger_client_authorization(session, numclient)
+        await close_gesdoc_session(session)
+        
+        if not success:
+            logger.error("Trigger de GESDOC falló")
+            return None
+    except Exception as e:
+        logger.error(f"Error en autenticación/trigger GESDOC: {e}")
+        return None
+    
+    # 4. Polling para verificar generación (SOLO LECTURA, sin más POSTs)
+    for attempt in range(max_polling_retries):
+        logger.info(f"Verificando generación del PDF (intento {attempt + 1}/{max_polling_retries})...")
+        await asyncio.sleep(polling_interval)
+        
+        auth_file = find_authorization_in_tmp(numclient, client_type)
+        if auth_file:
+            logger.info(f"✓ Autorización generada: {auth_file.name}")
+            move_authorization_to_destinations(auth_file, expediente, numclient, client_type)
+            return auth_file
+    
+    logger.error(f"No se generó autorización después de {max_polling_retries} intentos de lectura")
+    logger.warning(f"⚠️ El cliente debería haber recibido un email. Verificar manualmente.")
+    return None
+
+
+async def build_required_client_documents_for_payload(
+    payload: dict,
+    gesdoc_user: Optional[str] = None,
+    gesdoc_pwd: Optional[str] = None,
+    sqlserver_conn_str: Optional[str] = None,
+    **kwargs
+) -> list[Path]:
+    """
+    Construye la lista de documentos requeridos del cliente.
+    
+    Si no se encuentra la identidad del cliente y se proporcionan credenciales GESDOC,
+    intentará obtener la autorización automáticamente vía GESDOC.
+    
+    Args:
+        payload: Datos del recurso
+        gesdoc_user: Usuario de GESDOC (opcional, para fallback)
+        gesdoc_pwd: Contraseña de GESDOC (opcional, para fallback)
+        sqlserver_conn_str: Connection string de SQL Server (opcional, para fallback)
+        **kwargs: Argumentos adicionales para select_required_client_documents
+    
+    Returns:
+        Lista de paths de documentos a subir
+    
+    Raises:
+        RequiredClientDocumentsError: Si no se puede obtener documentación
+        ValueError: Si falta información necesaria para GESDOC
+    """
+    try:
+        client = client_identity_from_payload(payload)
+    except RequiredClientDocumentsError as e:
+        # NUEVO: Intentar obtener vía GESDOC
+        logger.warning(f"No se encontró identidad del cliente. Intentando GESDOC...")
+        
+        numclient = payload.get("numclient")
+        expediente = payload.get("expediente")
+        
+        if not numclient or not expediente:
+            raise ValueError("No se puede obtener autorización sin numclient y expediente") from e
+        
+        if not gesdoc_user or not gesdoc_pwd or not sqlserver_conn_str:
+            logger.error("No hay credenciales GESDOC disponibles")
+            raise ValueError("Credenciales GESDOC no configuradas") from e
+        
+        # Intentar obtener autorización
+        auth_file = await fetch_missing_authorization_via_gesdoc(
+            numclient,
+            expediente,
+            gesdoc_user,
+            gesdoc_pwd,
+            sqlserver_conn_str
+        )
+        
+        if not auth_file:
+            raise ValueError("No se pudo obtener autorización del cliente vía GESDOC") from e
+        
+        # Reintentar obtener identidad (ahora debería funcionar)
+        try:
+            client = client_identity_from_payload(payload)
+        except RequiredClientDocumentsError:
+            raise ValueError("Autorización obtenida pero aún no se puede inferir identidad") from e
+    
+    # Resto de la lógica sin cambios
     base_path = os.getenv("CLIENT_DOCS_BASE_PATH") or r"\\SERVER-DOC\clientes"
     ruta = get_ruta_cliente_documentacion(client, base_path=base_path)
     selected = select_required_client_documents(
