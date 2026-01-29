@@ -7,16 +7,18 @@ import subprocess
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 logger = logging.getLogger(__name__)
 
 # --- Excepciones ---
 
+
 class RequiredClientDocumentsError(RuntimeError):
     """No se han podido localizar/adjuntar los documentos obligatorios del cliente."""
 
+
 # --- Modelos ---
+
 
 @dataclass(frozen=True)
 class ClientIdentity:
@@ -27,30 +29,32 @@ class ClientIdentity:
     apellido1: str | None = None
     apellido2: str | None = None
 
+
 @dataclass(frozen=True)
 class SelectedClientDocuments:
     files_to_upload: list[Path]
     covered_terms: list[str]
     missing_terms: list[str]
 
-# --- Lógica de Identidad y Rutas (Mantenida/Refinada) ---
+
+# --- Lógica de Identidad y Rutas ---
+
 
 def client_identity_from_payload(payload: dict) -> ClientIdentity:
     """Extrae la identidad del cliente del payload (soporta varios formatos)."""
     sujeto_recurso = (
         (payload.get("sujeto_recurso") or payload.get("SujetoRecurso") or "")
     ).strip() or None
-    
-    # Debug logging para trazar el valor de sujeto_recurso
-    logger.debug(f"[ClientIdentity] payload keys: {list(payload.keys())}")
-    logger.debug(f"[ClientIdentity] sujeto_recurso extraído: '{sujeto_recurso}'")
+
     mandatario = payload.get("mandatario") or {}
     if isinstance(mandatario, dict) and (mandatario.get("tipo_persona") or "").strip():
         tipo = str(mandatario.get("tipo_persona")).strip().upper()
         if tipo == "JURIDICA":
             empresa = (mandatario.get("razon_social") or "").strip()
             if not empresa:
-                raise RequiredClientDocumentsError("Falta razón social para persona JURÍDICA.")
+                raise RequiredClientDocumentsError(
+                    "Falta razón social para persona JURÍDICA."
+                )
             return ClientIdentity(is_company=True, sujeto_recurso=sujeto_recurso, empresa=empresa)
         if tipo == "FISICA":
             nombre = (mandatario.get("nombre") or "").strip()
@@ -63,12 +67,12 @@ def client_identity_from_payload(payload: dict) -> ClientIdentity:
                 sujeto_recurso=sujeto_recurso,
                 nombre=nombre,
                 apellido1=ap1,
-                apellido2=ap2 or '',
+                apellido2=ap2 or "",
             )
 
-    # Fallbacks de nombres directos
     empresa = (payload.get("empresa") or payload.get("razon_social") or "").strip()
-    if empresa: return ClientIdentity(is_company=True, sujeto_recurso=sujeto_recurso, empresa=empresa)
+    if empresa:
+        return ClientIdentity(is_company=True, sujeto_recurso=sujeto_recurso, empresa=empresa)
 
     nombre = (payload.get("cliente_nombre") or "").strip()
     ap1 = (payload.get("cliente_apellido1") or payload.get("apellido1") or "").strip()
@@ -84,20 +88,29 @@ def client_identity_from_payload(payload: dict) -> ClientIdentity:
 
     raise RequiredClientDocumentsError("No se pudo inferir la identidad del cliente.")
 
+
 def get_ruta_cliente_documentacion(client: ClientIdentity, base_path: str | Path) -> Path:
     """Calcula la ruta base y busca carpetas de confianza."""
     base = Path(base_path)
-    
+
     def _get_alpha_folder(char: str) -> str:
         char = char.upper()
-        if char in "0123456789": return "0-9 (NUMEROS)"
-        if char in "ABC": return "A-C"
-        if char in "DE": return "D-E"
-        if char in "FGHIJ": return "F-J"
-        if char in "KL": return "K-L"
-        if char in "MNO": return "M-O"
-        if char in "PQRSTU": return "P-U"
-        if char in "VWXYZ": return "V-Z"
+        if char in "0123456789":
+            return "0-9 (NUMEROS)"
+        if char in "ABC":
+            return "A-C"
+        if char in "DE":
+            return "D-E"
+        if char in "FGHIJ":
+            return "F-J"
+        if char in "KL":
+            return "K-L"
+        if char in "MNO":
+            return "M-O"
+        if char in "PQRSTU":
+            return "P-U"
+        if char in "VWXYZ":
+            return "V-Z"
         return "Desconocido"
 
     def _first_alnum_char(value: str) -> str:
@@ -109,45 +122,31 @@ def get_ruta_cliente_documentacion(client: ClientIdentity, base_path: str | Path
     if client.sujeto_recurso:
         folder_name = re.sub(r"\s+", " ", client.sujeto_recurso.strip()).rstrip("!.,?;:")
         folder = base / _get_alpha_folder(_first_alnum_char(folder_name)) / folder_name
-        logger.info(f"[Ruta Docs] Usando SUJETO_RECURSO: '{folder_name}' -> {folder}")
     elif client.is_company:
         name = client.empresa.strip().rstrip("!.,?;:")
         folder = base / _get_alpha_folder(_first_alnum_char(name)) / name
-        logger.info(f"[Ruta Docs] Usando EMPRESA: '{name}' -> {folder}")
     else:
         full_name = f"{client.nombre} {client.apellido1.upper()} {client.apellido2.upper()}".strip()
         folder = base / _get_alpha_folder(_first_alnum_char(client.nombre)) / full_name
-        logger.info(f"[Ruta Docs] Usando NOMBRE+APELLIDOS: '{full_name}' -> {folder}")
 
-    # Jerarquía de carpetas: RECURSOS es la máxima prioridad
     for subname in ["DOCUMENTACION RECURSOS", "DOCUMENTACION", "DOCUMENTACIÓN"]:
         if (folder / subname).exists():
-            logger.info(f"[Ruta Docs] Subcarpeta encontrada: {folder / subname}")
             return folder / subname
-    logger.info(f"[Ruta Docs] Sin subcarpeta DOCUMENTACION, usando: {folder}")
     return folder
 
-# --- Nueva Heurística de Selección ---
 
-def _analyze_file_categories(name: str, categories_map: dict) -> list[str]:
-    """Determina a cuántas categorías pertenece un nombre de archivo."""
-    found = []
-    for cat, keywords in categories_map.items():
-        if any(k in name.lower() for k in keywords):
-            found.append(cat)
-    return found
+# --- Heurística de Selección y Puntuación ---
+
 
 def _calculate_file_score(path: Path, categories_found: list[str]) -> int:
     """
-    Calcula el score priorizando archivos específicos sobre combos.
-    Valores altos = Documento con alta probabilidad de ser el correcto.
+    Calcula el score combinando Calidad (CF/SF) y Ubicación (RECURSOS).
     """
     score = 0
     name = path.name.lower()
     path_upper = str(path).upper()
     ext = path.suffix.lower()
 
-    # 1. Filtro de extensión
     if ext == ".pdf":
         score += 50
     elif ext in [".jpg", ".jpeg", ".png"]:
@@ -155,9 +154,19 @@ def _calculate_file_score(path: Path, categories_found: list[str]) -> int:
     else:
         return -1000
 
-    # 2. PRIORIDAD RECURSOS (Bonus masivo)
+    # 1. EL FACTOR DETERMINANTE: FIRMA (CF vs SF)
+    # Un CF en carpeta normal debe ganar a un SF en Recursos
+    es_cf = any(k in name for k in [" cf", "_cf", "-cf", "con firma", "confirma", " firmad", " firmat"])
+    es_sf = any(k in name for k in [" sf", "_sf", "-sf", "sin firma", "sinfirma"])
+
+    if es_cf:
+        score += 1500
+    elif es_sf:
+        score -= 100
+
+    # 2. PRIORIDAD DE UBICACIÓN (RECURSOS)
     if "RECURSOS" in path_upper:
-        score += 1000
+        score += 800
 
     # 3. Especificidad vs Combos
     if len(categories_found) > 1:
@@ -166,23 +175,17 @@ def _calculate_file_score(path: Path, categories_found: list[str]) -> int:
         score += 35
 
     # 4. Keywords de Confianza
-    if any(k in name for k in ["firmad", "firmat", "original", "completo"]):
+    if any(k in name for k in ["original", "completo", "definitivo"]):
         score += 50
 
-    # REGLA "SOLO": penaliza para que pierda contra la versión normal
+    # REGLA "SOLO"
     if "_solo_" in name or " solo " in name or name.endswith("solo.pdf"):
-        score -= 10
+        score -= 15
 
-    if (
-        "comp." in name
-        or "comprimido" in name
-        or "_cmp" in name
-        or " cmp" in name
-        or name.endswith("cmp.pdf")
-    ):
+    if any(k in name for k in ["comp.", "comprimido", "_cmp", " cmp"]) or name.endswith("cmp.pdf"):
         score += 20
 
-    # 5. Detección de fragmentos
+    # 5. Detección de fragmentos y números
     is_frag = any(
         k in name
         for k in [
@@ -195,38 +198,18 @@ def _calculate_file_score(path: Path, categories_found: list[str]) -> int:
             "front",
             "back",
             "pag",
-            "pág",
-            "página",
         ]
     )
     has_num = bool(re.search(r"[\s_-][0-9]{1,2}($|\.)", name))
     if is_frag or has_num:
         score += 15
 
-    # 6. Penalización de basura / antiguos
+    # 6. Penalización de antiguos
     if any(k in name for k in ["old", "antiguo", "vencido", "copia"]):
-        score -= 200
+        score -= 500
 
     return score
 
-def _log_score_table(buckets: dict[str, list[dict]], cat: str) -> None:
-    """Imprime una tabla de scores para debugging y trazabilidad."""
-    if not buckets.get(cat):
-        return
-    
-    logger.info(f"\n{'='*80}")
-    logger.info(f"Score Table para categoría: {cat}")
-    logger.info(f"{'-'*80}")
-    logger.info(f"{'Archivo':<50} {'Score':>8} {'Fragmento':>12}")
-    logger.info(f"{'-'*80}")
-    
-    for item in sorted(buckets[cat], key=lambda x: x["score"], reverse=True):
-        filename = item["path"].name[:48]  # Truncar si es muy largo
-        score = item["score"]
-        is_frag = "Sí" if item["is_fragment"] else "No"
-        logger.info(f"{filename:<50} {score:>8} {is_frag:>12}")
-    
-    logger.info(f"{'='*80}\n")
 
 def select_required_client_documents(
     *,
@@ -238,141 +221,94 @@ def select_required_client_documents(
     output_dir: Path = Path("tmp/client_docs"),
     output_label: str = "client",
 ) -> SelectedClientDocuments:
-    
     if not ruta_docu.exists():
         raise RequiredClientDocumentsError(f"Ruta no encontrada: {ruta_docu}")
 
-    # Definir requisitos
-    # SOLO AUT es estrictamente obligatorio - el resto son opcionales
-    # Si es empresa, ESCR es opcional a menos que se fuerce por env
-    require_escr = os.getenv("CLIENT_DOCS_REQUIRE_ESCR", "0").lower() in ("1", "true", "y")
-    
-    # Mapeo de categorías a términos de búsqueda
     categories_map = {
         "AUT": ["aut"],
         "DNI": ["dni", "nie", "pasaporte"],
         "CIF": ["cif", "nif"] if is_company else [],
-        "ESCR": ["escr", "constitu", "titularidad", "notar", "poder", "acta", "mercantil"] if is_company else [],
+        "ESCR": ["escr", "constitu", "titularidad", "notar", "poder", "acta", "mercantil"]
+        if is_company
+        else [],
     }
-    
-    # Solo AUT es obligatorio; DNI, CIF, ESCR son opcionales (se añaden si existen)
+
+    # Requisitos
+    require_escr = os.getenv("CLIENT_DOCS_REQUIRE_ESCR", "0").lower() in ("1", "true", "y")
     strictly_required = ["AUT"]
-    optional_cats = ["DNI"]
+    if is_company and require_escr:
+        strictly_required.append("ESCR")
+
+    process_cats = ["AUT", "DNI"]
     if is_company:
-        optional_cats.append("CIF")
-        if require_escr:
-            strictly_required.append("ESCR")  # Solo si se fuerza por env
-        else:
-            optional_cats.append("ESCR")
-    
-    # Buscamos tanto los obligatorios como los opcionales
-    required_cats = strictly_required + optional_cats
+        process_cats.extend(["CIF", "ESCR"])
 
-    # Cubetas para clasificar candidatos
-    buckets: dict[str, list[dict]] = defaultdict(list)
-
-    # 1. Clasificación y Puntuación
+    # No filtramos la lista inicial para permitir el relleno de huecos entre carpetas
     all_files = [p for p in ruta_docu.rglob("*") if p.is_file()]
-
-    # --- REGLA DE ORO: SI HAY RECURSOS, IGNORAMOS EL RESTO ---
-    has_recursos = any("DOCUMENTACION RECURSOS" in str(p).upper() for p in all_files)
-    if has_recursos:
-        filtered: list[Path] = []
-        for p in all_files:
-            up = str(p).upper()
-            if ("DOCUMENTACION" in up or "DOCUMENTACIÓN" in up) and "RECURSOS" not in up:
-                continue
-            filtered.append(p)
-        all_files = filtered
+    buckets = defaultdict(list)
 
     for file_path in all_files:
-        
-        cats_found = _analyze_file_categories(file_path.name, categories_map)
-        if not cats_found: continue
+        cats_found = [
+            cat
+            for cat, keys in categories_map.items()
+            if any(k in file_path.name.lower() for k in keys)
+        ]
+        if not cats_found:
+            continue
 
         score = _calculate_file_score(file_path, cats_found)
-        if score < 0: continue
+        if score < 0:
+            continue
 
         for cat in cats_found:
-            low = file_path.name.lower()
             is_fragment = any(
-                x in low
-                for x in [
-                    "anverso",
-                    "reverso",
-                    "cara",
-                    "part",
-                    "darrera",
-                    "trasera",
-                    "front",
-                    "back",
-                    "pag",
-                    "pág",
-                    "página",
-                ]
-            ) or bool(re.search(r"[\s_-][0-9]{1,2}($|\.)", low))
-            buckets[cat].append({
-                "path": file_path,
-                "score": score,
-                "is_fragment": is_fragment
-            })
+                x in file_path.name.lower()
+                for x in ["anverso", "reverso", "cara", "part", "darrera", "trasera"]
+            ) or bool(re.search(r"[\s_-][0-9]{1,2}($|\.)", file_path.name.lower()))
+            buckets[cat].append({"path": file_path, "score": score, "is_fragment": is_fragment})
 
     final_files: list[Path] = []
     covered: list[str] = []
     missing: list[str] = []
-    
-    # Variable de entorno para activar logging detallado
-    debug_scoring = os.getenv("CLIENT_DOCS_DEBUG_SCORING", "0").lower() in ("1", "true", "y")
 
-    # 2. Selección inteligente por cubeta (misma lógica que correr_test.py)
-    for cat in required_cats:
+    for cat in process_cats:
         cands = buckets.get(cat, [])
         if not cands:
             missing.append(cat)
             continue
-        
-        # Logging de scores para debugging
-        if debug_scoring:
-            _log_score_table(buckets, cat)
-        
-        # Ordenar por puntuación (mejor primero)
+
         cands.sort(key=lambda x: x["score"], reverse=True)
 
-        # --- LÓGICA ESPECIAL PARA AUTORIZACIONES "SOLO" ---
+        # Filtro de Autorizaciones "SOLO"
         if cat == "AUT" and len(cands) > 1:
             sin_solo = [c for c in cands if "solo" not in c["path"].name.lower()]
             if sin_solo:
-                best_sin_solo_score = sin_solo[0]["score"]
+                # Solo descartamos los 'solo' si la versión normal tiene un score competitivo
                 cands = [
                     c
                     for c in cands
-                    if "solo" not in c["path"].name.lower() or c["score"] > best_sin_solo_score
+                    if "solo" not in c["path"].name.lower() or c["score"] > sin_solo[0]["score"]
                 ]
                 cands.sort(key=lambda x: x["score"], reverse=True)
 
         if not cands:
-            if cat not in missing:
-                missing.append(cat)
             continue
-
         best = cands[0]
 
-        # --- SELECCIÓN MULTI-SOCIO (Ventana de 20 pts) ---
+        # SELECCIÓN MULTI-SOCIO (Pillamos todos los que estén en el top para no perder socios)
         top_tier = [c["path"] for c in cands if c["score"] > (best["score"] - 20)]
         final_files.extend(top_tier)
 
-        # --- SELECCIÓN FRAGMENTOS (Ventana de 65 pts) ---
+        # SELECCIÓN FRAGMENTOS (Ventana de 65 pts para asegurar anverso/reverso)
         if best["is_fragment"]:
-            fragmentos = [c["path"] for c in cands if c["is_fragment"] and c["score"] > (best["score"] - 65)]
+            fragmentos = [
+                c["path"]
+                for c in cands
+                if c["is_fragment"] and c["score"] > (best["score"] - 65)
+            ]
             final_files.extend(fragmentos)
-        
-        covered.append(cat)
 
-    # Añadir ESCR si existe aunque no sea obligatorio
-    if is_company and not require_escr and buckets.get("ESCR"):
-        cands = sorted(buckets["ESCR"], key=lambda x: x["score"], reverse=True)
-        final_files.append(cands[0]["path"])
-        covered.append("ESCR")
+        covered.append(cat)
 
     # Dedup manteniendo orden
     archivos_unicos = []
@@ -382,55 +318,38 @@ def select_required_client_documents(
             archivos_unicos.append(p)
             seen.add(p)
 
-    # Solo fallar si falta documentación ESTRICTAMENTE obligatoria (AUT)
     missing_strict = [cat for cat in missing if cat in strictly_required]
     if missing_strict and strict:
-        raise RequiredClientDocumentsError(f"Faltan docs obligatorios en {ruta_docu.name}: {', '.join(missing_strict)}")
-    
-    # Log de documentos opcionales no encontrados (no es error)
-    missing_optional = [cat for cat in missing if cat not in strictly_required]
-    if missing_optional:
-        logger.info(f"[Docs Opcionales] No encontrados (OK): {', '.join(missing_optional)}")
+        raise RequiredClientDocumentsError(f"Faltan docs obligatorios: {', '.join(missing_strict)}")
 
-    # 3. Fusión con PDFtk
+    # Fusión con PDFtk
     if merge_if_multiple and len(archivos_unicos) > 1:
         pdftk_exe = Path(pdftk_path)
         if pdftk_exe.exists():
             output_dir.mkdir(parents=True, exist_ok=True)
             out_path = output_dir / f"{output_label}_merged.pdf"
             try:
-                cmd = [str(pdftk_exe)] + [str(p) for p in archivos_unicos] + ["cat", "output", str(out_path)]
+                cmd = [str(pdftk_exe)] + [str(p) for p in archivos_unicos] + [
+                    "cat",
+                    "output",
+                    str(out_path),
+                ]
                 subprocess.run(cmd, check=True, capture_output=True)
                 archivos_unicos = [out_path]
-                logger.info(f"Fusión exitosa: {out_path.name}")
             except Exception as e:
                 logger.error(f"Error fusionando con PDFtk: {e}")
-        else:
-            logger.warning("PDFtk no encontrado. Se envían archivos separados.")
 
-    return SelectedClientDocuments(
-        files_to_upload=archivos_unicos,
-        covered_terms=covered,
-        missing_terms=missing
-    )
+    return SelectedClientDocuments(archivos_unicos, covered, missing)
 
-def build_required_client_documents_for_payload(
-    payload: dict,
-    *,
-    strict: bool = True,
-    merge_if_multiple: bool = False,
-) -> list[Path]:
-    """API principal."""
+
+def build_required_client_documents_for_payload(payload: dict, **kwargs) -> list[Path]:
     client = client_identity_from_payload(payload)
     base_path = os.getenv("CLIENT_DOCS_BASE_PATH") or r"\\SERVER-DOC\clientes"
-    
     ruta = get_ruta_cliente_documentacion(client, base_path=base_path)
-    
     selected = select_required_client_documents(
         ruta_docu=ruta,
         is_company=client.is_company,
-        strict=strict,
-        merge_if_multiple=merge_if_multiple,
-        output_label=str(payload.get("idRecurso", "client"))
+        output_label=str(payload.get("idRecurso", "client")),
+        **kwargs,
     )
     return selected.files_to_upload

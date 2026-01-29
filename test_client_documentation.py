@@ -37,11 +37,11 @@ class TestClientDocumentation(unittest.TestCase):
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
-    def test_missing_terms_raises_in_strict_mode(self):
+    def test_missing_aut_raises_in_strict_mode(self):
         root = self._make_tmp_dir()
         try:
-            (root / "AUT.pdf").write_bytes(b"%PDF-1.4 fake")
-            # Falta DNI o NIE
+            (root / "DNI.pdf").write_bytes(b"%PDF-1.4 fake")
+            # Falta AUT (estrictamente obligatorio)
             with self.assertRaises(RequiredClientDocumentsError):
                 select_required_client_documents(
                     ruta_docu=root,
@@ -70,6 +70,22 @@ class TestClientDocumentation(unittest.TestCase):
             self.assertIn("AUT", set(selected.covered_terms))
             self.assertIn("DNI", set(selected.covered_terms))
             self.assertEqual(selected.missing_terms, [])
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_missing_dni_does_not_raise_in_strict_mode(self):
+        root = self._make_tmp_dir()
+        try:
+            (root / "AUT.pdf").write_bytes(b"%PDF-1.4 fake")
+
+            selected = select_required_client_documents(
+                ruta_docu=root,
+                is_company=False,
+                strict=True,
+                merge_if_multiple=False,
+            )
+            self.assertIn("AUT", set(selected.covered_terms))
+            self.assertIn("DNI", set(selected.missing_terms))
         finally:
             shutil.rmtree(root, ignore_errors=True)
 

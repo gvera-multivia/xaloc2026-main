@@ -18,56 +18,56 @@ CATEGORIES_BASE = {
     "ESCR": ["escr", "constitu"]
 }
 
-
 def _calculate_file_score(filename: str, categories_found: list[str]) -> int:
     score = 0
     name = filename.lower()
     path_upper = filename.upper()
     ext = Path(filename).suffix.lower()
 
-    # 1. Filtro de extensión
+    # 1. Filtro de extensión básico
     if ext == ".pdf": score += 50
     elif ext in [".jpg", ".jpeg", ".png"]: score += 20
     else: return -1000
 
-    # 2. PRIORIDAD RECURSOS (Bonus masivo)
-    if "RECURSOS" in path_upper:
-        score += 1000
+    # 2. EL FACTOR DETERMINANTE: FIRMA (CF vs SF)
+    # Le damos el peso más alto de todos para que salte entre carpetas si es necesario
+    es_cf = any(k in name for k in [" cf", "_cf", "-cf", "con firma", "confirma", " firmad", " firmat"])
+    es_sf = any(k in name for k in [" sf", "_sf", "-sf", "sin firma", "sinfirma"])
 
-    # 3. Especificidad vs Combos
+    if es_cf:
+        score += 1500  # Prioridad máxima
+    elif es_sf:
+        score -= 100   # Penalización ligera para que prefiera el archivo "limpio"
+    
+    # 3. PRIORIDAD DE UBICACIÓN (RECURSOS)
+    # Es alta, pero menor que un CF confirmado
+    if "RECURSOS" in path_upper:
+        score += 800
+
+    # 4. Especificidad vs Combos (Evitar AUTDNI.pdf si hay sueltos)
     if len(categories_found) > 1: score -= 45 
     elif len(categories_found) == 1: score += 35
 
-    # 4. Keywords de Confianza
-    if any(k in name for k in ["firmad", "firmat", "original", "completo"]):
+    # 5. Keywords de Confianza adicionales
+    if any(k in name for k in ["original", "completo", "definitivo"]):
         score += 50
-    
-    # REGLA "SOLO": Penalizamos la palabra 'solo' para que pierda contra la versión normal
-    if "_solo_" in name or " solo " in name or name.endswith("solo.pdf"):
-        score -= 10
-
     if "comp." in name or "comprimido" in name:
         score += 20
 
-    # 5. Detección de Fragmentos
-    is_frag = any(k in name for k in ["anverso", "reverso", "cara", "part", "darrera", "trasera", "front", "back", "pag"])
+    # 6. Detección de Fragmentos / Secuenciales
+    is_frag = any(k in name for k in ["anverso", "reverso", "cara", "part", "darrera", "trasera", "pag"])
     has_num = bool(re.search(r"[\s_-][0-9]{1,2}($|\.)", name))
     if is_frag or has_num: score += 15
 
-    # 6. Penalización de basura
+    # 7. Penalización de archivos antiguos
     if any(k in name for k in ["old", "antiguo", "vencido", "copia"]):
-        score -= 200
+        score -= 500
 
     return score
 
 def seleccionar_documentos_simulados(is_company: bool, filenames: list[str]):
-    # --- REGLA DE ORO: SI HAY RECURSOS, IGNORAMOS EL RESTO ---
-    has_recursos = any("DOCUMENTACION RECURSOS" in f.upper() for f in filenames)
-    if has_recursos:
-        filenames = [
-            f for f in filenames 
-            if not (("DOCUMENTACION" in f.upper() or "DOCUMENTACIÓN" in f.upper()) and "RECURSOS" not in f.upper())
-        ]
+    # NOTA: Ya no filtramos 'filenames' por carpeta Recursos aquí. 
+    # Mantenemos todos para permitir el "relleno de huecos".
 
     buckets = defaultdict(list)
     categories_map = {
@@ -85,8 +85,15 @@ def seleccionar_documentos_simulados(is_company: bool, filenames: list[str]):
         if score < 0: continue
         
         for cat in cats:
-            is_fragment = any(x in fname.lower() for x in ["anverso", "reverso", "cara", "part", "darrera", "trasera"]) or bool(re.search(r"[\s_-][0-9]{1,2}($|\.)", fname.lower()))
-            buckets[cat].append({"name": fname, "score": score, "is_fragment": is_fragment})
+            # Determinamos si es fragmento para la lógica de ventana
+            is_fragment = any(x in fname.lower() for x in ["anverso", "reverso", "cara", "part", "darrera", "trasera"]) or \
+                          bool(re.search(r"[\s_-][0-9]{1,2}($|\.)", fname.lower()))
+            
+            buckets[cat].append({
+                "name": fname, 
+                "score": score, 
+                "is_fragment": is_fragment
+            })
 
     seleccion_final = []
     categorias_a_procesar = ["AUT", "DNI"]
@@ -96,32 +103,21 @@ def seleccionar_documentos_simulados(is_company: bool, filenames: list[str]):
         cands = buckets.get(cat, [])
         if not cands: continue
         
+        # Ordenar por score (la mezcla de CF + Recursos hará que ganen los mejores)
         cands.sort(key=lambda x: x["score"], reverse=True)
-        
-        # --- LÓGICA ESPECIAL PARA AUTORIZACIONES "SOLO" ---
-        if cat == "AUT" and len(cands) > 1:
-            nombres_con_solo = [c for c in cands if "solo" in c["name"].lower()]
-            nombres_sin_solo = [c for c in cands if "solo" not in c["name"].lower()]
-            
-            # Si tenemos versiones SIN 'solo' con buena puntuación, descartamos las 'solo'
-            if nombres_sin_solo:
-                cands = [c for c in cands if "solo" not in c["name"].lower() or c["score"] > nombres_sin_solo[0]["score"]]
-
-        if not cands: continue
         best = cands[0]
         
-        # --- SELECCIÓN MULTI-SOCIO (Ventana de 20 pts) ---
-        # Cogemos todos los que estén en el top para capturar varios socios
+        # --- LÓGICA DE SELECCIÓN ---
+        # 1. Ventana de 20 pts para capturar múltiples socios/DNIs
         top_tier = [c["name"] for c in cands if c["score"] > (best["score"] - 20)]
         seleccion_final.extend(top_tier)
         
-        # --- SELECCIÓN FRAGMENTOS (Ventana de 65 pts) ---
+        # 2. Ventana de 65 pts si el mejor es un fragmento (Anverso/Reverso)
         if best["is_fragment"]:
             fragmentos = [c["name"] for c in cands if c["is_fragment"] and c["score"] > (best["score"] - 65)]
             seleccion_final.extend(fragmentos)
             
     return list(dict.fromkeys(seleccion_final)), buckets
-
 
 def ejecutar_test():
     if not os.path.exists(JSON_INPUT):
