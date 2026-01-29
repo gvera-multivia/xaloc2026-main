@@ -118,7 +118,8 @@ def fetch_one_resource(config: dict, conn_str: str) -> dict:
         
         for row in cursor.fetchall():
             record = dict(zip(columns, row))
-            expediente = record.get("Expedient", "")
+            expediente_raw = record.get("Expedient", "")
+            expediente = expediente_raw.strip() if expediente_raw else ""
             
             # Validar formato de expediente
             if expediente and regex.match(expediente):
@@ -127,14 +128,14 @@ def fetch_one_resource(config: dict, conn_str: str) -> dict:
                 
                 logger.info(f"✓ Recurso válido encontrado (después de revisar {invalid_count} inválidos):")
                 logger.info(f"  ID: {record['idRecurso']}")
-                logger.info(f"  Expediente: {record['Expedient']}")
+                logger.info(f"  Expediente: '{expediente}'")
                 logger.info(f"  Organismo: {record['Organisme']}")
                 logger.info(f"  Fase: {record.get('FaseProcedimiento', 'N/A')}")
                 
                 return record
             else:
                 invalid_count += 1
-                logger.debug(f"  Descartado ({invalid_count}): {expediente} (no cumple regex)")
+                logger.info(f"  [DEBUG] Descartado: '{expediente}' (Regex no coincide: {config['regex_expediente']})")
         
         conn.close()
         
