@@ -241,8 +241,56 @@ def select_required_client_documents(
 
     return SelectedClientDocuments(archivos_unicos, covered, missing)
 
-def build_required_client_documents_for_payload(payload: dict, **kwargs) -> list[Path]:
-    client = client_identity_from_payload(payload)
+
+async def build_required_client_documents_for_payload(
+    payload: dict,
+    gesdoc_user: Optional[str] = None,
+    gesdoc_pwd: Optional[str] = None,
+    sqlserver_conn_str: Optional[str] = None,
+    **kwargs
+) -> list[Path]:
+    """
+    Construye la lista de documentos requeridos del cliente.
+    
+    Si no se puede inferir la identidad del cliente desde el payload,
+    intenta obtener la autorización vía GESDOC como fallback.
+    """
+    try:
+        client = client_identity_from_payload(payload)
+    except RequiredClientDocumentsError as e:
+        # FALLBACK: Intentar obtener vía GESDOC
+        logger.warning(f"No se encontró identidad del cliente. Intentando GESDOC...")
+        
+        numclient = payload.get("numclient")
+        expediente = payload.get("expediente")
+        
+        if not numclient or not expediente:
+            raise ValueError("No se puede obtener autorización sin numclient y expediente") from e
+        
+        if not gesdoc_user or not gesdoc_pwd or not sqlserver_conn_str:
+            logger.error("No hay credenciales GESDOC disponibles")
+            raise ValueError("Credenciales GESDOC no configuradas") from e
+        
+        # Intentar obtener autorización
+        auth_file = await fetch_missing_authorization_via_gesdoc(
+            numclient,
+            expediente,
+            gesdoc_user,
+            gesdoc_pwd,
+            sqlserver_conn_str
+        )
+        
+        if not auth_file:
+            raise ValueError("No se pudo obtener autorización del cliente vía GESDOC") from e
+        
+        # Reintentar obtener identidad (ahora probamos con la DB ya que el payload falló)
+        logger.info(f"Reintentando obtener identidad desde la base de datos para cliente {numclient}...")
+        try:
+            client = client_identity_from_db(numclient, sqlserver_conn_str, sujeto_recurso=payload.get("sujeto_recurso"))
+        except RequiredClientDocumentsError as db_err:
+            raise ValueError(f"Autorización obtenida pero aún no se puede inferir identidad: {db_err}") from e
+    
+    # Resto de la lógica sin cambios
     base_path = os.getenv("CLIENT_DOCS_BASE_PATH") or r"\\SERVER-DOC\clientes"
     ruta = get_ruta_cliente_documentacion(client, base_path=base_path)
     selected = select_required_client_documents(
