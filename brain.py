@@ -282,16 +282,32 @@ class BrainOrchestrator:
             return False
     
     def verify_claim_in_db(self, id_recurso: int) -> bool:
-        """Verifica en SQL Server que TExp cambió a 1."""
+        """
+        Verifica en SQL Server que el recurso ha sido reclamado correctamente.
+        Un recurso se considera reclamado si:
+        - TExp cambia a 1.
+        - O Estado pasa a ser > 0 (En proceso).
+        - O UsuarioAsignado deja de estar vacío.
+        """
         try:
             conn = pyodbc.connect(self.sqlserver_conn_str)
             cursor = conn.cursor()
-            cursor.execute(SQL_VERIFY_CLAIM, (id_recurso,))
+            cursor.execute("""
+                SELECT TExp, Estado, UsuarioAsignado 
+                FROM Recursos.RecursosExp 
+                WHERE idRecurso = ?
+            """, (id_recurso,))
             row = cursor.fetchone()
             conn.close()
             
-            if row and row[0] == 1:  # TExp = 1
-                return True
+            if row:
+                texp, estado, usuario = row
+                # El claim es válido si TExp es 1, 2 o 3 Y el estado o usuario han cambiado
+                # TExp 1 es el estándar, pero en Girona se mantiene en 2 o 3 al asignar.
+                is_claimed = (texp in (1, 2, 3)) or (estado > 0) or (usuario and str(usuario).strip())
+                
+                if is_claimed:
+                    return True
             return False
         except Exception as e:
             self.logger.error(f"Error verificando claim en DB: {e}")

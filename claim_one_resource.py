@@ -74,7 +74,7 @@ ORDER BY rs.idRecurso ASC
 """
 
 SQL_VERIFY_CLAIM = """
-SELECT TExp, UsuarioAsignado
+SELECT TExp, Estado, UsuarioAsignado
 FROM Recursos.RecursosExp
 WHERE idRecurso = ?
 """
@@ -194,6 +194,10 @@ async def claim_resource(session: aiohttp.ClientSession, id_recurso: int, dry_ru
 
 def verify_claim(id_recurso: int, conn_str: str) -> bool:
     """Verifica que el claim fue exitoso en SQL Server."""
+    # Esperar un momento para que SQL Server refleje el cambio
+    import time
+    time.sleep(1)
+    
     try:
         conn = pyodbc.connect(conn_str)
         cursor = conn.cursor()
@@ -201,11 +205,22 @@ def verify_claim(id_recurso: int, conn_str: str) -> bool:
         row = cursor.fetchone()
         conn.close()
         
-        if row and row[0] == 1:  # TExp = 1
-            logger.info(f"✅ Claim verificado en SQL Server (TExp=1)")
+        if not row:
+            logger.error(f"No se encontró el recurso {id_recurso} para verificar")
+            return False
+            
+        texp, estado, usuario = row
+        logger.info(f"Estado actual en DB: TExp={texp}, Estado={estado}, Usuario='{usuario}'")
+        
+        # Consideramos éxito si:
+        # 1. TExp cambió a 1 (lo que esperábamos originalmente)
+        # 2. O Estado ya no es 0 (pasó de Pendiente a En Proceso)
+        # 3. O ya tiene un usuario asignado
+        if estado > 0 or (usuario and str(usuario).strip()):
+            logger.info(f"✅ Claim verificado exitosamente (Estado={estado}, Usuario='{usuario}')")
             return True
         else:
-            logger.warning(f"⚠️  Claim no confirmado (TExp={row[0] if row else 'NULL'})")
+            logger.warning(f"⚠️ El recurso sigue apareciendo como PENDIENTE (TExp={texp}, Estado={estado})")
             return False
     except Exception as e:
         logger.error(f"Error verificando claim: {e}")
