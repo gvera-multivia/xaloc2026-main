@@ -272,11 +272,11 @@ def _construir_ruta_recursos_telematicos(payload: dict, fase_procedimiento: Any 
     # Obtener base_path desde variables de entorno o usar valor por defecto
     base_path = os.getenv("CLIENT_DOCS_BASE_PATH") or r"\\SERVER-DOC\clientes"
     
-    # Obtener ruta base del cliente (apunta a DOCUMENTACION)
+    # Obtener ruta base del cliente (incluye: base_path / letra / nombre_cliente)
     ruta_cliente_base = get_ruta_cliente_documentacion(client, base_path=base_path)
     
-    # Subir un nivel y entrar en RECURSOS TELEMATICOS
-    ruta_recursos = ruta_cliente_base.parent / "RECURSOS TELEMATICOS"
+    # Crear carpeta RECURSOS TELEMATICOS al mismo nivel (como hermana de DOCUMENTACION)
+    ruta_recursos = ruta_cliente_base / "RECURSOS TELEMATICOS"
     
     # Crear carpeta base si no existe
     ruta_recursos.mkdir(parents=True, exist_ok=True)
