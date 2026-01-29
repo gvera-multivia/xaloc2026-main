@@ -64,13 +64,14 @@ SELECT
     rs.Estado,
     rs.numclient,
     rs.SujetoRecurso,
-    rs.FaseProcedimiento
+    rs.FaseProcedimiento,
+    rs.UsuarioAsignado
 FROM Recursos.RecursosExp rs
 WHERE rs.Organisme LIKE ?
   AND rs.TExp IN ({texp_list})
-  AND rs.Estado = 0
+  AND rs.Estado IN (0, 1)
   AND rs.Expedient IS NOT NULL
-ORDER BY rs.idRecurso ASC
+ORDER BY rs.Estado ASC, rs.idRecurso ASC
 """
 
 SQL_VERIFY_CLAIM = """
@@ -120,13 +121,16 @@ def fetch_one_resource(config: dict, conn_str: str) -> dict:
             record = dict(zip(columns, row))
             expediente_raw = record.get("Expedient", "")
             expediente = expediente_raw.strip() if expediente_raw else ""
+            estado = record.get("Estado", 0)
+            usuario = str(record.get("UsuarioAsignado", "")).strip()
             
             # Validar formato de expediente
             if expediente and regex.match(expediente):
                 # ¡Encontramos uno válido!
                 conn.close()
                 
-                logger.info(f"✓ Recurso válido encontrado (después de revisar {invalid_count} inválidos):")
+                status_str = "LIBRE" if estado == 0 else f"EN PROCESO (Asignado a: {usuario})"
+                logger.info(f"✓ Recurso válido encontrado ({status_str}):")
                 logger.info(f"  ID: {record['idRecurso']}")
                 logger.info(f"  Expediente: '{expediente}'")
                 logger.info(f"  Organismo: {record['Organisme']}")
@@ -135,7 +139,7 @@ def fetch_one_resource(config: dict, conn_str: str) -> dict:
                 return record
             else:
                 invalid_count += 1
-                logger.info(f"  [DEBUG] Descartado: '{expediente}' (Regex no coincide: {config['regex_expediente']})")
+                # logger.debug(f"  [DEBUG] Descartado: '{expediente}' (Regex no coincide)")
         
         conn.close()
         
@@ -304,41 +308,47 @@ async def main():
         logger.warning("No hay recursos disponibles para reclamar")
         return 0
     
-    # Hacer login
-    logger.info("")
-    logger.info("🔐 Autenticando en Xvia...")
-    cookie_jar = aiohttp.CookieJar(unsafe=True)
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "es-ES,es;q=0.9",
-        "Referer": config["login_url"],
-        "Origin": "http://www.xvia-grupoeuropa.net",
-        "Connection": "keep-alive",
-    }
+    # Si el recurso ya está en Estado 1, saltamos la parte de login y POST
+    already_claimed = (recurso.get("Estado") == 1)
     
-    async with aiohttp.ClientSession(headers=headers, cookie_jar=cookie_jar) as session:
-        try:
-            await create_authenticated_session_in_place(session, XVIA_EMAIL, XVIA_PASSWORD)
-            logger.info("✓ Login exitoso")
-        except Exception as e:
-            logger.error(f"Error en login: {e}")
-            return 1
-        
-        # Reclamar recurso
+    if already_claimed:
+        logger.info(f"ℹ️ El recurso ya está ASIGNADO (Estado=1). Saltando login y claim vía POST.")
+    else:
+        # Hacer login y POST solo si Estado es 0
         logger.info("")
-        if not await claim_resource(session, recurso["idRecurso"], args.dry_run):
-            logger.error("❌ Claim falló")
-            return 1
+        logger.info("🔐 Autenticando en Xvia...")
+        cookie_jar = aiohttp.CookieJar(unsafe=True)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "es-ES,es;q=0.9",
+            "Referer": config["login_url"],
+            "Origin": "http://www.xvia-grupoeuropa.net",
+            "Connection": "keep-alive",
+        }
+        
+        async with aiohttp.ClientSession(headers=headers, cookie_jar=cookie_jar) as session:
+            try:
+                await create_authenticated_session_in_place(session, XVIA_EMAIL, XVIA_PASSWORD)
+                logger.info("✓ Login exitoso")
+            except Exception as e:
+                logger.error(f"Error en login: {e}")
+                return 1
+            
+            # Reclamar recurso
+            logger.info("")
+            if not await claim_resource(session, recurso["idRecurso"], args.dry_run):
+                logger.error("❌ Claim falló")
+                return 1
     
-    # Verificar claim en SQL Server
-    logger.info("")
-    if not args.dry_run:
-        if not verify_claim(recurso["idRecurso"], conn_str):
-            logger.error("❌ Claim no verificado en SQL Server")
-            return 1
+        # Verificar claim en SQL Server solo si lo acabamos de reclamar
+        logger.info("")
+        if not args.dry_run:
+            if not verify_claim(recurso["idRecurso"], conn_str):
+                logger.error("❌ Claim no verificado en SQL Server")
+                return 1
     
-    # Encolar tarea
+    # Encolar tarea (se hace tanto si lo acabamos de reclamar como si ya estaba asignado)
     logger.info("")
     task_id = enqueue_task(db, args.site_id, recurso, args.dry_run)
     
