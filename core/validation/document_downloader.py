@@ -3,6 +3,7 @@ import logging
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional
+from core.config_manager import config_manager
 
 logger = logging.getLogger("worker")
 
@@ -13,8 +14,10 @@ class DownloadResult:
     error: Optional[str] = None
 
 class DocumentDownloader:
-    def __init__(self, url_template: str, download_dir: Path = Path("tmp/downloads")):
+    def __init__(self, url_template: str, download_dir: Optional[Path] = None):
         self.url_template = url_template
+        if download_dir is None:
+            download_dir = Path(config_manager.paths.get("downloads", "tmp/downloads"))
         self.download_dir = download_dir
         self.download_dir.mkdir(parents=True, exist_ok=True)
 
@@ -38,7 +41,8 @@ class DocumentDownloader:
             session = aiohttp.ClientSession()
 
         try:
-            async with session.get(url, timeout=30) as response:
+            timeout = config_manager.timeouts.get("general", 30)
+            async with session.get(url, timeout=timeout) as response:
                 if response.status == 200:
                     content = await response.read()
                     

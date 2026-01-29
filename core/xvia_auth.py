@@ -3,10 +3,11 @@ import re
 from typing import Optional
 import aiohttp
 from pathlib import Path
+from core.config_manager import config_manager
 
 logger = logging.getLogger("worker")
 
-LOGIN_URL = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login"
+LOGIN_URL = config_manager.login_url or "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login"
 
 def extract_csrf_token(html: str) -> Optional[str]:
     """
@@ -31,8 +32,9 @@ async def create_authenticated_session(
     timeout_seconds: int = 30
 ) -> aiohttp.ClientSession:
     # Es vital usar un User-Agent real para que el servidor no rechace la petición
+    user_agent = config_manager.http_headers.get("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": user_agent
     }
     
     session = aiohttp.ClientSession(

@@ -155,3 +155,30 @@ class SQLiteDatabase:
             raise
         finally:
             conn.close()
+
+    def get_organismo_config(self) -> Optional[Dict[str, Any]]:
+        """
+        Recupera la configuración centralizada del organismo.
+        """
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM organismo_config WHERE id = 1")
+            row = cursor.fetchone()
+            if row:
+                data = dict(row)
+                # Parse JSON fields
+                for field in ['http_headers', 'timeouts', 'paths', 'selectors']:
+                    if data.get(field):
+                        try:
+                            data[field] = json.loads(data[field])
+                        except json.JSONDecodeError:
+                            data[field] = {}
+                return data
+            return None
+        except Exception as e:
+            self.logger.error(f"Error recuperando config: {e}")
+            return None
+        finally:
+            conn.close()

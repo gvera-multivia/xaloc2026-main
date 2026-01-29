@@ -4,6 +4,7 @@ from typing import Optional
 import aiohttp
 import asyncio
 import re
+from core.config_manager import config_manager
 
 @dataclass
 class AttachmentInfo:
@@ -33,24 +34,26 @@ class AttachmentDownloader:
     - Almacenamiento organizado por idRecurso
     """
 
-    URL_TEMPLATE = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf-adjuntos/{id}"
-
     def __init__(
         self,
-        download_dir: Path = Path("tmp/downloads/adjuntos"),
+        download_dir: Optional[Path] = None,
         timeout_seconds: int = 30,
         max_retries: int = 3,
         max_concurrent: int = 5
     ):
+        if download_dir is None:
+            download_dir = Path(config_manager.paths.get("attachments", "tmp/downloads/adjuntos"))
+
         self.download_dir = download_dir
         self.timeout = aiohttp.ClientTimeout(total=timeout_seconds)
         self.max_retries = max_retries
         self.max_concurrent = max_concurrent
+        self.url_template = config_manager.attachment_url_template or "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf-adjuntos/{id}"
         self.download_dir.mkdir(parents=True, exist_ok=True)
 
     def build_url(self, attachment_id: str) -> str:
         """Construye URL de descarga para un adjunto."""
-        return self.URL_TEMPLATE.format(id=attachment_id)
+        return self.url_template.format(id=attachment_id)
 
     async def download_single(
         self,

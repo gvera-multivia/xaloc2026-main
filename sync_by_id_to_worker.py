@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Optional, Literal
 
 from dotenv import load_dotenv
+from core.config_manager import config_manager
 
 try:
     import pyodbc  # type: ignore
@@ -481,10 +482,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                     {
                         "id": adj_id,
                         "filename": filename_clean,
-                        "url": (
-                            "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/"
-                            "recursos/expedientes/pdf-adjuntos/{id}"
-                        ).format(id=adj_id),
+                        "url": config_manager.attachment_url_template.format(id=adj_id),
                     }
                 )
 

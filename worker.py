@@ -19,10 +19,7 @@ from core.validation import ValidationEngine, DiscrepancyReporter, DocumentDownl
 from core.attachments import AttachmentDownloader, AttachmentInfo
 from core.client_documentation import RequiredClientDocumentsError, build_required_client_documents_for_payload
 from core.xvia_auth import create_authenticated_session_in_place
-
-# Configuracion de URLs y Directorios
-DOCUMENT_URL_TEMPLATE = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf/{idRecurso}"
-DOWNLOAD_DIR = Path("tmp/downloads")
+from core.config_manager import config_manager
 
 # Configuracion de logging para el Worker
 logging.basicConfig(
@@ -80,11 +77,14 @@ async def _download_document_and_attachments(
     if not id_recurso:
         raise ValueError("Falta 'idRecurso' en el payload para descargar el documento.")
 
-    target_url = DOCUMENT_URL_TEMPLATE.format(idRecurso=id_recurso)
+    document_url_template = config_manager.document_url_template
+    download_dir = Path(config_manager.paths.get("downloads", "tmp/downloads"))
+
+    target_url = document_url_template.format(idRecurso=id_recurso)
     logger.info(f"Iniciando descarga autenticada desde: {target_url}")
 
-    local_pdf_path = DOWNLOAD_DIR / f"{id_recurso}.pdf"
-    DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    local_pdf_path = download_dir / f"{id_recurso}.pdf"
+    download_dir.mkdir(parents=True, exist_ok=True)
 
     async with auth_session.get(target_url) as resp:
         if resp.status != 200:
@@ -303,15 +303,18 @@ async def worker_loop():
     # unsafe=True permite procesar cookies en conexiones HTTP no cifradas
     cookie_jar = aiohttp.CookieJar(unsafe=True)
     
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "es-ES,es;q=0.9",
-        "Referer": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login", # Clave para CSRF
-        "Origin": "http://www.xvia-grupoeuropa.net",
-        "DNT": "1",
-        "Connection": "keep-alive",
-    }
+    headers = config_manager.http_headers
+    if not headers:
+         # Fallback headers if config is missing
+         headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "es-ES,es;q=0.9",
+            "Referer": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login",
+            "Origin": "http://www.xvia-grupoeuropa.net",
+            "DNT": "1",
+            "Connection": "keep-alive",
+        }
 
     # Iniciamos la sesión persistente con el tarro de cookies especial
     async with aiohttp.ClientSession(headers=headers, cookie_jar=cookie_jar) as auth_session:

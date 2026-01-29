@@ -13,3 +13,15 @@ CREATE TABLE IF NOT EXISTS tramite_queue (
     attachments_count INTEGER DEFAULT 0,
     attachments_metadata JSON
 );
+
+CREATE TABLE IF NOT EXISTS organismo_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    login_url TEXT,
+    document_url_template TEXT,
+    attachment_url_template TEXT,
+    http_headers JSON,
+    timeouts JSON,
+    paths JSON,
+    selectors JSON,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
