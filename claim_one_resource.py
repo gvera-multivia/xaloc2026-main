@@ -82,6 +82,29 @@ WHERE idRecurso = ?
 
 
 # =============================================================================
+# FUNCIONES DE AUTENTICACIÓN
+# =============================================================================
+
+async def get_authenticated_username(session: aiohttp.ClientSession) -> str:
+    """
+    Obtiene el nombre del usuario autenticado desde la página de Xvia.
+    Busca el patrón: <i class="fa fa-user-circle"...></i> Guillem Vera
+    """
+    try:
+        async with session.get("http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/home") as resp:
+            html = await resp.text()
+            # Buscar el nombre en el dropdown del usuario
+            match = re.search(r'<i class="fa fa-user-circle"[^>]*></i>\s*([^<]+)', html)
+            if match:
+                username = match.group(1).strip()
+                return username
+            return None
+    except Exception as e:
+        logger.error(f"Error obteniendo nombre de usuario: {e}")
+        return None
+
+
+# =============================================================================
 # FUNCIONES PRINCIPALES
 # =============================================================================
 
@@ -96,7 +119,7 @@ def build_sqlserver_connection_string() -> str:
     return f"DRIVER={driver};SERVER={server};DATABASE={database};UID={username};PWD={password}"
 
 
-def fetch_one_resource(config: dict, conn_str: str) -> dict:
+def fetch_one_resource(config: dict, conn_str: str, authenticated_user: str = None) -> dict:
     """Busca UN recurso disponible que cumpla el regex."""
     logger.info("🔍 Buscando recursos disponibles...")
     
@@ -126,10 +149,21 @@ def fetch_one_resource(config: dict, conn_str: str) -> dict:
             
             # Validar formato de expediente
             if expediente and regex.match(expediente):
+                # Si está en Estado 1, verificar que esté asignado al usuario actual
+                if estado == 1:
+                    if not authenticated_user or usuario != authenticated_user:
+                        logger.debug(f"  Descartado: '{expediente}' (Asignado a '{usuario}', no a '{authenticated_user}')")
+                        invalid_count += 1
+                        continue
+                
                 # ¡Encontramos uno válido!
                 conn.close()
                 
-                status_str = "LIBRE" if estado == 0 else f"EN PROCESO (Asignado a: {usuario})"
+                if estado == 0:
+                    status_str = "LIBRE"
+                else:
+                    status_str = f"EN PROCESO (Asignado a ti: {usuario})"
+                
                 logger.info(f"✓ Recurso válido encontrado ({status_str}):")
                 logger.info(f"  ID: {record['idRecurso']}")
                 logger.info(f"  Expediente: '{expediente}'")
@@ -144,7 +178,7 @@ def fetch_one_resource(config: dict, conn_str: str) -> dict:
         conn.close()
         
         if invalid_count > 0:
-            logger.warning(f"Se revisaron {invalid_count} recursos pero ninguno cumple el regex")
+            logger.warning(f"Se revisaron {invalid_count} recursos pero ninguno cumple los criterios")
         else:
             logger.warning("No se encontraron recursos disponibles")
         
@@ -233,11 +267,12 @@ def verify_claim(id_recurso: int, conn_str: str) -> bool:
 
 def enqueue_task(db: SQLiteDatabase, site_id: str, recurso: dict, dry_run: bool = False) -> int:
     """Encola la tarea en tramite_queue."""
+    # Convertir Decimal a int para evitar errores de serialización JSON
     payload = {
-        "idRecurso": recurso["idRecurso"],
-        "idExp": recurso.get("idExp"),
+        "idRecurso": int(recurso["idRecurso"]) if recurso.get("idRecurso") else None,
+        "idExp": int(recurso["idExp"]) if recurso.get("idExp") else None,
         "expediente": recurso["Expedient"],
-        "numclient": recurso.get("numclient"),
+        "numclient": int(recurso["numclient"]) if recurso.get("numclient") else None,
         "sujeto_recurso": recurso.get("SujetoRecurso"),
         "fase_procedimiento": recurso.get("FaseProcedimiento"),
         "source": "claim_one_resource",
@@ -300,53 +335,67 @@ async def main():
         logger.error(f"No se encontró configuración activa para: {args.site_id}")
         return 1
     
-    # Buscar UN recurso
+    # Primero hacer login para obtener el nombre del usuario autenticado
+    logger.info("")
+    logger.info("🔐 Autenticando en Xvia...")
+    cookie_jar = aiohttp.CookieJar(unsafe=True)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "es-ES,es;q=0.9",
+        "Referer": config["login_url"],
+        "Origin": "http://www.xvia-grupoeuropa.net",
+        "Connection": "keep-alive",
+    }
+    
+    session = aiohttp.ClientSession(headers=headers, cookie_jar=cookie_jar)
+    
+    try:
+        await create_authenticated_session_in_place(session, XVIA_EMAIL, XVIA_PASSWORD)
+        logger.info("✓ Login exitoso")
+        
+        # Obtener nombre del usuario autenticado
+        authenticated_user = await get_authenticated_username(session)
+        if authenticated_user:
+            logger.info(f"✓ Usuario autenticado: {authenticated_user}")
+        else:
+            logger.warning("⚠️  No se pudo obtener el nombre del usuario")
+    except Exception as e:
+        logger.error(f"Error en login: {e}")
+        await session.close()
+        return 1
+    
+    # Buscar UN recurso (libre o asignado al usuario actual)
     conn_str = build_sqlserver_connection_string()
-    recurso = fetch_one_resource(config, conn_str)
+    recurso = fetch_one_resource(config, conn_str, authenticated_user)
     
     if not recurso:
         logger.warning("No hay recursos disponibles para reclamar")
+        await session.close()
         return 0
     
-    # Si el recurso ya está en Estado 1, saltamos la parte de login y POST
+    # Si el recurso ya está en Estado 1, saltamos la parte de POST
     already_claimed = (recurso.get("Estado") == 1)
     
     if already_claimed:
-        logger.info(f"ℹ️ El recurso ya está ASIGNADO (Estado=1). Saltando login y claim vía POST.")
+        logger.info(f"ℹ️  El recurso ya está ASIGNADO a ti (Estado=1). Saltando claim vía POST.")
     else:
-        # Hacer login y POST solo si Estado es 0
+        # Reclamar recurso (ya tenemos la sesión autenticada)
         logger.info("")
-        logger.info("🔐 Autenticando en Xvia...")
-        cookie_jar = aiohttp.CookieJar(unsafe=True)
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "es-ES,es;q=0.9",
-            "Referer": config["login_url"],
-            "Origin": "http://www.xvia-grupoeuropa.net",
-            "Connection": "keep-alive",
-        }
-        
-        async with aiohttp.ClientSession(headers=headers, cookie_jar=cookie_jar) as session:
-            try:
-                await create_authenticated_session_in_place(session, XVIA_EMAIL, XVIA_PASSWORD)
-                logger.info("✓ Login exitoso")
-            except Exception as e:
-                logger.error(f"Error en login: {e}")
-                return 1
-            
-            # Reclamar recurso
-            logger.info("")
-            if not await claim_resource(session, recurso["idRecurso"], args.dry_run):
-                logger.error("❌ Claim falló")
-                return 1
+        if not await claim_resource(session, recurso["idRecurso"], args.dry_run):
+            logger.error("❌ Claim falló")
+            await session.close()
+            return 1
     
         # Verificar claim en SQL Server solo si lo acabamos de reclamar
         logger.info("")
         if not args.dry_run:
             if not verify_claim(recurso["idRecurso"], conn_str):
                 logger.error("❌ Claim no verificado en SQL Server")
+                await session.close()
                 return 1
+    
+    await session.close()
     
     # Encolar tarea (se hace tanto si lo acabamos de reclamar como si ya estaba asignado)
     logger.info("")
