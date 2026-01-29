@@ -15,13 +15,6 @@ from core.gesdoc_auth import create_gesdoc_session, trigger_client_authorization
 from core.authorization_fetcher import (
     find_authorization_in_tmp,
     move_authorization_to_destinations,
-    get_client_type_from_db
-)
-
-from core.gesdoc_auth import create_gesdoc_session, trigger_client_authorization, close_gesdoc_session
-from core.authorization_fetcher import (
-    find_authorization_in_tmp,
-    move_authorization_to_destinations,
     get_client_type_from_db,
     get_client_info_from_db
 )
@@ -36,6 +29,14 @@ logger = logging.getLogger(__name__)
 
 class RequiredClientDocumentsError(RuntimeError):
     """No se han podido localizar/adjuntar los documentos obligatorios del cliente."""
+
+# --- Modelos ---
+
+@dataclass(frozen=True)
+class SelectedClientDocuments:
+    files_to_upload: list[Path]
+    covered_terms: list[str]
+    missing_terms: list[str]
 
 # --- Lógica de Identidad ---
 
