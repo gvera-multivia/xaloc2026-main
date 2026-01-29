@@ -282,6 +282,7 @@ def _map_payload(
         "motivos": motivos,
         "adjuntos": adjuntos_list or [],
         "mandatario": mandatario,  # NUEVO
+        "fase_procedimiento": _clean_str(row.get("FaseProcedimiento")),  # NUEVO: Para organizar justificantes
     }
 
 

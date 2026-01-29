@@ -6,9 +6,11 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
+import unicodedata
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from playwright.async_api import Page, TimeoutError
 
@@ -129,15 +131,138 @@ async def _descargar_pdf_desde_url(page: Page, url: str, destino: Path) -> None:
         raise RuntimeError(f"No se pudo descargar el PDF por fetch: {e}") from e
 
 
-def _construir_ruta_recursos_telematicos(payload: dict) -> Path:
+def _normalize_text(text: str) -> str:
     """
-    Construye la ruta a la carpeta RECURSOS TELEMATICOS del cliente.
+    Normaliza texto para comparación flexible:
+    - Convierte a minúsculas
+    - Elimina acentos/tildes
+    - Elimina espacios extra
+    """
+    if not text:
+        return ""
+    text = str(text).strip().lower()
+    # Eliminar acentos usando NFD (Canonical Decomposition)
+    text = "".join(
+        c for c in unicodedata.normalize("NFD", text) 
+        if unicodedata.category(c) != "Mn"
+    )
+    return text
+
+
+def _get_folder_name_from_fase(fase_raw: Any) -> str:
+    """
+    Mapea el valor de FaseProcedimiento al nombre de carpeta estandarizado.
+    
+    Args:
+        fase_raw: Valor de FaseProcedimiento desde el payload
+    
+    Returns:
+        Nombre de carpeta estandarizado
+    
+    Raises:
+        ValueError: Si no se encuentra mapeo para la fase
+    """
+    # Mapeo de motivos (keys de config_motivos.json) a nombres de carpetas
+    MOTIVO_TO_FOLDER = {
+        "identificacion": "IDENTIFICACIONES",
+        "denuncia": "ALEGACIONES",
+        "propuesta de resolucion": "ALEGACIONES",
+        "extraordinario de revision": "EXTRAORDINARIOS DE REVISIÓN",
+        "subsanacion": "SUBSANACIONES",
+        "reclamaciones": "RECLAMACIONES",
+        "requerimiento embargo": "EMBARGOS",
+        "sancion": "SANCIONES",
+        "apremio": "APREMIOS",
+        "embargo": "EMBARGOS",
+    }
+    
+    fase_norm = _normalize_text(fase_raw)
+    
+    # Buscar coincidencia en los motivos
+    for motivo_key, folder_name in MOTIVO_TO_FOLDER.items():
+        if motivo_key in fase_norm:
+            return folder_name
+    
+    raise ValueError(f"No se encontró carpeta para la fase: {fase_raw}")
+
+
+def _folder_matches(folder_name: str, target_name: str) -> bool:
+    """
+    Comprueba si un nombre de carpeta coincide con el nombre objetivo
+    usando comparación flexible.
+    
+    Args:
+        folder_name: Nombre de carpeta existente
+        target_name: Nombre de carpeta objetivo (estandarizado)
+    
+    Returns:
+        True si coinciden, False en caso contrario
+    """
+    folder_norm = _normalize_text(folder_name)
+    target_norm = _normalize_text(target_name)
+    
+    # Coincidencia exacta después de normalización
+    if folder_norm == target_norm:
+        return True
+    
+    # Extraer palabras clave del nombre objetivo
+    target_words = set(target_norm.split())
+    folder_words = set(folder_norm.split())
+    
+    # Verificar si todas las palabras clave están presentes (permite variaciones de orden)
+    # Por ejemplo: "EXTRAORDINARIOS DE REVISIÓN" vs "RECURSOS EXTRAORDINARIOS DE REVISIÓN"
+    if target_words.issubset(folder_words):
+        return True
+    
+    # Verificar variaciones singular/plural
+    # Eliminar 's' final de cada palabra y comparar
+    target_singular = {w.rstrip('s') for w in target_words}
+    folder_singular = {w.rstrip('s') for w in folder_words}
+    
+    if target_singular == folder_singular:
+        return True
+    
+    return False
+
+
+def _find_or_create_subfolder(base_path: Path, folder_name: str) -> Path:
+    """
+    Busca una subcarpeta con coincidencia flexible o la crea si no existe.
+    
+    Args:
+        base_path: Ruta base donde buscar/crear la subcarpeta
+        folder_name: Nombre de carpeta estandarizado a buscar/crear
+    
+    Returns:
+        Path a la subcarpeta encontrada o creada
+    """
+    logger.info(f"Buscando carpeta '{folder_name}' en {base_path}...")
+    
+    # Buscar carpetas existentes con coincidencia flexible
+    if base_path.exists():
+        for item in base_path.iterdir():
+            if item.is_dir() and _folder_matches(item.name, folder_name):
+                logger.info(f"✓ Carpeta encontrada: {item.name}")
+                return item
+    
+    # No se encontró, crear con nombre estandarizado
+    new_folder = base_path / folder_name
+    new_folder.mkdir(parents=True, exist_ok=True)
+    logger.info(f"✓ Carpeta creada: {folder_name}")
+    
+    return new_folder
+
+
+def _construir_ruta_recursos_telematicos(payload: dict, fase_procedimiento: Any = None) -> Path:
+    """
+    Construye la ruta a la subcarpeta específica dentro de RECURSOS TELEMATICOS.
     
     Args:
         payload: Diccionario con datos del trámite (incluye mandatario)
+        fase_procedimiento: Valor de FaseProcedimiento para determinar la subcarpeta
     
     Returns:
-        Path a la carpeta RECURSOS TELEMATICOS del cliente
+        Path a la subcarpeta específica dentro de RECURSOS TELEMATICOS
     """
     logger.info("Construyendo ruta a carpeta RECURSOS TELEMATICOS...")
     
@@ -153,10 +278,21 @@ def _construir_ruta_recursos_telematicos(payload: dict) -> Path:
     # Subir un nivel y entrar en RECURSOS TELEMATICOS
     ruta_recursos = ruta_cliente_base.parent / "RECURSOS TELEMATICOS"
     
-    # Crear carpeta si no existe
+    # Crear carpeta base si no existe
     ruta_recursos.mkdir(parents=True, exist_ok=True)
     
     logger.info(f"Ruta RECURSOS TELEMATICOS: {ruta_recursos}")
+    
+    # Si se proporciona fase_procedimiento, buscar/crear subcarpeta específica
+    if fase_procedimiento:
+        try:
+            folder_name = _get_folder_name_from_fase(fase_procedimiento)
+            ruta_subfolder = _find_or_create_subfolder(ruta_recursos, folder_name)
+            logger.info(f"Ruta final con subcarpeta: {ruta_subfolder}")
+            return ruta_subfolder
+        except ValueError as e:
+            logger.warning(f"No se pudo determinar subcarpeta: {e}. Usando carpeta base.")
+    
     return ruta_recursos
 
 
@@ -241,6 +377,11 @@ async def descargar_y_guardar_justificante(page: Page, payload: dict) -> str:
     num_expediente = str(raw_expediente).replace("/", "-").replace("\\", "-").strip()
     logger.info(f"Número de expediente procesado: {num_expediente}")
     
+    # Extraer FaseProcedimiento del payload para determinar la subcarpeta
+    fase_procedimiento = payload.get("fase_procedimiento")
+    if not fase_procedimiento:
+        logger.warning("No se encontró 'fase_procedimiento' en el payload")
+    
     try:
         # 1. Esperar a que el iframe esté cargado
         await _esperar_iframe_cargado(page)
@@ -248,8 +389,8 @@ async def descargar_y_guardar_justificante(page: Page, payload: dict) -> str:
         # 2. Extraer URL del justificante
         url_justificante = await _obtener_url_justificante(page)
         
-        # 3. Construir ruta de destino
-        ruta_recursos = _construir_ruta_recursos_telematicos(payload)
+        # 3. Construir ruta de destino (con subcarpeta según motivo)
+        ruta_recursos = _construir_ruta_recursos_telematicos(payload, fase_procedimiento)
         
         # 4. Descargar a archivo temporal (nombre limpio para evitar problemas)
         temporal = Path("tmp") / f"temp_justif_{num_expediente}.pdf"

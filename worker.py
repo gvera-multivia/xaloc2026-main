@@ -11,6 +11,7 @@ import subprocess
 
 import aiohttp
 from dotenv import load_dotenv
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError, Error as PlaywrightError
 
 from core.sqlite_db import SQLiteDatabase
 from core.site_registry import get_site, get_site_controller
@@ -227,11 +228,70 @@ async def process_task(
             if db is not None and task_id is not None:
                 db.update_task_status(task_id, "completed", screenshot=str(screenshot_path))
 
-    except Exception as e:
-        logger.error(f"Error procesando tarea {task_id}: {e}")
+    except PlaywrightTimeoutError as e:
+        error_msg = f"Timeout de Playwright: Elemento no encontrado o página no cargó a tiempo"
+        logger.error(f"⏱️  Error en tarea {task_label}: {error_msg}")
+        logger.error(f"Detalles: {str(e)}")
         logger.error(traceback.format_exc())
         if db is not None and task_id is not None:
-            db.update_task_status(task_id, "failed", error=str(e))
+            db.update_task_status(task_id, "failed", error=error_msg)
+    
+    except PlaywrightError as e:
+        error_msg = f"Error de Playwright: {str(e)}"
+        logger.error(f"🎭 Error en tarea {task_label}: {error_msg}")
+        logger.error("Posibles causas: elemento no encontrado, selector incorrecto, o cambio en la estructura de la página")
+        logger.error(traceback.format_exc())
+        if db is not None and task_id is not None:
+            db.update_task_status(task_id, "failed", error=error_msg)
+    
+    except asyncio.TimeoutError as e:
+        error_msg = f"Timeout al procesar tarea {task_label}"
+        logger.error(f"⏱️  {error_msg}")
+        logger.error(f"Detalles: La operación excedió el tiempo límite de espera")
+        logger.error(traceback.format_exc())
+        if db is not None and task_id is not None:
+            db.update_task_status(task_id, "failed", error=error_msg)
+    
+    except RequiredClientDocumentsError as e:
+        error_msg = f"Documentación del cliente faltante: {e}"
+        logger.error(f"📄 Error en tarea {task_label}: {error_msg}")
+        logger.error(traceback.format_exc())
+        if db is not None and task_id is not None:
+            db.update_task_status(task_id, "failed", error=error_msg)
+    
+    except ValueError as e:
+        error_msg = str(e)
+        logger.error(f"❌ Error de validación en tarea {task_label}: {error_msg}")
+        logger.error(traceback.format_exc())
+        if db is not None and task_id is not None:
+            db.update_task_status(task_id, "failed", error=error_msg)
+    
+    except RuntimeError as e:
+        error_msg = str(e)
+        logger.error(f"⚠️  Error de ejecución en tarea {task_label}: {error_msg}")
+        logger.error(traceback.format_exc())
+        if db is not None and task_id is not None:
+            db.update_task_status(task_id, "failed", error=error_msg)
+    
+    except FileNotFoundError as e:
+        error_msg = f"Archivo no encontrado: {e}"
+        logger.error(f"📁 Error en tarea {task_label}: {error_msg}")
+        logger.error(traceback.format_exc())
+        if db is not None and task_id is not None:
+            db.update_task_status(task_id, "failed", error=error_msg)
+    
+    except Exception as e:
+        # Captura cualquier otro error no previsto
+        error_type = type(e).__name__
+        error_msg = str(e)
+        logger.error(f"💥 Error inesperado ({error_type}) en tarea {task_label}: {error_msg}")
+        logger.error(traceback.format_exc())
+        if db is not None and task_id is not None:
+            db.update_task_status(task_id, "failed", error=f"{error_type}: {error_msg}")
+    
+    finally:
+        # Asegurar que siempre se registre el fin del procesamiento
+        logger.info(f"Finalizando procesamiento de tarea {task_label}")
 
 async def worker_loop():
     db = SQLiteDatabase()
@@ -286,8 +346,10 @@ async def worker_loop():
                 logger.info("Deteniendo worker por interrupción de teclado (Ctrl+C)...")
                 break
             except Exception as e:
-                logger.error(f"Error inesperado en el bucle principal: {e}")
+                error_type = type(e).__name__
+                logger.error(f"💥 Error inesperado en el bucle principal ({error_type}): {e}")
                 logger.error(traceback.format_exc())
+                logger.info("⚡ El worker continuará procesando tareas después de este error...")
                 await asyncio.sleep(5)
 
     logger.info("Worker finalizado correctamente.")
