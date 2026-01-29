@@ -1,0 +1,122 @@
+#!/usr/bin/env python
+"""
+init_brain_config.py - Script de inicialización de configuración del Brain.
+
+Este script:
+1. Lee el archivo organismo_config.json
+2. Inserta las configuraciones en la tabla organismo_config de SQLite
+3. Verifica que la base de datos esté correctamente inicializada
+
+Uso:
+    python init_brain_config.py [--db-path db/xaloc_database.db]
+"""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+from core.sqlite_db import SQLiteDatabase
+
+
+def load_config_from_json(json_path: Path) -> list[dict]:
+    """Carga las configuraciones desde el archivo JSON."""
+    if not json_path.exists():
+        raise FileNotFoundError(f"No se encontró el archivo: {json_path}")
+    
+    with open(json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    
+    return data.get("configs", [])
+
+
+def init_brain_config(db_path: str, config_file: str = "organismo_config.json"):
+    """Inicializa la configuración del brain en SQLite."""
+    print("=" * 60)
+    print("🧠 INICIALIZADOR DE CONFIGURACIÓN DEL BRAIN")
+    print("=" * 60)
+    
+    # Cargar configuraciones desde JSON
+    config_path = Path(config_file)
+    print(f"\n📄 Cargando configuraciones desde: {config_path}")
+    
+    try:
+        configs = load_config_from_json(config_path)
+        print(f"✓ Se encontraron {len(configs)} configuraciones")
+    except Exception as e:
+        print(f"✗ Error cargando configuraciones: {e}")
+        return 1
+    
+    # Conectar a la base de datos
+    print(f"\n💾 Conectando a SQLite: {db_path}")
+    db = SQLiteDatabase(db_path)
+    
+    # Insertar configuraciones
+    print("\n📥 Insertando configuraciones...")
+    inserted = 0
+    skipped = 0
+    
+    for config in configs:
+        site_id = config.get("site_id")
+        try:
+            # Intentar insertar
+            config_id = db.insert_organismo_config(config)
+            status = "✓ ACTIVO" if config.get("active") else "○ INACTIVO"
+            print(f"  {status} {site_id:20} -> ID {config_id}")
+            inserted += 1
+        except Exception as e:
+            # Si ya existe, saltarlo
+            if "UNIQUE constraint failed" in str(e):
+                print(f"  ⊙ EXISTE  {site_id:20} (saltado)")
+                skipped += 1
+            else:
+                print(f"  ✗ ERROR   {site_id:20} -> {e}")
+    
+    # Resumen
+    print("\n" + "=" * 60)
+    print(f"📊 RESUMEN:")
+    print(f"   Insertadas: {inserted}")
+    print(f"   Saltadas:   {skipped}")
+    print(f"   Total:      {len(configs)}")
+    print("=" * 60)
+    
+    # Verificar configuraciones activas
+    print("\n🔍 Verificando configuraciones activas...")
+    active_configs = db.get_active_organismo_configs()
+    
+    if active_configs:
+        print(f"\n✓ Configuraciones activas ({len(active_configs)}):")
+        for cfg in active_configs:
+            print(f"  • {cfg['site_id']}")
+            print(f"    - Organismo: {cfg['query_organisme']}")
+            print(f"    - TExp: {cfg['filtro_texp']}")
+            print(f"    - Regex: {cfg['regex_expediente']}")
+    else:
+        print("\n⚠️  No hay configuraciones activas")
+    
+    print("\n✅ Inicialización completada\n")
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Inicializa la configuración del Brain Orchestrator"
+    )
+    parser.add_argument(
+        "--db-path",
+        default="db/xaloc_database.db",
+        help="Ruta al archivo SQLite"
+    )
+    parser.add_argument(
+        "--config-file",
+        default="organismo_config.json",
+        help="Ruta al archivo JSON de configuración"
+    )
+    
+    args = parser.parse_args()
+    
+    return init_brain_config(args.db_path, args.config_file)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

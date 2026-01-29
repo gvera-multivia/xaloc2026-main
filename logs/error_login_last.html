@@ -1,0 +1,906 @@
+<!doctype html>
+<html lang="es">
+
+<head>
+    <title>XVia & Grupoeuropa - </title>
+
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <meta name="csrf-token" content="OljgndgeP3o4Gx2C9aWqBx1ixWwT5F3C8qWkjPXf">
+
+    <!-- Styles -->
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/dropzone/5.9.3/dropzone.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dropzone/5.9.3/dropzone.min.js"></script>
+
+
+    <link rel="stylesheet" type="text/css" href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/css/bootstrap.min.css">
+    <link rel="stylesheet" type="text/css" href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/css/bootstrap-datepicker.min.css">
+    <link rel="stylesheet" href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/fonts/font-awesome.min.css">
+    <link rel="shortcut icon" href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/favicon.ico">
+
+    <link rel="stylesheet" href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/css/main.css ">
+
+    <link rel="stylesheet" href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/vendor/midia/midia.css"><link rel="stylesheet" href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/vendor/midia/dropzone.css">
+
+    <!-- Styles Personalizados -->
+    <style type="text/css">
+        BODY {
+            /* background-image: url( http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/images/background.png ) */
+
+            /*  background-color: rgba(0, 50, 255,0.4); */
+
+        }
+
+        .contenidodiv {
+            position: relative;
+            z-index: 999;
+            top: 65px;
+        }
+
+        .table {
+            font-family: Tahoma, Verdana, Arial;
+            font-size: 11px;
+
+        }
+
+        .table-screen tr:hover{
+            background: #98BBE4 !important;
+        }
+
+        .table-fixed thead {
+            width: 100%;
+        }
+
+        .table-fixed tbody {
+            overflow-x: auto !important;
+            overflow-y: auto !important;
+            width: 100%;
+            height: calc(100vh - 290px);
+        }
+
+        .table-fixed thead,
+        .table-fixed tbody,
+        .table-fixed tr,
+        .table-fixed td,
+        .table-fixed th {
+            display: block;
+        }
+
+        .table-fixed tbody td,
+        .table-fixed thead>tr>th {
+            height: 46px;
+            display: inline-block;
+            border-bottom-width: 0;
+        }
+
+        .table-fixed li{
+            list-style: none;
+            color:white;
+        }
+
+
+        .table-sales tbody {
+            overflow-x: auto !important;
+            overflow-y: auto !important;
+            width: 100%;
+            height: calc(100vh - 335px);
+        }
+
+        .table-sales thead,
+        .table-sales tbody,
+        .table-sales tr,
+        .table-sales td,
+        .table-sales th {
+            display: block;
+        }
+
+        .table-sales tbody td,
+        .table-sales thead>tr>th {
+            height: 28px;
+            display: inline-block;
+            border-bottom-width: 0;
+        }
+
+        .table-sales li{
+            list-style: none;
+            color:white;
+        }
+
+        tablescroll {
+            overflow-x: auto; !important;
+            overflow-y: auto; !important;
+        }
+
+        #chkMenu{
+            display: none;
+        }
+
+        #menu{
+            position: fixed;
+            top: 65px;
+            left:0px;
+            width: 0px;
+            height:100vh;
+            background-color: #0A3378;
+            transition: all 500ms cubic-bezier(1,0,0,1);
+            transition-timing-function: cubic-bezier(4,0,0,2);
+            overflow-y: auto; !important;
+        }
+
+        #menu li{
+            list-style: none;
+            left:0px;
+            padding: 4px;
+            color:white;
+            cursor:pointer;
+            transition: all 300ms;
+            display:block;
+            width: 240px;
+        }
+
+        #menu li:hover{
+
+        }
+
+        #data-cif{
+            cursor:pointer;
+        }
+
+        #data-cif:hover{
+            background-color: #0A3378;
+        }
+
+        /**************************************** */
+        /** Grid **
+        /**************************************** */
+        .contenedor-grid{
+            position: relative;
+        }
+
+        .grid{
+            width: 100%;
+            display:none;
+            background-color: #ccc;
+            position: absolute;
+            top:-5px;
+            z-index: 1000;
+            grid-template-columns: repeat(4,1fr);
+            grid-template-rows: 1fr;
+            grid-template-areas: "categorias subcategorias subcategorias subcategorias subcategorias";
+        }
+
+        .grid.activado{
+            display: grid;
+        }
+
+
+        .modal-tooltip {
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        background: white;
+        border-radius: 8px;
+        transition: opacity 0.4s ease;
+        }
+
+        .modal-content {
+        background-color: #f9f9f9;
+        border-radius: 10px;
+        box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+
+        .modal-header {
+        background-color: #007bff;
+        color: white;
+        border-bottom: none;
+        }
+
+        .modal-footer {
+        border-top: none;
+        text-align: center;
+        }
+
+        .fila-activa {
+            background-color: #d1ecf1;
+            border-left: 4px solid #28a745;
+        }
+
+        .seleccionada {
+            background-color: #E6E6FA; /* Cambia el color de fondo de la fila seleccionada */
+        }
+
+        .select_recurso {
+            background-color: #efefef; /* Cambia el color de fondo de la fila seleccionada */
+        }
+
+        .selected_recurso {
+            background-color: #d6d6d6; /* Cambia el color de fondo de la fila seleccionada */
+        }
+
+        @keyframes  parpadeo {
+            0%   { opacity: 1; }
+            50%  { opacity: 0; }
+            100% { opacity: 1; }
+        }
+
+    </style>
+
+</head>
+
+
+<body>
+
+    
+    <div class="container-fluid">
+        <nav class="navbar fixed-top navbar navbar navbar-dark navbar-expand-md navigation-clean" style="background-color: #0a3378;">
+            
+            <div class="container-fluid">
+                <a class="navbar-brand" href="/"><img src="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/images/logo-xviagrupoeuropa-2-idg-1.png"></a><button class="navbar-toggler" data-toggle="collapse" data-target="#navcol-1"><span class="sr-only">Toggle navigation</span><span class="navbar-toggler-icon"></span></button>
+
+                <div class="collapse navbar-collapse" id="navcol-1">
+
+                <div id="menu" class="overflow-y: auto;">
+                    <ul>
+                        <li>Ventas</li>
+                            <ul>
+                                    <li>
+                                        <a class="" href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/ventas/clientespotenciales">
+                                            <i class="fa fa-diamond"></i> DON PERFECTO </a></li>
+
+                                    <li>
+                                        <a class="" href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/ventas/ofertas">
+                                            <i class=""></i> Ofertas </a></li>
+
+                                    <li>
+
+                                    <li>
+                                        <a class="" href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/multi_neo/buzones/solo-suscripcion/view">
+                                            <i class="fa fa-shopping-cart"></i> Oportunidades de Ventas </a></li>
+
+                                    <li>
+
+                                        <a class="" href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/ventas/presupuestos/emitidos">
+                                            <i class=""></i> Presupuestos </a></li>
+
+
+                                    <li>
+                                        <a class="" href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/ventas/facturas/emitidas">
+                                            <i class=""></i> Facturas </a></li>
+
+                                    <li>
+                                        <a class="" href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/clientes/gestion-clientes">
+                                        <i class="fa fa-address-card"></i> Clientes</a></li>
+
+                            </ul>
+                        <li>Inactivos</li>
+                            <ul>
+                                    <li>
+                                        <a class="" href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/clientes/inactivos">
+                                            <i class=""></i> Clientes - BAJA SERVICIO</a></li>
+                        </ul>
+                            <li>Renovaciones</li>
+                            <ul>
+                                    <li>
+                                        <a class="" href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/renovaciones/mesas">
+                                            <i class=""></i> Renov. Mesas </a></li>
+                            </ul>
+                            <li>Servicio</li>
+                                <ul>
+                                    <li>
+                                        <a class="" href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/control-alertas">
+                                            <i class="fa fa-globe" style="font-size:16px"></i> Control Alertas</a></li>
+                                    <li>
+
+                                    <li>
+                                        <a class="" href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/tramitacion/expedientes">
+                                            <i class="fa fa-briefcase"></i> Tramitación de expedientes</a></li>
+
+                                    <li>
+
+                                        <a class="" href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos?Estado=-1">
+                                            <i class="fa fa-institution"></i> Recursos Telemáticos</a></li>
+                                    <li>
+                                        <a class="" href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes">
+                                            <i class="fa fa-balance-scale"></i> Recursos Expedientes</a></li>
+                                </ul>
+                            <li>Actividades</li>
+                                <ul>
+                                    <li>
+                                        <a class="" href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/actividades/clientespotenciales">
+                                            <i class="fa fa-calendar-plus-o"></i> Activ. abiertas </a></li>
+                                </ul>
+
+                            <li>Configuración</li>
+                                <ul>
+                                    <li>
+                                        <a class="" href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/configuracion/plantillas/recursos">
+                                            <i class="fa fa-file-word-o"></i> Plantillas Recursos </a>
+                                    </li>
+
+                                    <li>
+                                        <a class="" href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/configuracion/televisores">
+                                            <i class="fa fa-television"></i> Televisores </a>
+                                    </li>
+
+                                    <li>
+                                        <a class="" href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/screen/sales/mostrar">
+                                            <i class="fa fa-desktop"></i> Ventas </a>
+                                    </li>
+
+                                    <li>
+                                        <a class="" href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/configuracion/televisores/ventas/objetivos/gestionar">
+                                            <i class="fa fa-line-chart"></i> Objetivos Comerciales </a>
+                                    </li>
+                                </ul>
+                            <li> MULTI_NEO</li>
+                                <ul>
+                                    <li>
+                                        <a class="" href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/multi_neo/buzones">
+                                            <i class="fa fa-server"></i> Buzones </a>
+                                    </li>
+
+                                    <li>
+                                        <a class="" href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/multi_ne/gestion/certificados">
+                                            <i class="fa fa-key"></i> Gestión de certificados </a>
+                                    </li>
+
+                                    <li>
+                                        <a class="" href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/multi_ne/gestion/sin-servicio">
+                                            <i class="fa fa-key"></i> Sin servicios contratados </a>
+                                    </li>
+
+                                    <li>
+                                        <a class="" href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/multi_ne/gestion/certificados/emailspredeterminado/sedes">
+                                            <i class="fa fa-key"></i> Emails predeterminado Sedes </a>
+                                    </li>
+
+                                </ul>
+                    </ul>
+
+                </div>
+
+                    
+                                        <ul >
+                        <li ><a  href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login"><i class="fa fa-user-circle" style="font-size:24px"></i> Iniciar sesión </a>
+                    </ul>
+                    
+
+                <ul class="nav navbar-nav ml-auto">
+                    <!--
+                        <li class="dropdown"><a class="dropdown-toggle nav-link dropdown-toggle" data-toggle="dropdown" aria-expanded="true" href="#"><i class="fa fa-question-circle-o" style="font-size:24px;color:red"></i>Web telemáticas</a>
+                            <div class="dropdown-menu" role="menu">
+                                <a class="dropdown-item" target="_blank self" role="presentation" href="https://orgtn.diba.cat/Home/seltramit">Diputación de Barcelona</a>
+                                <a class="dropdown-item" target="_blank" role="presentation" href="https://multestransit.gencat.cat/sctPagaments/AppJava/views/expedients/cerca.xhtml?set-locale=ca_ES">SERVEI CATALA DE TRANSIT</a>
+                                <a class="dropdown-item" target="_blank" role="presentation" href="https://www.agenciatributaria.gob.es/AEAT.sede/Inicio/Inicio.shtml">AGENCIA TRIBUTARIA</a>
+                            </div>
+                        </li>
+                    -->
+
+                    <!--
+                    <li class="dropdown"><a class="dropdown-toggle nav-link dropdown-toggle" data-toggle="dropdown" aria-expanded="true" href="#"><i class="fa fa-asterisk" style="font-size:24px"></i>Centralita</a>
+                        <div class="dropdown-menu" role="menu">
+                            <a class="dropdown-item" target="_blank self" role="presentation" href="#">Operadora</a>
+                            <a class="dropdown-item" target="_blank" role="presentation" href="#">Listado de extensiones</a>
+                        </div>
+                    </li>
+                    -->
+
+                    <!-- <li class="nav-item" role="presentation"><a class="nav-link " href="/"><i class="fa fa-home"></i> Inicio</i></a> -->
+                    <!-- <li class="nav-item" role="presentation"><a class="nav-link" href=" http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/clientes/gestion-clientes"><i class="fa fa-address-card-o"></i> Clientes</a></li> -->
+                    <!-- <li class="nav-item" role="presentation"><a class="nav-link" href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/Servicio/GruposFijos/GestionGruposFijos"><i class="fa fa-object-group"></i> Grupos Fijos</a></li> -->
+
+            
+                        <!--
+                        <li class="nav-item" role="presentation">
+                            <a class="nav-link" href="#">
+                            <i class="fa fa-question-circle-o disabled" style="font-size:24px;color:red"></i> Ayuda</a>
+                        </li>
+                        -->
+
+                </ul>
+            </div>
+    </div>
+    </nav>
+    </div>
+    <div class="contenidodiv container-fluid">
+        <p></p>
+
+<div class="container">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header"><i class="fa fa-user-circle" style="font-size:48px"></i> Usuario: <b>ACCESO AL SISTEMA</b></div>
+
+                <div class="card-body">
+                    <form method="POST" action="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login">
+                        <input type="hidden" name="_token" value="OljgndgeP3o4Gx2C9aWqBx1ixWwT5F3C8qWkjPXf">
+                        <div class="form-group row">
+                            <label for="email" class="col-md-4 col-form-label text-md-right">Correo local</label>
+
+                            <div class="col-md-6">
+                                <input id="email" type="email" class="form-control is-invalid" name="email" value="gvera@xvia-serviciojuridicos.com" required autofocus>
+
+                                                                    <span class="invalid-feedback" role="alert">
+                                        <strong>Estas credenciales no coinciden con nuestros registros.</strong>
+                                    </span>
+                                                            </div>
+                        </div>
+
+                        <div class="form-group row">
+                            <label for="password" class="col-md-4 col-form-label text-md-right">Contraseña</label>
+
+                            <div class="col-md-6">
+                                <input id="password" type="password" class="form-control" name="password" required>
+
+                                                            </div>
+                        </div>
+
+                        <div class="form-group row">
+                            <div class="col-md-6 offset-md-4">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="remember" id="remember" checked>
+
+                                    <label class="form-check-label" for="remember">
+                                        Recuérdame 
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-group row mb-0">
+                            <div class="col-md-8 offset-md-4">
+                                <button type="submit" class="btn btn-primary">
+                                    Iniciar sesión
+                                </button>
+
+                                                                    <a class="btn btn-link" href="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/password/reset">
+                                        ¿ Olvidaste tu contraseña ? 
+                                    </a>
+                                                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+    </div>
+    </div>
+    </div>
+
+    
+    
+</body>
+
+
+<!-- <script src="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/js/jquery-3.3.1.slim.min.js"></script> -->
+<script src="https://code.jquery.com/jquery-3.3.1.min.js"></script>
+
+
+<script src="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/js/popper.min.js"></script>
+<script src="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/js/bootstrap.min.js"></script>
+<script src="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/js/jquery.mask.min.js"></script>
+<script src="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/js/bootstrap-datepicker.min.js"></script>
+<script src="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/js/main.min.js"></script>
+
+<script src="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/js/adminlte.min.js"></script>
+
+<script src="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/vendor/midia/dropzone.js"></script><script src="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/vendor/midia/clipboard.js"></script><script src="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/vendor/midia/midia.js"></script>
+
+<script>
+$(document).ready(function () {
+    let startIndex = null; // Índice de la fila inicial
+
+    const filaID = $(this).attr('id');
+    localStorage.setItem('filaID', filaID);
+    var id = $(this).data('id');
+
+    ////////////////////////////////////////////////////////////////////////////
+    $("tbody.tabla-scroll").each(function () {
+        let tabla = $(this);
+        let tablaId = tabla.attr("id");
+        let scrollPosition = localStorage.getItem("tablaScroll_" + tablaId);
+
+        if (scrollPosition) {
+            tabla.scrollTop(scrollPosition);
+        }
+
+        tabla.on("scroll", function () {
+            localStorage.setItem("tablaScroll_" + tablaId, tabla.scrollTop());
+        });
+    });
+
+    // Resetear scroll al cambiar de página en la paginación
+    $(".pagination a").on("click", function () {
+        $("tbody.tabla-scroll").each(function () {
+            localStorage.setItem("tablaScroll_" + $(this).attr("id"), 0);
+            $(this).scrollTop(0);
+        });
+    });
+    //////////////////////////////////////////////////////////////////////////////
+
+    $('#recursos_pend tbody tr').on('click', function(event) {
+        const rows = $('#recursos_pend tbody tr'); // Todas las filas
+        const currentIndex = $(this).index(); // Índice de la fila actual
+
+        var idsSeleccionados=null;
+
+        if (event.ctrlKey) { // Detectar si se está manteniendo presionada la tecla Ctrl
+            if (startIndex === null) {
+                // Primer clic con Ctrl: almacenar el índice inicial
+                startIndex = currentIndex;
+                $(this).addClass('select_recurso');
+                $(this).addClass('selected_recurso');
+
+            } else {
+                // Segundo clic con Ctrl: seleccionar el rango
+                rows.slice(Math.min(startIndex, currentIndex), Math.max(startIndex, currentIndex) + 1)
+                    .addClass('selected_recurso');
+                startIndex = null; // Reiniciar el índice inicial
+
+                // Obtener los IDs de todas las filas con la clase "seleccionada"
+                var idsSeleccionados = $(".selected_recurso").map(function() {
+                    return $(this).attr("id");
+                }).get();
+
+                var ruta="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos/selRows";
+                $.ajax({
+                    url: ruta,
+                    method: 'POST',
+                    data: { ids: idsSeleccionados },
+                    headers: {'X-CSRF-TOKEN': $("meta[name='csrf-token']").attr('content')},
+                    success: function(response) {
+                        location.reload();
+                    },
+                    error: function(xhr) {
+                        console.log(xhr.status, xhr.responseText);
+                        alert('Error: ' + xhr.status);
+                    }
+
+                });
+
+            }
+        } else {
+            // Si Ctrl no está presionada, limpiar selección previa
+                startIndex = null;
+                $('#recursos_pend tbody tr').removeClass('selected_recurso');
+                $('#recursos_pend tbody tr').removeClass('select_recurso');
+                $('#recursos_pend tbody tr').removeClass('seleccionada');
+
+                $('.fila').removeClass('fila-activa'); // Quita el color de otras filas
+                $(this).addClass('fila-activa');       // Agrega el color a la fila clicada
+
+        }
+
+        if (filaID) {
+            const fila = $('#' + filaID);
+            if (fila.length) {
+                fila[0].scrollIntoView({ behavior: 'auto', block: 'nearest' }); // Enfoca la fila
+            }
+        }
+
+    });
+
+});
+
+
+    $('#AsignarA').on('show.bs.modal', function(event) {
+        var button = $(event.relatedTarget);
+        var recurso_id = button.data('id');
+        var sujeto_rec = button.data('suj_rec');
+        var numero_exp_rec = button.data('exp_rec');
+
+        var modal = $(this);
+
+        modal.find('.modal-body #recurso_id').val(recurso_id);
+        modal.find('.modal-body #id').val(recurso_id);
+
+        modal.find('.modal-body #sujeto_rec').val(sujeto_rec);
+        modal.find('.modal-body #numero_exp_rec').val(numero_exp_rec);
+
+    })
+
+    $('#Asignar').on('show.bs.modal', function(event) {
+        var button = $(event.relatedTarget);
+        var recurso_id = button.data('id');
+        var sujeto_rec = button.data('suj_rec');
+        var numero_exp_rec = button.data('exp_rec');
+
+        var modal = $(this);
+
+        modal.find('.modal-body #recurso_id').val(recurso_id);
+        modal.find('.modal-body #id').val(recurso_id);
+
+        modal.find('.modal-body #sujeto_rec').val(sujeto_rec);
+        modal.find('.modal-body #numero_exp_rec').val(numero_exp_rec);
+
+    })
+
+    $('#Completado').on('show.bs.modal', function(event) {
+        var button = $(event.relatedTarget);
+        var recurso_id = button.data('id');
+        var sujeto_rec = button.data('suj_rec');
+        var numero_exp_rec = button.data('exp_rec');
+
+        var modal = $(this);
+
+        modal.find('.modal-body #recurso_id').val(recurso_id);
+        modal.find('.modal-body #id').val(recurso_id);
+
+        modal.find('.modal-body #sujeto_rec').val(sujeto_rec);
+        modal.find('.modal-body #numero_exp_rec').val(numero_exp_rec);
+
+    })
+
+    $('#AvisoPor').on('show.bs.modal', function(event) {
+
+        var button = $(event.relatedTarget);
+        var recurso_id = button.data('id');
+        var Fecha_Lim = button.data('Fecha_Lim');
+
+        var modal = $(this);
+
+        modal.find('.modal-body #recurso_id').val(recurso_id);
+        modal.find('.modal-body #id').val(recurso_id);
+
+        modal.find('.modal-body #Fecha_Lim').val(Fecha_Lim);
+
+    })
+
+    $('#Eliminar').on('show.bs.modal', function(event) {
+
+        var button = $(event.relatedTarget);
+        var recurso_id = button.data('id');
+        var Fecha_Lim = button.data('Fecha_Lim');
+
+        var modal = $(this);
+
+        modal.find('.modal-body #recurso_id').val(recurso_id);
+        modal.find('.modal-body #id').val(recurso_id);
+
+        modal.find('.modal-body #Fecha_Lim').val(Fecha_Lim);
+
+    })
+
+    $('#Error_presup').on('show.bs.modal', function(event) {
+
+        var button = $(event.relatedTarget);
+        var presup_id = button.data('id');
+
+        var modal = $(this);
+
+        modal.find('.modal-body #presup_id').val(presup_id);
+
+    })
+
+    $('#chkMenu').click(function(){
+        if($(this).is(':checked')){
+            $("#menu").css('width','360px','overflow','scroll');
+        } else {
+            $("#menu").css('width','0px', 'overflow','hidden');
+
+        }
+    });
+
+    $('#onSelectall').click(function(){
+        var ruta="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/clientes/inactivos/carta/123/view";
+
+        var x = screen.width/2 - 740/2;
+        var y = screen.height/2 - 700/2;
+
+        window.open(ruta, '_blank', 'scrollbars=1,height=480,width=740,left='+x+',top='+y);
+
+  		return false;
+
+    });
+
+    $('.email').click(function(){
+        var email=$(".email").data("email")
+
+        var ruta="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/clientes/inactivos/carta";
+        var url=ruta+'/'+email+'/view';
+
+        var x = screen.width/2 - 1024/2;
+        var y = screen.height/2 - 550/2;
+
+        window.open(url, '_blank', 'scrollbars=1,height=550,width=1024,left='+x+',top='+y);
+
+  		return false;
+
+    });
+
+    $('.emailsend').click(function(){
+        var emailsend=$(".emailsend").data("emailsend")
+        var ruta="http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/clientes/inactivos/carta";
+        var url=ruta+"/"+emailsend+"/send";
+
+        alert(url);
+
+        /*
+        var x = screen.width/2 - 1024/2;
+        var y = screen.height/2 - 550/2;
+
+        window.open(url, '_blank', 'scrollbars=1,height=550,width=1024,left='+x+',top='+y);
+
+        */
+
+  		return false;
+
+    });
+
+/*
+    $('.datepicker').datepicker({
+            days: ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"],
+            daysShort: ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"],
+            format: 'dd/mm/yyyy',
+            startDate: '-3d'
+    });
+
+*/
+
+ $(".datepicker").datepicker({
+        closeText: 'Cerrar',
+        prevText: '<Ant',
+        nextText: 'Sig>',
+        currentText: 'Hoy',
+        monthNames: ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'],
+        monthNamesShort: ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'],
+        dayNames: ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'],
+        dayNamesShort: ['Dom', 'Lun', 'Mar', 'Mié', 'Juv', 'Vie', 'Sáb'],
+        dayNamesMin: ['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá'],
+        weekHeader: 'Sm',
+        format: 'dd/mm/yyyy',
+        firstDay: 1,
+        isRTL: false,
+        showMonthAfterYear: false,
+        yearSuffix: ''
+    });
+
+    $('.attachments-tooltip').on('click', function () {
+        const id = $(this).data('id');
+        const offset = $(this).offset();
+
+        const modal = $('#tooltipModelId');
+
+        modal.css({
+        top: offset.top - $(this).outerHeight()+28,
+        left: offset.left+8,
+        display: 'block'
+        });
+
+        $('#tooltipContent').html('Cargando...');
+
+        var ruta = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf-adjuntos";
+
+        $.ajax({
+            url: ruta,
+            method: 'POST',
+            data: { id: id },
+            headers: {'X-CSRF-TOKEN': $("meta[name='csrf-token']").attr('content')},
+            success: function(response) {
+                $('#tooltipContent').empty();
+                $('#tooltipContent').html(response.body_html);
+                $('#tooltipContent').fadeIn(500);
+            },
+            error: function(xhr) {
+                $('#tooltipContent').fadeOut(10);
+            }
+
+        });
+
+    });
+
+    $('.fila').on('click', function () {
+        $('.fila').removeClass('fila-activa'); // Quita el color de otras filas
+        $(this).addClass('fila-activa');       // Agrega el color a la fila clicada
+    });
+
+    $(document).on('click', function (event) {
+        const modal = $('#tooltipModelId');
+        const tooltipTrigger = $('.attachments-tooltip');
+
+        // Si el clic NO fue dentro del modal NI en el botón que lo activa
+        if (!modal.is(event.target) && modal.has(event.target).length === 0 &&
+            !tooltipTrigger.is(event.target) && tooltipTrigger.has(event.target).length === 0) {
+            modal.hide();
+        }
+
+    });
+
+
+    $('#select-all').on('change', function() {
+        var ruta = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/ventas/facturas/generar/select-all/traspasos-contables";
+
+        $('#procesando').fadeIn(150);
+
+        $.ajax({
+            url: ruta,
+            method: 'POST',
+            data: {
+                checked: $(this).is(':checked')
+            },
+            headers: {'X-CSRF-TOKEN': $("meta[name='csrf-token']").attr('content')},
+            success: function(response) {
+                location.reload();
+            },
+            error: function(xhr) {
+
+            }
+
+        });
+
+    });
+
+
+    // Escuchar cambios en los checkboxes
+    $('.factura-checkbox').on('change', function() {
+        var ruta = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/ventas/facturas/generar/seleccion/traspasos-contables";
+
+        $('#procesando').fadeIn(150);
+
+        $.ajax({
+            url: ruta,
+            method: 'POST',
+            data: {
+                idFactura: $(this).val(),
+                fechafactura: $(this).data('fecha'),
+                checked: $(this).is(':checked')
+            },
+            headers: {'X-CSRF-TOKEN': $("meta[name='csrf-token']").attr('content')},
+            success: function(response) {
+                location.reload();
+            },
+            error: function(xhr) {
+
+            }
+
+        });
+
+    });
+
+    $('.check-dia').on('change', function() {
+        var fecha = $(this).data('fecha');
+        var estado = $(this).is(':checked') ? 1 : 0; // 1 = seleccionado, 0 = deseleccionado
+
+        var ruta = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/ventas/facturas/generar/SeleccionPorFecha/traspasos-contables";
+
+        $('#procesando').fadeIn(150);
+
+
+        $.ajax({
+            url: ruta,
+            method: 'POST',
+            data: {
+                fecha: fecha,
+                estado: estado,
+            },
+            headers: {'X-CSRF-TOKEN': $("meta[name='csrf-token']").attr('content')},
+            success: function(response) {
+                location.reload();
+            },
+            error: function(xhr) {
+                alert('Error al actualizar selección, por fechas');
+            }
+
+        });
+
+
+    });
+
+    // Botón para enviar todas las seleccionadas
+    //    $('#traspasar-btn').on('click', function() {
+    //
+    //        window.location.href = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/ventas/facturas/generar/ejecutar/traspasos-contables";
+
+    //    });
+
+    $('#traspasar-btn').on('click', function() {
+    window.open("http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/ventas/facturas/generar/ejecutar/traspasos-contables", '_blank');
+    location.reload();
+    });
+
+</script>
+
+</html>

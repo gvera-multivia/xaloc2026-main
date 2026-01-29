@@ -1,0 +1,24 @@
+{
+    "configs": [
+        {
+            "site_id": "xaloc_girona",
+            "query_organisme": "%XALOC%",
+            "filtro_texp": "2,3",
+            "regex_expediente": "^\\d{4}/\\d{6}-MUL$",
+            "login_url": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login",
+            "recursos_url": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos",
+            "active": true,
+            "notes": "XALOC Girona - Multas de tráfico. Autenticación requerida con XVIA_EMAIL y XVIA_PASSWORD del .env"
+        },
+        {
+            "site_id": "madrid",
+            "query_organisme": "%MADRID%",
+            "filtro_texp": "2,3",
+            "regex_expediente": "^.*$",
+            "login_url": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login",
+            "recursos_url": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos",
+            "active": false,
+            "notes": "Pendiente de definir formato de expediente específico"
+        }
+    ]
+}

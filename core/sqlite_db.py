@@ -155,3 +155,68 @@ class SQLiteDatabase:
             raise
         finally:
             conn.close()
+
+    # ==========================================================================
+    # MÉTODOS PARA ORGANISMO_CONFIG
+    # ==========================================================================
+
+    def get_active_organismo_configs(self) -> list[Dict[str, Any]]:
+        """
+        Retorna todas las configuraciones de organismos activos.
+        
+        Returns:
+            Lista de dicts con: site_id, query_organisme, filtro_texp, 
+            regex_expediente, login_url, recursos_url
+        """
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT site_id, query_organisme, filtro_texp, 
+                       regex_expediente, login_url, recursos_url
+                FROM organismo_config
+                WHERE active = 1
+            """)
+            return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+    
+    def update_last_sync(self, site_id: str) -> None:
+        """Actualiza el timestamp de última sincronización."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE organismo_config
+                SET last_sync_at = ?, updated_at = ?
+                WHERE site_id = ?
+            """, (datetime.now().isoformat(), datetime.now().isoformat(), site_id))
+            conn.commit()
+        finally:
+            conn.close()
+    
+    def insert_organismo_config(self, config: Dict[str, Any]) -> int:
+        """Inserta una nueva configuración de organismo."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO organismo_config (
+                    site_id, query_organisme, filtro_texp, 
+                    regex_expediente, login_url, recursos_url, active
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                config['site_id'],
+                config['query_organisme'],
+                config['filtro_texp'],
+                config['regex_expediente'],
+                config['login_url'],
+                config['recursos_url'],
+                config.get('active', 1)
+            ))
+            conn.commit()
+            return cursor.lastrowid
+        finally:
+            conn.close()
+
