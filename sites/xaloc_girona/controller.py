@@ -29,6 +29,8 @@ class XalocGironaController:
             "archivos_adjuntos": data.get("archivos_adjuntos") or data.get("archivos"),
             # NUEVO: Datos del mandatario
             "mandatario": data.get("mandatario"),
+            # NUEVO: Fase del procedimiento (para organizar justificantes)
+            "fase_procedimiento": data.get("fase_procedimiento"),
         }
 
     def create_target(
