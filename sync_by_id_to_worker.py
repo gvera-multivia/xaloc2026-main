@@ -89,15 +89,17 @@ def _text_to_tinymce_html(text: str) -> str:
         out.append(f"<p>{b}</p>")
     return "".join(out)
 
-
 def get_motivos_por_fase(
     fase_raw: Any,
     expediente: str,
+    sujeto_recurso: str = "", 
     *,
     config_map: dict[str, Any],
     output: str = "text",
 ) -> str:
     expediente_txt = _clean_str(expediente)
+    # Forzamos MAYÚSCULAS para que quede bien en el documento legal
+    sujeto_txt = _clean_str(sujeto_recurso).upper() 
     fase_norm = normalize_text(fase_raw)
 
     selected: dict[str, Any] | None = None
@@ -109,27 +111,28 @@ def get_motivos_por_fase(
     if not selected:
         raise ValueError(f"No se encontró configuración para la fase: {fase_raw}")
 
+    # Extraemos y limpiamos los campos
     asunto = _clean_str(selected.get("asunto"))
     expone = _clean_str(selected.get("expone"))
-    solicita = _clean_str(selected.get("solicita")).replace("{expediente}", expediente_txt)
+    solicita = _clean_str(selected.get("solicita"))
+
+    # Función interna para limpiar etiquetas en bloque
+    def _rellenar(t: str) -> str:
+        return t.replace("{expediente}", expediente_txt).replace("{sujeto_recurso}", sujeto_txt)
+
+    asunto = _rellenar(asunto)
+    expone = _rellenar(expone)
+    solicita = _rellenar(solicita)
 
     if not (asunto and expone and solicita):
-        raise ValueError(f"Datos incompletos en config_motivos.json para la fase: {fase_raw}")
+        raise ValueError(f"Datos incompletos en el JSON para la fase: {fase_raw}")
 
-    # Construimos el texto con saltos de línea reales (\n)
-    # Usamos \n para un salto simple o \n\n para separar bloques
     text = f"ASUNTO: {asunto}\n\nEXPONE: {expone}\n\nSOLICITA: {solicita}"
 
-    # Si por alguna razón necesitas procesar saltos para un sistema que use HTML 
-    # pero NO quieres etiquetas <p>, podrías usar solo <br />, 
-    # pero para texto plano lo normal es devolver 'text'.
     if output == "html":
-        # Esta es una versión alternativa si el destino final es una web 
-        # pero no quieres párrafos, solo saltos de línea.
         return text.replace("\n", "<br />")
 
     return text
-
 
 FALLBACKS: dict[str, str] = {
     # Solo se permiten fallbacks declarados explícitamente aquí.
@@ -275,7 +278,7 @@ def _map_payload(
         "idRecurso": row.get("idRecurso"),
         "user_email": "INFO@XVIA-SERVICIOSJURIDICOS.COM",
         "denuncia_num": expediente,
-        "plate_number": _normalize_plate(row.get("matricula")),
+        "plate_number": _normalize_plate(row.get("matricula")) or FALLBACKS["Matricula"],
         "expediente_num": expediente,
         "sujeto_recurso": _clean_str(row.get("sujeto_recurso")),
         # OJO: aquí ya va HTML (si output="html"), para insertarlo como HTML en TinyMCE
@@ -489,12 +492,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         try:
             expediente = _clean_str(task_data["row"].get("Expedient"))
             fase_raw = task_data["row"].get("FaseProcedimiento")
+            sujeto_recurso = _clean_str(task_data["row"].get("sujeto_recurso"))
 
             # Motivos en HTML para TinyMCE (saltos visibles)
             motivos_html = get_motivos_por_fase(
                 fase_raw,
                 expediente,
                 config_map=motivos_config,
+                sujeto_recurso=sujeto_recurso,
                 output="text",
             )
 

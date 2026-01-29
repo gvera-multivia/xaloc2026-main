@@ -181,7 +181,7 @@ async def rellenar_formulario(page: Page, datos: DatosMulta) -> None:
     try:
         # Solo esperamos que el formulario esté presente, NO esperamos ningún campo específico
         # porque los IDs de campos cambian después de seleccionar "Representant de Tercers"
-        await page.wait_for_selector("form#formulario", state="attached", timeout=20000)
+        await page.wait_for_selector("form#formulario", state="attached", timeout=30000)
 
         # CAMBIO DE ORDEN: Rellenar sección de mandatario PRIMERO
         # Esto es crítico porque el formulario puede tener validaciones JS que ocultan
