@@ -66,6 +66,7 @@ class XalocGironaAutomation(BaseAutomation):
                 self.logger.info(f"✓ Justificante guardado en: {ruta_justificante}")
             except Exception as e:
                 self.logger.error(f"Error descargando justificante: {e}")
+                self.mark_nonfatal_issue()
                 # No fallar toda la tarea si solo falla la descarga del justificante
                 # El formulario ya fue enviado exitosamente
                 self.logger.warning("Continuando sin justificante descargado...")

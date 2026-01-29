@@ -381,6 +381,8 @@ async def descargar_y_guardar_justificante(page: Page, payload: dict) -> str:
     fase_procedimiento = payload.get("fase_procedimiento")
     if not fase_procedimiento:
         logger.warning("No se encontró 'fase_procedimiento' en el payload")
+    else:
+        logger.info(f"fase_procedimiento extraído del payload: '{fase_procedimiento}'")
     
     try:
         # 1. Esperar a que el iframe esté cargado
