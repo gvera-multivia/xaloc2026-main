@@ -1,4 +1,9 @@
 playwright
-pyautogui>=1.40.0
 python-dotenv
-pyautogui
+pyodbc
+pandas
+jinja2
+aiohttp
+requests
+openpyxl
+groq
