@@ -73,6 +73,27 @@ def client_identity_from_payload(payload: dict) -> ClientIdentity:
 
     raise RequiredClientDocumentsError("No se pudo inferir la identidad del cliente.")
 
+
+def client_identity_from_db(numclient: int, conn_str: str, sujeto_recurso: str | None = None) -> ClientIdentity:
+    """Extrae la identidad del cliente consultando SQL Server."""
+    info = get_client_info_from_db(numclient, conn_str)
+    if not info:
+        raise RequiredClientDocumentsError(f"No se encontró información en la DB para el cliente {numclient}")
+
+    nombrefiscal = (info.get("Nombrefiscal") or "").strip()
+    if nombrefiscal:
+        return ClientIdentity(is_company=True, sujeto_recurso=sujeto_recurso, empresa=nombrefiscal)
+
+    nombre = (info.get("Nombre") or "").strip()
+    ap1 = (info.get("Apellido1") or "").strip()
+    ap2 = (info.get("Apellido2") or "").strip()
+
+    if not (nombre and ap1):
+             raise RequiredClientDocumentsError(f"Datos de DB incompletos para cliente {numclient}")
+
+    return ClientIdentity(is_company=False, sujeto_recurso=sujeto_recurso,
+                          nombre=nombre, apellido1=ap1, apellido2=ap2)
+
 # --- Heurística de Selección y Puntuación ---
 
 def _calculate_file_score(path: Path, categories_found: list[str]) -> int:
@@ -382,11 +403,12 @@ async def build_required_client_documents_for_payload(
         if not auth_file:
             raise ValueError("No se pudo obtener autorización del cliente vía GESDOC") from e
         
-        # Reintentar obtener identidad (ahora debería funcionar)
+        # Reintentar obtener identidad (ahora probamos con la DB ya que el payload falló)
+        logger.info(f"Reintentando obtener identidad desde la base de datos para cliente {numclient}...")
         try:
-            client = client_identity_from_payload(payload)
-        except RequiredClientDocumentsError:
-            raise ValueError("Autorización obtenida pero aún no se puede inferir identidad") from e
+            client = client_identity_from_db(numclient, sqlserver_conn_str, sujeto_recurso=payload.get("sujeto_recurso"))
+        except RequiredClientDocumentsError as db_err:
+            raise ValueError(f"Autorización obtenida pero aún no se puede inferir identidad: {db_err}") from e
     
     # Resto de la lógica sin cambios
     base_path = os.getenv("CLIENT_DOCS_BASE_PATH") or r"\\SERVER-DOC\clientes"
