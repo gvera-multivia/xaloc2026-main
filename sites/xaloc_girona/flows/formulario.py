@@ -98,6 +98,21 @@ async def _rellenar_input_mayusculas(page: Page, selector: str, valor: str) -> N
     await page.wait_for_timeout(DELAY_MS)
 
 
+async def _seleccionar_modo_notificacion_email(page: Page) -> None:
+    # IMPORTANTE: hay 2 radios con el mismo id="modoNotificacion".
+    # Seleccionamos de forma inequívoca por name+value.
+    selector = "input[name='modoNotificacion'][value='E']"
+    radio = page.locator(selector).first
+
+    await radio.wait_for(state="visible", timeout=15000)
+    await radio.scroll_into_view_if_needed()
+    try:
+        await radio.check()
+    except Exception:
+        await radio.click()
+    await page.wait_for_timeout(DELAY_MS)
+
+
 async def _rellenar_persona_juridica(page: Page, m: DatosMandatario) -> None:
     logging.info("Tipo de persona: JURÍDICA")
     
@@ -194,6 +209,9 @@ async def rellenar_formulario(page: Page, datos: DatosMulta) -> None:
             await page.wait_for_timeout(1500)
 
         # Ahora rellenamos el resto de campos
+        logging.info("Seleccionando modo de notificación por Email...")
+        await _seleccionar_modo_notificacion_email(page)
+
         logging.info(f"Email: {datos.email}")
         await _rellenar_input(page, "#contact22", str(datos.email))
 
