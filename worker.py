@@ -44,37 +44,33 @@ def _call_with_supported_kwargs(fn, **kwargs):
 
 def apply_url_cert_config():
     if sys.platform != "win32":
-        logger.info("apply_url_cert_config: no es Windows; se omite.")
         return
 
-    # Cambiamos la extensión a .bat
     script_path = Path("url-cert-config.bat")
-    
     if not script_path.exists():
-        raise FileNotFoundError(f"No existe el archivo de configuración: {script_path.resolve()}")
+        logger.error("No se encontro url-cert-config.bat")
+        return
 
-    logger.info(f"Ejecutando script de certificados: {script_path.name}")
-
-    # Al ser .bat, lo ejecutamos directamente a través de shell=True
-    # Esto evita problemas con las comillas y las variables de entorno %CN%
     try:
+        # Ejecutamos con encoding utf-8 para coincidir con el chcp 65001 del bat
         completed = subprocess.run(
             [str(script_path.resolve())],
             capture_output=True,
             text=True,
-            shell=True, # Importante para archivos .bat
-            check=True  # Lanza excepción si el código de salida no es 0
+            shell=True,
+            encoding="utf-8", 
+            errors="replace"
         )
+
+        # Solo logueamos exito si el bat imprimio nuestra palabra clave
+        if completed.returncode == 0 and "EXITOSOS" in completed.stdout:
+            logger.info("Configuracion de certificados aplicada correctamente.")
+        else:
+            logger.error(f"Fallo en la configuracion. Error: {completed.stderr.strip()}")
+
+    except Exception as e:
+        logger.error(f"Error inesperado al aplicar certificados: {e}")
         
-        if completed.stdout:
-            logger.info(f"Salida: {completed.stdout.strip()}")
-
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Error al ejecutar el script (Código {e.returncode}): {e.stderr}")
-        raise RuntimeError(f"Fallo en la configuración de certificados.")
-
-    logger.info("Configuración de certificados aplicada correctamente.")
-    
 async def _download_document_and_attachments(
     *,
     payload: dict,
