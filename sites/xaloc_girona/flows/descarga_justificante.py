@@ -284,14 +284,19 @@ def _construir_ruta_recursos_telematicos(payload: dict, fase_procedimiento: Any 
     logger.info(f"Ruta RECURSOS TELEMATICOS: {ruta_recursos}")
     
     # Si se proporciona fase_procedimiento, buscar/crear subcarpeta específica
+    logger.info(f"DEBUG: fase_procedimiento recibido = '{fase_procedimiento}' (tipo: {type(fase_procedimiento).__name__})")
     if fase_procedimiento:
+        logger.info(f"DEBUG: Entrando en lógica de subcarpeta para fase_procedimiento='{fase_procedimiento}'")
         try:
             folder_name = _get_folder_name_from_fase(fase_procedimiento)
+            logger.info(f"DEBUG: Nombre de carpeta determinado: '{folder_name}'")
             ruta_subfolder = _find_or_create_subfolder(ruta_recursos, folder_name)
             logger.info(f"Ruta final con subcarpeta: {ruta_subfolder}")
             return ruta_subfolder
         except ValueError as e:
             logger.warning(f"No se pudo determinar subcarpeta: {e}. Usando carpeta base.")
+    else:
+        logger.warning(f"DEBUG: fase_procedimiento es falsy, usando carpeta base. Valor: '{fase_procedimiento}'")
     
     return ruta_recursos
 
