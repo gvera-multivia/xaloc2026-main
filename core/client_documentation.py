@@ -7,6 +7,7 @@ import subprocess
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
+from core.config_manager import config_manager
 
 logger = logging.getLogger(__name__)
 
@@ -250,7 +251,7 @@ def select_required_client_documents(
 
 def build_required_client_documents_for_payload(payload: dict, **kwargs) -> list[Path]:
     client = client_identity_from_payload(payload)
-    base_path = os.getenv("CLIENT_DOCS_BASE_PATH") or r"\\SERVER-DOC\clientes"
+    base_path = config_manager.paths.get("client_docs_base", os.getenv("CLIENT_DOCS_BASE_PATH") or r"\\SERVER-DOC\clientes")
     ruta = get_ruta_cliente_documentacion(client, base_path=base_path)
     selected = select_required_client_documents(
         ruta_docu=ruta,

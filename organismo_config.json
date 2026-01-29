@@ -1,0 +1,31 @@
+{
+  "login_url": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login",
+  "document_url_template": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf/{idRecurso}",
+  "attachment_url_template": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf-adjuntos/{id}",
+  "http_headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "es-ES,es;q=0.9",
+    "Referer": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login",
+    "Origin": "http://www.xvia-grupoeuropa.net",
+    "DNT": "1",
+    "Connection": "keep-alive"
+  },
+  "timeouts": {
+    "general": 30000,
+    "login": 60000,
+    "transicion": 30000,
+    "subida_archivo": 60000,
+    "delay_ms": 500,
+    "cert_popup_delay_ms": 2000,
+    "cert_popup_midload_delay_ms": 1600
+  },
+  "paths": {
+    "downloads": "tmp/downloads",
+    "attachments": "tmp/downloads/adjuntos",
+    "client_docs_base": "\\\\SERVER-DOC\\clientes"
+  },
+  "selectors": {
+     "login_csrf_token": "input[name=\"_token\"]"
+  }
+}
