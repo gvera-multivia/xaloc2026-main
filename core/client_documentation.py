@@ -12,13 +12,10 @@ logger = logging.getLogger(__name__)
 
 # --- Excepciones ---
 
-
 class RequiredClientDocumentsError(RuntimeError):
     """No se han podido localizar/adjuntar los documentos obligatorios del cliente."""
 
-
 # --- Modelos ---
-
 
 @dataclass(frozen=True)
 class ClientIdentity:
@@ -29,16 +26,13 @@ class ClientIdentity:
     apellido1: str | None = None
     apellido2: str | None = None
 
-
 @dataclass(frozen=True)
 class SelectedClientDocuments:
     files_to_upload: list[Path]
     covered_terms: list[str]
     missing_terms: list[str]
 
-
 # --- Lógica de Identidad y Rutas ---
-
 
 def client_identity_from_payload(payload: dict) -> ClientIdentity:
     """Extrae la identidad del cliente del payload (soporta varios formatos)."""
@@ -88,7 +82,6 @@ def client_identity_from_payload(payload: dict) -> ClientIdentity:
 
     raise RequiredClientDocumentsError("No se pudo inferir la identidad del cliente.")
 
-
 def get_ruta_cliente_documentacion(client: ClientIdentity, base_path: str | Path) -> Path:
     """Calcula la ruta base y busca carpetas de confianza."""
     base = Path(base_path)
@@ -134,9 +127,7 @@ def get_ruta_cliente_documentacion(client: ClientIdentity, base_path: str | Path
             return folder / subname
     return folder
 
-
 # --- Heurística de Selección y Puntuación ---
-
 
 def _calculate_file_score(path: Path, categories_found: list[str]) -> int:
     """
@@ -210,7 +201,6 @@ def _calculate_file_score(path: Path, categories_found: list[str]) -> int:
 
     return score
 
-
 def select_required_client_documents(
     *,
     ruta_docu: Path,
@@ -243,7 +233,7 @@ def select_required_client_documents(
     if is_company:
         process_cats.extend(["CIF", "ESCR"])
 
-    # No filtramos la lista inicial para permitir el relleno de huecos entre carpetas
+    # Obtenemos todos los archivos sin filtrar inicialmente para permitir el relleno de huecos (GAP-FILLING)
     all_files = [p for p in ruta_docu.rglob("*") if p.is_file()]
     buckets = defaultdict(list)
 
@@ -341,8 +331,8 @@ def select_required_client_documents(
 
     return SelectedClientDocuments(archivos_unicos, covered, missing)
 
-
 def build_required_client_documents_for_payload(payload: dict, **kwargs) -> list[Path]:
+    """API principal."""
     client = client_identity_from_payload(payload)
     base_path = os.getenv("CLIENT_DOCS_BASE_PATH") or r"\\SERVER-DOC\clientes"
     ruta = get_ruta_cliente_documentacion(client, base_path=base_path)
