@@ -56,14 +56,14 @@ def client_identity_from_payload(payload: dict) -> ClientIdentity:
             nombre = (mandatario.get("nombre") or "").strip()
             ap1 = (mandatario.get("apellido1") or "").strip()
             ap2 = (mandatario.get("apellido2") or "").strip()
-            if not (nombre and ap1 and ap2):
+            if not (nombre and ap1):
                 raise RequiredClientDocumentsError("Faltan datos completos para persona FÍSICA.")
             return ClientIdentity(
                 is_company=False,
                 sujeto_recurso=sujeto_recurso,
                 nombre=nombre,
                 apellido1=ap1,
-                apellido2=ap2,
+                apellido2=ap2 or '',
             )
 
     # Fallbacks de nombres directos
