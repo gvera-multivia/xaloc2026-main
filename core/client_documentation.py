@@ -18,6 +18,18 @@ from core.authorization_fetcher import (
     get_client_type_from_db
 )
 
+from core.gesdoc_auth import create_gesdoc_session, trigger_client_authorization, close_gesdoc_session
+from core.authorization_fetcher import (
+    find_authorization_in_tmp,
+    move_authorization_to_destinations,
+    get_client_type_from_db,
+    get_client_info_from_db
+)
+from core.client_paths import (
+    ClientIdentity,
+    get_ruta_cliente_documentacion
+)
+
 logger = logging.getLogger(__name__)
 
 # --- Excepciones ---
@@ -25,24 +37,7 @@ logger = logging.getLogger(__name__)
 class RequiredClientDocumentsError(RuntimeError):
     """No se han podido localizar/adjuntar los documentos obligatorios del cliente."""
 
-# --- Modelos ---
-
-@dataclass(frozen=True)
-class ClientIdentity:
-    is_company: bool
-    sujeto_recurso: str | None = None
-    empresa: str | None = None
-    nombre: str | None = None
-    apellido1: str | None = None
-    apellido2: str | None = None
-
-@dataclass(frozen=True)
-class SelectedClientDocuments:
-    files_to_upload: list[Path]
-    covered_terms: list[str]
-    missing_terms: list[str]
-
-# --- Lógica de Identidad y Rutas ---
+# --- Lógica de Identidad ---
 
 def client_identity_from_payload(payload: dict) -> ClientIdentity:
     """Extrae la identidad del cliente del payload."""
@@ -74,43 +69,9 @@ def client_identity_from_payload(payload: dict) -> ClientIdentity:
     ap2 = (payload.get("cliente_apellido2") or payload.get("apellido2") or "").strip()
     if nombre and ap1 and ap2:
         return ClientIdentity(is_company=False, sujeto_recurso=sujeto_recurso,
-                              nombre=nombre, apellido1=ap1, apellido2=ap2)
+                               nombre=nombre, apellido1=ap1, apellido2=ap2)
 
     raise RequiredClientDocumentsError("No se pudo inferir la identidad del cliente.")
-
-def get_ruta_cliente_documentacion(client: ClientIdentity, base_path: str | Path) -> Path:
-    """Calcula la ruta base del cliente (RAÍZ)."""
-    base = Path(base_path)
-
-    def _get_alpha_folder(char: str) -> str:
-        char = char.upper()
-        if char in "0123456789": return "0-9 (NUMEROS)"
-        if char in "ABC": return "A-C"
-        if char in "DE": return "D-E"
-        if char in "FGHIJ": return "F-J"
-        if char in "KL": return "K-L"
-        if char in "MNO": return "M-O"
-        if char in "PQRSTU": return "P-U"
-        if char in "VWXYZ": return "V-Z"
-        return "Desconocido"
-
-    def _first_alnum_char(value: str) -> str:
-        for ch in (value or "").strip():
-            if ch.isalnum(): return ch
-        return (value or "").strip()[:1] or "?"
-
-    if client.sujeto_recurso:
-        folder_name = re.sub(r"\s+", " ", client.sujeto_recurso.strip()).rstrip("!.,?;:")
-        folder = base / _get_alpha_folder(_first_alnum_char(folder_name)) / folder_name
-    elif client.is_company:
-        name = client.empresa.strip().rstrip("!.,?;:")
-        folder = base / _get_alpha_folder(_first_alnum_char(name)) / name
-    else:
-        full_name = f"{client.nombre} {client.apellido1.upper()} {client.apellido2.upper()}".strip()
-        folder = base / _get_alpha_folder(_first_alnum_char(client.nombre)) / full_name
-
-    # DEVOLVEMOS SIEMPRE LA RAÍZ DEL CLIENTE para que select_required... pueda ver todas las carpetas
-    return folder
 
 # --- Heurística de Selección y Puntuación ---
 
@@ -286,49 +247,59 @@ async def fetch_missing_authorization_via_gesdoc(
 ) -> Optional[Path]:
     """
     Obtiene autorización de cliente vía GESDOC cuando no está disponible localmente.
-    
-    ⚠️ IMPORTANTE: Solo hace UN POST para evitar múltiples emails al cliente.
-    Los reintentos son solo para verificar si el archivo se generó.
-    
-    Flujo:
-    1. Determinar tipo de cliente desde SQL Server
-    2. Buscar en carpetas temporales (tmp_pdf)
-    3. Si no existe:
-       a. Login en GESDOC
-       b. POST búsqueda de cliente (UNA SOLA VEZ)
-       c. Polling para verificar generación del PDF (solo lectura)
-    4. Mover a carpetas correctas
-    
-    Args:
-        numclient: Número de cliente
-        expediente: Número de expediente
-        gesdoc_user: Usuario de GESDOC
-        gesdoc_pwd: Contraseña de GESDOC
-        sqlserver_conn_str: Connection string de SQL Server
-        max_polling_retries: Intentos máximos de polling (solo lectura)
-        polling_interval: Tiempo de espera entre intentos (segundos)
-    
-    Returns:
-        Path del archivo de autorización o None si falla
     """
     logger.info(f"Intentando obtener autorización para cliente {numclient} vía GESDOC")
     
-    # 1. Determinar tipo de cliente desde SQL Server
-    client_type = get_client_type_from_db(numclient, sqlserver_conn_str)
-    logger.info(f"Tipo de cliente: {client_type}")
+    # 1. Obtener identidad completa desde SQL Server
+    client_info = get_client_info_from_db(numclient, sqlserver_conn_str)
+    if not client_info:
+        logger.error(f"No se pudo obtener información de la DB para el cliente {numclient}")
+        return None
+        
+    client_type = "empresa" if client_info.get("Nombrefiscal") else "particular"
     
+    # Construimos la identidad
+    client = ClientIdentity(
+        is_company=(client_type == "empresa"),
+        empresa=client_info.get("Nombrefiscal"),
+        nombre=client_info.get("Nombre"),
+        apellido1=client_info.get("Apellido1"),
+        apellido2=client_info.get("Apellido2")
+    )
+    
+    # Calculamos rutas de destino
+    base_path = os.getenv("CLIENT_DOCS_BASE_PATH") or r"\\SERVER-DOC\clientes"
+    client_root = get_ruta_cliente_documentacion(client, base_path)
+    
+    # Las subcarpetas estándar son DOCUMENTACION y DOCUMENTACION RECURSOS (o similar)
+    # Buscamos subcarpetas que contengan estas palabras
+    dest_folders = []
+    if client_root.exists():
+        for sub in client_root.iterdir():
+            if sub.is_dir():
+                sub_name = sub.name.upper()
+                if "DOCUMENTA" in sub_name:
+                    dest_folders.append(sub)
+    
+    # Si no existen, las definimos por defecto dentro del cliente
+    if not dest_folders:
+        dest_folders = [
+            client_root / "DOCUMENTACION",
+            client_root / "DOCUMENTACION RECURSOS"
+        ]
+
     # 2. Buscar primero en tmp (puede que ya exista)
     auth_file = find_authorization_in_tmp(numclient, client_type)
     if auth_file:
         logger.info(f"✓ Autorización ya existe en tmp: {auth_file.name}")
-        if move_authorization_to_destinations(auth_file, expediente, numclient, client_type):
+        if move_authorization_to_destinations(auth_file, dest_folders):
             return auth_file
         else:
             logger.warning("No se pudo mover la autorización, pero existe")
             return auth_file
     
     # 3. No existe, generar vía GESDOC (UNA SOLA VEZ)
-    logger.warning(f"⚠️ Enviando solicitud de autorización a GESDOC (se enviará email al cliente)")
+    logger.warning(f"⚠️ Enviando solicitud de autorización a GESDOC para {numclient}")
     try:
         session = await create_gesdoc_session(gesdoc_user, gesdoc_pwd)
         success = await trigger_client_authorization(session, numclient)
@@ -341,7 +312,7 @@ async def fetch_missing_authorization_via_gesdoc(
         logger.error(f"Error en autenticación/trigger GESDOC: {e}")
         return None
     
-    # 4. Polling para verificar generación (SOLO LECTURA, sin más POSTs)
+    # 4. Polling para verificar generación
     for attempt in range(max_polling_retries):
         logger.info(f"Verificando generación del PDF (intento {attempt + 1}/{max_polling_retries})...")
         await asyncio.sleep(polling_interval)
@@ -349,11 +320,10 @@ async def fetch_missing_authorization_via_gesdoc(
         auth_file = find_authorization_in_tmp(numclient, client_type)
         if auth_file:
             logger.info(f"✓ Autorización generada: {auth_file.name}")
-            move_authorization_to_destinations(auth_file, expediente, numclient, client_type)
+            move_authorization_to_destinations(auth_file, dest_folders)
             return auth_file
     
-    logger.error(f"No se generó autorización después de {max_polling_retries} intentos de lectura")
-    logger.warning(f"⚠️ El cliente debería haber recibido un email. Verificar manualmente.")
+    logger.error(f"No se generó autorización después de {max_polling_retries} intentos")
     return None
 
 

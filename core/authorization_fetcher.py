@@ -25,38 +25,46 @@ DOCS_BASE_PATH = Path(r"\\SERVER-DOC\Documentacion")
 DOCS_RECURSOS_BASE_PATH = Path(r"\\SERVER-DOC\Documentacion recursos")
 
 
-def get_client_type_from_db(numclient: int, conn_str: str) -> Literal["particular", "empresa"]:
+def get_client_info_from_db(numclient: int, conn_str: str) -> dict:
     """
-    Determina el tipo de cliente consultando SQL Server.
-    
-    Consulta la columna Nombrefiscal de la tabla Clientes.Clientes:
-    - Si tiene valor (no NULL y no vacío) → Empresa
-    - Si es NULL o vacío → Particular
-    
-    Args:
-        numclient: Número de cliente
-        conn_str: Connection string de SQL Server
-    
-    Returns:
-        "empresa" si tiene Nombrefiscal, "particular" si no
+    Obtiene información completa del cliente desde SQL Server.
     """
     try:
         conn = pyodbc.connect(conn_str)
         cursor = conn.cursor()
-        cursor.execute("SELECT Nombrefiscal FROM Clientes.Clientes WHERE numclient = ?", (numclient,))
+        # Usamos la tabla 'clientes' y la columna 'numerocliente' tal como se ve en el resto del proyecto
+        query = """
+            SELECT Nombrefiscal, Nombre, Apellido1, Apellido2 
+            FROM clientes 
+            WHERE numerocliente = ?
+        """
+        cursor.execute(query, (numclient,))
         row = cursor.fetchone()
         conn.close()
         
-        if row and row[0] and str(row[0]).strip():
-            logger.debug(f"Cliente {numclient} es empresa (Nombrefiscal: {row[0]})")
-            return "empresa"
+        if row:
+            columns = [c[0] for c in cursor.description]
+            return dict(zip(columns, row))
         
-        logger.debug(f"Cliente {numclient} es particular")
-        return "particular"
+        return {}
     except Exception as e:
-        logger.error(f"Error determinando tipo de cliente {numclient}: {e}")
-        # Por defecto, asumir particular
+        logger.error(f"Error consultando datos del cliente {numclient}: {e}")
+        return {}
+
+
+def get_client_type_from_db(numclient: int, conn_str: str) -> Literal["particular", "empresa"]:
+    """
+    Determina el tipo de cliente consultando SQL Server.
+    """
+    info = get_client_info_from_db(numclient, conn_str)
+    if not info:
         return "particular"
+        
+    nombrefiscal = info.get("Nombrefiscal")
+    if nombrefiscal and str(nombrefiscal).strip():
+        return "empresa"
+    
+    return "particular"
 
 
 def find_authorization_in_tmp(
@@ -64,51 +72,38 @@ def find_authorization_in_tmp(
     client_type: Optional[Literal["particular", "empresa"]] = None
 ) -> Optional[Path]:
     """
-    Busca archivo de autorización en carpetas temporales.
+    Busca el archivo de autorización en las carpetas temporales de GESDOC.
     
-    Patrones de búsqueda:
+    Busca archivos que coincidan con el patrón:
     - Particular: Autoriza_Particular_*_{numclient}.pdf en \\server-doc\tmp_pdf
     - Empresa: Autoriza_Empresa_solo_*_{numclient}.pdf en \\server-doc\tmp_pdf\SEDES
-    
-    Args:
-        numclient: Número de cliente
-        client_type: Tipo de cliente. Si es None, busca ambos tipos.
-    
-    Returns:
-        Path del archivo encontrado o None
     """
-    logger.debug(f"Buscando autorización para cliente {numclient} (tipo: {client_type or 'ambos'})")
+    patterns = []
+    if client_type == "particular" or client_type is None:
+        patterns.append((TMP_PDF_PATH, f"Autoriza_Particular_*_{numclient}.pdf"))
     
-    search_patterns = []
-    
-    if client_type is None or client_type == "particular":
-        # Buscar en tmp_pdf (particulares)
-        pattern_particular = TMP_PDF_PATH / f"Autoriza_Particular_*_{numclient}.pdf"
-        search_patterns.append(("particular", pattern_particular))
-    
-    if client_type is None or client_type == "empresa":
-        # Buscar en tmp_pdf/SEDES (empresas)
-        pattern_empresa = TMP_PDF_SEDES_PATH / f"Autoriza_Empresa_solo_*_{numclient}.pdf"
-        search_patterns.append(("empresa", pattern_empresa))
-    
-    for tipo, pattern in search_patterns:
-        try:
-            matches = list(glob.glob(str(pattern)))
-            if matches:
-                # Si hay múltiples, tomar el más reciente
-                if len(matches) > 1:
-                    matches.sort(key=lambda x: os.path.getmtime(x), reverse=True)
-                    logger.warning(f"Múltiples autorizaciones encontradas para {numclient}, usando la más reciente")
-                
-                auth_file = Path(matches[0])
-                logger.info(f"✓ Autorización encontrada ({tipo}): {auth_file.name}")
-                return auth_file
-        except Exception as e:
-            logger.warning(f"Error buscando en {pattern}: {e}")
+    if client_type == "empresa" or client_type is None:
+        patterns.append((TMP_PDF_SEDES_PATH, f"Autoriza_Empresa_solo_*_{numclient}.pdf"))
+
+    found_files = []
+    for base_path, pattern in patterns:
+        if not base_path.exists():
+            logger.warning(f"Ruta temporal no accesible: {base_path}")
             continue
+            
+        matches = list(base_path.glob(pattern))
+        if matches:
+            found_files.extend(matches)
+
+    if not found_files:
+        return None
+
+    # Si hay varios, devolver el más reciente por fecha de modificación
+    found_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+    if len(found_files) > 1:
+        logger.warning(f"Múltiples autorizaciones encontradas para {numclient}, usando la más reciente")
     
-    logger.debug(f"No se encontró autorización para cliente {numclient}")
-    return None
+    return found_files[0]
 
 
 def get_client_folder_path(numclient: int) -> Optional[Path]:
@@ -160,69 +155,36 @@ def get_expediente_folder_path(expediente: str) -> Optional[Path]:
 
 
 def move_authorization_to_destinations(
-    source_path: Path,
-    expediente: str,
-    numclient: int,
-    client_type: Literal["particular", "empresa"]
+    auth_file: Path, 
+    dest_folders: List[Path]
 ) -> bool:
     """
-    Mueve el archivo de autorización a las carpetas de destino.
-    
-    Destinos:
-    1. \\SERVER-DOC\Documentacion recursos\{letra}\{expediente}\
-    2. \\SERVER-DOC\Documentacion\{letra}\{numclient}\ (si existe)
+    Mueve/Copia la autorización a las carpetas de destino especificadas.
     
     Args:
-        source_path: Path del archivo de autorización en tmp
-        expediente: Número de expediente
-        numclient: Número de cliente
-        client_type: Tipo de cliente (particular o empresa)
+        auth_file: Path del archivo origen
+        dest_folders: Lista de carpetas destino
     
     Returns:
-        True si se movió exitosamente a al menos un destino
+        True si se copió al menos a una carpeta
     """
-    if not source_path.exists():
-        logger.error(f"Archivo fuente no existe: {source_path}")
+    if not auth_file or not auth_file.exists():
+        logger.error(f"Archivo de origen no existe: {auth_file}")
         return False
-    
-    success = False
-    
-    # Nombre del archivo de destino (simplificado)
-    if client_type == "particular":
-        dest_filename = f"Autoriza_Particular_{numclient}.pdf"
-    else:
-        dest_filename = f"Autoriza_Empresa_{numclient}.pdf"
-    
-    # 1. Copiar a carpeta de expediente
-    exp_folder = get_expediente_folder_path(expediente)
-    if exp_folder:
+
+    success_count = 0
+    for folder in dest_folders:
         try:
-            dest_path = exp_folder / dest_filename
-            shutil.copy2(source_path, dest_path)
-            logger.info(f"✓ Autorización copiada a expediente: {dest_path}")
-            success = True
+            folder.mkdir(parents=True, exist_ok=True)
+            dest_path = folder / auth_file.name
+            
+            logger.info(f"Copiando {auth_file.name} a {folder}")
+            shutil.copy2(auth_file, dest_path)
+            success_count += 1
         except Exception as e:
-            logger.error(f"Error copiando a carpeta de expediente: {e}")
-    else:
-        logger.warning(f"No se encontró carpeta de expediente para: {expediente}")
-    
-    # 2. Copiar a carpeta de cliente (si existe)
-    client_folder = get_client_folder_path(numclient)
-    if client_folder:
-        try:
-            dest_path = client_folder / dest_filename
-            shutil.copy2(source_path, dest_path)
-            logger.info(f"✓ Autorización copiada a cliente: {dest_path}")
-            success = True
-        except Exception as e:
-            logger.error(f"Error copiando a carpeta de cliente: {e}")
-    else:
-        logger.debug(f"No se encontró carpeta de cliente para: {numclient}")
-    
-    # 3. Eliminar el archivo temporal (opcional)
-    # Por ahora lo dejamos para debugging
-    # try:
-    #     source_path.unlink()
+            logger.error(f"Error copiando a {folder}: {e}")
+
+    return success_count > 0
     #     logger.debug(f"Archivo temporal eliminado: {source_path}")
     # except Exception as e:
     #     logger.warning(f"No se pudo eliminar archivo temporal: {e}")
