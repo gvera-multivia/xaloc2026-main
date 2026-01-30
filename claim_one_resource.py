@@ -27,6 +27,7 @@ from dotenv import load_dotenv
 
 from core.sqlite_db import SQLiteDatabase
 from core.xvia_auth import create_authenticated_session_in_place, mark_resource_complete, COMPLETAR_URL
+from core.nt_expediente_fixer import is_nt_pattern, fix_nt_expediente
 
 
 # =============================================================================
@@ -187,7 +188,21 @@ def fetch_one_resource(config: dict, conn_str: str, authenticated_user: str = No
             usuario = str(recurso.get("UsuarioAsignado", "")).strip()
             
             # Validar formato de expediente
-            if expediente and regex.match(expediente):
+            expediente_valido = expediente and regex.match(expediente)
+            
+            # Fallback: intentar corregir expediente con formato NT/
+            if not expediente_valido and is_nt_pattern(expediente):
+                id_exp = recurso.get("idExp")
+                corrected = fix_nt_expediente(conn_str, id_exp)
+                if corrected and regex.match(corrected):
+                    logger.info(f"✅ Expediente NT/ corregido: '{expediente}' -> '{corrected}'")
+                    recurso["Expedient"] = corrected
+                    expediente = corrected
+                    expediente_valido = True
+                else:
+                    logger.warning(f"❌ Expediente NT/ no corregible: {expediente}")
+            
+            if expediente_valido:
                 # Si está en Estado 1, verificar que esté asignado al usuario actual
                 if estado == 1:
                     if not authenticated_user or usuario != authenticated_user:
@@ -265,7 +280,7 @@ async def claim_resource(session: aiohttp.ClientSession, id_recurso: int, dry_ru
         return False
 
 
-def verify_claim(id_recurso: int, conn_str: str) -> bool:
+def verify_claim(id_recurso: int, conn_str: str, authenticated_user: str) -> bool:
     """Verifica que el claim fue exitoso en SQL Server."""
     # Esperar un momento para que SQL Server refleje el cambio
     import time
@@ -283,17 +298,19 @@ def verify_claim(id_recurso: int, conn_str: str) -> bool:
             return False
             
         texp, estado, usuario = row
-        logger.info(f"Estado actual en DB: TExp={texp}, Estado={estado}, Usuario='{usuario}'")
+        usuario_db = str(usuario or "").strip()
+        nuestro_usuario = str(authenticated_user or "").strip()
+        
+        logger.info(f"Estado actual en DB: TExp={texp}, Estado={estado}, Usuario='{usuario_db}'")
         
         # Consideramos éxito si:
-        # 1. TExp cambió a 1 (lo que esperábamos originalmente)
-        # 2. O Estado ya no es 0 (pasó de Pendiente a En Proceso)
-        # 3. O ya tiene un usuario asignado
-        if estado > 0 or (usuario and str(usuario).strip()):
-            logger.info(f"✅ Claim verificado exitosamente (Estado={estado}, Usuario='{usuario}')")
+        # 1. El estado ha pasado a 1
+        # 2. Y el usuario asignado es el nuestro
+        if estado == 1 and usuario_db == nuestro_usuario:
+            logger.info(f"✅ Claim verificado exitosamente (Estado={estado}, Usuario='{usuario_db}')")
             return True
         else:
-            logger.warning(f"⚠️ El recurso sigue apareciendo como PENDIENTE (TExp={texp}, Estado={estado})")
+            logger.warning(f"⚠️ El claim NO se ha verificado correctamente (Estado={estado}, Usuario='{usuario_db}'). Esperado: Estado=1, Usuario='{nuestro_usuario}'")
             return False
     except Exception as e:
         logger.error(f"Error verificando claim: {e}")
@@ -634,7 +651,7 @@ async def main():
         # Verificar claim en SQL Server solo si lo acabamos de reclamar
         logger.info("")
         if not args.dry_run:
-            if not verify_claim(recurso["idRecurso"], conn_str):
+            if not verify_claim(recurso["idRecurso"], conn_str, authenticated_user):
                 logger.error("❌ Claim no verificado en SQL Server")
                 await session.close()
                 return 1

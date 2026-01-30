@@ -32,6 +32,7 @@ from dotenv import load_dotenv
 
 from core.sqlite_db import SQLiteDatabase
 from core.xvia_auth import create_authenticated_session_in_place
+from core.nt_expediente_fixer import is_nt_pattern, fix_nt_expediente
 
 
 # =============================================================================
@@ -113,6 +114,7 @@ class BrainOrchestrator:
         self.dry_run = dry_run
         self.logger = logger
         self.session: Optional[aiohttp.ClientSession] = None
+        self.authenticated_user: Optional[str] = None
         
     # -------------------------------------------------------------------------
     # PASO 0: Inicializar sesión autenticada
@@ -144,10 +146,35 @@ class BrainOrchestrator:
                 login_url
             )
             self.logger.info("✓ Sesión XVIA autenticada correctamente")
+            
+            # Obtener nombre del usuario autenticado
+            self.authenticated_user = await self.get_authenticated_username()
+            if self.authenticated_user:
+                self.logger.info(f"✓ Usuario autenticado: {self.authenticated_user}")
+            else:
+                self.logger.warning("⚠️ No se pudo obtener el nombre del usuario autenticado")
+                
         except Exception as e:
             await self.session.close()
             self.session = None
             raise RuntimeError(f"Error en autenticación: {e}")
+            
+    async def get_authenticated_username(self) -> Optional[str]:
+        """Obtiene el nombre del usuario autenticado desde la página de Xvia."""
+        if not self.session:
+            return None
+        try:
+            async with self.session.get("http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/home") as resp:
+                html = await resp.text()
+                # Buscar el nombre en el dropdown del usuario
+                match = re.search(r'<i class="fa fa-user-circle"[^>]*></i>\s*([^<]+)', html)
+                if match:
+                    username = match.group(1).strip()
+                    return username
+                return None
+        except Exception as e:
+            self.logger.error(f"Error obteniendo nombre de usuario: {e}")
+            return None
     
     async def close_session(self) -> None:
         """Cierra la sesión."""
@@ -196,9 +223,24 @@ class BrainOrchestrator:
                 if expediente and regex.match(expediente):
                     results.append(record)
                 else:
-                    self.logger.debug(
-                        f"Expediente descartado por regex: {expediente}"
-                    )
+                    # Fallback: intentar corregir expediente con formato NT/
+                    if is_nt_pattern(expediente):
+                        id_exp = record.get("idExp")
+                        corrected = fix_nt_expediente(self.sqlserver_conn_str, id_exp)
+                        if corrected and regex.match(corrected):
+                            self.logger.info(
+                                f"✅ Expediente NT/ corregido: '{expediente}' -> '{corrected}'"
+                            )
+                            record["Expedient"] = corrected
+                            results.append(record)
+                        else:
+                            self.logger.warning(
+                                f"❌ Expediente NT/ no corregible: {expediente}"
+                            )
+                    else:
+                        self.logger.debug(
+                            f"Expediente descartado por regex: {expediente}"
+                        )
             
             conn.close()
             self.logger.info(
@@ -302,12 +344,20 @@ class BrainOrchestrator:
             
             if row:
                 texp, estado, usuario = row
-                # El claim es válido si TExp es 1, 2 o 3 Y el estado o usuario han cambiado
-                # TExp 1 es el estándar, pero en Girona se mantiene en 2 o 3 al asignar.
-                is_claimed = (texp in (1, 2, 3)) or (estado > 0) or (usuario and str(usuario).strip())
+                # El claim es válido si el estado ha pasado a 1 y el usuario asignado es el nuestro
+                # TExp debe ser 2 o 3 (el 1 y 4 no los hacemos)
+                
+                # Normalizamos el usuario para comparar
+                usuario_db = str(usuario or "").strip()
+                nuestro_usuario = str(self.authenticated_user or "").strip()
+                
+                is_claimed = (estado == 1) and (usuario_db == nuestro_usuario)
                 
                 if is_claimed:
+                    self.logger.info(f"✅ Claim verificado: Estado={estado}, Usuario='{usuario_db}'")
                     return True
+                else:
+                    self.logger.warning(f"⚠️ Claim NO verificado: TExp={texp}, Estado={estado}, Usuario='{usuario_db}' (Esperado: Estado=1, Usuario='{nuestro_usuario}')")
             return False
         except Exception as e:
             self.logger.error(f"Error verificando claim en DB: {e}")
