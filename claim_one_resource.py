@@ -420,8 +420,8 @@ def load_config_motivos():
         return json.load(f)
 
 
-def get_motivos_por_fase(fase_raw, expediente: str, config_map: dict) -> str:
-    """Obtiene los motivos según la fase del procedimiento."""
+def get_motivos_por_fase(fase_raw, expediente: str, sujeto: str, config_map: dict) -> str:
+    """Obtiene los motivos según la fase del procedimiento y reemplaza placeholders."""
     import unicodedata
     
     def normalize_text(text) -> str:
@@ -433,7 +433,6 @@ def get_motivos_por_fase(fase_raw, expediente: str, config_map: dict) -> str:
         )
     
     fase_norm = normalize_text(fase_raw)
-    
     selected = None
     for key, value in (config_map or {}).items():
         if key and key in fase_norm:
@@ -443,9 +442,24 @@ def get_motivos_por_fase(fase_raw, expediente: str, config_map: dict) -> str:
     if not selected:
         raise ValueError(f"No se encontró configuración para la fase: {fase_raw}")
     
+    # Limpiamos y extraemos
     asunto = _clean_str(selected.get("asunto"))
     expone = _clean_str(selected.get("expone"))
-    solicita = _clean_str(selected.get("solicita")).replace("{expediente}", _clean_str(expediente))
+    solicita = _clean_str(selected.get("solicita"))
+
+    # Definimos los mapeos de reemplazo
+    # Nota: He añadido {numero_de_expediente} por si acaso, aunque en tu JSON sale {expediente}
+    reemplazos = {
+        "{expediente}": _clean_str(expediente),
+        "{numero_de_expediente}": _clean_str(expediente),
+        "{sujeto_recurso}": _clean_str(sujeto)
+    }
+
+    # Aplicamos los reemplazos en cadena a todos los campos
+    for tag, val in reemplazos.items():
+        asunto = asunto.replace(tag, val)
+        expone = expone.replace(tag, val)
+        solicita = solicita.replace(tag, val)
     
     if not (asunto and expone and solicita):
         raise ValueError(f"Datos incompletos en config_motivos.json para la fase: {fase_raw}")
@@ -466,10 +480,11 @@ def enqueue_task(db: SQLiteDatabase, site_id: str, recurso: dict, dry_run: bool 
         # Obtener motivos según la fase
         expediente = _clean_str(recurso.get("Expedient"))
         fase_raw = recurso.get("FaseProcedimiento")
-        
+        sujeto_raw = recurso.get("SujetoRecurso")
         motivos_text = get_motivos_por_fase(
             fase_raw,
             expediente,
+            sujeto_raw,
             config_map=motivos_config
         )
         
