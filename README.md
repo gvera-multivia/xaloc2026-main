@@ -10,6 +10,38 @@ Sitios registrados en `core/site_registry.py`:
 - `base_online`: login con certificado y ramificacion `P1`/`P2`/`P3` (rellena formularios + adjunta documentos), llega a pantalla "Signar i Presentar" **sin firmar/presentar**.
 - `madrid`: navegacion completa hasta el formulario + rellenado del formulario (pantalla de adjuntos alcanzada); **upload/envio pendientes**.
 
+## SQL Server (sync scripts)
+
+Para `sync_sqlserver_to_worker_queue.py`, la conexion a SQL Server puede venir por variables de entorno (recomendado si tu parser de `.env` se come `;`):
+
+- `SQLSERVER_DRIVER` (por defecto: `SQL Server`)
+- `SQLSERVER_SERVER`
+- `SQLSERVER_DATABASE`
+- `SQLSERVER_USERNAME`
+- `SQLSERVER_PASSWORD`
+- (opcional) `SQLSERVER_TRUSTED_CONNECTION=1`
+
+Alternativamente, puedes seguir usando `--connection-string` o `SQLSERVER_CONNECTION_STRING`.
+
+## Documentación obligatoria del cliente (AUT + identidad)
+
+El `worker.py` añade automáticamente la documentación del cliente a la lista de archivos a subir (para todos los sites). Busca los documentos en el servidor de documentación y, si es necesario, los sube como varios archivos o los fusiona en un único PDF.
+
+Reglas (por defecto):
+
+- Particular: `AUT` + (`DNI` o `NIE`)
+- Empresa: `AUT` + (`CIF` o `NIF`) + (`DNI` o `NIE`)
+  - `ESCR` es opcional (se puede forzar con `CLIENT_DOCS_REQUIRE_ESCR=1`)
+
+Variables de entorno (opcionales):
+
+- `REQUIRE_CLIENT_DOCS` (default `1`): `0/false` para desactivar.
+- `CLIENT_DOCS_BASE_PATH` (default `\\SERVER-DOC\clientes`): raíz de la carpeta de clientes.
+- `CLIENT_DOCS_MERGE` (default `0`): intenta fusionar varios documentos en un PDF.
+- `PDFTK_PATH` (default `C:\Program Files (x86)\PDFtk\bin\pdftk.exe`): ruta a PDFtk (si no existe, sube por separado).
+- `CLIENT_DOCS_OUTPUT_DIR` (default `tmp/client_docs`): salida de PDFs fusionados.
+- `CLIENT_DOCS_REQUIRE_ESCR` (default `0`): fuerza exigir `ESCR` para empresas.
+
 ## Requisitos
 
 - Python **3.10+** (se usan type hints `str | None`).
@@ -59,7 +91,7 @@ python main.py --site base_online --protocol P3 `
   --p3-file pdfs-prueba/test3.pdf
 ```
 
-Nota: en `madrid` y `xaloc_girona`, los datos "demo" se generan en sus controladores (`sites/<site>/controller.py`). `main.py` solo pasa argumentos que el controlador declare en su firma.
+Nota: los datos de ejecuciÃ³n deben venir de la cola (SQLite) o de un JSON (p.ej. encolado con `enqueue_task.py`). Los controladores no generan datos "demo" ni aplican valores por defecto.
 
 ## Como funciona por dentro (arquitectura)
 

@@ -64,7 +64,7 @@ class DireccionData:
     codigo_postal: str = ""
     municipio: str = ""
     provincia: str = ""      # Selector
-    pais: str = "ESPAÑA"     # Selector, default España
+    pais: str = ""     # Selector
 
 
 @dataclass
@@ -119,7 +119,7 @@ class InteresadoData:
     telefono: str = ""
     
     # Checkboxes de confirmación
-    confirmar_email: bool = True
+    confirmar_email: bool = False
     confirmar_sms: bool = False
 
 

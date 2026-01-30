@@ -117,7 +117,10 @@ def _formatear_adreca(detall: BaseOnlineAddressData) -> str:
     provincia = _upper_or_none(detall.provincia)
     pais = _upper_or_none(detall.pais)
 
-    es_espana = pais is None or pais in {"ESPAÑA", "ESPANA"}
+    if not pais:
+        raise ValueError("P1: 'pais' es obligatorio.")
+
+    es_espana = pais in {"ESPAÑA", "ESPANA"}
     if es_espana:
         if not municipio:
             raise ValueError("P1: 'municipio' es obligatorio para España.")
@@ -210,8 +213,10 @@ async def _rellenar_identificacion_conductor(page: Page, data: BaseOnlineP1Data)
     await page.wait_for_timeout(DELAY_MS)
     await page.wait_for_load_state("domcontentloaded")
 
-    archivos = data.archivos_adjuntos or [Path("pdfs-prueba/test1.pdf")]
-    await subir_archivos_por_modal(page, list(archivos), max_archivos=1)
+    archivos = list(data.archivos_adjuntos or [])
+    if not archivos:
+        raise ValueError("P1: falta 'archivos_adjuntos' (al menos 1 archivo).")
+    await subir_archivos_por_modal(page, archivos, max_archivos=1)
 
     await page.locator("input[type='submit'][name='form:j_id29'][value='Continuar']").first.click()
     await page.wait_for_timeout(DELAY_MS)

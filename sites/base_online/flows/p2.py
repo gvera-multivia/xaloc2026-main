@@ -58,8 +58,10 @@ async def ejecutar_p2(page: Page, data: BaseOnlineP2Data) -> None:
     await page.wait_for_load_state("domcontentloaded")
 
     logging.info("[P2] Subiendo documentos (paso 3)...")
-    archivos = data.archivos_adjuntos or [Path("pdfs-prueba/test1.pdf")]
-    await subir_archivos_por_modal(page, list(archivos), max_archivos=1)
+    archivos = list(data.archivos_adjuntos or [])
+    if not archivos:
+        raise ValueError("P2: falta 'archivos_adjuntos' (al menos 1 archivo).")
+    await subir_archivos_por_modal(page, archivos, max_archivos=1)
 
     await page.locator("input[type='submit'][name='form:j_id29'][value='Continuar']").first.click()
     await page.wait_for_timeout(DELAY_MS)

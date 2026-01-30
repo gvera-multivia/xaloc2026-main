@@ -4,3 +4,6 @@ pyodbc
 pandas
 jinja2
 aiohttp
+requests
+openpyxl
+groq
