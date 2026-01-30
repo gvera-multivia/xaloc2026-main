@@ -26,7 +26,7 @@ import pyodbc
 from dotenv import load_dotenv
 
 from core.sqlite_db import SQLiteDatabase
-from core.xvia_auth import create_authenticated_session_in_place
+from core.xvia_auth import create_authenticated_session_in_place, mark_resource_complete, COMPLETAR_URL
 
 
 # =============================================================================
@@ -297,6 +297,9 @@ def verify_claim(id_recurso: int, conn_str: str) -> bool:
             return False
     except Exception as e:
         logger.error(f"Error verificando claim: {e}")
+        return False
+
+
         return False
 
 

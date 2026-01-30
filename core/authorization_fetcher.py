@@ -169,27 +169,39 @@ def move_authorization_to_destinations(
         True si se copió al menos a una carpeta
     """
     if not auth_file or not auth_file.exists():
-        logger.error(f"Archivo de origen no existe: {auth_file}")
+        logger.error(f"❌ Archivo de origen no existe: {auth_file}")
         return False
 
     success_count = 0
     for folder in dest_folders:
         try:
+            # Asegurar que la carpeta existe
             folder.mkdir(parents=True, exist_ok=True)
+            if not folder.exists():
+                logger.error(f"❌ No se pudo crear/acceder a la carpeta destino: {folder}")
+                continue
+
             dest_path = folder / auth_file.name
             
-            logger.info(f"Copiando {auth_file.name} a {folder}")
+            logger.info(f"📂 Copiando {auth_file.name} a {folder}...")
             shutil.copy2(auth_file, dest_path)
-            success_count += 1
+            
+            # Verificación post-copia
+            if dest_path.exists():
+                size = dest_path.stat().st_size
+                logger.info(f"✅ Copiado con éxito: {dest_path} ({size} bytes)")
+                success_count += 1
+            else:
+                logger.error(f"❌ Error crítico: El archivo NO aparece en el destino tras la copia: {dest_path}")
+                
         except Exception as e:
-            logger.error(f"Error copiando a {folder}: {e}")
+            logger.error(f"❌ Error copiando a {folder}: {e}")
 
-    return success_count > 0
-    #     logger.debug(f"Archivo temporal eliminado: {source_path}")
-    # except Exception as e:
-    #     logger.warning(f"No se pudo eliminar archivo temporal: {e}")
+    if success_count > 0:
+        logger.info(f"🏁 Movimiento finalizado con {success_count} copias exitosas")
+        return True
     
-    return success
+    return False
 
 
 def verify_network_access() -> bool:
@@ -208,10 +220,14 @@ def verify_network_access() -> bool:
     
     all_accessible = True
     for path in paths_to_check:
-        if not path.exists():
-            logger.error(f"Ruta de red no accesible: {path}")
+        try:
+            if not path.exists():
+                logger.error(f"Ruta de red no accesible: {path}")
+                all_accessible = False
+            else:
+                logger.debug(f"✓ Ruta accesible: {path}")
+        except Exception as e:
+            logger.error(f"Error accediendo a {path}: {e}")
             all_accessible = False
-        else:
-            logger.debug(f"✓ Ruta accesible: {path}")
     
     return all_accessible

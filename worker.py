@@ -18,7 +18,7 @@ from core.site_registry import get_site, get_site_controller
 from core.validation import ValidationEngine, DiscrepancyReporter, DocumentDownloader
 from core.attachments import AttachmentDownloader, AttachmentInfo
 from core.client_documentation import RequiredClientDocumentsError, build_required_client_documents_for_payload
-from core.xvia_auth import create_authenticated_session_in_place
+from core.xvia_auth import create_authenticated_session_in_place, mark_resource_complete
 from core.sqlserver_utils import build_sqlserver_connection_string
 
 # Configuracion de URLs y Directorios
@@ -238,6 +238,18 @@ async def process_task(
             screenshot_path = await bot.ejecutar_flujo_completo(datos)
 
             logger.info(f"Tarea {task_id} completada. Screenshot: {screenshot_path}")
+            
+            # --- NUEVO: MARCAR COMO COMPLETADO EN XVIA ---
+            # Solo si no hubo incidencias "non-fatal" (ej: fallo al descargar justificante)
+            if not getattr(bot, "_exit_has_nonfatal_issues", False):
+                if payload.get("idRecurso"):
+                    logger.info(f"Intentando marcar recurso {payload['idRecurso']} como completado en la web...")
+                    success_mark = await mark_resource_complete(auth_session, payload)
+                    if not success_mark:
+                        logger.warning("No se pudo marcar como completado en la web, pero el trámite fue enviado.")
+            else:
+                logger.warning(f"Tarea finalizada con incidencias no fatales. NO se marcará como completado en la web.")
+
             if db is not None and task_id is not None:
                 db.update_task_status(task_id, "completed", screenshot=str(screenshot_path))
 
