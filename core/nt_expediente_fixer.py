@@ -133,9 +133,7 @@ def fix_nt_expediente(conn_str: str, id_exp: int) -> Optional[str]:
         
         logger.info(f"📝 Encontrados {count_row[0]} registros con formato NT/ para actualizar")
         
-        # PASO 3: Ejecutar los UPDATEs (dentro de una transacción)
-        cursor.execute("BEGIN TRANSACTION")
-        
+        # PASO 3: Ejecutar los UPDATEs
         try:
             # UPDATE expedientes
             cursor.execute("""
@@ -175,7 +173,8 @@ def fix_nt_expediente(conn_str: str, id_exp: int) -> Optional[str]:
             """, (nuevo_exp, id_exp, PATRON_NT9_SQL, PATRON_NT10_SQL))
             rows_pub = cursor.rowcount
             
-            cursor.execute("COMMIT")
+            # Confirmar transacción usando el método nativo de PyODBC
+            conn.commit()
             
             logger.info(
                 f"✅ Expediente corregido exitosamente: '{nuevo_exp}' "
@@ -187,7 +186,7 @@ def fix_nt_expediente(conn_str: str, id_exp: int) -> Optional[str]:
             return nuevo_exp
             
         except Exception as e:
-            cursor.execute("ROLLBACK")
+            conn.rollback()
             logger.error(f"❌ Error durante UPDATE, haciendo rollback: {e}")
             conn.close()
             return None
