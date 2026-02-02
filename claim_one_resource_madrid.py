@@ -18,6 +18,7 @@ import os
 import re
 import sys
 from datetime import datetime
+from decimal import Decimal
 
 import aiohttp
 import pyodbc
@@ -131,6 +132,14 @@ def build_sqlserver_connection_string() -> str:
 
 def _clean_str(value) -> str:
     return str(value).strip() if value is not None else ""
+
+def _convert_value(v):
+    """Convierte valores SQL Server a tipos JSON serializables."""
+    if isinstance(v, Decimal):
+        return float(v)
+    if v is None:
+        return None
+    return v
 
 def _inferir_tipo_via(domicilio: str) -> str:
     """Intenta extraer el tipo de vía (CL, AV, RONDA, etc.) de la calle."""
@@ -319,10 +328,10 @@ def build_madrid_payload(recurso: dict) -> dict:
     }
 
     return {
-        "idRecurso": recurso["idRecurso"],
-        "idExp": recurso["idExp"],
+        "idRecurso": _convert_value(recurso["idRecurso"]),
+        "idExp": _convert_value(recurso["idExp"]),
         "expediente": expediente,
-        "numclient": recurso["numclient"],
+        "numclient": _convert_value(recurso["numclient"]),
         "sujeto_recurso": _clean_str(recurso.get("SujetoRecurso")),
         "fase_procedimiento": _clean_str(recurso.get("FaseProcedimiento")),
         "matricula": _clean_str(recurso.get("matricula")),
