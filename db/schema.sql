@@ -29,3 +29,18 @@ CREATE TABLE IF NOT EXISTS organismo_config (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Tabla de cola de tareas pendientes de autorización externa (GESDOC)
+-- Estas tareas NO se procesan automáticamente, requieren autorización manual
+CREATE TABLE IF NOT EXISTS pending_authorization_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    site_id TEXT NOT NULL,              -- 'xaloc_girona', 'madrid', etc.
+    payload JSON NOT NULL,              -- Datos del trámite en JSON
+    authorization_type TEXT NOT NULL,   -- 'gesdoc', 'manual', etc.
+    reason TEXT,                        -- Motivo por el que requiere autorización
+    status TEXT DEFAULT 'pending',      -- 'pending', 'authorized', 'rejected', 'moved_to_queue'
+    authorized_by TEXT,                 -- Usuario que autorizó
+    authorized_at TIMESTAMP,            -- Fecha de autorización
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    notes TEXT                          -- Notas adicionales
+);
