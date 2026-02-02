@@ -145,6 +145,8 @@ async def process_task(
 ):
     task_label = str(task_id) if task_id is not None else "TEST"
     logger.info(f"Procesando tarea ID: {task_label} - Site: {site_id} - Protocol: {protocol}")
+    prev_keep_browser_open = os.getenv("XALOC_KEEP_BROWSER_OPEN")
+    prev_keep_tab_open = os.getenv("XALOC_KEEP_TAB_OPEN")
 
     try:
         if auth_session is None:
@@ -234,6 +236,10 @@ async def process_task(
 
         # 6. EJECUTAR LA AUTOMATIZACIÓN
         logger.info(f"Iniciando automatización para {site_id}...")
+        if site_id == "madrid":
+            os.environ["XALOC_KEEP_BROWSER_OPEN"] = "1"
+            os.environ["XALOC_KEEP_TAB_OPEN"] = "1"
+
         async with AutomationCls(config) as bot:
             screenshot_path = await bot.ejecutar_flujo_completo(datos)
 
@@ -241,14 +247,17 @@ async def process_task(
             
             # --- NUEVO: MARCAR COMO COMPLETADO EN XVIA ---
             # Solo si no hubo incidencias "non-fatal" (ej: fallo al descargar justificante)
-            if not getattr(bot, "_exit_has_nonfatal_issues", False):
+            if site_id != "madrid" and not getattr(bot, "_exit_has_nonfatal_issues", False):
                 if payload.get("idRecurso"):
                     logger.info(f"Intentando marcar recurso {payload['idRecurso']} como completado en la web...")
                     success_mark = await mark_resource_complete(auth_session, payload)
                     if not success_mark:
                         logger.warning("No se pudo marcar como completado en la web, pero el trámite fue enviado.")
             else:
-                logger.warning(f"Tarea finalizada con incidencias no fatales. NO se marcará como completado en la web.")
+                if site_id == "madrid":
+                    logger.info("Madrid: no se marca el recurso como completado en Xvia.")
+                else:
+                    logger.warning("Tarea finalizada con incidencias no fatales. NO se marcará como completado en la web.")
 
             if db is not None and task_id is not None:
                 db.update_task_status(task_id, "completed", screenshot=str(screenshot_path))
@@ -315,6 +324,14 @@ async def process_task(
             db.update_task_status(task_id, "failed", error=f"{error_type}: {error_msg}")
     
     finally:
+        if prev_keep_browser_open is None:
+            os.environ.pop("XALOC_KEEP_BROWSER_OPEN", None)
+        else:
+            os.environ["XALOC_KEEP_BROWSER_OPEN"] = prev_keep_browser_open
+        if prev_keep_tab_open is None:
+            os.environ.pop("XALOC_KEEP_TAB_OPEN", None)
+        else:
+            os.environ["XALOC_KEEP_TAB_OPEN"] = prev_keep_tab_open
         # Asegurar que siempre se registre el fin del procesamiento
         logger.info(f"Finalizando procesamiento de tarea {task_label}")
 

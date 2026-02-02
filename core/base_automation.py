@@ -189,6 +189,9 @@ class BaseAutomation:
     async def _stop_browser(self, *, success: bool) -> None:
         keep_open = os.getenv("XALOC_KEEP_BROWSER_OPEN") == "1"
         if keep_open:
+            if os.getenv("XALOC_KEEP_TAB_OPEN") == "1":
+                self.logger.info("PestaÃ±a y navegador mantenidos abiertos (XALOC_KEEP_TAB_OPEN=1)")
+                return
             if not success:
                 self.logger.info("Navegador NO cerrado (XALOC_KEEP_BROWSER_OPEN=1)")
                 return

@@ -217,7 +217,17 @@ def _split_street_and_number(domicilio: str) -> tuple[str, str]:
         return match.group(1).strip(" ,"), match.group(2).strip()
     return domicilio.strip(), ""
 
-def _parse_expediente(expediente: str) -> dict:
+def _inferir_prefijo_expediente(*, fase_raw: str, es_empresa: bool) -> str:
+    fase_norm = _normalize_text(fase_raw)
+    if "identificacion" in fase_norm:
+        return "911" if es_empresa else "912"
+    if "denuncia" in fase_norm:
+        return "911" if es_empresa else "912"
+    if "sancion" in fase_norm or "resolucion" in fase_norm:
+        return "931" if es_empresa else "935"
+    return "935"
+
+def _parse_expediente(expediente: str, *, fase_raw: str = "", es_empresa: bool = False) -> dict:
     exp = _clean_str(expediente).upper()
     m1 = re.match(r"^(?P<nnn>\d{3})/(?P<exp>\d{9})\.(?P<d>\d)$", exp)
     if m1:
@@ -237,10 +247,11 @@ def _parse_expediente(expediente: str) -> dict:
         }
     m3 = re.match(r"^(?P<exp>\d{9})\.(?P<d>\d)$", exp)
     if m3:
-        logger.warning("Expediente sin prefijo NNN ('%s'). Usando NNN=000.", exp)
+        prefijo = _inferir_prefijo_expediente(fase_raw=fase_raw, es_empresa=es_empresa)
+        logger.warning("Expediente sin prefijo NNN ('%s'). Usando NNN=%s.", exp, prefijo)
         return {
             "expediente_tipo": "opcion1",
-            "expediente_nnn": "000",
+            "expediente_nnn": prefijo,
             "expediente_eeeeeeeee": m3.group("exp"),
             "expediente_d": m3.group("d"),
         }
@@ -405,13 +416,14 @@ def build_madrid_payload(recurso: dict) -> dict:
     if not provincia_notif:
         provincia_notif = _clean_str(recurso.get("cliente_municipio")).upper()
 
+    fase_raw = _clean_str(recurso.get("FaseProcedimiento"))
     expone, solicita, naturaleza = _build_expone_solicita(
-        _clean_str(recurso.get("FaseProcedimiento")),
+        fase_raw,
         expediente,
         _clean_str(recurso.get("SujetoRecurso")),
     )
 
-    exp_parts = _parse_expediente(expediente)
+    exp_parts = _parse_expediente(expediente, fase_raw=fase_raw, es_empresa=bool(cif_empresa))
     user_phone = tel or movil
     inter_email_check = bool(_clean_str(recurso.get("cliente_email")))
     
