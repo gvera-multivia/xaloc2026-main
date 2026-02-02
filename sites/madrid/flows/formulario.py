@@ -254,8 +254,8 @@ async def ejecutar_formulario_madrid(
     
     inter = datos.interesado
     
-    # Teléfono (editable)
-    await _rellenar_input(page, config.interesado_telefono_selector, inter.telefono, "Teléfono interesado")
+    # Teléfono (editable) - NO RELLENAR para evitar duplicados
+    # await _rellenar_input(page, config.interesado_telefono_selector, inter.telefono, "Teléfono interesado")
     
     # Checkboxes de confirmación
     await _marcar_checkbox(page, config.interesado_check_email_selector, inter.confirmar_email, "Email interesado")

@@ -88,7 +88,8 @@ class MadridConfig(BaseConfig):
     # =========================================================================
     
     # Solo tocamos teléfono y checkboxes de confirmación dentro de la sección _id21:2
-    interesado_telefono_selector: str = "input[name*='_id21:2'].formula2_COMUNES_INTERESADO_TELEFONO"
+    # Nota: NO rellenamos este campo, solo está documentado
+    interesado_telefono_selector: str = "input[id*='_id21:2'][id*='_id28'][id*='_id31'][id*='_id35'].formula2_COMUNES_INTERESADO_TELEFONO"
     interesado_check_email_selector: str = "input[name*='_id21:2'].formula2_COMUNES_INTERESADO_CHECKEMAIL"
     interesado_check_sms_selector: str = "input[name*='_id21:2'].formula2_COMUNES_INTERESADO_CHECKSMS"
     
@@ -119,9 +120,9 @@ class MadridConfig(BaseConfig):
     representante_codpostal_selector: str = "input[name*='_id21:3'].formula2_COMUNES_REPRESENTANTE_CODPOSTAL"
     
     # Contacto (Email, Móvil, Teléfono)
-    representante_email_selector: str = "input[name*='_id21:3'].formula2_COMUNES_REPRESENTANTE_EMAIL"
-    representante_movil_selector: str = "input[name*='_id21:3'].formula2_COMUNES_REPRESENTANTE_MOVIL"
-    representante_telefono_selector: str = "input[name*='_id21:3'].formula2_COMUNES_REPRESENTANTE_TELEFONO"
+    representante_email_selector: str = "input[id*='_id21:3'][id*='_id28'][id*='_id31'][id*='_id35'].formula2_COMUNES_REPRESENTANTE_EMAIL"
+    representante_movil_selector: str = "input[id*='_id21:3'][id*='_id28:7'][id*='_id31:1'].formula2_COMUNES_REPRESENTANTE_MOVIL"
+    representante_telefono_selector: str = "input[id*='_id21:3'][id*='_id28'][id*='_id31'][id*='_id35'].formula2_COMUNES_REPRESENTANTE_TELEFONO"
     
     # Checkboxes de confirmación (Representante)
     representante_check_email_selector: str = "input[name*='_id21:3'].formula2_COMUNES_REPRESENTANTE_CHECKEMAIL"
@@ -158,9 +159,9 @@ class MadridConfig(BaseConfig):
     notificacion_codpostal_selector: str = "input[name*='_id21:5'].formula2_COMUNES_NOTIFICACION_CODPOSTAL"
     
     # Contacto
-    notificacion_email_selector: str = "input[name*='_id21:5'].formula2_COMUNES_NOTIFICACION_EMAIL"
-    notificacion_movil_selector: str = "input[name*='_id21:5'].formula2_COMUNES_NOTIFICACION_MOVIL"
-    notificacion_telefono_selector: str = "input[name*='_id21:5'].formula2_COMUNES_NOTIFICACION_TELEFONO"
+    notificacion_email_selector: str = "input[id*='_id21:5'][id*='_id28'][id*='_id31'][id*='_id35'].formula2_COMUNES_NOTIFICACION_EMAIL"
+    notificacion_movil_selector: str = "input[id*='_id21:5'][id*='_id28:9'][id*='_id31:1'].formula2_COMUNES_NOTIFICACION_MOVIL"
+    notificacion_telefono_selector: str = "input[id*='_id21:5'][id*='_id28:9'][id*='_id31:2'].formula2_COMUNES_NOTIFICACION_TELEFONO"
     
     # =========================================================================
     # FORMULARIO - Sección 6: Naturaleza del escrito
