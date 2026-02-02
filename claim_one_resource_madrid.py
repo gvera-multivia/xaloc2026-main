@@ -373,7 +373,7 @@ async def main():
         db = SQLiteDatabase("db/xaloc_database.db")
         
         if not args.dry_run:
-            task_id = db.insert_task("madrid_multas", None, payload)
+            task_id = db.insert_task("madrid", None, payload)
             logger.info(f"📥 Tarea {task_id} encolada para MADRID")
         else:
             logger.info(f"[DRY-RUN] Payload Madrid: {payload}")
