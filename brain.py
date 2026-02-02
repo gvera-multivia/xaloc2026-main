@@ -78,8 +78,18 @@ SELECT
     rs.Estado,
     rs.numclient,
     rs.SujetoRecurso,
-    rs.FaseProcedimiento
+    rs.FaseProcedimiento,
+    -- Campos para identificación del cliente (GESDOC check)
+    rs.Empresa,
+    rs.cif,
+    c.Nombrefiscal,
+    c.nifempresa,
+    c.nif AS cliente_nif,
+    c.Nombre AS cliente_nombre,
+    c.Apellido1 AS cliente_apellido1,
+    c.Apellido2 AS cliente_apellido2
 FROM Recursos.RecursosExp rs
+INNER JOIN clientes c ON rs.numclient = c.numerocliente
 WHERE rs.Organisme LIKE ?
   AND rs.TExp IN ({texp_list})
   AND rs.Estado = 0
@@ -356,6 +366,15 @@ class BrainOrchestrator:
     # -------------------------------------------------------------------------
     # PASO 4: Construir payload
     # -------------------------------------------------------------------------
+    def _convert_value(self, v):
+        """Convierte valores SQL Server a tipos JSON serializables."""
+        from decimal import Decimal
+        if isinstance(v, Decimal):
+            return float(v)
+        if v is None:
+            return None
+        return v
+    
     def build_payload(self, recurso: dict, config: dict) -> dict:
         """
         Construye el payload compatible con el worker.
@@ -363,13 +382,36 @@ class BrainOrchestrator:
         Este método debe mapear los campos de SQL Server a los campos
         que espera el worker (similar a sync_by_id_to_worker.py).
         """
+        # Determinar tipo de persona para el campo mandatario
+        empresa = (recurso.get("Empresa") or recurso.get("Nombrefiscal") or "").strip()
+        cif = (recurso.get("cif") or recurso.get("nifempresa") or "").strip()
+        
+        if empresa or cif:
+            mandatario = {
+                "tipo_persona": "JURIDICA",
+                "razon_social": empresa.upper()
+            }
+        else:
+            mandatario = {
+                "tipo_persona": "FISICA",
+                "nombre": (recurso.get("cliente_nombre") or "").strip().upper(),
+                "apellido1": (recurso.get("cliente_apellido1") or "").strip().upper(),
+                "apellido2": (recurso.get("cliente_apellido2") or "").strip().upper()
+            }
+        
         return {
-            "idRecurso": recurso["idRecurso"],
-            "idExp": recurso.get("idExp"),
-            "expediente": recurso["Expedient"],
-            "numclient": recurso.get("numclient"),
-            "sujeto_recurso": recurso.get("SujetoRecurso"),
-            "fase_procedimiento": recurso.get("FaseProcedimiento"),
+            "idRecurso": self._convert_value(recurso["idRecurso"]),
+            "idExp": self._convert_value(recurso.get("idExp")),
+            "expediente": (recurso.get("Expedient") or "").strip(),
+            "numclient": self._convert_value(recurso.get("numclient")),
+            "sujeto_recurso": (recurso.get("SujetoRecurso") or "").strip(),
+            "fase_procedimiento": (recurso.get("FaseProcedimiento") or "").strip(),
+            "mandatario": mandatario,
+            # Campos adicionales para identificación (usados por check_requires_gesdoc)
+            "empresa": empresa,
+            "cliente_nombre": (recurso.get("cliente_nombre") or "").strip(),
+            "cliente_apellido1": (recurso.get("cliente_apellido1") or "").strip(),
+            "cliente_apellido2": (recurso.get("cliente_apellido2") or "").strip(),
             "source": "brain_orchestrator",
             "claimed_at": datetime.now().isoformat()
         }
