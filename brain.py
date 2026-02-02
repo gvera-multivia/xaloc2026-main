@@ -432,17 +432,42 @@ class BrainOrchestrator:
             motivos_text = f"ASUNTO: Recurso expediente {expediente}\n\nEXPONE: ...\n\nSOLICITA: ..."
         
         # --- Construir mandatario ---
+        def _extraer_documento_control(documento: str) -> tuple:
+            doc_clean = documento.strip().upper()
+            if len(doc_clean) < 2:
+                return ("", "")
+            return (doc_clean[:-1], doc_clean[-1])
+        
+        def _detectar_tipo_documento(doc: str) -> str:
+            if not doc:
+                return "NIF"
+            doc = doc.strip().upper()
+            if re.match(r'^[A-Z]{3}[0-9]+', doc):
+                return "PS"
+            return "NIF"
+        
         empresa = _clean_str(recurso.get("Empresa") or recurso.get("Nombrefiscal")).upper()
         cif = _clean_str(recurso.get("cif") or recurso.get("nifempresa")).upper()
         
         if empresa or cif:
+            # Persona JURÍDICA
+            cif_doc, cif_ctrl = _extraer_documento_control(cif) if cif else ("", "")
             mandatario = {
                 "tipo_persona": "JURIDICA",
-                "razon_social": empresa
+                "razon_social": empresa,
+                "cif_documento": cif_doc,
+                "cif_control": cif_ctrl
             }
         else:
+            # Persona FÍSICA
+            nif = _clean_str(recurso.get("cliente_nif")).upper()
+            doc_num, doc_ctrl = _extraer_documento_control(nif) if nif else ("", "")
+            tipo_doc = _detectar_tipo_documento(nif)
             mandatario = {
                 "tipo_persona": "FISICA",
+                "tipo_doc": tipo_doc,
+                "doc_numero": doc_num,
+                "doc_control": doc_ctrl,
                 "nombre": _clean_str(recurso.get("cliente_nombre")).upper(),
                 "apellido1": _clean_str(recurso.get("cliente_apellido1")).upper(),
                 "apellido2": _clean_str(recurso.get("cliente_apellido2")).upper()
