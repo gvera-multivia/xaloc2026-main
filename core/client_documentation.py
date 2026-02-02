@@ -276,14 +276,28 @@ async def build_required_client_documents_for_payload(
     o si falta la autorización (AUT), intenta obtenerla vía GESDOC como fallback.
     """
     # Intentar obtener identidad del cliente
+    client: ClientIdentity | None = None
+    identity_error: Optional[Exception] = None
     try:
         client = client_identity_from_payload(payload)
     except RequiredClientDocumentsError as e:
-        # FALLBACK 1: No se puede inferir identidad → Intentar GESDOC
-        logger.warning(f"No se encontró identidad del cliente. Intentando GESDOC...")
-        client = await _fetch_and_rebuild_client_identity(
-            payload, gesdoc_user, gesdoc_pwd, sqlserver_conn_str, e
-        )
+        identity_error = e
+
+    if client is None:
+        numclient = payload.get("numclient")
+        if numclient and sqlserver_conn_str:
+            try:
+                client = client_identity_from_db(
+                    numclient,
+                    sqlserver_conn_str,
+                    sujeto_recurso=payload.get("sujeto_recurso")
+                )
+            except RequiredClientDocumentsError as e:
+                identity_error = e
+
+    if client is None:
+        # No se puede determinar identidad sin revisar rutas -> no usar GESDOC a?n
+        raise identity_error or RequiredClientDocumentsError("No se pudo inferir la identidad del cliente.")
     
     # Intentar seleccionar documentos
     base_path = os.getenv("CLIENT_DOCS_BASE_PATH") or r"\\SERVER-DOC\clientes"
