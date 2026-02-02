@@ -26,6 +26,7 @@ from dotenv import load_dotenv
 
 from core.sqlite_db import SQLiteDatabase
 from core.xvia_auth import create_authenticated_session_in_place
+from core.address_classifier import classify_address_with_ai, classify_address_fallback
 
 # =============================================================================
 # CONFIGURACIÓN
@@ -392,7 +393,7 @@ async def claim_resource(session: aiohttp.ClientSession, id_recurso: int, dry_ru
         logger.error(f"Error en claim: {e}")
         return False
 
-def build_madrid_payload(recurso: dict) -> dict:
+async def build_madrid_payload(recurso: dict) -> dict:
     """Construye el payload enriquecido para Madrid."""
     expediente = _clean_str(recurso.get("Expedient"))
     cif_empresa = _clean_str(recurso.get("cif"))
@@ -405,12 +406,51 @@ def build_madrid_payload(recurso: dict) -> dict:
         recurso.get("cliente_movil")
     )
     
-    domicilio = _clean_str(recurso.get("cliente_domicilio")).upper()
-    domicilio_nombre, domicilio_numero = _split_street_and_number(domicilio)
-    tipo_numeracion = "NUM"
-    if not domicilio_numero:
-        domicilio_numero = ""
-        tipo_numeracion = "S/N"
+    # CLASIFICACIÓN DE DIRECCIÓN CON IA
+    domicilio_raw = _clean_str(recurso.get("cliente_domicilio"))
+    poblacion = _clean_str(recurso.get("cliente_municipio"))
+    piso_db = _clean_str(recurso.get("cliente_planta"))
+    puerta_db = _clean_str(recurso.get("cliente_puerta"))
+    escalera_db = _clean_str(recurso.get("cliente_escalera"))
+    
+    # Intentar clasificación con IA
+    use_ai = os.getenv("GROQ_API_KEY") is not None
+    if use_ai:
+        try:
+            logger.info(f"[IA] Clasificando dirección con IA: '{domicilio_raw}'")
+            clasificacion = await classify_address_with_ai(
+                direccion_raw=domicilio_raw,
+                poblacion=poblacion,
+                piso=piso_db,
+                puerta=puerta_db
+            )
+            logger.info(f"[IA] Clasificación exitosa: tipo_via={clasificacion['tipo_via']}, calle={clasificacion['calle']}, numero={clasificacion['numero']}")
+            
+            # Usar clasificación IA
+            notif_tipo_via = clasificacion["tipo_via"]
+            notif_nombre_via = clasificacion["calle"].upper()
+            notif_numero = clasificacion["numero"]
+            notif_escalera = clasificacion["escalera"] or escalera_db.upper()
+            notif_planta = clasificacion["planta"] or piso_db.upper()
+            notif_puerta = clasificacion["puerta"] or puerta_db.upper()
+            
+        except Exception as e:
+            logger.warning(f"[IA] Falló clasificación IA, usando fallback: {e}")
+            use_ai = False
+    
+    if not use_ai:
+        # Fallback: usar lógica simple
+        logger.info("[FALLBACK] Usando clasificación fallback (sin IA)")
+        clasificacion = classify_address_fallback(domicilio_raw)
+        notif_tipo_via = clasificacion["tipo_via"]
+        notif_nombre_via = clasificacion["calle"].upper()
+        notif_numero = clasificacion["numero"]
+        notif_escalera = escalera_db.upper()
+        notif_planta = piso_db.upper()
+        notif_puerta = puerta_db.upper()
+    
+    # Determinar tipo de numeración
+    tipo_numeracion = "NUM" if notif_numero else "S/N"
 
     provincia_notif = _clean_str(recurso.get("cliente_provincia")).upper()
     if not provincia_notif:
@@ -461,10 +501,13 @@ def build_madrid_payload(recurso: dict) -> dict:
         "notif_pais": "ESPAÑA",
         "notif_provincia": provincia_notif,
         "notif_municipio": _clean_str(recurso.get("cliente_municipio")).upper(),
-        "notif_tipo_via": _inferir_tipo_via(domicilio),
-        "notif_nombre_via": domicilio_nombre.upper(),
+        "notif_tipo_via": notif_tipo_via,
+        "notif_nombre_via": notif_nombre_via,
         "notif_tipo_numeracion": tipo_numeracion,
-        "notif_numero": domicilio_numero,
+        "notif_numero": notif_numero,
+        "notif_escalera": notif_escalera,
+        "notif_planta": notif_planta,
+        "notif_puerta": notif_puerta,
         "notif_codigo_postal": _clean_str(recurso.get("cliente_cp")),
         "notif_email": "info@xvia-serviciosjuridicos.com",
         "notif_movil": movil or "",
@@ -505,7 +548,7 @@ async def main():
             logger.info(f"✅ Recurso {id_rec} reclamado vía POST")
         
         # Encolar en tramite_queue
-        payload = build_madrid_payload(recurso)
+        payload = await build_madrid_payload(recurso)
         db = SQLiteDatabase("db/xaloc_database.db")
         
         if not args.dry_run:
@@ -513,6 +556,7 @@ async def main():
             logger.info(f"📥 Tarea {task_id} encolada para MADRID")
         else:
             logger.info(f"[DRY-RUN] Payload Madrid: {payload}")
+
             
     finally:
         await session.close()
