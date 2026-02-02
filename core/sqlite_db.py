@@ -220,3 +220,185 @@ class SQLiteDatabase:
         finally:
             conn.close()
 
+    # ==========================================================================
+    # MÉTODOS PARA PENDING_AUTHORIZATION_QUEUE (GESDOC)
+    # ==========================================================================
+
+    def insert_pending_authorization(
+        self, 
+        site_id: str, 
+        payload: Dict[str, Any], 
+        authorization_type: str = "gesdoc",
+        reason: Optional[str] = None
+    ) -> int:
+        """
+        Inserta una tarea que requiere autorización externa antes de procesarse.
+        
+        Args:
+            site_id: ID del site (ej: 'xaloc_girona')
+            payload: Datos del trámite
+            authorization_type: Tipo de autorización ('gesdoc', 'manual', etc.)
+            reason: Motivo por el que requiere autorización
+        
+        Returns:
+            ID de la tarea insertada
+        """
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO pending_authorization_queue 
+                (site_id, payload, authorization_type, reason)
+                VALUES (?, ?, ?, ?)
+            """, (site_id, json.dumps(payload), authorization_type, reason))
+            conn.commit()
+            self.logger.info(f"Tarea añadida a pending_authorization_queue: {cursor.lastrowid} (tipo: {authorization_type})")
+            return cursor.lastrowid
+        except Exception as e:
+            self.logger.error(f"Error insertando tarea de autorización pendiente: {e}")
+            raise
+        finally:
+            conn.close()
+
+    def get_pending_authorizations(self, authorization_type: Optional[str] = None) -> list[Dict[str, Any]]:
+        """
+        Obtiene todas las tareas pendientes de autorización.
+        
+        Args:
+            authorization_type: Filtrar por tipo (ej: 'gesdoc'). None = todos.
+        
+        Returns:
+            Lista de tareas pendientes de autorización
+        """
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            if authorization_type:
+                cursor.execute("""
+                    SELECT id, site_id, payload, authorization_type, reason, 
+                           status, created_at, notes
+                    FROM pending_authorization_queue
+                    WHERE status = 'pending' AND authorization_type = ?
+                    ORDER BY created_at ASC
+                """, (authorization_type,))
+            else:
+                cursor.execute("""
+                    SELECT id, site_id, payload, authorization_type, reason, 
+                           status, created_at, notes
+                    FROM pending_authorization_queue
+                    WHERE status = 'pending'
+                    ORDER BY created_at ASC
+                """)
+            
+            results = []
+            for row in cursor.fetchall():
+                item = dict(row)
+                item['payload'] = json.loads(item['payload'])
+                results.append(item)
+            return results
+        finally:
+            conn.close()
+
+    def authorize_and_move_to_queue(self, pending_id: int, authorized_by: str = "system") -> Optional[int]:
+        """
+        Autoriza una tarea pendiente y la mueve a la cola principal (tramite_queue).
+        
+        Args:
+            pending_id: ID de la tarea en pending_authorization_queue
+            authorized_by: Usuario/sistema que autoriza
+        
+        Returns:
+            ID de la nueva tarea en tramite_queue, o None si falló
+        """
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            cursor.execute("BEGIN IMMEDIATE")
+            
+            # Obtener la tarea pendiente
+            cursor.execute("""
+                SELECT site_id, payload FROM pending_authorization_queue
+                WHERE id = ? AND status = 'pending'
+            """, (pending_id,))
+            row = cursor.fetchone()
+            
+            if not row:
+                self.logger.warning(f"Tarea pendiente {pending_id} no encontrada o ya procesada")
+                conn.rollback()
+                return None
+            
+            # Insertar en tramite_queue
+            cursor.execute("""
+                INSERT INTO tramite_queue (site_id, payload)
+                VALUES (?, ?)
+            """, (row['site_id'], row['payload']))
+            new_task_id = cursor.lastrowid
+            
+            # Actualizar estado en pending_authorization_queue
+            cursor.execute("""
+                UPDATE pending_authorization_queue
+                SET status = 'moved_to_queue',
+                    authorized_by = ?,
+                    authorized_at = ?
+                WHERE id = ?
+            """, (authorized_by, datetime.now().isoformat(), pending_id))
+            
+            conn.commit()
+            self.logger.info(f"Tarea {pending_id} autorizada y movida a tramite_queue como {new_task_id}")
+            return new_task_id
+            
+        except Exception as e:
+            self.logger.error(f"Error autorizando tarea {pending_id}: {e}")
+            conn.rollback()
+            return None
+        finally:
+            conn.close()
+
+    def reject_pending_authorization(self, pending_id: int, reason: str, rejected_by: str = "system") -> bool:
+        """
+        Rechaza una tarea pendiente de autorización.
+        
+        Args:
+            pending_id: ID de la tarea
+            reason: Motivo del rechazo
+            rejected_by: Usuario que rechaza
+        
+        Returns:
+            True si se rechazó correctamente
+        """
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE pending_authorization_queue
+                SET status = 'rejected',
+                    authorized_by = ?,
+                    authorized_at = ?,
+                    notes = ?
+                WHERE id = ? AND status = 'pending'
+            """, (rejected_by, datetime.now().isoformat(), reason, pending_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def count_pending_authorizations(self, authorization_type: Optional[str] = None) -> int:
+        """Cuenta las tareas pendientes de autorización."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            if authorization_type:
+                cursor.execute("""
+                    SELECT COUNT(*) FROM pending_authorization_queue
+                    WHERE status = 'pending' AND authorization_type = ?
+                """, (authorization_type,))
+            else:
+                cursor.execute("""
+                    SELECT COUNT(*) FROM pending_authorization_queue
+                    WHERE status = 'pending'
+                """)
+            return cursor.fetchone()[0]
+        finally:
+            conn.close()
