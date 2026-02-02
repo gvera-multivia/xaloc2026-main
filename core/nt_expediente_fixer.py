@@ -109,13 +109,13 @@ def fix_nt_expediente(conn_str: str, id_exp: int) -> Optional[str]:
         # PASO 2: Verificar que hay registros con formato NT/ para actualizar
         cursor.execute("""
             SELECT COUNT(*) FROM (
-                SELECT 1 FROM expedientes WHERE idexpediente = ? AND (numexpediente LIKE ? OR numexpediente LIKE ?)
+                SELECT 1 AS x FROM expedientes WHERE idexpediente = ? AND (numexpediente LIKE ? OR numexpediente LIKE ?)
                 UNION ALL
-                SELECT 1 FROM recursos.RecursosExp WHERE IdExp = ? AND (Expedient LIKE ? OR Expedient LIKE ?)
+                SELECT 1 AS x FROM recursos.RecursosExp WHERE IdExp = ? AND (Expedient LIKE ? OR Expedient LIKE ?)
                 UNION ALL
-                SELECT 1 FROM ListasPresentacion WHERE Idexpediente = ? AND (numexpediente LIKE ? OR numexpediente LIKE ?)
+                SELECT 1 AS x FROM ListasPresentacion WHERE Idexpediente = ? AND (numexpediente LIKE ? OR numexpediente LIKE ?)
                 UNION ALL
-                SELECT 1 FROM pubExp p JOIN recursos.RecursosExp r ON r.IdPublic = p.idpublic 
+                SELECT 1 AS x FROM pubExp p JOIN recursos.RecursosExp r ON r.IdPublic = p.idpublic 
                 WHERE r.IdExp = ? AND (p.Exp LIKE ? OR p.Exp LIKE ?)
             ) AS combinados
         """, (
