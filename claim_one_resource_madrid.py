@@ -407,7 +407,7 @@ def build_madrid_payload(recurso: dict) -> dict:
     
     domicilio = _clean_str(recurso.get("cliente_domicilio")).upper()
     domicilio_nombre, domicilio_numero = _split_street_and_number(domicilio)
-    tipo_numeracion = "NUMERO"
+    tipo_numeracion = "NUM"
     if not domicilio_numero:
         domicilio_numero = ""
         tipo_numeracion = "S/N"
@@ -430,7 +430,7 @@ def build_madrid_payload(recurso: dict) -> dict:
     # Representante (Fijo)
     representante = {
         "rep_tipo_via": "RONDA",
-        "rep_tipo_numeracion": "NUMERO",
+        "rep_tipo_numeracion": "NUM",
         "representative_city": "BARCELONA",
         "representative_province": "BARCELONA",
         "representative_country": "ESPAÑA",
@@ -466,9 +466,9 @@ def build_madrid_payload(recurso: dict) -> dict:
         "notif_tipo_numeracion": tipo_numeracion,
         "notif_numero": domicilio_numero,
         "notif_codigo_postal": _clean_str(recurso.get("cliente_cp")),
-        "notif_email": _clean_str(recurso.get("cliente_email")),
-        "notif_movil": movil,
-        "notif_telefono": tel,
+        "notif_email": "info@xvia-serviciosjuridicos.com",
+        "notif_movil": movil or "",
+        "notif_telefono": tel or "",
         **exp_parts,
         "naturaleza": naturaleza,
         "expone": expone,
