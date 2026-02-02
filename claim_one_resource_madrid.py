@@ -89,8 +89,8 @@ FROM Recursos.RecursosExp rs
 INNER JOIN clientes c ON rs.numclient = c.numerocliente
 INNER JOIN expedientes e ON rs.idExp = e.idexpediente
 LEFT JOIN attachments_resource_documents att ON rs.automatic_id = att.automatic_id
-WHERE (rs.Organisme = ' SUBDIRECCION GNAL GESTION MULTAS DE MADRID' 
-       OR rs.Organisme = 'MADRID, SUBDIRECCION GENERAL DE GESTION DE MULTAS')
+WHERE (rs.Organisme like '%SUBDIRECCION GNAL GESTION MULTAS DE MADRID%' 
+       OR rs.Organisme like '%MADRID, SUBDIRECCION GENERAL DE GESTION DE MULTAS%')
   AND rs.TExp IN ({texp_list})
   AND rs.Estado IN (0, 1)
   AND rs.Expedient IS NOT NULL
