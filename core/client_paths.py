@@ -3,6 +3,7 @@ Utilidades compartidas para el cálculo de rutas de clientes.
 """
 
 import re
+import unicodedata
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional
@@ -48,6 +49,17 @@ def get_client_folder_name(client: ClientIdentity) -> str:
         return f"{client.nombre} {client.apellido1.upper()} {client.apellido2.upper()}".strip()
 
 
+def normalize_client_folder_name(value: str) -> str:
+    """Normaliza el nombre para comparar rutas con diferencias menores."""
+    if value is None:
+        return ""
+    text = value.strip().upper().replace("_", " ")
+    text = unicodedata.normalize("NFD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = re.sub(r"[^\w\s]", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def get_ruta_cliente_documentacion(client: ClientIdentity, base_path: str | Path) -> Path:
     """Calcula la ruta base del cliente (RAÍZ)."""
     base = Path(base_path)
@@ -63,4 +75,22 @@ def get_ruta_cliente_documentacion(client: ClientIdentity, base_path: str | Path
     else:
         char_to_use = first_alnum_char(client.nombre)
         
-    return base / get_alpha_folder(char_to_use) / name
+    alpha_folder = get_alpha_folder(char_to_use)
+    candidate = base / alpha_folder / name
+    if candidate.exists():
+        return candidate
+
+    alpha_dir = base / alpha_folder
+    if not alpha_dir.exists():
+        return candidate
+
+    target_norm = normalize_client_folder_name(name)
+    matches = []
+    for sub in alpha_dir.iterdir():
+        if sub.is_dir() and normalize_client_folder_name(sub.name) == target_norm:
+            matches.append(sub)
+
+    if len(matches) == 1:
+        return matches[0]
+
+    return candidate
