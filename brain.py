@@ -87,9 +87,12 @@ SELECT
     c.nif AS cliente_nif,
     c.Nombre AS cliente_nombre,
     c.Apellido1 AS cliente_apellido1,
-    c.Apellido2 AS cliente_apellido2
+    c.Apellido2 AS cliente_apellido2,
+    -- Campo matrícula desde expedientes
+    e.matricula
 FROM Recursos.RecursosExp rs
 INNER JOIN clientes c ON rs.numclient = c.numerocliente
+INNER JOIN expedientes e ON rs.idExp = e.idexpediente
 WHERE rs.Organisme LIKE ?
   AND rs.TExp IN ({texp_list})
   AND rs.Estado = 0
@@ -378,40 +381,94 @@ class BrainOrchestrator:
     def build_payload(self, recurso: dict, config: dict) -> dict:
         """
         Construye el payload compatible con el worker.
-        
-        Este método debe mapear los campos de SQL Server a los campos
-        que espera el worker (similar a sync_by_id_to_worker.py).
+        Incluye todos los campos requeridos: email, denuncia_num, matricula, expediente_num, motivos.
         """
-        # Determinar tipo de persona para el campo mandatario
-        empresa = (recurso.get("Empresa") or recurso.get("Nombrefiscal") or "").strip()
-        cif = (recurso.get("cif") or recurso.get("nifempresa") or "").strip()
+        import json
+        import re
+        import unicodedata
+        from pathlib import Path
+        
+        # --- Helper functions (copiadas de claim_one_resource.py) ---
+        def _clean_str(value) -> str:
+            return str(value).strip() if value is not None else ""
+        
+        def _normalize_plate(value) -> str:
+            cleaned = re.sub(r"\s+", "", _clean_str(value)).upper()
+            return cleaned if cleaned else "."
+        
+        def normalize_text(text) -> str:
+            if not text:
+                return ""
+            text = str(text).strip().lower()
+            return "".join(
+                c for c in unicodedata.normalize("NFD", text) if unicodedata.category(c) != "Mn"
+            )
+        
+        # --- Cargar config_motivos.json ---
+        config_path = Path("config_motivos.json")
+        if config_path.exists():
+            with open(config_path, "r", encoding="utf-8") as f:
+                motivos_config = json.load(f)
+        else:
+            motivos_config = {}
+        
+        # --- Obtener motivos según fase ---
+        expediente = _clean_str(recurso.get("Expedient"))
+        fase_raw = recurso.get("FaseProcedimiento")
+        sujeto_raw = _clean_str(recurso.get("SujetoRecurso")).upper()
+        fase_norm = normalize_text(fase_raw)
+        
+        motivos_text = ""
+        for key, value in (motivos_config or {}).items():
+            if key and key in fase_norm:
+                asunto = _clean_str(value.get("asunto")).replace("{expediente}", expediente).replace("{sujeto_recurso}", sujeto_raw)
+                expone = _clean_str(value.get("expone")).replace("{expediente}", expediente).replace("{sujeto_recurso}", sujeto_raw)
+                solicita = _clean_str(value.get("solicita")).replace("{expediente}", expediente).replace("{sujeto_recurso}", sujeto_raw)
+                motivos_text = f"ASUNTO: {asunto}\n\nEXPONE: {expone}\n\nSOLICITA: {solicita}"
+                break
+        
+        if not motivos_text:
+            self.logger.warning(f"No se encontró configuración de motivos para fase: {fase_raw}")
+            motivos_text = f"ASUNTO: Recurso expediente {expediente}\n\nEXPONE: ...\n\nSOLICITA: ..."
+        
+        # --- Construir mandatario ---
+        empresa = _clean_str(recurso.get("Empresa") or recurso.get("Nombrefiscal")).upper()
+        cif = _clean_str(recurso.get("cif") or recurso.get("nifempresa")).upper()
         
         if empresa or cif:
             mandatario = {
                 "tipo_persona": "JURIDICA",
-                "razon_social": empresa.upper()
+                "razon_social": empresa
             }
         else:
             mandatario = {
                 "tipo_persona": "FISICA",
-                "nombre": (recurso.get("cliente_nombre") or "").strip().upper(),
-                "apellido1": (recurso.get("cliente_apellido1") or "").strip().upper(),
-                "apellido2": (recurso.get("cliente_apellido2") or "").strip().upper()
+                "nombre": _clean_str(recurso.get("cliente_nombre")).upper(),
+                "apellido1": _clean_str(recurso.get("cliente_apellido1")).upper(),
+                "apellido2": _clean_str(recurso.get("cliente_apellido2")).upper()
             }
         
+        # --- Construir payload completo ---
         return {
+            # Campos requeridos por el worker
             "idRecurso": self._convert_value(recurso["idRecurso"]),
             "idExp": self._convert_value(recurso.get("idExp")),
-            "expediente": (recurso.get("Expedient") or "").strip(),
+            "user_email": "INFO@XVIA-SERVICIOSJURIDICOS.COM",
+            "denuncia_num": expediente,
+            "plate_number": _normalize_plate(recurso.get("matricula")),
+            "expediente_num": expediente,
+            "expediente": expediente,
             "numclient": self._convert_value(recurso.get("numclient")),
-            "sujeto_recurso": (recurso.get("SujetoRecurso") or "").strip(),
-            "fase_procedimiento": (recurso.get("FaseProcedimiento") or "").strip(),
+            "sujeto_recurso": sujeto_raw,
+            "fase_procedimiento": _clean_str(fase_raw),
+            "motivos": motivos_text,
             "mandatario": mandatario,
-            # Campos adicionales para identificación (usados por check_requires_gesdoc)
+            "adjuntos": [],
+            # Campos adicionales para identificación
             "empresa": empresa,
-            "cliente_nombre": (recurso.get("cliente_nombre") or "").strip(),
-            "cliente_apellido1": (recurso.get("cliente_apellido1") or "").strip(),
-            "cliente_apellido2": (recurso.get("cliente_apellido2") or "").strip(),
+            "cliente_nombre": _clean_str(recurso.get("cliente_nombre")),
+            "cliente_apellido1": _clean_str(recurso.get("cliente_apellido1")),
+            "cliente_apellido2": _clean_str(recurso.get("cliente_apellido2")),
             "source": "brain_orchestrator",
             "claimed_at": datetime.now().isoformat()
         }
