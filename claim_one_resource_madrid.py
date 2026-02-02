@@ -141,6 +141,15 @@ def _convert_value(v):
         return None
     return v
 
+def _normalize_text(text: str) -> str:
+    if not text:
+        return ""
+    text = str(text).strip().lower()
+    import unicodedata
+    return "".join(
+        c for c in unicodedata.normalize("NFD", text) if unicodedata.category(c) != "Mn"
+    )
+
 def _inferir_tipo_via(domicilio: str) -> str:
     """Intenta extraer el tipo de vía (CL, AV, RONDA, etc.) de la calle."""
     if not domicilio:
@@ -168,14 +177,16 @@ def _inferir_tipo_via(domicilio: str) -> str:
     return via_map.get(first, "CALLE")
 
 def _detectar_tipo_documento(doc: str) -> str:
-    """Detecta si es NIF, NIE o CIF."""
+    """Detecta si es NIF, NIE o PASAPORTE (Madrid solo acepta estos 3)."""
     if not doc:
         return "NIF"
     doc = doc.strip().upper()
-    if re.match(r'^[ABCDEFGHKLMNPQSV]', doc):
-        return "CIF"
     if re.match(r'^[XYZ]', doc):
         return "NIE"
+    # Pasaporte: 3 letras + nÃºmeros (heurÃ­stico)
+    if re.match(r'^[A-Z]{3}[0-9]+$', doc):
+        return "PASAPORTE"
+    # CIF u otros formatos => tratar como NIF para cumplir con el selector
     return "NIF"
 
 def _seleccionar_telefonos(tel1, tel2, movil) -> tuple:
@@ -197,6 +208,95 @@ def _seleccionar_telefonos(tel1, tel2, movil) -> tuple:
                 final_tel = clean_n
                 
     return final_movil[:9], final_tel[:9]
+
+def _split_street_and_number(domicilio: str) -> tuple[str, str]:
+    if not domicilio:
+        return "", ""
+    match = re.search(r"^(.*?)(?:\s+|,\s*)(\d+[A-Z]?)\s*$", domicilio)
+    if match:
+        return match.group(1).strip(" ,"), match.group(2).strip()
+    return domicilio.strip(), ""
+
+def _parse_expediente(expediente: str) -> dict:
+    exp = _clean_str(expediente).upper()
+    m1 = re.match(r"^(?P<nnn>\d{3})/(?P<exp>\d{9})\.(?P<d>\d)$", exp)
+    if m1:
+        return {
+            "expediente_tipo": "opcion1",
+            "expediente_nnn": m1.group("nnn"),
+            "expediente_eeeeeeeee": m1.group("exp"),
+            "expediente_d": m1.group("d"),
+        }
+    m2 = re.match(r"^(?P<lll>[A-Z]{3})/(?P<aaaa>\d{4})/(?P<exp>\d{9})$", exp)
+    if m2:
+        return {
+            "expediente_tipo": "opcion2",
+            "expediente_lll": m2.group("lll"),
+            "expediente_aaaa": m2.group("aaaa"),
+            "expediente_exp_num": m2.group("exp"),
+        }
+    m3 = re.match(r"^(?P<exp>\d{9})\.(?P<d>\d)$", exp)
+    if m3:
+        logger.warning("Expediente sin prefijo NNN ('%s'). Usando NNN=000.", exp)
+        return {
+            "expediente_tipo": "opcion1",
+            "expediente_nnn": "000",
+            "expediente_eeeeeeeee": m3.group("exp"),
+            "expediente_d": m3.group("d"),
+        }
+    logger.warning("Formato de expediente no reconocido: '%s'", exp)
+    return {
+        "expediente_tipo": "",
+        "expediente_nnn": "",
+        "expediente_eeeeeeeee": "",
+        "expediente_d": "",
+        "expediente_lll": "",
+        "expediente_aaaa": "",
+        "expediente_exp_num": "",
+    }
+
+def _load_motivos_config() -> dict:
+    try:
+        import json
+        from pathlib import Path
+        path = Path("config_motivos.json")
+        if not path.exists():
+            return {}
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning("No se pudo cargar config_motivos.json: %s", e)
+        return {}
+
+def _build_expone_solicita(fase_raw: str, expediente: str, sujeto: str) -> tuple[str, str, str]:
+    config = _load_motivos_config()
+    fase_norm = _normalize_text(fase_raw)
+    selected = None
+    selected_key = ""
+    for key, value in (config or {}).items():
+        if key and key in fase_norm:
+            selected = value
+            selected_key = key
+            break
+    if not selected:
+        exp = _clean_str(expediente)
+        expone = f"Se presenta escrito relativo al expediente {exp}."
+        solicita = f"Se tenga por presentado el escrito. Expediente: {exp}."
+        naturaleza = "A"
+        return expone, solicita, naturaleza
+
+    exp = _clean_str(expediente)
+    sujeto_txt = _clean_str(sujeto)
+    expone = _clean_str(selected.get("expone")).replace("{expediente}", exp).replace("{sujeto_recurso}", sujeto_txt)
+    solicita = _clean_str(selected.get("solicita")).replace("{expediente}", exp).replace("{sujeto_recurso}", sujeto_txt)
+
+    key_norm = _normalize_text(selected_key)
+    if "identificacion" in key_norm:
+        naturaleza = "I"
+    elif any(tag in key_norm for tag in ["denuncia", "propuesta", "subsanacion"]):
+        naturaleza = "A"
+    else:
+        naturaleza = "R"
+    return expone, solicita, naturaleza
 
 # =============================================================================
 # LÓGICA PRINCIPAL
@@ -294,37 +394,36 @@ def build_madrid_payload(recurso: dict) -> dict:
     )
     
     domicilio = _clean_str(recurso.get("cliente_domicilio")).upper()
-    
-    notificacion = {
-        "tipo_documento": _detectar_tipo_documento(nif),
-        "numero_documento": nif,
-        "nombre": _clean_str(recurso.get("cliente_nombre")).upper(),
-        "apellido1": _clean_str(recurso.get("cliente_apellido1")).upper(),
-        "apellido2": _clean_str(recurso.get("cliente_apellido2")).upper(),
-        "razon_social": _clean_str(recurso.get("cliente_razon_social")).upper(),
-        "provincia": _clean_str(recurso.get("cliente_provincia")).upper(),
-        "municipio": _clean_str(recurso.get("cliente_municipio")).upper(),
-        "tipo_via": _inferir_tipo_via(domicilio),
-        "domicilio": domicilio,
-        "escalera": _clean_str(recurso.get("cliente_escalera")).upper(),
-        "planta": _clean_str(recurso.get("cliente_planta")).upper(),
-        "puerta": _clean_str(recurso.get("cliente_puerta")).upper(),
-        "cp": _clean_str(recurso.get("cliente_cp")),
-        "email": _clean_str(recurso.get("cliente_email")),
-        "movil": movil,
-        "telefono": tel
-    }
+    domicilio_nombre, domicilio_numero = _split_street_and_number(domicilio)
+    if not domicilio_numero:
+        domicilio_numero = "S/N"
+
+    provincia_notif = _clean_str(recurso.get("cliente_provincia")).upper()
+    if not provincia_notif:
+        provincia_notif = _clean_str(recurso.get("cliente_municipio")).upper()
+
+    expone, solicita, naturaleza = _build_expone_solicita(
+        _clean_str(recurso.get("FaseProcedimiento")),
+        expediente,
+        _clean_str(recurso.get("SujetoRecurso")),
+    )
+
+    exp_parts = _parse_expediente(expediente)
+    user_phone = tel or movil
+    inter_email_check = bool(_clean_str(recurso.get("cliente_email")))
     
     # Representante (Fijo)
     representante = {
-        "municipio": "BARCELONA",
-        "tipo_via": "RONDA",
-        "domicilio": "GENERAL MITRE, DEL",
-        "tipo_numeracion": "NUMERO",
-        "numero": "169",
-        "cp": "08022",
-        "email": "info@xvia-serviciosjuridicos.com",
-        "movil": "722761154"
+        "rep_tipo_via": "RONDA",
+        "rep_tipo_numeracion": "NUMERO",
+        "representative_city": "BARCELONA",
+        "representative_province": "BARCELONA",
+        "representative_country": "ESPAÑA",
+        "representative_street": "GENERAL MITRE, DEL",
+        "representative_number": "169",
+        "representative_zip": "08022",
+        "representative_email": "info@xvia-serviciosjuridicos.com",
+        "representative_phone": "722761154",
     }
 
     return {
@@ -334,9 +433,31 @@ def build_madrid_payload(recurso: dict) -> dict:
         "numclient": _convert_value(recurso["numclient"]),
         "sujeto_recurso": _clean_str(recurso.get("SujetoRecurso")),
         "fase_procedimiento": _clean_str(recurso.get("FaseProcedimiento")),
-        "matricula": _clean_str(recurso.get("matricula")),
-        "notificacion": notificacion,
-        "representante": representante,
+        "plate_number": _clean_str(recurso.get("matricula")),
+        "user_phone": user_phone,
+        "inter_email_check": inter_email_check,
+        **representante,
+        "notif_tipo_documento": _detectar_tipo_documento(nif),
+        "notif_numero_documento": nif,
+        "notif_name": _clean_str(recurso.get("cliente_nombre")).upper(),
+        "notif_surname1": _clean_str(recurso.get("cliente_apellido1")).upper(),
+        "notif_surname2": _clean_str(recurso.get("cliente_apellido2")).upper(),
+        "notif_razon_social": _clean_str(recurso.get("cliente_razon_social")).upper(),
+        "notif_pais": "ESPAÑA",
+        "notif_provincia": provincia_notif,
+        "notif_municipio": _clean_str(recurso.get("cliente_municipio")).upper(),
+        "notif_tipo_via": _inferir_tipo_via(domicilio),
+        "notif_nombre_via": domicilio_nombre.upper(),
+        "notif_tipo_numeracion": "NUMERO",
+        "notif_numero": domicilio_numero,
+        "notif_codigo_postal": _clean_str(recurso.get("cliente_cp")),
+        "notif_email": _clean_str(recurso.get("cliente_email")),
+        "notif_movil": movil,
+        "notif_telefono": tel,
+        **exp_parts,
+        "naturaleza": naturaleza,
+        "expone": expone,
+        "solicita": solicita,
         "source": "claim_one_resource_madrid",
         "claimed_at": datetime.now().isoformat()
     }
