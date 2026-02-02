@@ -274,28 +274,17 @@ class BrainOrchestrator:
             return False
         
         try:
-            # Obtener el token CSRF de la sesión actual
-            # El token está en las cookies después del login
-            csrf_token = None
-            for cookie in self.session.cookie_jar:
-                if cookie.key == "XSRF-TOKEN":
-                    csrf_token = cookie.value
-                    break
-            
-            # Si no está en cookies, obtenerlo de la página
-            if not csrf_token:
-                async with self.session.get(
-                    "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos"
-                ) as resp:
-                    html = await resp.text()
-                    # Buscar el token en el HTML
-                    match = re.search(r'name="_token"\s+value="([^"]+)"', html)
-                    if match:
-                        csrf_token = match.group(1)
-            
-            if not csrf_token:
-                self.logger.error("No se pudo obtener el token CSRF")
-                return False
+            # Siempre obtener token CSRF fresco de la página antes de cada POST
+            async with self.session.get(
+                "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos"
+            ) as resp:
+                html = await resp.text()
+                # Buscar el token en el HTML
+                match = re.search(r'name="_token"\s+value="([^"]+)"', html)
+                if not match:
+                    self.logger.error("No se pudo obtener el token CSRF del HTML")
+                    return False
+                csrf_token = match.group(1)
             
             # Preparar datos del formulario
             form_data = {
