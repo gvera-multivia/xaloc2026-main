@@ -12,6 +12,8 @@ from typing import Any, Optional, Literal
 
 from dotenv import load_dotenv
 
+from core.client_documentation import check_requires_gesdoc
+
 try:
     import pyodbc  # type: ignore
 except Exception:  # pragma: no cover
@@ -336,6 +338,29 @@ def _insert_task(db_path: str, site_id: str, payload: dict[str, Any]) -> int:
         conn.close()
 
 
+def _insert_pending_authorization(
+    db_path: str, 
+    site_id: str, 
+    payload: dict[str, Any],
+    authorization_type: str = "gesdoc",
+    reason: str | None = None
+) -> int:
+    """Inserta en pending_authorization_queue para casos que requieren GESDOC."""
+    conn = sqlite3.connect(Path(db_path))
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO pending_authorization_queue 
+               (site_id, payload, authorization_type, reason) 
+               VALUES (?, ?, ?, ?)""",
+            (site_id, json.dumps(payload, ensure_ascii=False, default=str), authorization_type, reason),
+        )
+        conn.commit()
+        return int(cur.lastrowid)
+    finally:
+        conn.close()
+
+
 def _build_sqlserver_connection_string(
     *,
     direct: str | None,
@@ -509,7 +534,29 @@ def main(argv: Optional[list[str]] = None) -> int:
                 adjuntos_list=task_data["adjuntos"],
             )
 
-            # Insertar en SQLite
+            # Verificar si requiere GESDOC antes de encolar
+            requires_gesdoc, reason = check_requires_gesdoc(payload)
+            
+            if requires_gesdoc:
+                # Insertar en pending_authorization_queue
+                pending_id = _insert_pending_authorization(
+                    args.sqlite_db, args.site_id, payload, "gesdoc", reason
+                )
+                print("\n=== Sincronización por ID (PENDIENTE GESDOC) ===")
+                print(f"⚠️ idRecurso: {args.id}")
+                print(f"⚠️ Requiere GESDOC: {reason}")
+                print(f"⚠️ Site ID: {args.site_id}")
+                print(f"⚠️ Expediente: {expediente}")
+                print(f"⚠️ Tarea añadida a pending_authorization_queue con ID: {pending_id}")
+                print("\n⚠️ Este caso NO se procesará hasta que se autorice manualmente.")
+                
+                if args.verbose:
+                    print("\nPayload completo:")
+                    print(json.dumps(payload, indent=2, ensure_ascii=False))
+                
+                return 0
+            
+            # No requiere GESDOC - insertar en tramite_queue normal
             task_id = _insert_task(args.sqlite_db, args.site_id, payload)
 
             print("\n=== Sincronización por ID ===")

@@ -98,43 +98,63 @@ def client_identity_from_db(numclient: int, conn_str: str, sujeto_recurso: str |
 # --- Heurística de Selección y Puntuación ---
 
 def _calculate_file_score(path: Path, categories_found: list[str]) -> int:
-    """Calcula el score combinando Calidad (CF/SF) y Ubicación (RECURSOS)."""
+    """Calcula el score combinando Calidad (CF/SF) y Ubicación."""
     score = 0
     name = path.name.lower()
     path_upper = str(path).upper()
     ext = path.suffix.lower()
 
-    if ext == ".pdf": score += 50
-    elif ext in [".jpg", ".jpeg", ".png"]: score += 20
-    else: return -1000
+    # Filtro base de extensión
+    if ext == ".pdf": 
+        score += 50
+    elif ext in [".jpg", ".jpeg", ".png"]: 
+        score += 20
+    else: 
+        return -1000 # Formatos no deseados
 
     # 1. EL FACTOR DETERMINANTE: FIRMA (CF vs SF)
-    # Le damos el peso más alto: un CF en carpeta normal gana a un SF en Recursos
+    # Buscamos patrones que indiquen si está firmado o no
     es_cf = any(k in name for k in [" cf", "_cf", "-cf", "con firma", "confirma", " firmad", " firmat"])
     es_sf = any(k in name for k in [" sf", "_sf", "-sf", "sin firma", "sinfirma"])
 
-    if es_cf: score += 1500
-    elif es_sf: score -= 100
+    if es_cf: 
+        score += 1500  # Prioridad absoluta: el documento está firmado
+    elif es_sf: 
+        score += 200   # CAMBIO: Antes restaba 100. Ahora suma 200 para que sea 
+                       # el mejor candidato si no existe un CF.
 
-    # 2. PRIORIDAD DE UBICACIÓN (RECURSOS)
-    if "RECURSOS" in path_upper: score += 800
+    # 2. PRIORIDAD DE UBICACIÓN
+    # Valoramos más los archivos en carpetas específicas de gestión
+    if "RECURSOS" in path_upper: 
+        score += 800
+    elif "DOCUMENTA" in path_upper: 
+        score += 100 # Bonus por estar en la carpeta oficial de documentación
 
-    # 3. Especificidad vs Combos (AUTDNI)
-    if len(categories_found) > 1: score -= 45
-    elif len(categories_found) == 1: score += 35
+    # 3. Especificidad vs Documentos Combinados
+    # Premiamos archivos que son solo una cosa (ej: solo DNI) sobre combos (ej: AUTDNI)
+    if len(categories_found) > 1: 
+        score -= 45
+    elif len(categories_found) == 1: 
+        score += 35
 
-    # 4. Confianza
-    if any(k in name for k in ["original", "completo", "definitivo"]): score += 50
-    if "_solo_" in name or " solo " in name or name.endswith("solo.pdf"): score -= 15
-    if any(k in name for k in ["comp.", "comprimido", "_cmp", " cmp"]) or name.endswith("cmp.pdf"): score += 20
+    # 4. Palabras clave de confianza
+    if any(k in name for k in ["original", "completo", "definitivo"]): 
+        score += 50
+    if "_solo_" in name or " solo " in name or name.endswith("solo.pdf"): 
+        score -= 15
+    if any(k in name for k in ["comp.", "comprimido", "_cmp", " cmp"]) or name.endswith("cmp.pdf"): 
+        score += 20
 
-    # 5. Fragmentos
+    # 5. Tratamiento de Fragmentos (Anverso/Reverso)
     is_frag = any(k in name for k in ["anverso", "reverso", "cara", "part", "darrera", "trasera", "front", "back", "pag"])
     has_num = bool(re.search(r"[\s_-][0-9]{1,2}($|\.)", name))
-    if is_frag or has_num: score += 15
+    if is_frag or has_num: 
+        score += 15
 
-    # 6. Penalización
-    if any(k in name for k in ["old", "antiguo", "vencido", "copia"]): score -= 500
+    # 6. Penalización de obsolescencia
+    # Si el nombre indica que es viejo, lo hundimos en la puntuación
+    if any(k in name for k in ["old", "antiguo", "vencido", "copia"]): 
+        score -= 500
 
     return score
 
@@ -449,3 +469,65 @@ async def fetch_missing_authorization_via_gesdoc(
     
     logger.error(f"No se generó autorización después de {max_polling_retries} intentos")
     return None
+
+
+# =============================================================================
+# VERIFICACIÓN DE REQUISITOS GESDOC
+# =============================================================================
+
+def check_requires_gesdoc(payload: dict, base_path: str | None = None) -> tuple[bool, str | None]:
+    """
+    Verifica si un caso requiere autorización GESDOC antes de procesarse.
+    
+    Comprueba si existe AUT del cliente en la carpeta de documentación local.
+    Si no existe, el caso debe ir a pending_authorization_queue.
+    
+    Args:
+        payload: Datos del trámite (debe incluir datos del cliente)
+        base_path: Ruta base de clientes (default: CLIENT_DOCS_BASE_PATH o \\SERVER-DOC\clientes)
+    
+    Returns:
+        (requires_gesdoc: bool, reason: str | None)
+        - (False, None) si NO requiere GESDOC
+        - (True, "motivo") si SÍ requiere GESDOC
+    """
+    if base_path is None:
+        base_path = os.getenv("CLIENT_DOCS_BASE_PATH") or r"\\SERVER-DOC\clientes"
+    
+    # 1. Intentar obtener identidad del cliente
+    try:
+        client = client_identity_from_payload(payload)
+    except RequiredClientDocumentsError as e:
+        # No se puede determinar identidad → requiere GESDOC
+        return (True, f"No se pudo inferir identidad del cliente: {e}")
+    
+    # 2. Obtener ruta de documentación
+    try:
+        ruta_docu = get_ruta_cliente_documentacion(client, base_path=base_path)
+    except Exception as e:
+        return (True, f"Error obteniendo ruta de documentación: {e}")
+    
+    # 3. Verificar si la carpeta existe
+    if not ruta_docu.exists():
+        return (True, f"Carpeta de documentación no existe: {ruta_docu}")
+    
+    # 4. Buscar AUT en la carpeta (solo verificamos existencia, no seleccionamos)
+    aut_keywords = ["aut"]
+    all_files = [p for p in ruta_docu.rglob("*") if p.is_file()]
+    
+    # Filtrar solo archivos en carpetas DOCUMENTACION
+    doc_files = [f for f in all_files if "DOCUMENTA" in str(f).upper()]
+    
+    # Buscar cualquier archivo que contenga "aut" en el nombre
+    aut_files = [
+        f for f in doc_files 
+        if any(kw in f.name.lower() for kw in aut_keywords)
+        and f.suffix.lower() in [".pdf", ".jpg", ".jpeg", ".png"]
+    ]
+    
+    if not aut_files:
+        return (True, f"No se encontró autorización (AUT) en: {ruta_docu}")
+    
+    # Si hay AUT, no requiere GESDOC
+    logger.debug(f"AUT encontrado para el cliente: {aut_files[0].name}")
+    return (False, None)

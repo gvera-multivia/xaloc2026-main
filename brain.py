@@ -33,6 +33,7 @@ from dotenv import load_dotenv
 from core.sqlite_db import SQLiteDatabase
 from core.xvia_auth import create_authenticated_session_in_place
 from core.nt_expediente_fixer import is_nt_pattern, fix_nt_expediente
+from core.client_documentation import check_requires_gesdoc
 
 
 # =============================================================================
@@ -388,11 +389,34 @@ class BrainOrchestrator:
     # PASO 5: Encolar tarea
     # -------------------------------------------------------------------------
     def enqueue_locally(self, site_id: str, payload: dict) -> int:
-        """Inserta la tarea en tramite_queue de SQLite."""
+        """
+        Inserta la tarea en la cola apropiada.
+        
+        Si el caso requiere autorización GESDOC → pending_authorization_queue
+        Si NO requiere GESDOC → tramite_queue (procesamiento normal)
+        """
         if self.dry_run:
             self.logger.info(f"[DRY-RUN] Encolado simulado: {payload['expediente']}")
             return -1
         
+        # Verificar si requiere GESDOC antes de encolar
+        requires_gesdoc, reason = check_requires_gesdoc(payload)
+        
+        if requires_gesdoc:
+            # Enviar a cola de autorización pendiente
+            self.logger.warning(f"⏸️ Requiere GESDOC: {payload['expediente']} - {reason}")
+            pending_id = self.db.insert_pending_authorization(
+                site_id=site_id,
+                payload=payload,
+                authorization_type="gesdoc",
+                reason=reason
+            )
+            self.logger.info(
+                f"📋 Tarea {pending_id} en pending_authorization_queue: {payload['expediente']}"
+            )
+            return pending_id
+        
+        # No requiere GESDOC → cola normal
         task_id = self.db.insert_task(site_id, None, payload)
         self.logger.info(
             f"📥 Tarea {task_id} encolada: {payload['expediente']} -> {site_id}"
