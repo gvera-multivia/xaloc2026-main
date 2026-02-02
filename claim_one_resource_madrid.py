@@ -384,7 +384,8 @@ async def claim_resource(session: aiohttp.ClientSession, id_recurso: int, dry_ru
 def build_madrid_payload(recurso: dict) -> dict:
     """Construye el payload enriquecido para Madrid."""
     expediente = _clean_str(recurso.get("Expedient"))
-    nif = _clean_str(recurso.get("cliente_nif"))
+    cif_empresa = _clean_str(recurso.get("cif"))
+    nif = cif_empresa or _clean_str(recurso.get("cliente_nif"))
     
     # Notificación (Dinámico desde DB)
     movil, tel = _seleccionar_telefonos(
@@ -395,8 +396,10 @@ def build_madrid_payload(recurso: dict) -> dict:
     
     domicilio = _clean_str(recurso.get("cliente_domicilio")).upper()
     domicilio_nombre, domicilio_numero = _split_street_and_number(domicilio)
+    tipo_numeracion = "NUMERO"
     if not domicilio_numero:
-        domicilio_numero = "S/N"
+        domicilio_numero = ""
+        tipo_numeracion = "S/N"
 
     provincia_notif = _clean_str(recurso.get("cliente_provincia")).upper()
     if not provincia_notif:
@@ -448,7 +451,7 @@ def build_madrid_payload(recurso: dict) -> dict:
         "notif_municipio": _clean_str(recurso.get("cliente_municipio")).upper(),
         "notif_tipo_via": _inferir_tipo_via(domicilio),
         "notif_nombre_via": domicilio_nombre.upper(),
-        "notif_tipo_numeracion": "NUMERO",
+        "notif_tipo_numeracion": tipo_numeracion,
         "notif_numero": domicilio_numero,
         "notif_codigo_postal": _clean_str(recurso.get("cliente_cp")),
         "notif_email": _clean_str(recurso.get("cliente_email")),
