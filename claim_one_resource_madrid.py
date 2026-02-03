@@ -65,7 +65,7 @@ SELECT
     rs.SujetoRecurso,
     rs.FaseProcedimiento,
     rs.UsuarioAsignado,
-    e.matricula,
+    e.Matricula,
     rs.cif,
     -- Datos detallados del cliente para NOTIFICACIÓN
     c.nif AS cliente_nif,
