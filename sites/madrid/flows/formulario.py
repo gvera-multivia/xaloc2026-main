@@ -257,7 +257,7 @@ def _elemento_bdc_desde_selector(selector: str) -> str | None:
     Ej: ".formula2_COMUNES_NOTIFICACION_NOMBREVIA" -> "COMUNES_NOTIFICACION_NOMBREVIA"
     """
 
-    m = re.search(r"\\.formula2_([A-Z0-9_]+)", selector)
+    m = re.search(r"\.formula2_([A-Z0-9_]+)", selector)
     if not m:
         return None
     return m.group(1)
@@ -323,6 +323,8 @@ async def _rellenar_nombre_via_validado(
     *,
     tipo_via: str | None,
     nombre_campo: str,
+    strict: bool,
+    prevalidar_bdc: bool,
 ) -> bool:
     """
     Rellena NOMBREVIA sin inventar: consulta BDC y selecciona una sugerencia válida.
@@ -333,10 +335,9 @@ async def _rellenar_nombre_via_validado(
     if not valor_humano:
         return False
 
-    validar_sin_error = getattr(config, "strict_direccion", True)
-    prevalidar = getattr(config, "prevalidar_direccion_bdc", True)
+    validar_sin_error = strict
 
-    if not prevalidar:
+    if not prevalidar_bdc:
         return await _rellenar_input_con_autocomplete(
             page,
             selector,
@@ -627,6 +628,8 @@ async def ejecutar_formulario_madrid(
         rep_dir.nombre_via,
         tipo_via=rep_dir.tipo_via,
         nombre_campo="Nombre vía rep.",
+        strict=False,
+        prevalidar_bdc=False,
     )
     await _seleccionar_opcion(page, config.representante_tipo_num_selector, rep_dir.tipo_numeracion, "Tipo num. rep.")
     await _rellenar_input(page, config.representante_numero_selector, rep_dir.numero, "Número rep.")
@@ -707,6 +710,8 @@ async def ejecutar_formulario_madrid(
         notif_dir.nombre_via,
         tipo_via=notif_dir.tipo_via,
         nombre_campo="Nombre vía notif.",
+        strict=getattr(config, "strict_direccion", True),
+        prevalidar_bdc=getattr(config, "prevalidar_direccion_bdc", True),
     )
     await _seleccionar_opcion(page, config.notificacion_tipo_num_selector, notif_dir.tipo_numeracion, "Tipo num. notif.")
     await _rellenar_input(page, config.notificacion_numero_selector, notif_dir.numero, "Número notif.")
