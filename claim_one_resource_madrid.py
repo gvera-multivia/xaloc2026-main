@@ -476,7 +476,8 @@ async def build_madrid_payload(recurso: dict) -> dict:
     puerta_db = _clean_str(recurso.get("cliente_puerta"))
     escalera_db = _clean_str(recurso.get("cliente_escalera"))
     
-    use_ai = os.getenv("GROQ_API_KEY") is not None
+    # Por seguridad operativa: el parser IA puede "inventar" calles. Solo usarlo si se habilita explícitamente.
+    use_ai = os.getenv("MADRID_USE_ADDRESS_AI", "0") == "1" and os.getenv("GROQ_API_KEY") is not None
     if use_ai:
         try:
             logger.info(f"[IA] Clasificando dirección con IA: '{domicilio_raw}'")
@@ -500,6 +501,8 @@ async def build_madrid_payload(recurso: dict) -> dict:
                     f"-> via='{notif_tipo_via}', calle='{notif_nombre_via}'"
                 )
                 use_ai = False
+            else:
+                logger.info(f"[IA] Dirección parseada: via='{notif_tipo_via}', calle='{notif_nombre_via}', num='{notif_numero}'")
         except Exception as e:
             logger.warning(f"[IA] Falló clasificación IA, usando fallback: {e}")
             use_ai = False

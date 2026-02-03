@@ -181,6 +181,8 @@ def classify_address_fallback(direccion_raw: str) -> dict:
             "puerta": ""
         }
     
+    stop_tokens = {"DE", "DEL", "LA", "LAS", "LOS", "EL", "Y"}
+
     # Intentar detectar tipo de vía en el primer token
     first_token = parts[0]
     tipo_via = via_map.get(first_token, "CALLE")
@@ -192,6 +194,8 @@ def classify_address_fallback(direccion_raw: str) -> dict:
     for i, token in enumerate(parts):
         # Si es el primer token y es tipo de vía, saltar
         if i == 0 and first_token in via_map:
+            continue
+        if token in stop_tokens:
             continue
         
         # Si contiene dígitos, podría ser el número
