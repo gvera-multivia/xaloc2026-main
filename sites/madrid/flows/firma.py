@@ -71,12 +71,13 @@ async def _esperar_popup_documento(page: Page, timeout_ms: int = 30000) -> Page:
 
 async def _descargar_documento_popup(popup_page: Page, destino: Path) -> Path:
     """
-    Descarga el documento visualizado en el popup usando fetch interno.
-    
-    Este método usa fetch() dentro del contexto del navegador para:
-    - Mantener las cookies de sesión activas
-    - Descargar el PDF original sin necesidad de impresión virtual
-    - Evitar problemas de renderizado vacío
+    Descarga el documento visualizado en el popup.
+
+    Nota: algunos endpoints (servlets/Struts `.do`) devuelven HTTP 405 cuando se
+    intentan descargar vía `fetch()` (XHR/JS) aunque la navegación normal
+    funcione. Por eso evitamos `page.evaluate(fetch)` y usamos primero
+    `page.request` (cookies compartidas) y, si falla, forzamos una navegación y
+    capturamos la respuesta.
     
     Args:
         popup_page: Página del popup con el documento
@@ -95,40 +96,68 @@ async def _descargar_documento_popup(popup_page: Page, destino: Path) -> Path:
     logger.info(f"URL del documento: {url}")
     
     try:
-        # Script JS para descargar el archivo como Base64 sin navegar
-        # Se ejecuta en el contexto de la página actual, manteniendo la sesión
-        js_download_script = """
-        async (url) => {
-            const response = await fetch(url);
-            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-            const blob = await response.blob();
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result.split(',')[1]);
-                reader.onerror = reject;
-                reader.readAsDataURL(blob);
-            });
-        }
-        """
-        
-        # Ejecutar el fetch en el contexto de la página actual
-        logger.info("Ejecutando fetch en contexto del navegador...")
-        base64_data = await popup_page.evaluate(js_download_script, url)
-        
-        # Decodificar y guardar el PDF
-        import base64
-        pdf_bytes = base64.b64decode(base64_data)
-        
-        destino.write_bytes(pdf_bytes)
-        
-        file_size = len(pdf_bytes)
-        logger.info(f"Documento descargado correctamente ({file_size} bytes)")
-        
-        # Validación de tamaño
-        if file_size < 2000:
-            logger.warning("⚠️ El archivo es sospechosamente pequeño, revisa el contenido.")
-        
-        return destino
+        timeout_ms = 60000
+
+        def _looks_like_pdf(data: bytes, content_type: str | None) -> bool:
+            if data.startswith(b"%PDF"):
+                return True
+            if content_type and "pdf" in content_type.lower():
+                return True
+            return False
+
+        # Intento 1: APIRequestContext asociado a la página (comparte cookies/sesión)
+        logger.info("Intento 1/2: descarga vía page.request.get(...)")
+        resp = await popup_page.request.get(
+            url,
+            timeout=timeout_ms,
+            headers={
+                "Accept": "application/pdf,application/octet-stream,*/*",
+                "Referer": popup_page.url,
+            },
+        )
+        body = await resp.body()
+        content_type = (resp.headers or {}).get("content-type")
+
+        if resp.ok and _looks_like_pdf(body, content_type):
+            destino.write_bytes(body)
+            file_size = len(body)
+            logger.info(f"✓ Documento descargado correctamente ({file_size} bytes)")
+            if file_size < 2000:
+                logger.warning("⚠️ El archivo es sospechosamente pequeño, revisa el contenido.")
+            return destino
+
+        logger.warning(
+            "Descarga vía request no devolvió PDF (status=%s, content-type=%s, bytes=%s). Probando fallback...",
+            getattr(resp, "status", None),
+            content_type,
+            len(body) if body is not None else None,
+        )
+
+        # Intento 2: forzar navegación y capturar la respuesta (equivalente a carga normal de documento)
+        logger.info("Intento 2/2: recarga por navegación y captura de respuesta")
+        base_url = url.split(";", 1)[0]
+        async with popup_page.expect_response(
+            lambda r: (r.url == url) or (r.url.startswith(base_url)),
+            timeout=timeout_ms,
+        ) as resp_info:
+            await popup_page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+
+        nav_resp = await resp_info.value
+        nav_body = await nav_resp.body()
+        nav_ct = (nav_resp.headers or {}).get("content-type")
+
+        if nav_resp.ok and _looks_like_pdf(nav_body, nav_ct):
+            destino.write_bytes(nav_body)
+            file_size = len(nav_body)
+            logger.info(f"✓ Documento descargado correctamente ({file_size} bytes)")
+            if file_size < 2000:
+                logger.warning("⚠️ El archivo es sospechosamente pequeño, revisa el contenido.")
+            return destino
+
+        raise RuntimeError(
+            f"No se pudo descargar el PDF (request: {getattr(resp, 'status', None)}; "
+            f"nav: {getattr(nav_resp, 'status', None)}; ct: {nav_ct!r})"
+        )
         
     except Exception as e:
         logger.error(f"Error al descargar documento: {e}")
