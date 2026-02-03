@@ -19,11 +19,10 @@ if TYPE_CHECKING:
     from sites.madrid.data_models import MadridFormData
 
 from sites.madrid.data_models import TipoExpediente, NaturalezaEscrito, TipoDocumento
-from sites.madrid.bdc import (
-    bdc_sugerencias_desde_pagina,
-    sugerencias_desde_response,
-    elegir_mejor_sugerencia_con_tipo,
-)
+# Nota: BDC existe como endpoint para sugerencias mientras escribes, pero no es fiable
+# usarlo "offline" para resolver una dirección completa (resultados limitados por prefijo).
+# Por defecto, este flujo selecciona desde el UI autocomplete.
+from sites.madrid.bdc import bdc_sugerencias_desde_pagina, sugerencias_desde_response, elegir_mejor_sugerencia_con_tipo
 
 logger = logging.getLogger(__name__)
 
@@ -253,6 +252,7 @@ async def _seleccionar_sugerencia_jquery_ui(
     valor_introducido: str,
     nombre_campo: str = "",
     sugerencia_objetivo: str | None = None,
+    tipo_via_preferida: str | None = None,
     timeout_ms: int = 2500,
 ) -> bool:
     """
@@ -340,6 +340,7 @@ async def _seleccionar_sugerencia_jquery_ui(
             return False
 
     objetivo = _normalizar_texto_autocomplete(valor_introducido)
+    tipo_norm = _normalizar_texto_autocomplete(tipo_via_preferida or "")
 
     mejor_idx = 0
     mejor_score = -10_000
@@ -354,6 +355,13 @@ async def _seleccionar_sugerencia_jquery_ui(
 
         if objetivo_tokens:
             score += sum(2 for tok in objetivo_tokens if tok in tnorm)
+
+        # Preferir el tipo de vía si viene en la sugerencia: "CHAMBERI  [PLAZA]"
+        if tipo_norm:
+            if f"[{tipo_norm}]" in tnorm:
+                score += 10
+            elif tipo_norm in tnorm:
+                score += 2
 
         # Preferir sugerencias más "limpias" (más cortas) si hay empate
         score -= int(len(tnorm) / 20)
@@ -415,6 +423,7 @@ async def _rellenar_input_con_autocomplete(
     nombre_campo: str = "",
     validar_sin_error: bool = True,
     sugerencia_objetivo: str | None = None,
+    tipo_via_preferida: str | None = None,
 ) -> bool:
     """
     Rellena un input y, si aparece, selecciona una sugerencia del autocomplete.
@@ -448,6 +457,7 @@ async def _rellenar_input_con_autocomplete(
             valor,
             nombre_campo=nombre_campo,
             sugerencia_objetivo=sugerencia_objetivo,
+            tipo_via_preferida=tipo_via_preferida,
         )
 
         if sugerencia_objetivo and validar_sin_error and not seleccionado:
@@ -535,6 +545,29 @@ def _prefijos_busqueda_nombre_via(nombre_via: str, tipo_via: str | None) -> list
     return candidatos
 
 
+def _texto_busqueda_nombre_via(nombre_via: str, tipo_via: str | None) -> str:
+    """
+    Texto para teclear en el input y abrir sugerencias.
+
+    Si el raw viene como "PLAZA DE CHAMBERÍ" y ya se seleccionó `tipo_via=PLAZA`,
+    aquí devolvemos "CHAMBERI" (evita enviar "PLAZA DE ..." al campo NOMBREVIA).
+    """
+
+    texto = _normalizar_texto_autocomplete(nombre_via)
+    if not texto:
+        return ""
+
+    stop = {"DE", "DEL", "LA", "LAS", "LOS", "EL", "Y"}
+    tipo_norm = _normalizar_texto_autocomplete(tipo_via or "")
+    tokens = [t for t in texto.split(" ") if t and t not in stop and t != tipo_norm]
+
+    if not tokens:
+        tokens = [t for t in texto.split(" ") if t]
+
+    # Quedarnos con el último token significativo (suele ser el nombre)
+    return tokens[-1] if tokens else texto
+
+
 async def _rellenar_nombre_via_validado(
     page: Page,
     config: "MadridConfig",
@@ -557,13 +590,23 @@ async def _rellenar_nombre_via_validado(
 
     validar_sin_error = strict
 
+    # Modo recomendado: NO usar BDC offline. Teclear y seleccionar desde el autocomplete del UI.
     if not prevalidar_bdc:
+        valor_tecleo = _texto_busqueda_nombre_via(valor_humano, tipo_via)
+        if not valor_tecleo:
+            valor_tecleo = valor_humano
+
+        logger.debug(
+            f"[UI] {nombre_campo}: raw='{valor_humano}' tipo_via='{tipo_via or ''}' tecleo='{valor_tecleo}'"
+        )
+
         return await _rellenar_input_con_autocomplete(
             page,
             selector,
-            valor_humano,
+            valor_tecleo,
             nombre_campo,
             validar_sin_error=validar_sin_error,
+            tipo_via_preferida=tipo_via,
         )
 
     elemento = _elemento_bdc_desde_selector(selector)
@@ -931,6 +974,11 @@ async def ejecutar_formulario_madrid(
     
     # Dirección de notificación
     notif_dir = notif.direccion
+
+    logger.info(
+        f"  → Notif dirección input: tipo_via='{notif_dir.tipo_via or ''}', nombre_via='{notif_dir.nombre_via or ''}', "
+        f"num='{notif_dir.numero or ''}', cp='{notif_dir.codigo_postal or ''}', muni='{notif_dir.municipio or ''}'"
+    )
     
     await _seleccionar_opcion(page, config.notificacion_pais_selector, notif_dir.pais, "País notif.")
     await _seleccionar_opcion(page, config.notificacion_provincia_selector, notif_dir.provincia, "Provincia notif.")

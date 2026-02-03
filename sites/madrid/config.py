@@ -46,7 +46,9 @@ class MadridConfig(BaseConfig):
 
     # Validaciones del formulario (p.ej. dirección / calle contra BBDD)
     strict_direccion: bool = True
-    prevalidar_direccion_bdc: bool = True
+    # Nota: la BDC devuelve sugerencias por prefijo (resultados limitados). Si se usa para
+    # "resolver" una dirección completa puede dar falsos positivos. Por defecto, no se usa.
+    prevalidar_direccion_bdc: bool = False
      
     # Paso 7: Botón "Continuar" tras autenticación
     continuar_post_auth_selector: str = "#btnContinuar"
