@@ -189,14 +189,31 @@ async def _seleccionar_sugerencia_jquery_ui(
     `ul.ui-autocomplete li.ui-menu-item`.
     """
 
-    items = page.locator("ul.ui-autocomplete li.ui-menu-item")
+    # El UL suele existir aunque esté oculto (display:none). No esperes "visible" aquí.
+    menu = page.locator("ul.ui-autocomplete")
     try:
-        await items.first.wait_for(state="visible", timeout=timeout_ms)
+        await menu.first.wait_for(state="attached", timeout=timeout_ms)
     except PlaywrightTimeoutError:
         return False
 
+    items = page.locator("ul.ui-autocomplete li.ui-menu-item")
+
+    # Esperar a que se llenen sugerencias (debounce + red).
+    deadline = time.monotonic() + (timeout_ms / 1000.0)
+    while True:
+        try:
+            if await items.count() > 0:
+                break
+        except Exception:
+            pass
+
+        if time.monotonic() > deadline:
+            break
+
+        await page.wait_for_timeout(100)
+
     try:
-        textos = await items.all_inner_texts()
+        textos = [t.strip() for t in await items.all_text_contents() if t and t.strip()]
     except Exception:
         textos = []
 
@@ -327,21 +344,25 @@ async def _rellenar_input_con_autocomplete(
 
         await elemento.first.click(timeout=1000)
         await elemento.first.press("Control+A")
-        await elemento.first.type(valor, delay=50)
-        await _delay_humano(page, 200, 350)
+        # Es importante "teclear" (no solo fill) para disparar keyup/keydown + debounce (bindWithDelay).
+        await elemento.first.type(valor, delay=80)
 
-        await _seleccionar_sugerencia_jquery_ui(
+        seleccionado = await _seleccionar_sugerencia_jquery_ui(
             page,
             valor,
             nombre_campo=nombre_campo,
             sugerencia_objetivo=sugerencia_objetivo,
         )
 
+        if sugerencia_objetivo and validar_sin_error and not seleccionado:
+            raise ValueError(f"{nombre_campo}: no apareció/autoseleccionó el desplegable de sugerencias")
+
         # Forzar blur para disparar validaciones server-side en algunos formularios
-        try:
-            await elemento.first.press("Tab")
-        except Exception:
-            pass
+        if seleccionado or not sugerencia_objetivo:
+            try:
+                await elemento.first.press("Tab")
+            except Exception:
+                pass
 
         await _delay_humano(page, 300, 500)
 
