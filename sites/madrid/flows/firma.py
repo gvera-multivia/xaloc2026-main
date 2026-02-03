@@ -75,9 +75,10 @@ async def _descargar_documento_popup(popup_page: Page, destino: Path) -> Path:
 
     Nota: algunos endpoints (servlets/Struts `.do`) devuelven HTTP 405 cuando se
     intentan descargar vía `fetch()` (XHR/JS) aunque la navegación normal
-    funcione. Por eso evitamos `page.evaluate(fetch)` y usamos primero
-    `page.request` (cookies compartidas) y, si falla, forzamos una navegación y
-    capturamos la respuesta.
+    funcione. Además, algunos servidores bloquean reintentos (403/405) cuando se
+    intenta "re-descargar" el mismo recurso. Por eso este método intenta
+    aprovechar el propio flujo de red del navegador (sin lanzar peticiones extra)
+    y, solo si es posible, capturar una descarga nativa.
     
     Args:
         popup_page: Página del popup con el documento
@@ -105,58 +106,72 @@ async def _descargar_documento_popup(popup_page: Page, destino: Path) -> Path:
                 return True
             return False
 
-        # Intento 1: APIRequestContext asociado a la página (comparte cookies/sesión)
-        logger.info("Intento 1/2: descarga vía page.request.get(...)")
-        resp = await popup_page.request.get(
-            url,
-            timeout=timeout_ms,
-            headers={
-                "Accept": "application/pdf,application/octet-stream,*/*",
-                "Referer": popup_page.url,
-            },
+        # Intento 1: descarga nativa (si el popup ofrece un enlace/botón descargable).
+        # Ojo: el visor PDF del navegador suele NO exponer el botón de descarga en el DOM.
+        download_trigger = popup_page.locator(
+            "a[download], a:has-text('Descargar'), button:has-text('Descargar'), a[href*='descargar'], a[href$='.pdf']"
         )
-        body = await resp.body()
-        content_type = (resp.headers or {}).get("content-type")
+        try:
+            if await download_trigger.first.is_visible(timeout=500):
+                logger.info("Intento 1/2: captura de download nativo (expect_download + save_as)")
+                async with popup_page.expect_download(timeout=timeout_ms) as dl_info:
+                    await download_trigger.first.click()
+                download = await dl_info.value
+                await download.save_as(destino)
+                data = destino.read_bytes()
+                if not _looks_like_pdf(data, None) and len(data) < 1000:
+                    raise RuntimeError("Descarga nativa demasiado pequeña / no parece PDF")
+                logger.info(f"✓ Documento descargado (download) ({len(data)} bytes)")
+                if len(data) < 2000:
+                    logger.warning("⚠️ El archivo es sospechosamente pequeño, revisa el contenido.")
+                return destino
+        except Exception as e:
+            logger.info(f"Descarga nativa no disponible o falló: {e}")
 
-        if resp.ok and _looks_like_pdf(body, content_type):
-            destino.write_bytes(body)
-            file_size = len(body)
-            logger.info(f"✓ Documento descargado correctamente ({file_size} bytes)")
-            if file_size < 2000:
-                logger.warning("⚠️ El archivo es sospechosamente pequeño, revisa el contenido.")
-            return destino
+        # Intento 2: sin peticiones extra. Capturar respuestas ya cargadas en el popup.
+        logger.info("Intento 2/2: inspección de respuestas del popup (sin reintentos HTTP)")
+        captured: list = []
 
-        logger.warning(
-            "Descarga vía request no devolvió PDF (status=%s, content-type=%s, bytes=%s). Probando fallback...",
-            getattr(resp, "status", None),
-            content_type,
-            len(body) if body is not None else None,
-        )
+        def _on_response(resp) -> None:
+            try:
+                resp_url = (resp.url or "")
+                ct = (resp.headers or {}).get("content-type", "").lower()
+                if ("documento" in resp_url.lower()) or ("pdf" in ct) or ("octet-stream" in ct):
+                    captured.append(resp)
+            except Exception:
+                pass
 
-        # Intento 2: forzar navegación y capturar la respuesta (equivalente a carga normal de documento)
-        logger.info("Intento 2/2: recarga por navegación y captura de respuesta")
-        base_url = url.split(";", 1)[0]
-        async with popup_page.expect_response(
-            lambda r: (r.url == url) or (r.url.startswith(base_url)),
-            timeout=timeout_ms,
-        ) as resp_info:
-            await popup_page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+        popup_page.on("response", _on_response)
+        try:
+            try:
+                await popup_page.wait_for_load_state("networkidle", timeout=timeout_ms)
+            except Exception:
+                # Si no llega a networkidle (p.ej. streams), esperar un poco para dejar terminar la carga.
+                await popup_page.wait_for_timeout(2000)
+        finally:
+            popup_page.remove_listener("response", _on_response)
 
-        nav_resp = await resp_info.value
-        nav_body = await nav_resp.body()
-        nav_ct = (nav_resp.headers or {}).get("content-type")
+        # Priorizar respuestas que apunten al endpoint esperado.
+        prefer = [r for r in captured if "visualizarDocumento.do" in (r.url or "")]
+        rest = [r for r in captured if r not in prefer]
 
-        if nav_resp.ok and _looks_like_pdf(nav_body, nav_ct):
-            destino.write_bytes(nav_body)
-            file_size = len(nav_body)
-            logger.info(f"✓ Documento descargado correctamente ({file_size} bytes)")
-            if file_size < 2000:
-                logger.warning("⚠️ El archivo es sospechosamente pequeño, revisa el contenido.")
-            return destino
+        for resp in prefer + rest:
+            ct = (resp.headers or {}).get("content-type")
+            try:
+                data = await resp.body()
+            except Exception:
+                continue
+            if not data:
+                continue
+            if _looks_like_pdf(data, ct):
+                destino.write_bytes(data)
+                logger.info(f"✓ Documento capturado del popup ({len(data)} bytes)")
+                if len(data) < 2000:
+                    logger.warning("⚠️ El archivo es sospechosamente pequeño, revisa el contenido.")
+                return destino
 
         raise RuntimeError(
-            f"No se pudo descargar el PDF (request: {getattr(resp, 'status', None)}; "
-            f"nav: {getattr(nav_resp, 'status', None)}; ct: {nav_ct!r})"
+            "No se pudo extraer un PDF del popup sin reintentar la descarga (posible bloqueo 403/405)."
         )
         
     except Exception as e:
@@ -271,42 +286,69 @@ async def ejecutar_firma_madrid(
     popup_page = None
     pdf_bytes_capturados: bytes | None = None
     try:
-        async with context.expect_page(timeout=config.popup_wait_timeout) as new_page_info:
-            # Importante: capturar la respuesta de red *del popup* en el mismo click.
-            # Algunos endpoints devuelven 403/405 si se reintenta descargar (request/goto).
-            async with context.expect_event(
-                "response",
-                lambda r: (
-                    config.url_visualizar_documento_pattern in (r.url or "")
-                ),
-                timeout=config.popup_wait_timeout,
-            ) as pdf_response_info:
+        captured_responses: list = []
+
+        def _looks_like_pdf(data: bytes, content_type: str | None) -> bool:
+            if data.startswith(b"%PDF"):
+                return True
+            if content_type and "pdf" in content_type.lower():
+                return True
+            return False
+
+        def _on_ctx_response(resp) -> None:
+            try:
+                resp_url = (resp.url or "")
+                if "servcla.madrid.es" not in resp_url:
+                    return
+                ct = (resp.headers or {}).get("content-type", "").lower()
+                if ("documento" in resp_url.lower()) or ("pdf" in ct) or ("octet-stream" in ct):
+                    captured_responses.append(resp)
+            except Exception:
+                pass
+
+        # Capturar respuestas del navegador durante el click/apertura del popup.
+        # Esto evita hacer peticiones extra (que suelen devolver 403/405).
+        context.on("response", _on_ctx_response)
+        try:
+            async with context.expect_page(timeout=config.popup_wait_timeout) as new_page_info:
                 logger.info("Haciendo click en 'Verificar documento'...")
                 await page.click(config.verificar_documento_selector)
         
-        popup_page = await new_page_info.value
-        await popup_page.wait_for_load_state("domcontentloaded", timeout=config.default_timeout)
+            popup_page = await new_page_info.value
+            await popup_page.wait_for_load_state("domcontentloaded", timeout=config.default_timeout)
+            try:
+                await popup_page.wait_for_load_state("networkidle", timeout=config.default_timeout)
+            except Exception:
+                await popup_page.wait_for_timeout(1500)
+        finally:
+            context.remove_listener("response", _on_ctx_response)
         
         logger.info(f"✓ Popup capturado con URL: {popup_page.url}")
 
-        # Intentar obtener el PDF desde la respuesta capturada (evita peticiones extra).
-        try:
-            pdf_response = await pdf_response_info.value
-            pdf_body = await pdf_response.body()
-            pdf_ct = (pdf_response.headers or {}).get("content-type")
-            if pdf_body.startswith(b"%PDF") or (pdf_ct and "pdf" in pdf_ct.lower()):
+        # Intentar extraer el PDF desde las respuestas capturadas (sin reintentar descargas).
+        prefer = [
+            r for r in captured_responses
+            if config.url_visualizar_documento_pattern in (r.url or "")
+        ]
+        rest = [r for r in captured_responses if r not in prefer]
+
+        for resp in prefer + rest:
+            try:
+                pdf_body = await resp.body()
+            except Exception:
+                continue
+            if not pdf_body:
+                continue
+            pdf_ct = (resp.headers or {}).get("content-type")
+            if _looks_like_pdf(pdf_body, pdf_ct):
                 destino_descarga.parent.mkdir(parents=True, exist_ok=True)
                 destino_descarga.write_bytes(pdf_body)
                 pdf_bytes_capturados = pdf_body
                 logger.info(f"✓ PDF capturado del tráfico de red ({len(pdf_body)} bytes)")
-            else:
-                logger.warning(
-                    "Respuesta capturada no parece PDF (content-type=%s, bytes=%s); se usará método alternativo.",
-                    pdf_ct,
-                    len(pdf_body) if pdf_body is not None else None,
-                )
-        except Exception as e:
-            logger.warning(f"No se pudo capturar el PDF del tráfico de red: {e}")
+                break
+
+        if pdf_bytes_capturados is None:
+            logger.warning("No se pudo capturar el PDF del tráfico de red; se usará método alternativo.")
         
     except PlaywrightTimeoutError:
         raise RuntimeError(
