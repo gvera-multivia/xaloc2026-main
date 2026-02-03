@@ -76,6 +76,7 @@ SELECT
     c.provincia AS cliente_provincia,
     c.poblacion AS cliente_municipio,
     c.calle AS cliente_domicilio,
+    c.numero AS cliente_numero,
     c.escalera AS cliente_escalera,
     c.piso AS cliente_planta,
     c.puerta AS cliente_puerta,
@@ -408,6 +409,7 @@ async def build_madrid_payload(recurso: dict) -> dict:
     
     # CLASIFICACIÓN DE DIRECCIÓN CON IA
     domicilio_raw = _clean_str(recurso.get("cliente_domicilio"))
+    numero_db = _clean_str(recurso.get("cliente_numero"))
     poblacion = _clean_str(recurso.get("cliente_municipio"))
     piso_db = _clean_str(recurso.get("cliente_planta"))
     puerta_db = _clean_str(recurso.get("cliente_puerta"))
@@ -417,10 +419,11 @@ async def build_madrid_payload(recurso: dict) -> dict:
     use_ai = os.getenv("GROQ_API_KEY") is not None
     if use_ai:
         try:
-            logger.info(f"[IA] Clasificando dirección con IA: '{domicilio_raw}'")
+            logger.info(f"[IA] Clasificando dirección con IA: '{domicilio_raw}' (numero_db={numero_db})")
             clasificacion = await classify_address_with_ai(
                 direccion_raw=domicilio_raw,
                 poblacion=poblacion,
+                numero=numero_db,
                 piso=piso_db,
                 puerta=puerta_db
             )

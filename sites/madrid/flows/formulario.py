@@ -410,6 +410,24 @@ async def ejecutar_formulario_madrid(
         await page.click(config.continuar_formulario_selector)
     
     logger.info(f"  → Navegado a pantalla de adjuntos: {page.url}")
+    
+    # =========================================================================
+    # SECCIÓN 9: Manejar popup de SweetAlert (si aparece)
+    # =========================================================================
+    # El portal puede mostrar un popup de "No se reconoce la dirección"
+    # Necesitamos aceptarlo para continuar
+    try:
+        swal_button = page.get_by_role("button", name="Aceptar dirección y continuar")
+        await swal_button.wait_for(state="visible", timeout=3000)
+        logger.info("SECCIÓN 9: Popup de dirección no reconocida detectado")
+        await swal_button.click()
+        logger.info("  → Popup aceptado: 'Aceptar dirección y continuar'")
+        # Esperar un poco después del click
+        await page.wait_for_timeout(500)
+    except Exception:
+        # No hay popup, continuar normalmente
+        logger.debug("  → No se detectó popup de dirección (OK)")
+    
     logger.info("=" * 80)
     logger.info("FORMULARIO COMPLETADO EXITOSAMENTE")
     logger.info("=" * 80)

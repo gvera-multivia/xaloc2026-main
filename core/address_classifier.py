@@ -44,6 +44,7 @@ def _build_prompt_sistema() -> str:
 async def classify_address_with_ai(
     direccion_raw: str,
     poblacion: str = "",
+    numero: str = "",
     piso: str = "",
     puerta: str = "",
     *,
@@ -55,6 +56,7 @@ async def classify_address_with_ai(
     Args:
         direccion_raw: Dirección completa o calle (ej: "CL MAYOR 15")
         poblacion: Población/municipio (opcional, ayuda al contexto)
+        numero: Número de la calle desde la DB (opcional)
         piso: Piso/planta (opcional)
         puerta: Puerta (opcional)
         api_key: API key de Groq (opcional, usa GROQ_API_KEY del entorno si no se proporciona)
@@ -80,6 +82,8 @@ async def classify_address_with_ai(
         datos_ia = [
             f"calle: {direccion_raw}",
         ]
+        if numero:
+            datos_ia.append(f"numero: {numero}")
         if poblacion:
             datos_ia.append(f"poblacion: {poblacion}")
         if piso:
