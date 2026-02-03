@@ -388,7 +388,8 @@ async def _rellenar_nombre_via_validado(
         mejor = valor_humano
 
     # Para disparar el desplegable, tecleamos el "core" (antes de los corchetes) si existe.
-    core = re.split(r"\\s*\\[", mejor, maxsplit=1)[0].strip()
+    # Evitamos regex aquí: algunos valores llevan sufijo tipo "CHAMBERI  [PLAZA]".
+    core = mejor.split("[", 1)[0].strip()
     valor_tecleo = core if len(core) >= 3 else valor_humano
 
     ok = await _rellenar_input_con_autocomplete(
