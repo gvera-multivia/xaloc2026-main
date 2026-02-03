@@ -404,7 +404,15 @@ async def _rellenar_nombre_via_validado(
     if validar_sin_error and ok:
         # Confirmar que el valor final coincide (normalizado) con la sugerencia elegida.
         actual = await page.locator(selector).first.input_value()
-        if _normalizar_texto_autocomplete(actual) != _normalizar_texto_autocomplete(mejor):
+        actual_norm = _normalizar_texto_autocomplete(actual)
+        mejor_norm = _normalizar_texto_autocomplete(mejor)
+
+        # En WFORS, la sugerencia puede incluir sufijos informativos tipo "  [CALLE]",
+        # pero el valor final del input quedarse solo con el "core" (p.ej. "ABARDERO").
+        mejor_core = mejor.split("[", 1)[0].strip()
+        mejor_core_norm = _normalizar_texto_autocomplete(mejor_core)
+
+        if actual_norm not in {mejor_norm, mejor_core_norm}:
             raise ValueError(f"{nombre_campo}: valor final '{actual}' no coincide con sugerencia '{mejor}'")
 
     return ok
