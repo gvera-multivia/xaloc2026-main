@@ -153,37 +153,6 @@ def _normalize_text(text: str) -> str:
     )
 
 
-def _tokens_significativos(text: str) -> set[str]:
-    stop = {"DE", "DEL", "LA", "LAS", "LOS", "EL", "Y", "DA", "DO", "D", "S", "SN", "S/N"}
-    norm = _normalize_text(text).upper()
-    tokens = {t for t in re.split(r"[^A-Z0-9]+", norm) if t}
-    return {t for t in tokens if t not in stop and len(t) >= 3}
-
-
-def _clasificacion_direccion_coherente(domicilio_raw: str, calle_parseada: str, tipo_via: str) -> bool:
-    """
-    Evita "alucinaciones" del parser IA: la calle resultante debe estar respaldada
-    por el texto original (token overlap).
-    """
-
-    raw_tokens = _tokens_significativos(domicilio_raw)
-    calle_tokens = _tokens_significativos(calle_parseada)
-    if not calle_tokens:
-        return False
-
-    inter = raw_tokens.intersection(calle_tokens)
-    ratio = len(inter) / max(1, len(calle_tokens))
-    if ratio < 0.6:
-        return False
-
-    via = (tipo_via or "").strip().upper()
-    if via:
-        via_tokens = _tokens_significativos(via)
-        if via_tokens and raw_tokens and raw_tokens.isdisjoint(via_tokens):
-            return False
-
-    return True
-
 def _inferir_tipo_via(domicilio: str) -> str:
     """Intenta extraer el tipo de vía (CL, AV, RONDA, etc.) de la calle."""
     if not domicilio:
@@ -476,8 +445,7 @@ async def build_madrid_payload(recurso: dict) -> dict:
     puerta_db = _clean_str(recurso.get("cliente_puerta"))
     escalera_db = _clean_str(recurso.get("cliente_escalera"))
     
-    # Por seguridad operativa: el parser IA puede "inventar" calles. Solo usarlo si se habilita explícitamente.
-    use_ai = os.getenv("MADRID_USE_ADDRESS_AI", "0") == "1" and os.getenv("GROQ_API_KEY") is not None
+    use_ai = os.getenv("GROQ_API_KEY") is not None
     if use_ai:
         try:
             logger.info(f"[IA] Clasificando dirección con IA: '{domicilio_raw}'")
@@ -495,14 +463,6 @@ async def build_madrid_payload(recurso: dict) -> dict:
             notif_planta = clasificacion["planta"] or piso_db.upper()
             notif_puerta = clasificacion["puerta"] or puerta_db.upper()
 
-            if not _clasificacion_direccion_coherente(domicilio_raw, notif_nombre_via, notif_tipo_via):
-                logger.warning(
-                    f"[IA] Clasificación incoherente vs raw; descartando IA. raw='{domicilio_raw}' "
-                    f"-> via='{notif_tipo_via}', calle='{notif_nombre_via}'"
-                )
-                use_ai = False
-            else:
-                logger.info(f"[IA] Dirección parseada: via='{notif_tipo_via}', calle='{notif_nombre_via}', num='{notif_numero}'")
         except Exception as e:
             logger.warning(f"[IA] Falló clasificación IA, usando fallback: {e}")
             use_ai = False

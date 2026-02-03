@@ -37,8 +37,7 @@ def _build_prompt_sistema() -> str:
     REGLAS DE ORO:
     1. En 'puerta', si el valor es 'NAVE 8', pon solo '8'. Si es 'LOCAL 2', pon '2'.
     2. No inventes datos. Si no existe, deja "".
-    3. No “corrijas” nombres de calles ni completes direcciones: respeta el texto proporcionado.
-    4. JSON puro, sin comentarios.
+    3. JSON puro, sin comentarios.
     """
 
 
@@ -181,8 +180,6 @@ def classify_address_fallback(direccion_raw: str) -> dict:
             "puerta": ""
         }
     
-    stop_tokens = {"DE", "DEL", "LA", "LAS", "LOS", "EL", "Y"}
-
     # Intentar detectar tipo de vía en el primer token
     first_token = parts[0]
     tipo_via = via_map.get(first_token, "CALLE")
@@ -195,9 +192,6 @@ def classify_address_fallback(direccion_raw: str) -> dict:
         # Si es el primer token y es tipo de vía, saltar
         if i == 0 and first_token in via_map:
             continue
-        if token in stop_tokens:
-            continue
-        
         # Si contiene dígitos, podría ser el número
         if re.search(r'\d', token):
             if not numero:
