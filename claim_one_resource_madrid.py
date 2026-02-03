@@ -229,36 +229,59 @@ def _inferir_prefijo_expediente(*, fase_raw: str, es_empresa: bool) -> str:
         return "931" if es_empresa else "935"
     return "935"
 
+
 def _parse_expediente(expediente: str, *, fase_raw: str = "", es_empresa: bool = False) -> dict:
     exp = _clean_str(expediente).upper()
+    
+    # Caso 1: Formato NNN/EEEEEEEEE.D (Ya tiene prefijo numérico)
     m1 = re.match(r"^(?P<nnn>\d{3})/(?P<exp>\d{9})\.(?P<d>\d)$", exp)
     if m1:
         return {
+            "expediente_completo": exp,
             "expediente_tipo": "opcion1",
             "expediente_nnn": m1.group("nnn"),
             "expediente_eeeeeeeee": m1.group("exp"),
             "expediente_d": m1.group("d"),
+            "expediente_lll": "",
+            "expediente_aaaa": "",
+            "expediente_exp_num": "",
         }
+    
+    # Caso 2: Formato LLL/AAAA/EEEEEEEEE (Prefijo alfabético/anual)
     m2 = re.match(r"^(?P<lll>[A-Z]{3})/(?P<aaaa>\d{4})/(?P<exp>\d{9})$", exp)
     if m2:
         return {
+            "expediente_completo": exp,
             "expediente_tipo": "opcion2",
             "expediente_lll": m2.group("lll"),
             "expediente_aaaa": m2.group("aaaa"),
             "expediente_exp_num": m2.group("exp"),
+            "expediente_nnn": "",
+            "expediente_eeeeeeeee": "",
+            "expediente_d": "",
         }
+    
+    # Caso 3: Formato EEEEEEEEE.D (SIN PREFIJO -> INFERIR)
     m3 = re.match(r"^(?P<exp>\d{9})\.(?P<d>\d)$", exp)
     if m3:
         prefijo = _inferir_prefijo_expediente(fase_raw=fase_raw, es_empresa=es_empresa)
-        logger.warning("Expediente sin prefijo NNN ('%s'). Usando NNN=%s.", exp, prefijo)
+        # Construimos el expediente reconstruido con su prefijo
+        exp_reconstruido = f"{prefijo}/{exp}"
+        logger.warning("Expediente sin prefijo NNN ('%s'). Inferido: %s. Completo: %s", exp, prefijo, exp_reconstruido)
         return {
+            "expediente_completo": exp_reconstruido,
             "expediente_tipo": "opcion1",
             "expediente_nnn": prefijo,
             "expediente_eeeeeeeee": m3.group("exp"),
             "expediente_d": m3.group("d"),
+            "expediente_lll": "",
+            "expediente_aaaa": "",
+            "expediente_exp_num": "",
         }
+        
     logger.warning("Formato de expediente no reconocido: '%s'", exp)
     return {
+        "expediente_completo": exp,
         "expediente_tipo": "",
         "expediente_nnn": "",
         "expediente_eeeeeeeee": "",
@@ -267,7 +290,6 @@ def _parse_expediente(expediente: str, *, fase_raw: str = "", es_empresa: bool =
         "expediente_aaaa": "",
         "expediente_exp_num": "",
     }
-
 def _load_motivos_config() -> dict:
     try:
         import json
@@ -395,19 +417,26 @@ async def claim_resource(session: aiohttp.ClientSession, id_recurso: int, dry_ru
         return False
 
 async def build_madrid_payload(recurso: dict) -> dict:
-    """Construye el payload enriquecido para Madrid."""
-    expediente = _clean_str(recurso.get("Expedient"))
+    """Construye el payload enriquecido para Madrid con expediente normalizado."""
+    expediente_raw = _clean_str(recurso.get("Expedient"))
     cif_empresa = _clean_str(recurso.get("cif"))
     nif = cif_empresa or _clean_str(recurso.get("cliente_nif"))
+    fase_raw = _clean_str(recurso.get("FaseProcedimiento"))
+
+    # 1. Parseamos el expediente primero para obtener el prefijo si es necesario
+    exp_parts = _parse_expediente(expediente_raw, fase_raw=fase_raw, es_empresa=bool(cif_empresa))
     
-    # Notificación (Dinámico desde DB)
-    movil, tel = _seleccionar_telefonos(
-        recurso.get("cliente_tel1"), 
-        recurso.get("cliente_tel2"), 
-        recurso.get("cliente_movil")
+    # Extraemos el expediente con prefijo para usarlo en los textos de EXPONE/SOLICITA
+    expediente_para_textos = exp_parts.get("expediente_completo", expediente_raw)
+
+    # 2. Generamos EXPONE y SOLICITA usando el expediente (con prefijo si se infirió)
+    expone, solicita, naturaleza = _build_expone_solicita(
+        fase_raw,
+        expediente_para_textos,
+        _clean_str(recurso.get("SujetoRecurso")),
     )
-    
-    # CLASIFICACIÓN DE DIRECCIÓN CON IA
+
+    # 3. Clasificación de dirección (IA o Fallback)
     domicilio_raw = _clean_str(recurso.get("cliente_domicilio"))
     numero_db = _clean_str(recurso.get("cliente_numero"))
     poblacion = _clean_str(recurso.get("cliente_municipio"))
@@ -415,11 +444,10 @@ async def build_madrid_payload(recurso: dict) -> dict:
     puerta_db = _clean_str(recurso.get("cliente_puerta"))
     escalera_db = _clean_str(recurso.get("cliente_escalera"))
     
-    # Intentar clasificación con IA
     use_ai = os.getenv("GROQ_API_KEY") is not None
     if use_ai:
         try:
-            logger.info(f"[IA] Clasificando dirección con IA: '{domicilio_raw}' (numero_db={numero_db})")
+            logger.info(f"[IA] Clasificando dirección con IA: '{domicilio_raw}'")
             clasificacion = await classify_address_with_ai(
                 direccion_raw=domicilio_raw,
                 poblacion=poblacion,
@@ -427,50 +455,30 @@ async def build_madrid_payload(recurso: dict) -> dict:
                 piso=piso_db,
                 puerta=puerta_db
             )
-            logger.info(f"[IA] Clasificación exitosa: tipo_via={clasificacion['tipo_via']}, calle={clasificacion['calle']}, numero={clasificacion['numero']}")
-            
-            # Usar clasificación IA
             notif_tipo_via = clasificacion["tipo_via"]
             notif_nombre_via = clasificacion["calle"].upper()
             notif_numero = clasificacion["numero"]
             notif_escalera = clasificacion["escalera"] or escalera_db.upper()
             notif_planta = clasificacion["planta"] or piso_db.upper()
             notif_puerta = clasificacion["puerta"] or puerta_db.upper()
-            
         except Exception as e:
             logger.warning(f"[IA] Falló clasificación IA, usando fallback: {e}")
             use_ai = False
     
     if not use_ai:
-        # Fallback: usar lógica simple
-        logger.info("[FALLBACK] Usando clasificación fallback (sin IA)")
         clasificacion = classify_address_fallback(domicilio_raw)
         notif_tipo_via = clasificacion["tipo_via"]
         notif_nombre_via = clasificacion["calle"].upper()
-        notif_numero = clasificacion["numero"]
+        notif_numero = clasificacion["numero"] or numero_db
         notif_escalera = escalera_db.upper()
         notif_planta = piso_db.upper()
         notif_puerta = puerta_db.upper()
     
-    # Determinar tipo de numeración
     tipo_numeracion = "NUM" if notif_numero else "S/N"
+    provincia_notif = _clean_str(recurso.get("cliente_provincia")).upper() or poblacion.upper()
+    movil, tel = _seleccionar_telefonos(recurso.get("cliente_tel1"), recurso.get("cliente_tel2"), recurso.get("cliente_movil"))
 
-    provincia_notif = _clean_str(recurso.get("cliente_provincia")).upper()
-    if not provincia_notif:
-        provincia_notif = _clean_str(recurso.get("cliente_municipio")).upper()
-
-    fase_raw = _clean_str(recurso.get("FaseProcedimiento"))
-    expone, solicita, naturaleza = _build_expone_solicita(
-        fase_raw,
-        expediente,
-        _clean_str(recurso.get("SujetoRecurso")),
-    )
-
-    exp_parts = _parse_expediente(expediente, fase_raw=fase_raw, es_empresa=bool(cif_empresa))
-    user_phone = tel or movil
-    inter_email_check = bool(_clean_str(recurso.get("cliente_email")))
-    
-    # Representante (Fijo)
+    # Representante (Datos fijos)
     representante = {
         "rep_tipo_via": "RONDA",
         "rep_tipo_numeracion": "NUM",
@@ -487,13 +495,13 @@ async def build_madrid_payload(recurso: dict) -> dict:
     return {
         "idRecurso": _convert_value(recurso["idRecurso"]),
         "idExp": _convert_value(recurso["idExp"]),
-        "expediente": expediente,
+        "expediente": expediente_raw, 
         "numclient": _convert_value(recurso["numclient"]),
         "sujeto_recurso": _clean_str(recurso.get("SujetoRecurso")),
-        "fase_procedimiento": _clean_str(recurso.get("FaseProcedimiento")),
+        "fase_procedimiento": fase_raw,
         "plate_number": _clean_str(recurso.get("matricula")),
-        "user_phone": user_phone,
-        "inter_email_check": inter_email_check,
+        "user_phone": tel or movil,
+        "inter_email_check": bool(_clean_str(recurso.get("cliente_email"))),
         **representante,
         "notif_tipo_documento": _detectar_tipo_documento(nif),
         "notif_numero_documento": nif,
@@ -503,12 +511,12 @@ async def build_madrid_payload(recurso: dict) -> dict:
         "notif_razon_social": _clean_str(recurso.get("cliente_razon_social")).upper(),
         "notif_pais": "ESPAÑA",
         "notif_provincia": provincia_notif,
-        "notif_municipio": _clean_str(recurso.get("cliente_municipio")).upper(),
+        "notif_municipio": poblacion.upper(),
         "notif_tipo_via": notif_tipo_via,
         "notif_nombre_via": notif_nombre_via,
         "notif_tipo_numeracion": tipo_numeracion,
         "notif_numero": notif_numero,
-        "notif_portal": "",  # Portal - no disponible en DB, se puede añadir si la IA lo detecta
+        "notif_portal": "",
         "notif_escalera": notif_escalera,
         "notif_planta": notif_planta,
         "notif_puerta": notif_puerta,
@@ -516,7 +524,7 @@ async def build_madrid_payload(recurso: dict) -> dict:
         "notif_email": "info@xvia-serviciosjuridicos.com",
         "notif_movil": movil or "",
         "notif_telefono": tel or "",
-        **exp_parts,
+        **exp_parts, 
         "naturaleza": naturaleza,
         "expone": expone,
         "solicita": solicita,
