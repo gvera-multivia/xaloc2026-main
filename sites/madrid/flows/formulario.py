@@ -217,6 +217,37 @@ async def _seleccionar_por_teclado_hasta_objetivo(
     return False
 
 
+async def _seleccionar_por_indice_autocomplete(page: Page, indice: int) -> bool:
+    """
+    Selecciona el item del autocomplete por posición usando teclado.
+
+    jQuery UI: ArrowDown abre el menú y selecciona el primer item; para llegar al item N
+    se hace ArrowDown N veces adicionales y luego Enter.
+    """
+
+    if indice < 0:
+        return False
+
+    try:
+        await page.keyboard.press("ArrowDown")
+    except Exception:
+        return False
+
+    for _ in range(indice):
+        await page.wait_for_timeout(120)
+        try:
+            await page.keyboard.press("ArrowDown")
+        except Exception:
+            return False
+
+    await page.wait_for_timeout(120)
+    try:
+        await page.keyboard.press("Enter")
+        return True
+    except Exception:
+        return False
+
+
 async def _seleccionar_sugerencia_jquery_ui(
     page: Page,
     valor_introducido: str,
@@ -260,6 +291,15 @@ async def _seleccionar_sugerencia_jquery_ui(
         textos = []
 
     if sugerencia_objetivo:
+        objetivo_norm = _normalizar_texto_autocomplete(sugerencia_objetivo)
+        if textos:
+            for idx, texto in enumerate(textos):
+                if _normalizar_texto_autocomplete(texto) == objetivo_norm:
+                    if await _seleccionar_por_indice_autocomplete(page, idx):
+                        return True
+                    break
+
+        # Fallback: intentar por aria-live (menos determinista).
         pasos = (len(textos) + 2) if textos else 15
         if await _seleccionar_por_teclado_hasta_objetivo(
             page,
