@@ -439,7 +439,7 @@ async def _rellenar_input_con_autocomplete(
             logger.debug(f"  → Campo {nombre_campo or selector} deshabilitado, saltando")
             return False
 
-        await elemento.first.click(timeout=1000)
+        await elemento.first.click(timeout=2000)
         await elemento.first.press("Control+A")
         # Es importante "teclear" (no solo fill) para disparar keyup/keydown + debounce (bindWithDelay).
         await elemento.first.type(valor, delay=80)

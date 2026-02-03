@@ -269,15 +269,44 @@ async def ejecutar_firma_madrid(
     context = page.context
     
     popup_page = None
+    pdf_bytes_capturados: bytes | None = None
     try:
         async with context.expect_page(timeout=config.popup_wait_timeout) as new_page_info:
-            logger.info("Haciendo click en 'Verificar documento'...")
-            await page.click(config.verificar_documento_selector)
+            # Importante: capturar la respuesta de red *del popup* en el mismo click.
+            # Algunos endpoints devuelven 403/405 si se reintenta descargar (request/goto).
+            async with context.expect_event(
+                "response",
+                lambda r: (
+                    config.url_visualizar_documento_pattern in (r.url or "")
+                ),
+                timeout=config.popup_wait_timeout,
+            ) as pdf_response_info:
+                logger.info("Haciendo click en 'Verificar documento'...")
+                await page.click(config.verificar_documento_selector)
         
         popup_page = await new_page_info.value
         await popup_page.wait_for_load_state("domcontentloaded", timeout=config.default_timeout)
         
         logger.info(f"✓ Popup capturado con URL: {popup_page.url}")
+
+        # Intentar obtener el PDF desde la respuesta capturada (evita peticiones extra).
+        try:
+            pdf_response = await pdf_response_info.value
+            pdf_body = await pdf_response.body()
+            pdf_ct = (pdf_response.headers or {}).get("content-type")
+            if pdf_body.startswith(b"%PDF") or (pdf_ct and "pdf" in pdf_ct.lower()):
+                destino_descarga.parent.mkdir(parents=True, exist_ok=True)
+                destino_descarga.write_bytes(pdf_body)
+                pdf_bytes_capturados = pdf_body
+                logger.info(f"✓ PDF capturado del tráfico de red ({len(pdf_body)} bytes)")
+            else:
+                logger.warning(
+                    "Respuesta capturada no parece PDF (content-type=%s, bytes=%s); se usará método alternativo.",
+                    pdf_ct,
+                    len(pdf_body) if pdf_body is not None else None,
+                )
+        except Exception as e:
+            logger.warning(f"No se pudo capturar el PDF del tráfico de red: {e}")
         
     except PlaywrightTimeoutError:
         raise RuntimeError(
@@ -312,8 +341,13 @@ async def ejecutar_firma_madrid(
     logger.info("Descargando documento del popup...")
     
     try:
-        await _descargar_documento_popup(popup_page, destino_descarga)
-        logger.info(f"✓ Documento descargado en: {destino_descarga}")
+        if pdf_bytes_capturados is not None:
+            if len(pdf_bytes_capturados) < 2000:
+                logger.warning("⚠️ El archivo es sospechosamente pequeño, revisa el contenido.")
+            logger.info(f"✓ Documento descargado en: {destino_descarga}")
+        else:
+            await _descargar_documento_popup(popup_page, destino_descarga)
+            logger.info(f"✓ Documento descargado en: {destino_descarga}")
     except Exception as e:
         logger.error(f"Error descargando documento: {e}")
         # Capturar screenshot del popup para debugging
