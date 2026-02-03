@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import random
 import re
+import time
 import unicodedata
 from typing import TYPE_CHECKING
 
@@ -82,6 +83,98 @@ def _normalizar_texto_autocomplete(texto: str) -> str:
     return texto
 
 
+def _extraer_ultima_sugerencia_aria_live(texto_aria: str) -> str | None:
+    """
+    jQuery UI Autocomplete anuncia sugerencias por un aria-live region (role=status)
+    con mensajes del tipo:
+      - "2 results are available, use up and down arrow keys to navigate."
+      - "No search results."
+      - "ABARDERO  [CALLE]"
+
+    Devuelve la última "sugerencia" anunciada (no los mensajes informativos).
+    """
+
+    if not texto_aria:
+        return None
+
+    lineas = [ln.strip() for ln in texto_aria.splitlines() if ln.strip()]
+    if not lineas:
+        return None
+
+    for ln in reversed(lineas):
+        low = ln.lower()
+        if "results are available" in low:
+            continue
+        if "result is available" in low:
+            continue
+        if "no search results" in low:
+            continue
+        if "use up and down arrow keys" in low:
+            continue
+        return ln
+
+    return None
+
+
+async def _leer_sugerencia_actual_aria_live(page: Page) -> str | None:
+    loc = page.locator("span.ui-helper-hidden-accessible[role='status']")
+    try:
+        if await loc.count() == 0:
+            return None
+        # `text_content` incluye nodos con display:none; `inner_text` no.
+        texto = await loc.first.text_content(timeout=500)
+    except Exception:
+        return None
+
+    return _extraer_ultima_sugerencia_aria_live(texto or "")
+
+
+async def _seleccionar_por_teclado_hasta_objetivo(
+    page: Page,
+    *,
+    objetivo: str,
+    max_pasos: int,
+    timeout_ms: int,
+) -> bool:
+    """
+    Usa ArrowDown/Enter y el aria-live region para garantizar que se selecciona
+    exactamente la sugerencia objetivo.
+    """
+
+    objetivo_norm = _normalizar_texto_autocomplete(objetivo)
+    if not objetivo_norm:
+        return False
+
+    deadline = time.monotonic() + (timeout_ms / 1000.0)
+
+    try:
+        await page.keyboard.press("ArrowDown")
+    except Exception:
+        return False
+
+    for _ in range(max(1, max_pasos)):
+        await page.wait_for_timeout(120)
+
+        actual = await _leer_sugerencia_actual_aria_live(page)
+        if actual and _normalizar_texto_autocomplete(actual) == objetivo_norm:
+            try:
+                await page.keyboard.press("Enter")
+                await page.wait_for_timeout(120)
+                return True
+            except Exception:
+                return False
+
+        if time.monotonic() > deadline:
+            break
+
+        try:
+            await page.keyboard.press("ArrowDown")
+        except Exception:
+            break
+
+    return False
+
+
 async def _seleccionar_sugerencia_jquery_ui(
     page: Page,
     valor_introducido: str,
@@ -106,6 +199,16 @@ async def _seleccionar_sugerencia_jquery_ui(
         textos = await items.all_inner_texts()
     except Exception:
         textos = []
+
+    if sugerencia_objetivo:
+        pasos = (len(textos) + 2) if textos else 15
+        if await _seleccionar_por_teclado_hasta_objetivo(
+            page,
+            objetivo=sugerencia_objetivo,
+            max_pasos=pasos,
+            timeout_ms=timeout_ms,
+        ):
+            return True
 
     if sugerencia_objetivo and textos:
         objetivo_norm = _normalizar_texto_autocomplete(sugerencia_objetivo)
