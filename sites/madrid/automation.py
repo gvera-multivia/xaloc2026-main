@@ -10,7 +10,7 @@ from core.base_automation import BaseAutomation
 from core.errors import RestartRequiredError
 from sites.madrid.config import MadridConfig
 from sites.madrid.data_models import MadridTarget
-from sites.madrid.flows import ejecutar_navegacion_madrid, ejecutar_formulario_madrid, ejecutar_upload_madrid
+from sites.madrid.flows import ejecutar_navegacion_madrid, ejecutar_formulario_madrid, ejecutar_upload_madrid, ejecutar_firma_madrid
 
 
 class MadridAutomation(BaseAutomation):
@@ -31,9 +31,7 @@ class MadridAutomation(BaseAutomation):
         - FASE 1: Navegación hasta el formulario (11 pasos)
         - FASE 2: Rellenado del formulario (8 secciones)
         - FASE 3: Subida de documentos (adjuntos)
-        
-        Fases futuras:
-        - FASE 4: Confirmación y envío
+        - FASE 4: Firma y verificación de documento
         
         Args:
             datos: Datos del trámite (MadridTarget)
@@ -91,12 +89,24 @@ class MadridAutomation(BaseAutomation):
                     self.logger.info("\nƒsÿ Sin adjuntos, saltando FASE 3")
 
                 # ================================================================
-                # FASE 4: FIRMA Y REGISTRO (NO SE EJECUTA EN DEMO)
+                # FASE 4: FIRMA Y VERIFICACIÓN DE DOCUMENTO
                 # ================================================================
-                # Importante: el siguiente paso sería pulsar "Firma y registrar" (`#btRedireccion`),
-                # pero se deja sin ejecutar en modo demo.
                 self.logger.info("\n" + "=" * 80)
-                self.logger.info("FASE 4: FIRMA Y REGISTRO (NO SE EJECUTA EN DEMO)")
+                self.logger.info("FASE 4: FIRMA Y VERIFICACIÓN DE DOCUMENTO")
+                self.logger.info("=" * 80)
+                
+                # Construir ruta de destino para el documento verificado
+                id_recurso = getattr(datos, 'idRecurso', 'unknown')
+                destino_verificacion = self.config.dir_screenshots / f"verificacion_{id_recurso}.pdf"
+                
+                self.page = await ejecutar_firma_madrid(
+                    self.page,
+                    self.config,
+                    destino_verificacion
+                )
+                
+                self.logger.info("\n" + "=" * 80)
+                self.logger.info("FIRMA Y VERIFICACIÓN COMPLETADA")
                 self.logger.info("=" * 80)
 
                 # ================================================================

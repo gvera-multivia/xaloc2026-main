@@ -195,8 +195,25 @@ class MadridConfig(BaseConfig):
     # Botón "Continuar" tras adjuntar documentos
     adjuntos_continuar_selector: str = "input[id='formDesigner:_id699'][type='submit'][value='Continuar']"
 
-    # Botón final "Firma y registrar" (NO se pulsa en modo demo)
+    # Botón final "Firma y registrar"
     firma_registrar_selector: str = "input#btRedireccion"
+    
+    # =========================================================================
+    # FIRMA Y VERIFICACIÓN DE DOCUMENTO
+    # =========================================================================
+    
+    # URL esperada tras click en "Firma y registrar"
+    url_signa_firma_contains: str = "servcla.madrid.es/SIGNA_WBFIRMAR/solicitarFirma.do"
+    
+    # Botón "Verificar documento" en la página de firma
+    verificar_documento_selector: str = "button[name='verificar'][value='1']"
+    
+    # Patrón de URL para el popup de visualización
+    url_visualizar_documento_pattern: str = "visualizarDocumento.do"
+    
+    # Timeouts específicos para firma
+    firma_navigation_timeout: int = 90000  # 90s (puede tardar más en cargar SIGNA)
+    popup_wait_timeout: int = 30000  # 30s para esperar el popup
     
     # =========================================================================
     # Configuración de esperas
