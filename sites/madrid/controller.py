@@ -37,6 +37,7 @@ class MadridController:
         self,
         *,
         headless: bool = True,
+        idRecurso: int | None = None,
         exp_tipo: str | None = None,
         exp_nnn: str | None = None,
         exp_eeeeeeeee: str | None = None,
@@ -201,6 +202,7 @@ class MadridController:
         archivos_final = archivos
 
         return MadridTarget(
+            idRecurso=idRecurso,
             form_data=form_data,
             archivos_adjuntos=[Path(a) for a in archivos_final] if archivos_final else [],
             headless=headless,
@@ -213,6 +215,8 @@ class MadridController:
         Mapea claves genéricas de DB a argumentos de create_target.
         """
         return {
+            # ID del recurso (para nombrar archivos)
+            "idRecurso": data.get("idRecurso"),
             # Permite dos formatos:
             # - "genérico" (plate_number, representative_*, etc.) para worker-tasks
             # - "avanzado" (matricula, rep_*, exp_*) para sobreescribir defaults del controlador

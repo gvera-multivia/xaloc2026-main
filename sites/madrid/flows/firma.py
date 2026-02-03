@@ -71,7 +71,12 @@ async def _esperar_popup_documento(page: Page, timeout_ms: int = 30000) -> Page:
 
 async def _descargar_documento_popup(popup_page: Page, destino: Path) -> Path:
     """
-    Descarga el documento visualizado en el popup.
+    Descarga el documento visualizado en el popup usando fetch interno.
+    
+    Este método usa fetch() dentro del contexto del navegador para:
+    - Mantener las cookies de sesión activas
+    - Descargar el PDF original sin necesidad de impresión virtual
+    - Evitar problemas de renderizado vacío
     
     Args:
         popup_page: Página del popup con el documento
@@ -85,18 +90,48 @@ async def _descargar_documento_popup(popup_page: Page, destino: Path) -> Path:
     # Asegurar que el directorio existe
     destino.parent.mkdir(parents=True, exist_ok=True)
     
-    # Intentar descargar como PDF
+    # Obtener la URL actual del popup (que contiene el documento)
+    url = popup_page.url
+    logger.info(f"URL del documento: {url}")
+    
     try:
-        pdf_bytes = await popup_page.pdf(
-            format="A4",
-            print_background=True,
-            prefer_css_page_size=True
-        )
+        # Script JS para descargar el archivo como Base64 sin navegar
+        # Se ejecuta en el contexto de la página actual, manteniendo la sesión
+        js_download_script = """
+        async (url) => {
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            const blob = await response.blob();
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result.split(',')[1]);
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+            });
+        }
+        """
+        
+        # Ejecutar el fetch en el contexto de la página actual
+        logger.info("Ejecutando fetch en contexto del navegador...")
+        base64_data = await popup_page.evaluate(js_download_script, url)
+        
+        # Decodificar y guardar el PDF
+        import base64
+        pdf_bytes = base64.b64decode(base64_data)
+        
         destino.write_bytes(pdf_bytes)
-        logger.info(f"Documento descargado correctamente ({len(pdf_bytes)} bytes)")
+        
+        file_size = len(pdf_bytes)
+        logger.info(f"Documento descargado correctamente ({file_size} bytes)")
+        
+        # Validación de tamaño
+        if file_size < 2000:
+            logger.warning("⚠️ El archivo es sospechosamente pequeño, revisa el contenido.")
+        
         return destino
+        
     except Exception as e:
-        logger.error(f"Error al descargar documento como PDF: {e}")
+        logger.error(f"Error al descargar documento: {e}")
         raise
 
 

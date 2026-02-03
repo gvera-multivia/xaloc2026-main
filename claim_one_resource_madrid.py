@@ -303,35 +303,87 @@ def _load_motivos_config() -> dict:
         logger.warning("No se pudo cargar config_motivos.json: %s", e)
         return {}
 
+def _inferir_naturaleza_por_motivo_y_fase(
+    *,
+    motivo_key: str,
+    motivo_data: dict | None,
+    fase_raw: str,
+) -> str:
+    """
+    Determina la naturaleza (A/R/I) en funciÃ³n del MOTIVO (config_motivos.json)
+    y de la fase (FaseProcedimiento).
+
+    Nota: la letra no viene en el JSON, asÃ­ que se infiere por reglas.
+    """
+
+    motivo_norm = _normalize_text(motivo_key)
+    fase_norm = _normalize_text(fase_raw)
+
+    # Reglas explÃ­citas por motivo/clave (mÃ¡s estable que texto libre).
+    if "identificacion" in motivo_norm or "identificacion" in fase_norm:
+        return "I"
+
+    if any(tag in motivo_norm for tag in ["denuncia", "propuesta", "subsanacion"]) or any(
+        tag in fase_norm for tag in ["denuncia", "propuesta", "subsanacion", "alegacion", "alegaciones"]
+    ):
+        return "A"
+
+    if any(tag in motivo_norm for tag in ["sancion", "apremio", "embargo", "requerimiento", "reclamacion", "revision"]) or any(
+        tag in fase_norm for tag in ["sancion", "apremio", "embargo", "requerimiento", "reclamacion", "revision", "recurso"]
+    ):
+        return "R"
+
+    # Inferencia por contenidos del motivo (asunto/expone/solicita) y fase como fallback.
+    blob_parts: list[str] = [motivo_norm, fase_norm]
+    if motivo_data:
+        for field in ("asunto", "expone", "solicita"):
+            blob_parts.append(_normalize_text(motivo_data.get(field)))
+    blob = " ".join(p for p in blob_parts if p)
+
+    if "alegacion" in blob or "alegaciones" in blob:
+        return "A"
+    if "recurso" in blob or "reposicion" in blob or "reclamacion" in blob or "revision" in blob:
+        return "R"
+
+    # Ãšltimo recurso: si no se puede inferir, mantener comportamiento conservador.
+    # (HistÃ³ricamente se usaba "A" como fallback.)
+    return "A"
+
+
 def _build_expone_solicita(fase_raw: str, expediente: str, sujeto: str) -> tuple[str, str, str]:
     config = _load_motivos_config()
     fase_norm = _normalize_text(fase_raw)
-    selected = None
+
+    selected: dict | None = None
     selected_key = ""
     for key, value in (config or {}).items():
-        if key and key in fase_norm:
+        key_norm = _normalize_text(key)
+        if key_norm and key_norm in fase_norm:
             selected = value
             selected_key = key
             break
-    if not selected:
-        exp = _clean_str(expediente)
-        expone = f"Se presenta escrito relativo al expediente {exp}."
-        solicita = f"Se tenga por presentado el escrito. Expediente: {exp}."
-        naturaleza = "A"
-        return expone, solicita, naturaleza
 
     exp = _clean_str(expediente)
     sujeto_txt = _clean_str(sujeto)
+
+    if not selected:
+        expone = f"Se presenta escrito relativo al expediente {exp}."
+        solicita = f"Se tenga por presentado el escrito. Expediente: {exp}."
+        naturaleza = _inferir_naturaleza_por_motivo_y_fase(
+            motivo_key="",
+            motivo_data=None,
+            fase_raw=fase_raw,
+        )
+        return expone, solicita, naturaleza
+
     expone = _clean_str(selected.get("expone")).replace("{expediente}", exp).replace("{sujeto_recurso}", sujeto_txt)
     solicita = _clean_str(selected.get("solicita")).replace("{expediente}", exp).replace("{sujeto_recurso}", sujeto_txt)
 
-    key_norm = _normalize_text(selected_key)
-    if "identificacion" in key_norm:
-        naturaleza = "I"
-    elif any(tag in key_norm for tag in ["denuncia", "propuesta", "subsanacion"]):
-        naturaleza = "A"
-    else:
-        naturaleza = "R"
+    naturaleza = _inferir_naturaleza_por_motivo_y_fase(
+        motivo_key=selected_key,
+        motivo_data=selected,
+        fase_raw=fase_raw,
+    )
     return expone, solicita, naturaleza
 
 # =============================================================================
