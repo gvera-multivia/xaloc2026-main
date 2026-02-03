@@ -607,6 +607,10 @@ async def _rellenar_nombre_via_validado(
             raise ValueError(f"No se pudo elegir sugerencia BDC para {nombre_campo} con '{valor_humano}'")
         mejor = valor_humano
 
+    logger.debug(
+        f"[BDC] {nombre_campo}: raw='{valor_humano}' tipo_via='{tipo_via or ''}' -> sugerencia='{mejor}' (prefijos={prefijos})"
+    )
+
     # Para disparar el desplegable, tecleamos el "core" (antes de los corchetes) si existe.
     # Evitamos regex aquí: algunos valores llevan sufijo tipo "CHAMBERI  [PLAZA]".
     core = mejor.split("[", 1)[0].strip()

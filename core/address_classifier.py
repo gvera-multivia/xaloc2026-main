@@ -37,7 +37,8 @@ def _build_prompt_sistema() -> str:
     REGLAS DE ORO:
     1. En 'puerta', si el valor es 'NAVE 8', pon solo '8'. Si es 'LOCAL 2', pon '2'.
     2. No inventes datos. Si no existe, deja "".
-    3. JSON puro, sin comentarios.
+    3. No “corrijas” nombres de calles ni completes direcciones: respeta el texto proporcionado.
+    4. JSON puro, sin comentarios.
     """
 
 
