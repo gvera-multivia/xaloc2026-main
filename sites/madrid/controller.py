@@ -162,8 +162,8 @@ class MadridController:
             ),
             contacto=ContactoData(
                 email=_require("notif_email", notif_email),
-                movil=_require("notif_movil", notif_movil),
-                telefono=_require("notif_telefono", notif_telefono),
+                movil=(notif_movil or "").strip(),  # Opcional: puede no tener móvil
+                telefono=(notif_telefono or "").strip(),  # Opcional: puede no tener teléfono fijo
             ),
         )
 
@@ -179,7 +179,7 @@ class MadridController:
 
         form_data = MadridFormData(
             expediente=expediente,
-            matricula=_require("matricula", matricula),
+            matricula=(matricula or "").strip(),  # Opcional: algunos expedientes no tienen matrícula
             interesado=interesado,
             representante=representante,
             notificacion=notificacion,
