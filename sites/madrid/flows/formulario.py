@@ -129,6 +129,48 @@ async def _leer_sugerencia_actual_aria_live(page: Page) -> str | None:
     return _extraer_ultima_sugerencia_aria_live(texto or "")
 
 
+async def _esperar_autocomplete_listo(page: Page, selector: str, timeout_ms: int = 5000) -> None:
+    """
+    Espera a que el input termine de cargar sugerencias.
+
+    En WFORS se observa la clase `ui-autocomplete-loading` mientras hace la llamada a BDC.
+    """
+
+    loc = page.locator(selector).first
+    deadline = time.monotonic() + (timeout_ms / 1000.0)
+
+    while True:
+        try:
+            class_attr = (await loc.get_attribute("class")) or ""
+        except Exception:
+            class_attr = ""
+
+        if "ui-autocomplete-loading" not in class_attr:
+            return
+
+        if time.monotonic() > deadline:
+            return
+
+        await page.wait_for_timeout(100)
+
+
+async def _esperar_items_autocomplete(page: Page, timeout_ms: int = 5000) -> None:
+    items = page.locator("ul.ui-autocomplete li.ui-menu-item")
+    deadline = time.monotonic() + (timeout_ms / 1000.0)
+
+    while True:
+        try:
+            if await items.count() > 0:
+                return
+        except Exception:
+            pass
+
+        if time.monotonic() > deadline:
+            return
+
+        await page.wait_for_timeout(100)
+
+
 async def _seleccionar_por_teclado_hasta_objetivo(
     page: Page,
     *,
@@ -198,19 +240,19 @@ async def _seleccionar_sugerencia_jquery_ui(
 
     items = page.locator("ul.ui-autocomplete li.ui-menu-item")
 
-    # Esperar a que se llenen sugerencias (debounce + red).
-    deadline = time.monotonic() + (timeout_ms / 1000.0)
-    while True:
+    await _esperar_items_autocomplete(page, timeout_ms=timeout_ms)
+
+    # Si vamos a seleccionar una sugerencia concreta, abrimos el menú antes de clickar.
+    if sugerencia_objetivo:
         try:
-            if await items.count() > 0:
-                break
+            await page.keyboard.press("ArrowDown")
         except Exception:
             pass
 
-        if time.monotonic() > deadline:
-            break
-
-        await page.wait_for_timeout(100)
+        try:
+            await items.first.wait_for(state="visible", timeout=timeout_ms)
+        except PlaywrightTimeoutError:
+            pass
 
     try:
         textos = [t.strip() for t in await items.all_text_contents() if t and t.strip()]
@@ -232,7 +274,17 @@ async def _seleccionar_sugerencia_jquery_ui(
         for idx, texto in enumerate(textos):
             if _normalizar_texto_autocomplete(texto) == objetivo_norm:
                 try:
-                    await items.nth(idx).click(timeout=1000)
+                    target = items.nth(idx)
+                    wrapper = target.locator(":scope >> *").first
+                    if await wrapper.count() > 0:
+                        await wrapper.click(timeout=1000)
+                    else:
+                        await target.click(timeout=1000)
+
+                    try:
+                        await menu.first.wait_for(state="hidden", timeout=1500)
+                    except PlaywrightTimeoutError:
+                        pass
                     await _delay_humano(page, 150, 300)
                     return True
                 except Exception as e:
@@ -346,6 +398,10 @@ async def _rellenar_input_con_autocomplete(
         await elemento.first.press("Control+A")
         # Es importante "teclear" (no solo fill) para disparar keyup/keydown + debounce (bindWithDelay).
         await elemento.first.type(valor, delay=80)
+
+        # Esperar a que el widget termine la llamada (ui-autocomplete-loading) y se rellenen items.
+        await _esperar_autocomplete_listo(page, selector, timeout_ms=5000)
+        await _esperar_items_autocomplete(page, timeout_ms=5000)
 
         seleccionado = await _seleccionar_sugerencia_jquery_ui(
             page,
