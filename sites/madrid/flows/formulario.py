@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import random
 import re
+import unicodedata
 from typing import TYPE_CHECKING
 
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
@@ -17,6 +18,11 @@ if TYPE_CHECKING:
     from sites.madrid.data_models import MadridFormData
 
 from sites.madrid.data_models import TipoExpediente, NaturalezaEscrito, TipoDocumento
+from sites.madrid.bdc import (
+    bdc_sugerencias_desde_pagina,
+    sugerencias_desde_response,
+    elegir_mejor_sugerencia_con_tipo,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +68,344 @@ async def _rellenar_input(page: Page, selector: str, valor: str, nombre_campo: s
         logger.warning(f"  → Error rellenando {nombre_campo or selector}: {e}")
     
     return False
+
+
+def _normalizar_texto_autocomplete(texto: str) -> str:
+    if texto is None:
+        return ""
+
+    texto = unicodedata.normalize("NFKD", texto)
+    texto = "".join(ch for ch in texto if not unicodedata.combining(ch))
+    texto = texto.upper()
+    texto = re.sub(r"[^A-Z0-9 ]+", " ", texto)
+    texto = re.sub(r"\s+", " ", texto).strip()
+    return texto
+
+
+async def _seleccionar_sugerencia_jquery_ui(
+    page: Page,
+    valor_introducido: str,
+    nombre_campo: str = "",
+    sugerencia_objetivo: str | None = None,
+    timeout_ms: int = 2500,
+) -> bool:
+    """
+    Selecciona una sugerencia de jQuery UI Autocomplete (si aparece).
+
+    Nota: El HTML del desplegable no está en el formulario; se inyecta como:
+    `ul.ui-autocomplete li.ui-menu-item`.
+    """
+
+    items = page.locator("ul.ui-autocomplete li.ui-menu-item")
+    try:
+        await items.first.wait_for(state="visible", timeout=timeout_ms)
+    except PlaywrightTimeoutError:
+        return False
+
+    try:
+        textos = await items.all_inner_texts()
+    except Exception:
+        textos = []
+
+    if sugerencia_objetivo and textos:
+        objetivo_norm = _normalizar_texto_autocomplete(sugerencia_objetivo)
+        for idx, texto in enumerate(textos):
+            if _normalizar_texto_autocomplete(texto) == objetivo_norm:
+                try:
+                    await items.nth(idx).click(timeout=1000)
+                    await _delay_humano(page, 150, 300)
+                    return True
+                except Exception as e:
+                    logger.debug(f"  → No se pudo clickar sugerencia objetivo en {nombre_campo or 'autocomplete'}: {e}")
+                    break
+
+    if not textos:
+        try:
+            await page.keyboard.press("ArrowDown")
+            await page.keyboard.press("Enter")
+            return True
+        except Exception:
+            return False
+
+    objetivo = _normalizar_texto_autocomplete(valor_introducido)
+
+    mejor_idx = 0
+    mejor_score = -10_000
+    objetivo_tokens = [t for t in objetivo.split(" ") if t]
+
+    for idx, texto in enumerate(textos):
+        tnorm = _normalizar_texto_autocomplete(texto)
+        score = 0
+
+        if objetivo and objetivo in tnorm:
+            score += 20
+
+        if objetivo_tokens:
+            score += sum(2 for tok in objetivo_tokens if tok in tnorm)
+
+        # Preferir sugerencias más "limpias" (más cortas) si hay empate
+        score -= int(len(tnorm) / 20)
+
+        if score > mejor_score:
+            mejor_score = score
+            mejor_idx = idx
+
+    try:
+        await items.nth(mejor_idx).click(timeout=1000)
+        await _delay_humano(page, 150, 300)
+        return True
+    except Exception as e:
+        logger.debug(f"  → No se pudo clickar sugerencia en {nombre_campo or 'autocomplete'}: {e}")
+
+    try:
+        await page.keyboard.press("ArrowDown")
+        await page.keyboard.press("Enter")
+        return True
+    except Exception:
+        return False
+
+
+async def _validar_campo_sin_error(
+    page: Page,
+    selector: str,
+    nombre_campo: str = "",
+    timeout_ms: int = 3500,
+) -> None:
+    """
+    Valida que el campo no muestre error (p.ej. 'La calle introducida no es correcta').
+
+    En los HTML de WFORS suele aparecer un `span.textoError` dentro del `label.wrapper`.
+    """
+
+    input_loc = page.locator(selector).first
+    label_loc = input_loc.locator("xpath=ancestor::label[1]")
+    error_loc = label_loc.locator("span.textoError")
+
+    # Esperar una ventana breve para que el backend pinte el error si aplica.
+    try:
+        await error_loc.first.wait_for(state="visible", timeout=timeout_ms)
+        msg = (await error_loc.first.inner_text()).strip()
+    except PlaywrightTimeoutError:
+        msg = ""
+
+    # Si no se ve span.textoError, aún puede quedar la clase "error" en el input.
+    class_attr = (await input_loc.get_attribute("class")) or ""
+    tiene_error_class = " error " in f" {class_attr} "
+
+    if msg or tiene_error_class:
+        raise ValueError(f"Validación fallida en {nombre_campo or selector}: {msg or 'campo marcado con error'}")
+
+
+async def _rellenar_input_con_autocomplete(
+    page: Page,
+    selector: str,
+    valor: str,
+    nombre_campo: str = "",
+    validar_sin_error: bool = True,
+    sugerencia_objetivo: str | None = None,
+) -> bool:
+    """
+    Rellena un input y, si aparece, selecciona una sugerencia del autocomplete.
+
+    Esto es clave para campos como NOMBREVIA donde el sistema valida contra BBDD.
+    """
+
+    if not valor:
+        return False
+
+    try:
+        elemento = page.locator(selector)
+        if await elemento.count() == 0:
+            return False
+
+        if await elemento.first.is_disabled():
+            logger.debug(f"  → Campo {nombre_campo or selector} deshabilitado, saltando")
+            return False
+
+        await elemento.first.click(timeout=1000)
+        await elemento.first.press("Control+A")
+        await elemento.first.type(valor, delay=50)
+        await _delay_humano(page, 200, 350)
+
+        await _seleccionar_sugerencia_jquery_ui(
+            page,
+            valor,
+            nombre_campo=nombre_campo,
+            sugerencia_objetivo=sugerencia_objetivo,
+        )
+
+        # Forzar blur para disparar validaciones server-side en algunos formularios
+        try:
+            await elemento.first.press("Tab")
+        except Exception:
+            pass
+
+        await _delay_humano(page, 300, 500)
+
+        if validar_sin_error:
+            await _validar_campo_sin_error(page, selector, nombre_campo=nombre_campo)
+
+        return True
+    except Exception as e:
+        logger.warning(f"  → Error rellenando (autocomplete) {nombre_campo or selector}: {e}")
+        return False
+
+
+def _elemento_bdc_desde_selector(selector: str) -> str | None:
+    """
+    Extrae el nombre del 'elemento' BDC a partir de un selector que contiene `.formula2_...`.
+    Ej: ".formula2_COMUNES_NOTIFICACION_NOMBREVIA" -> "COMUNES_NOTIFICACION_NOMBREVIA"
+    """
+
+    m = re.search(r"\\.formula2_([A-Z0-9_]+)", selector)
+    if not m:
+        return None
+    return m.group(1)
+
+
+def _prefijos_busqueda_nombre_via(nombre_via: str, tipo_via: str | None) -> list[str]:
+    """
+    Genera prefijos para el parámetro `valor` de BDC (lo que se “va tecleando”).
+
+    Caso típico: entrada humana "PLAZA DE CHAMBERI" y el sistema sugiere "CHAMBERI  [PLAZA]".
+    """
+
+    texto = _normalizar_texto_autocomplete(nombre_via)
+    if not texto:
+        return []
+
+    stop = {"DE", "DEL", "LA", "LAS", "LOS", "EL", "Y"}
+    tipo_norm = _normalizar_texto_autocomplete(tipo_via or "")
+
+    tokens = [t for t in texto.split(" ") if t]
+    tokens = [t for t in tokens if t not in stop]
+    if tipo_norm:
+        tokens = [t for t in tokens if t != tipo_norm]
+
+    if not tokens:
+        tokens = [t for t in texto.split(" ") if t]
+
+    candidatos: list[str] = []
+    vistos: set[str] = set()
+
+    def add_pref(s: str) -> None:
+        s = (s or "").strip()
+        if len(s) < 3:
+            return
+        if s in vistos:
+            return
+        vistos.add(s)
+        candidatos.append(s)
+
+    # Probar por último token (suele ser el nombre principal)
+    add_pref(tokens[-1][:3])
+    add_pref(tokens[-1][:4])
+    add_pref(tokens[-1][:5])
+
+    # Probar por primer token significativo
+    add_pref(tokens[0][:3])
+    add_pref(tokens[0][:4])
+    add_pref(tokens[0][:5])
+
+    # Probar por texto original (por si el sistema sí acepta ese orden)
+    add_pref(texto[:3])
+    add_pref(texto[:4])
+    add_pref(texto[:5])
+
+    return candidatos
+
+
+async def _rellenar_nombre_via_validado(
+    page: Page,
+    config: "MadridConfig",
+    selector: str,
+    valor_humano: str,
+    *,
+    tipo_via: str | None,
+    nombre_campo: str,
+) -> bool:
+    """
+    Rellena NOMBREVIA sin inventar: consulta BDC y selecciona una sugerencia válida.
+
+    Si `config.prevalidar_direccion_bdc` está desactivado, usa el autocomplete en UI sin preconsulta.
+    """
+
+    if not valor_humano:
+        return False
+
+    validar_sin_error = getattr(config, "strict_direccion", True)
+    prevalidar = getattr(config, "prevalidar_direccion_bdc", True)
+
+    if not prevalidar:
+        return await _rellenar_input_con_autocomplete(
+            page,
+            selector,
+            valor_humano,
+            nombre_campo,
+            validar_sin_error=validar_sin_error,
+        )
+
+    elemento = _elemento_bdc_desde_selector(selector)
+    if not elemento:
+        if validar_sin_error:
+            raise ValueError(f"No se pudo extraer elemento BDC desde selector: {selector}")
+        return await _rellenar_input_con_autocomplete(
+            page,
+            selector,
+            valor_humano,
+            nombre_campo,
+            validar_sin_error=validar_sin_error,
+        )
+
+    sugerencias: list[str] = []
+    prefijos = _prefijos_busqueda_nombre_via(valor_humano, tipo_via)
+    for pref in prefijos:
+        try:
+            resp = await bdc_sugerencias_desde_pagina(page, elemento=elemento, valor=pref)
+        except Exception:
+            continue
+
+        sugerencias = sugerencias_desde_response(resp)
+        if sugerencias:
+            break
+
+    if not sugerencias:
+        if validar_sin_error:
+            raise ValueError(f"No hay sugerencias BDC para {nombre_campo} con '{valor_humano}'")
+        return await _rellenar_input_con_autocomplete(
+            page,
+            selector,
+            valor_humano,
+            nombre_campo,
+            validar_sin_error=validar_sin_error,
+        )
+
+    mejor = elegir_mejor_sugerencia_con_tipo(sugerencias, valor_humano, tipo_via=tipo_via)
+    if not mejor:
+        if validar_sin_error:
+            raise ValueError(f"No se pudo elegir sugerencia BDC para {nombre_campo} con '{valor_humano}'")
+        mejor = valor_humano
+
+    # Para disparar el desplegable, tecleamos el "core" (antes de los corchetes) si existe.
+    core = re.split(r"\\s*\\[", mejor, maxsplit=1)[0].strip()
+    valor_tecleo = core if len(core) >= 3 else valor_humano
+
+    ok = await _rellenar_input_con_autocomplete(
+        page,
+        selector,
+        valor_tecleo,
+        nombre_campo,
+        validar_sin_error=validar_sin_error,
+        sugerencia_objetivo=mejor,
+    )
+
+    if validar_sin_error and ok:
+        # Confirmar que el valor final coincide (normalizado) con la sugerencia elegida.
+        actual = await page.locator(selector).first.input_value()
+        if _normalizar_texto_autocomplete(actual) != _normalizar_texto_autocomplete(mejor):
+            raise ValueError(f"{nombre_campo}: valor final '{actual}' no coincide con sugerencia '{mejor}'")
+
+    return ok
 
 
 async def _seleccionar_opcion(page: Page, selector: str, valor: str, nombre_campo: str = "") -> bool:
@@ -276,7 +620,14 @@ async def ejecutar_formulario_madrid(
     # Dirección (solo campos editables)
     await _rellenar_input(page, config.representante_municipio_selector, rep_dir.municipio, "Municipio rep.")
     await _seleccionar_opcion(page, config.representante_tipo_via_selector, rep_dir.tipo_via, "Tipo vía rep.")
-    await _rellenar_input(page, config.representante_nombre_via_selector, rep_dir.nombre_via, "Nombre vía rep.")
+    await _rellenar_nombre_via_validado(
+        page,
+        config,
+        config.representante_nombre_via_selector,
+        rep_dir.nombre_via,
+        tipo_via=rep_dir.tipo_via,
+        nombre_campo="Nombre vía rep.",
+    )
     await _seleccionar_opcion(page, config.representante_tipo_num_selector, rep_dir.tipo_numeracion, "Tipo num. rep.")
     await _rellenar_input(page, config.representante_numero_selector, rep_dir.numero, "Número rep.")
     await _rellenar_input(page, config.representante_portal_selector, rep_dir.portal, "Portal rep.")
@@ -349,7 +700,14 @@ async def ejecutar_formulario_madrid(
     await _seleccionar_opcion(page, config.notificacion_provincia_selector, notif_dir.provincia, "Provincia notif.")
     await _rellenar_input(page, config.notificacion_municipio_selector, notif_dir.municipio, "Municipio notif.")
     await _seleccionar_opcion(page, config.notificacion_tipo_via_selector, notif_dir.tipo_via, "Tipo vía notif.")
-    await _rellenar_input(page, config.notificacion_nombre_via_selector, notif_dir.nombre_via, "Nombre vía notif.")
+    await _rellenar_nombre_via_validado(
+        page,
+        config,
+        config.notificacion_nombre_via_selector,
+        notif_dir.nombre_via,
+        tipo_via=notif_dir.tipo_via,
+        nombre_campo="Nombre vía notif.",
+    )
     await _seleccionar_opcion(page, config.notificacion_tipo_num_selector, notif_dir.tipo_numeracion, "Tipo num. notif.")
     await _rellenar_input(page, config.notificacion_numero_selector, notif_dir.numero, "Número notif.")
     await _rellenar_input(page, config.notificacion_portal_selector, notif_dir.portal, "Portal notif.")

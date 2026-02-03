@@ -43,7 +43,11 @@ class MadridConfig(BaseConfig):
     
     # Paso 6: Certificado (popup de Windows)
     stealth_disable_webdriver: bool = True
-    
+
+    # Validaciones del formulario (p.ej. dirección / calle contra BBDD)
+    strict_direccion: bool = True
+    prevalidar_direccion_bdc: bool = True
+     
     # Paso 7: Botón "Continuar" tras autenticación
     continuar_post_auth_selector: str = "#btnContinuar"
     
