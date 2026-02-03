@@ -290,7 +290,8 @@ async def ejecutar_formulario_madrid(
     # Contacto
     await _rellenar_input(page, config.representante_email_selector, rep_con.email, "Email rep.")
     await _rellenar_input(page, config.representante_movil_selector, rep_con.movil, "Móvil rep.")
-    await _rellenar_input(page, config.representante_telefono_selector, rep_con.telefono, "Teléfono rep.")
+    # Teléfono rep. - NO RELLENAR (formula2_COMUNES_REPRESENTANTE_TELEFONO) para evitar duplicados
+    # await _rellenar_input(page, config.representante_telefono_selector, rep_con.telefono, "Teléfono rep.")
     
     # Checkbox de confirmación (evita escribir en checkboxes homónimos fuera de _id21:3)
     await _marcar_checkbox(
@@ -330,8 +331,9 @@ async def ejecutar_formulario_madrid(
     
     await _rellenar_input(page, config.notificacion_num_doc_selector, notif_id.numero_documento, "Núm. doc. notif.")
     
-    # Según tipo de documento, rellenar nombre/apellidos o razón social
-    if notif_id.tipo_documento == TipoDocumento.NIF:
+    # Según si hay razón social, rellenar nombre/apellidos o razón social
+    # (La razón social indica persona jurídica, si no hay es persona física)
+    if notif_id.razon_social:
         # Persona jurídica -> razón social
         await _rellenar_input(page, config.notificacion_razon_social_selector, notif_id.razon_social, "Razón social notif.")
     else:

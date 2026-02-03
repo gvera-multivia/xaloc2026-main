@@ -65,7 +65,7 @@ SELECT
     rs.SujetoRecurso,
     rs.FaseProcedimiento,
     rs.UsuarioAsignado,
-    e.Matricula,
+    e.matricula,
     rs.cif,
     -- Datos detallados del cliente para NOTIFICACIÓN
     c.nif AS cliente_nif,
@@ -505,6 +505,7 @@ async def build_madrid_payload(recurso: dict) -> dict:
         "notif_nombre_via": notif_nombre_via,
         "notif_tipo_numeracion": tipo_numeracion,
         "notif_numero": notif_numero,
+        "notif_portal": "",  # Portal - no disponible en DB, se puede añadir si la IA lo detecta
         "notif_escalera": notif_escalera,
         "notif_planta": notif_planta,
         "notif_puerta": notif_puerta,
