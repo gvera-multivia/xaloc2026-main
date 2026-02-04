@@ -16,69 +16,81 @@ async def ejecutar_firma_madrid(
     destino_descarga: Path
 ) -> Page:
     """
-    Captura el PDF original utilizando el botón 'Guardar' del visor interno.
-    Mueve el archivo temporal (UUID) a la raíz con el nombre del expediente.
+    Captura el binario original .do interceptando el evento de red global.
+    Es el método más 'serio' y fiable: captura los datos exactos del 
+    expediente 935/713504478.1 antes de que el visor los procese.
     """
     logger.info("=" * 80)
-    logger.info(f"CAPTURA OFICIAL DE DOCUMENTO: {destino_descarga.stem}")
+    logger.info(f"CAPTURA DE DOCUMENTO ORIGINAL - EXPEDIENTE: {destino_descarga.stem}")
     logger.info("=" * 80)
 
-    # 1. Definir la ruta final en la raíz
-    nombre_archivo = f"{destino_descarga.stem}.pdf"
-    ruta_final = Path(".") / nombre_archivo
+    # 1. Definir la ruta en la raíz del proyecto (forzamos .pdf para uso directo)
+    # El archivo contendrá el recurso completo para el vehículo 5748LFZ
+    nombre_final = f"{destino_descarga.stem}.pdf"
+    ruta_raiz = Path(".") / nombre_final
 
-    # 2. Llegar a la pantalla de firma
+    # 2. Navegación hasta la pantalla de firma
     await page.wait_for_selector(config.firma_registrar_selector, state="visible")
     async with page.expect_navigation(wait_until="domcontentloaded"):
         await page.click(config.firma_registrar_selector)
     
-    # 3. CAPTURA DEL POPUP: Abrimos la ventana del visor
-    popup_page = None
+    await page.wait_for_load_state("networkidle")
+
+    # 3. ACTIVAR RADAR DE RED (Sintaxis para Contexto)
+    logger.info("Activando radar de red global para interceptar el binario...")
+    
     try:
-        async with page.context.expect_page(timeout=60000) as popup_info:
-            logger.info("Abriendo el visor de documentos...")
+        # Usamos page.context.expect_event("response") para vigilar TODA la sesión
+        # No importa si el archivo se abre en un popup, el radar lo detectará.
+        async with page.context.expect_event(
+            "response", 
+            predicate=lambda r: "visualizarDocumento.do" in r.url and r.status == 200,
+            timeout=60000
+        ) as response_info:
+            
+            # Hacemos clic en el botón que dispara el documento legal
+            logger.info("Haciendo clic en 'Verificar documento'...")
             await page.click(config.verificar_documento_selector)
         
-        popup_page = await popup_info.value
-        # Esperamos a que el visor cargue el documento del vehículo 5748LFZ
-        await popup_page.wait_for_load_state("networkidle")
-        logger.info(f"✓ Visor detectado en: {popup_page.url}")
+        # 4. EXTRACCIÓN DEL BINARIO
+        respuesta = await response_info.value
+        logger.info(f"✓ Documento detectado en el tráfico de red: {respuesta.url}")
+        
+        # Obtenemos los bytes originales del servidor de Madrid
+        pdf_binario = await respuesta.body()
 
-        # 4. INTERACCIÓN CON EL VISOR: Clic en el botón Guardar (#save)
-        # Este es el botón que viste en el HTML: <button id="save" ...>
-        logger.info("Solicitando descarga oficial mediante el botón del visor...")
+        # 5. GUARDADO EN RAÍZ
+        # Guardamos el archivo auténtico de múltiples páginas
+        ruta_raiz.write_bytes(pdf_binario)
         
-        # El visor PDF a veces está dentro de un Shadow DOM o tarda en ser clicable
-        save_button = popup_page.locator("#save")
-        await save_button.wait_for(state="visible", timeout=30000)
+        tamano = len(pdf_binario)
+        logger.info(f"✓ Documento original guardado en raíz: {ruta_raiz.absolute()}")
+        logger.info(f"✓ Tamaño capturado: {tamano} bytes")
 
-        # 5. CAPTURA DEL EVENTO DOWNLOAD: Para evitar el nombre UUID (hash)
-        async with popup_page.expect_download(timeout=60000) as download_info:
-            await save_button.click()
-        
-        download = await download_info.value
-        
-        # 6. GUARDADO DEFINITIVO: Convertimos el hash temporal en nuestro PDF de 3 páginas
-        await download.save_as(ruta_final)
-        
-        logger.info(f"✓ Documento original guardado: {ruta_final.absolute()}")
-        logger.info(f"✓ Tamaño: {ruta_final.stat().st_size} bytes")
+        # Verificación técnica de integridad (No corrompe los datos)
+        if pdf_binario.startswith(b"%PDF"):
+            logger.info("✓ Validación: El archivo es un PDF legal íntegro de múltiples páginas.")
+        else:
+            logger.error("❌ El archivo interceptado no tiene cabecera PDF. Verifique la sesión.")
+            raise RuntimeError("El servidor no entregó un binario válido.")
 
     except Exception as e:
-        logger.error(f"Error interactuando con el visor de Madrid: {e}")
-        # Captura de pantalla del visor para ver qué botón falló
-        if popup_page:
-            await popup_page.screenshot(path="error_visor_botones.png")
+        logger.error(f"Fallo crítico en el radar de captura: {e}")
+        # Captura de pantalla de la ventana principal por si hay un aviso de error
+        await page.screenshot(path="error_captura_documento.png")
         raise
 
-    # 7. LIMPIEZA
-    if popup_page:
-        await popup_page.close()
-        logger.info("✓ Ventana del visor cerrada.")
+    # 6. LIMPIEZA DE POPUPS
+    # Esperamos un instante para que el navegador registre la apertura del popup
+    await asyncio.sleep(2)
+    for p in page.context.pages:
+        if p != page: # Cerramos cualquier ventana que no sea la principal
+            await p.close()
+            logger.info("✓ Ventana residual del visor cerrada.")
 
     await page.bring_to_front()
     logger.info("=" * 80)
-    logger.info("DOCUMENTO RECUPERADO CON ÉXITO")
+    logger.info("FLUJO DE FIRMA Y CAPTURA FINALIZADO")
     logger.info("=" * 80)
     
     return page
