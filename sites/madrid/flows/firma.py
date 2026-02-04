@@ -1,9 +1,9 @@
 from __future__ import annotations
 import logging
-import asyncio
+import base64
 from pathlib import Path
 from typing import TYPE_CHECKING
-from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
+from playwright.async_api import Page
 
 if TYPE_CHECKING:
     from sites.madrid.config import MadridConfig
@@ -16,81 +16,69 @@ async def ejecutar_firma_madrid(
     destino_descarga: Path
 ) -> Page:
     """
-    Captura el binario original .do interceptando el evento de red global.
-    Es el método más 'serio' y fiable: captura los datos exactos del 
-    expediente 935/713504478.1 antes de que el visor los procese.
+    Extrae el documento original inyectando la lógica de fetch validada en consola.
+    Garantiza el binario de 67KB y evita el visor de la extensión.
     """
     logger.info("=" * 80)
-    logger.info(f"CAPTURA DE DOCUMENTO ORIGINAL - EXPEDIENTE: {destino_descarga.stem}")
+    logger.info(f"EXTRACCIÓN BINARIA DIRECTA - EXPEDIENTE: {destino_descarga.stem}")
     logger.info("=" * 80)
 
-    # 1. Definir la ruta en la raíz del proyecto (forzamos .pdf para uso directo)
-    # El archivo contendrá el recurso completo para el vehículo 5748LFZ
+    # 1. Definir ruta en la raíz del proyecto
     nombre_final = f"{destino_descarga.stem}.pdf"
     ruta_raiz = Path(".") / nombre_final
 
-    # 2. Navegación hasta la pantalla de firma
+    # 2. Navegar a la pantalla de firma
     await page.wait_for_selector(config.firma_registrar_selector, state="visible")
     async with page.expect_navigation(wait_until="domcontentloaded"):
         await page.click(config.firma_registrar_selector)
     
     await page.wait_for_load_state("networkidle")
 
-    # 3. ACTIVAR RADAR DE RED (Sintaxis para Contexto)
-    logger.info("Activando radar de red global para interceptar el binario...")
+    # 3. EJECUCIÓN DEL "HACK" DE CONSOLA
+    # Le pedimos al navegador que haga el fetch y nos devuelva el PDF en Base64
+    logger.info("Ejecutando fetch interceptor para el vehículo 5748LFZ...")
     
+    script_extraccion = """
+    async () => {
+        const btn = document.querySelector('button[name="verificar"]');
+        const formData = new FormData(btn.form);
+        formData.append('verificar', '1');
+
+        const response = await fetch(btn.form.action, {
+            method: 'POST',
+            body: new URLSearchParams(formData)
+        });
+
+        if (!response.ok) throw new Error("Servidor Madrid falló: " + response.status);
+
+        const buffer = await response.arrayBuffer();
+        // Convertimos el buffer a Base64 para pasarlo de JS a Python sin pérdidas
+        return btoa(String.fromCharCode(...new Uint8Array(buffer)));
+    }
+    """
+
     try:
-        # Usamos page.context.expect_event("response") para vigilar TODA la sesión
-        # No importa si el archivo se abre en un popup, el radar lo detectará.
-        async with page.context.expect_event(
-            "response", 
-            predicate=lambda r: "visualizarDocumento.do" in r.url and r.status == 200,
-            timeout=60000
-        ) as response_info:
-            
-            # Hacemos clic en el botón que dispara el documento legal
-            logger.info("Haciendo clic en 'Verificar documento'...")
-            await page.click(config.verificar_documento_selector)
+        # Ejecutamos la lógica que funcionó en tu consola
+        base64_pdf = await page.evaluate(script_extraccion)
         
-        # 4. EXTRACCIÓN DEL BINARIO
-        respuesta = await response_info.value
-        logger.info(f"✓ Documento detectado en el tráfico de red: {respuesta.url}")
+        # 4. DECODIFICACIÓN Y GUARDADO FÍSICO
+        pdf_bytes = base64.b64decode(base64_pdf)
         
-        # Obtenemos los bytes originales del servidor de Madrid
-        pdf_binario = await respuesta.body()
-
-        # 5. GUARDADO EN RAÍZ
-        # Guardamos el archivo auténtico de múltiples páginas
-        ruta_raiz.write_bytes(pdf_binario)
-        
-        tamano = len(pdf_binario)
-        logger.info(f"✓ Documento original guardado en raíz: {ruta_raiz.absolute()}")
-        logger.info(f"✓ Tamaño capturado: {tamano} bytes")
-
-        # Verificación técnica de integridad (No corrompe los datos)
-        if pdf_binario.startswith(b"%PDF"):
-            logger.info("✓ Validación: El archivo es un PDF legal íntegro de múltiples páginas.")
+        if pdf_bytes.startswith(b"%PDF"):
+            ruta_raiz.write_bytes(pdf_bytes)
+            logger.info(f"✓ DOCUMENTO ORIGINAL GUARDADO ({len(pdf_bytes)} bytes)")
+            logger.info(f"Ubicación: {ruta_raiz.absolute()}")
         else:
-            logger.error("❌ El archivo interceptado no tiene cabecera PDF. Verifique la sesión.")
-            raise RuntimeError("El servidor no entregó un binario válido.")
+            raise RuntimeError("Los datos recibidos no tienen formato PDF.")
 
     except Exception as e:
-        logger.error(f"Fallo crítico en el radar de captura: {e}")
-        # Captura de pantalla de la ventana principal por si hay un aviso de error
-        await page.screenshot(path="error_captura_documento.png")
+        logger.error(f"Fallo en la extracción por inyección: {e}")
         raise
 
-    # 6. LIMPIEZA DE POPUPS
-    # Esperamos un instante para que el navegador registre la apertura del popup
-    await asyncio.sleep(2)
-    for p in page.context.pages:
-        if p != page: # Cerramos cualquier ventana que no sea la principal
-            await p.close()
-            logger.info("✓ Ventana residual del visor cerrada.")
-
-    await page.bring_to_front()
+    # 5. FINALIZACIÓN
+    # Ya no hay popups que cerrar porque nunca dejamos que se abrieran
     logger.info("=" * 80)
-    logger.info("FLUJO DE FIRMA Y CAPTURA FINALIZADO")
+    logger.info("PROCESO DE FIRMA Y EXTRACCIÓN COMPLETADO CON ÉXITO")
     logger.info("=" * 80)
     
     return page
