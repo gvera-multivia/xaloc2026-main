@@ -102,7 +102,8 @@ class MadridAutomation(BaseAutomation):
                 self.page = await ejecutar_firma_madrid(
                     self.page,
                     self.config,
-                    destino_verificacion
+                    destino_verificacion,
+                    datos.payload
                 )
                 
                 self.logger.info("\n" + "=" * 80)

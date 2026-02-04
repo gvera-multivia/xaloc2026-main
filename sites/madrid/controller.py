@@ -86,6 +86,7 @@ class MadridController:
         expone: str | None = None,
         solicita: str | None = None,
         archivos: list[str] | None = None,
+        payload: dict | None = None,
     ) -> MadridTarget:
         def _require(name: str, value: str | None) -> str:
             v = (value or "").strip()
@@ -205,6 +206,7 @@ class MadridController:
             idRecurso=idRecurso,
             form_data=form_data,
             archivos_adjuntos=[Path(a) for a in archivos_final] if archivos_final else [],
+            payload=payload or {},
             headless=headless,
         )
 
@@ -267,6 +269,7 @@ class MadridController:
             "expone": data.get("expone"),
             "solicita": data.get("solicita"),
             "archivos": data.get("archivos") or data.get("archivos_adjuntos"),
+            "payload": data,
         }
 
 def get_controller() -> MadridController:

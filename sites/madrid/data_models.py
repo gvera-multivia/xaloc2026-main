@@ -166,6 +166,9 @@ class MadridTarget:
     
     # Archivos adjuntos (para la pantalla posterior)
     archivos_adjuntos: list[Path] = field(default_factory=list)
+
+    # Payload crudo original (para lógica de paths y notificaciones)
+    payload: dict = field(default_factory=dict)
     
     # Metadatos de ejecución
     headless: bool = True
