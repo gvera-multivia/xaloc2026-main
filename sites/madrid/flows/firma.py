@@ -3,7 +3,7 @@ import logging
 import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING
-from playwright.async_api import Page
+from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
 if TYPE_CHECKING:
     from sites.madrid.config import MadridConfig
@@ -16,61 +16,69 @@ async def ejecutar_firma_madrid(
     destino_descarga: Path
 ) -> Page:
     """
-    Simula la acción de 'Guardar como' (Ctrl + S) interceptando el binario original.
-    Guarda el documento de múltiples páginas legal en la raíz del proyecto.
+    Captura el PDF original utilizando el botón 'Guardar' del visor interno.
+    Mueve el archivo temporal (UUID) a la raíz con el nombre del expediente.
     """
     logger.info("=" * 80)
-    logger.info("CAPTURA PROFESIONAL: BINARIO ORIGINAL DEL AYUNTAMIENTO")
+    logger.info(f"CAPTURA OFICIAL DE DOCUMENTO: {destino_descarga.stem}")
     logger.info("=" * 80)
 
-    # 1. Definir ruta en la raíz (forzamos .do para que veas que es el original)
-    nombre_archivo = f"{destino_descarga.stem}.do"
-    ruta_raiz = Path(".") / nombre_archivo
+    # 1. Definir la ruta final en la raíz
+    nombre_archivo = f"{destino_descarga.stem}.pdf"
+    ruta_final = Path(".") / nombre_archivo
 
+    # 2. Llegar a la pantalla de firma
+    await page.wait_for_selector(config.firma_registrar_selector, state="visible")
+    async with page.expect_navigation(wait_until="domcontentloaded"):
+        await page.click(config.firma_registrar_selector)
+    
+    # 3. CAPTURA DEL POPUP: Abrimos la ventana del visor
+    popup_page = None
     try:
-        # 2. Navegar a la pantalla de firma
-        await page.wait_for_selector(config.firma_registrar_selector, state="visible")
-        async with page.expect_navigation(wait_until="domcontentloaded"):
-            await page.click(config.firma_registrar_selector)
-        
-        # 3. INTERCEPCIÓN (El radar): Escuchamos en todo el contexto (incluye el popup)
-        # Esto captura la respuesta que Madrid envía para 'visualizarDocumento.do'
-        async with page.context.expect_response(
-            lambda r: "visualizarDocumento.do" in r.url and r.status == 200,
-            timeout=60000
-        ) as response_info:
-            
-            logger.info("Haciendo clic para generar el documento...")
+        async with page.context.expect_page(timeout=60000) as popup_info:
+            logger.info("Abriendo el visor de documentos...")
             await page.click(config.verificar_documento_selector)
         
-        # 4. CAPTURA DE DATOS: Extraemos el cuerpo del archivo
-        respuesta = await response_info.value
-        binario_original = await respuesta.body()
+        popup_page = await popup_info.value
+        # Esperamos a que el visor cargue el documento del vehículo 5748LFZ
+        await popup_page.wait_for_load_state("networkidle")
+        logger.info(f"✓ Visor detectado en: {popup_page.url}")
 
-        # 5. GUARDADO FÍSICO: Volcamos el buffer al disco en la raíz
-        ruta_raiz.write_bytes(binario_original)
+        # 4. INTERACCIÓN CON EL VISOR: Clic en el botón Guardar (#save)
+        # Este es el botón que viste en el HTML: <button id="save" ...>
+        logger.info("Solicitando descarga oficial mediante el botón del visor...")
         
-        logger.info(f"✓ Archivo original guardado: {ruta_raiz.absolute()}")
-        logger.info(f"✓ Tamaño capturado: {len(binario_original)} bytes")
+        # El visor PDF a veces está dentro de un Shadow DOM o tarda en ser clicable
+        save_button = popup_page.locator("#save")
+        await save_button.wait_for(state="visible", timeout=30000)
 
-        # Verificación rápida de cabecera (No corrompe el archivo)
-        if binario_original.startswith(b"%PDF"):
-            logger.info("✓ Validación: El .do contiene un PDF válido de múltiples páginas.")
+        # 5. CAPTURA DEL EVENTO DOWNLOAD: Para evitar el nombre UUID (hash)
+        async with popup_page.expect_download(timeout=60000) as download_info:
+            await save_button.click()
+        
+        download = await download_info.value
+        
+        # 6. GUARDADO DEFINITIVO: Convertimos el hash temporal en nuestro PDF de 3 páginas
+        await download.save_as(ruta_final)
+        
+        logger.info(f"✓ Documento original guardado: {ruta_final.absolute()}")
+        logger.info(f"✓ Tamaño: {ruta_final.stat().st_size} bytes")
 
     except Exception as e:
-        logger.error(f"Error crítico en la captura del documento: {e}")
+        logger.error(f"Error interactuando con el visor de Madrid: {e}")
+        # Captura de pantalla del visor para ver qué botón falló
+        if popup_page:
+            await popup_page.screenshot(path="error_visor_botones.png")
         raise
 
-    # 6. LIMPIEZA DE VENTANAS: Cerramos el visor que se quedó abierto
-    await asyncio.sleep(2)
-    for p in page.context.pages:
-        if p != page: 
-            await p.close()
-            logger.info("✓ Ventana emergente del visor cerrada.")
+    # 7. LIMPIEZA
+    if popup_page:
+        await popup_page.close()
+        logger.info("✓ Ventana del visor cerrada.")
 
     await page.bring_to_front()
     logger.info("=" * 80)
-    logger.info("PROCESO FINALIZADO: DOCUMENTO DISPONIBLE EN RAÍZ")
+    logger.info("DOCUMENTO RECUPERADO CON ÉXITO")
     logger.info("=" * 80)
     
     return page
