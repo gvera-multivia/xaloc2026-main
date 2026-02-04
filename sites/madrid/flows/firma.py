@@ -1,22 +1,9 @@
-"""
-Flujo de firma y verificación de documento para Madrid Ayuntamiento mediante impresión virtual.
-
-Pasos:
-1. Click en "Firma y registrar" (btRedireccion)
-2. Esperar navegación a SIGNA_WBFIRMAR/solicitarFirma.do
-3. Click en "Verificar documento"
-4. Capturar popup con el visor del documento
-5. Generar PDF mediante impresión virtual (Print to PDF)
-6. Cerrar popup y volver a ventana principal
-"""
-
 from __future__ import annotations
-
 import logging
 import re
+import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING
-
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
 if TYPE_CHECKING:
@@ -24,52 +11,50 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-
-def _extraer_jsessionid(url: str) -> str:
-    """Extrae el jsessionid de una URL."""
-    match = re.search(r'jsessionid=([^&;/?]+)', url)
-    if match:
-        return match.group(1)
-    raise ValueError(f"No se pudo extraer jsessionid de la URL: {url}")
-
-
-async def _imprimir_pdf_desde_popup(popup_page: Page, nombre_archivo: str) -> Path:
+async def _imprimir_visor_a_pdf(popup_page: Page, nombre_pdf: str) -> Path:
     """
-    Utiliza el motor de Chromium para imprimir el contenido del popup a un PDF físico.
-    IMPORTANTE: Solo funciona si Playwright se ejecuta en modo HEADLESS.
+    Fuerza la impresión a PDF del visor de Madrid.
+    Espera a que los blobs de las páginas (.pagerect) estén cargados.
     """
-    # Guardamos en la raíz del proyecto
-    destino = Path(".") / nombre_archivo
-    logger.info(f"Iniciando impresión virtual a PDF: {destino.absolute()}")
+    # Guardar en la raíz del proyecto
+    destino = Path(".") / nombre_pdf
+    logger.info(f"Iniciando renderizado y captura de PDF en: {destino.absolute()}")
 
     try:
-        # 1. Esperar a que el visor termine de cargar el documento y la red esté inactiva
-        await popup_page.wait_for_load_state("networkidle", timeout=30000)
+        # 1. Esperar a que el contenedor de las páginas PDF aparezca en el DOM
+        # Según tu HTML, las páginas tienen la clase 'pagerect'
+        await popup_page.wait_for_selector(".pagerect", state="visible", timeout=20000)
         
-        # 2. Pequeño margen para asegurar el renderizado de fuentes y firmas
-        await popup_page.wait_for_timeout(3000)
+        # 2. Ocultar la interfaz del visor (toolbar) para que no salga en el PDF
+        await popup_page.add_style_tag(content="#toolbar { display: none !important; }")
+        
+        # 3. Esperar a que el navegador termine de procesar los blobs de red
+        await popup_page.wait_for_load_state("networkidle", timeout=10000)
+        
+        # 4. Margen de seguridad para asegurar que el motor de renderizado "dibuje" el PDF
+        await popup_page.wait_for_timeout(5000)
 
-        # 3. Generar el PDF
-        # Nota: 'print_background' es clave para que salgan los logos del Ayuntamiento
+        # 5. Ejecutar la impresión virtual (Solo funciona en modo HEADLESS)
         await popup_page.pdf(
             path=destino,
             format="A4",
             print_background=True,
-            margin={"top": "1cm", "right": "1cm", "bottom": "1cm", "left": "1cm"}
+            display_header_footer=False,
+            margin={"top": "0cm", "right": "0cm", "bottom": "0cm", "left": "0cm"}
         )
 
         size = destino.stat().st_size
-        logger.info(f"✓ PDF generado con éxito ({size} bytes)")
-        
         if size < 5000:
-            logger.warning("⚠️ El PDF generado es sospechosamente pequeño, revisa el modo headless.")
+            raise RuntimeError(f"El PDF generado es demasiado pequeño ({size} bytes). Verifique modo headless.")
             
+        logger.info(f"✓ PDF generado exitosamente mediante impresión ({size} bytes)")
         return destino
 
     except Exception as e:
-        logger.error(f"Error durante la impresión virtual a PDF: {e}")
+        logger.error(f"Error crítico durante la impresión virtual: {e}")
+        # Backup: Si falla el PDF, intentamos un screenshot de alta resolución
+        await popup_page.screenshot(path=Path(".") / f"emergencia_{nombre_pdf}.png", full_page=True)
         raise
-
 
 async def ejecutar_firma_madrid(
     page: Page, 
@@ -77,39 +62,20 @@ async def ejecutar_firma_madrid(
     destino_descarga: Path
 ) -> Page:
     """
-    Ejecuta el flujo completo de firma y captura el documento final.
+    Flujo de firma y verificación con captura visual del justificante.
     """
     logger.info("=" * 80)
-    logger.info("INICIANDO FLUJO DE FIRMA E IMPRESIÓN VIRTUAL")
+    logger.info("INICIANDO FLUJO DE FIRMA (MODO IMPRESIÓN VIRTUAL)")
     logger.info("=" * 80)
 
-    # =========================================================================
-    # PASO 1: Validar botón 'Firma y registrar'
-    # =========================================================================
-    logger.info("Validando presencia del botón 'Firma y registrar'...")
-    try:
-        await page.wait_for_selector(config.firma_registrar_selector, state="visible", timeout=config.default_timeout)
-        logger.info("✓ Botón 'Firma y registrar' encontrado")
-    except PlaywrightTimeoutError:
-        raise RuntimeError(f"No se encontró el botón 'Firma y registrar' ({config.firma_registrar_selector})")
-
-    # =========================================================================
-    # PASO 2: Click y Navegación
-    # =========================================================================
-    logger.info("Haciendo click en 'Firma y registrar'...")
-    try:
-        async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.firma_navigation_timeout):
-            await page.click(config.firma_registrar_selector)
-        logger.info(f"✓ Navegación completada. URL actual: {page.url}")
-    except PlaywrightTimeoutError:
-        raise RuntimeError("Timeout esperando navegación tras 'Firma y registrar'")
-
-    # =========================================================================
-    # PASO 3 y 4: Click 'Verificar' y Captura de Popup
-    # =========================================================================
-    logger.info("Preparando click en 'Verificar documento'...")
-    await page.wait_for_selector(config.verificar_documento_selector, state="visible")
-
+    # PASO 1: Validar botón
+    await page.wait_for_selector(config.firma_registrar_selector, state="visible")
+    
+    # PASO 2: Click y esperar navegación
+    async with page.expect_navigation(wait_until="domcontentloaded"):
+        await page.click(config.firma_registrar_selector)
+    
+    # PASO 3: Click en Verificar y Capturar Popup
     popup_page = None
     try:
         async with page.context.expect_page(timeout=config.popup_wait_timeout) as new_page_info:
@@ -117,44 +83,26 @@ async def ejecutar_firma_madrid(
             await page.click(config.verificar_documento_selector)
         
         popup_page = await new_page_info.value
+        # Esperar a que cargue el visor (wrapper HTML)
         await popup_page.wait_for_load_state("domcontentloaded")
-        logger.info(f"✓ Popup capturado con URL: {popup_page.url}")
     except PlaywrightTimeoutError:
-        raise RuntimeError("No se abrió el popup de verificación a tiempo.")
+        raise RuntimeError("El portal de Madrid no abrió el visor del documento.")
 
-    # =========================================================================
-    # PASO 5: Extraer jsessionid (Opcional, para log)
-    # =========================================================================
-    try:
-        jsid = _extraer_jsessionid(popup_page.url)
-        logger.info(f"✓ jsessionid detectado: {jsid[:15]}...")
-    except Exception:
-        logger.warning("No se pudo extraer jsessionid, continuando con impresión...")
-
-    # =========================================================================
-    # PASO 6: Generar PDF (Versión Impresión)
-    # =========================================================================
-    # Usamos el nombre del archivo definido originalmente, pero lo guardaremos en la raíz
+    # PASO 4: Generar el PDF desde el visor
+    # Limpiamos el nombre para que sea el del expediente
     nombre_final = destino_descarga.name if destino_descarga.name.endswith(".pdf") else f"{destino_descarga.stem}.pdf"
     
     try:
-        # Llamamos a la función de impresión virtual
-        await _imprimir_pdf_desde_popup(popup_page, nombre_final)
-    except Exception as e:
-        logger.error(f"Fallo en la impresión del documento: {e}")
-        # Captura de pantalla de emergencia por si el PDF falla
-        await popup_page.screenshot(path=f"error_captura_{nombre_final}.png", full_page=True)
-        raise
+        await _imprimir_visor_a_pdf(popup_page, nombre_final)
+    finally:
+        # PASO 5: Limpieza
+        if popup_page:
+            await popup_page.close()
+            logger.info("✓ Visor de documento cerrado.")
 
-    # =========================================================================
-    # PASO 7: Cierre y vuelta
-    # =========================================================================
-    logger.info("Cerrando popup y volviendo a ventana principal...")
-    await popup_page.close()
     await page.bring_to_front()
-    
     logger.info("=" * 80)
-    logger.info("FLUJO DE FIRMA Y VERIFICACIÓN COMPLETADO CON ÉXITO")
+    logger.info("PROCESO DE FIRMA E IMPRESIÓN FINALIZADO")
     logger.info("=" * 80)
     
     return page
