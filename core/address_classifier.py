@@ -1,45 +1,64 @@
 """
 Módulo para clasificar direcciones postales usando IA (Groq).
-Adaptado de scripts/llamar_ia.py para uso con payloads del worker.
+Adaptado para cumplir con el catálogo oficial de tipos de vía del formulario.
 """
 
 import os
 import json
+import re
 from typing import Optional
 from groq import Groq
 
-
-# Modelo a usar (mismo que llamar_ia.py)
+# Modelo a usar
 MODELO = "llama-3.3-70b-versatile"
 
+# Lista oficial extraída del select proporcionado
+VIAS_VALIDAS = [
+    "ACCESO", "AGREGADO", "ALAMEDA", "ANDADOR", "ARRABAL", "ARROYO", "AUTOPISTA", "AUTOVIA", 
+    "AVENIDA", "BAJADA", "BARRANCO", "BARRANQUIL", "BARRIO", "BLOQUE", "BULEVAR", "CALEYA", 
+    "CALLE", "CALLEJA", "CALLEJON", "CALLIZO", "CAMINO", "CAMPO", "CANAL", "CANTON", 
+    "CARRERA", "CARRETERA", "CARRIL", "CASERIO", "CAÑADA", "CHALET", "CINTURON", "COLEGIO", 
+    "COLONIA", "COMPLEJO", "CONCEJO", "CONJUNTO", "COSTANILLA", "CUESTA", "DETRÁS", 
+    "DIPUTACION", "DISEMINADOS", "EDIFICIO", "EDIFICIOS", "ENTRADA", "ESCALINATA", 
+    "ESPALDA", "ESTACION", "EXPLANADA", "EXTRAMUROS", "EXTRARRADIO", "FERROCARRIL", 
+    "FINCA", "FUENTE", "GALERIA", "GLORIETA", "GRAN VIA", "GRUPO", "HUERTA", "JARDIN", 
+    "JARDINES", "LADO", "LAGO", "LUGAR", "MALECON", "MANZANA", "MASIAS", "MERCADO", 
+    "MONTE", "MONUMENTO", "MUELLE", "MUNICIPIO", "PARAMO", "PARQUE", "PARTICULAR", 
+    "PARTIDA", "PASADIZO", "PASAJE", "PASEO", "PISTA", "PLACETA", "PLAZA", "PLAZUELA", 
+    "POBLADO", "POLIGONO", "PROLONGACION", "PUENTE", "PUERTA", "QUINTA", "RACONADA", 
+    "RAMAL", "RAMBLA", "RAMPA", "RIERA", "RINCON", "RIO", "RONDA", "RUA", "SALIDA", 
+    "SALON", "SECTOR", "SENDA", "SOLAR", "SUBIDA", "TERRENOS", "TORRENTE", "TRANSVERSAL", 
+    "TRASERA", "TRAVESIA", "URBANIZACION", "VALLE", "VEREDA", "VIA", "VIADUCTO", "VIAL"
+]
 
 def _get_groq_client(api_key: Optional[str] = None) -> Groq:
-    """Obtiene el cliente de Groq con la API key."""
     key = api_key or os.getenv("GROQ_API_KEY")
     if not key:
         raise ValueError("GROQ_API_KEY no está configurada en el entorno")
     return Groq(api_key=key)
 
-
 def _build_prompt_sistema() -> str:
-    """Construye el prompt del sistema para la IA."""
-    return """
+    """Construye el prompt del sistema incluyendo las vías permitidas."""
+    vias_str = ", ".join(VIAS_VALIDAS)
+    return f"""
     Actúas como un experto en el catastro de España. Tu objetivo es parsear direcciones de forma ultra-limpia.
-    Devuelve exclusivamente un objeto JSON con los siguientes campos:
     
-    - via: (CALLE, AVENIDA, PLAZA, etc.)
-    - calle: (Nombre limpio de la vía. Corrige truncamientos si es obvio por la ciudad)
+    VALORES PERMITIDOS PARA 'via':
+    [{vias_str}]
+
+    Devuelve exclusivamente un objeto JSON con los siguientes campos:
+    - via: (DEBE ser uno de los valores de la lista anterior. Si no encaja, usa 'CALLE')
+    - calle: (Nombre limpio de la vía. Corrige truncamientos)
     - numero: (Solo el número o S/N)
     - escalera: (Solo el identificador)
     - planta: (Piso. Normaliza: 'P'->'PRINCIPAL', 'BJ'->'BAJO', '3º'->'3')
-    - puerta: (Solo el identificador final. ELIMINA prefijos como 'NAVE', 'PTA', 'PUERTA', 'LOCAL', 'PUESTO'. Ejemplo: 'NAVE 8' -> '8', 'PTA 3' -> '3')
+    - puerta: (Solo el identificador final. ELIMINA 'NAVE', 'PTA', 'LOCAL', etc.)
 
-    REGLAS DE ORO:
-    1. En 'puerta', si el valor es 'NAVE 8', pon solo '8'. Si es 'LOCAL 2', pon '2'.
-    2. No inventes datos. Si no existe, deja "".
+    REGLAS:
+    1. Si recibes 'CL' o 'C/', mapealo a 'CALLE'. Si recibes 'AV' a 'AVENIDA', etc.
+    2. En 'puerta', si el valor es 'NAVE 8', pon solo '8'.
     3. JSON puro, sin comentarios.
     """
-
 
 async def classify_address_with_ai(
     direccion_raw: str,
@@ -50,50 +69,17 @@ async def classify_address_with_ai(
     *,
     api_key: Optional[str] = None
 ) -> dict:
-    """
-    Clasifica una dirección usando IA (Groq).
-    
-    Args:
-        direccion_raw: Dirección completa o calle (ej: "CL MAYOR 15")
-        poblacion: Población/municipio (opcional, ayuda al contexto)
-        numero: Número de la calle desde la DB (opcional)
-        piso: Piso/planta (opcional)
-        puerta: Puerta (opcional)
-        api_key: API key de Groq (opcional, usa GROQ_API_KEY del entorno si no se proporciona)
-    
-    Returns:
-        {
-            "tipo_via": "CALLE",
-            "calle": "MAYOR",
-            "numero": "15",
-            "escalera": "",
-            "planta": "2",
-            "puerta": "A"
-        }
-    
-    Raises:
-        ValueError: Si GROQ_API_KEY no está configurada
-        Exception: Si la llamada a la IA falla
-    """
     try:
         client = _get_groq_client(api_key)
         
-        # Construir el texto de entrada similar a llamar_ia.py
-        datos_ia = [
-            f"calle: {direccion_raw}",
-        ]
-        if numero:
-            datos_ia.append(f"numero: {numero}")
-        if poblacion:
-            datos_ia.append(f"poblacion: {poblacion}")
-        if piso:
-            datos_ia.append(f"piso: {piso}")
-        if puerta:
-            datos_ia.append(f"puerta: {puerta}")
+        datos_ia = [f"calle: {direccion_raw}"]
+        if numero: datos_ia.append(f"numero: {numero}")
+        if poblacion: datos_ia.append(f"poblacion: {poblacion}")
+        if piso: datos_ia.append(f"piso: {piso}")
+        if puerta: datos_ia.append(f"puerta: {puerta}")
         
         texto_entrada = ", ".join(datos_ia)
         
-        # Llamar a la IA
         chat_completion = client.chat.completions.create(
             messages=[
                 {"role": "system", "content": _build_prompt_sistema()},
@@ -104,106 +90,66 @@ async def classify_address_with_ai(
             temperature=0.1
         )
         
-        # Parsear respuesta
         respuesta = json.loads(chat_completion.choices[0].message.content)
         
-        # Normalizar campos al formato esperado por Madrid
-        via = (respuesta.get("via") or "").strip().upper()
-        calle = (respuesta.get("calle") or "").strip().upper()
-        numero = (respuesta.get("numero") or "").strip()
-        escalera = (respuesta.get("escalera") or "").strip().upper()
-        planta = (respuesta.get("planta") or "").strip().upper()
-        puerta_parsed = (respuesta.get("puerta") or "").strip().upper()
-        
+        # Validar que la vía devuelta esté en nuestra lista
+        via_ia = (respuesta.get("via") or "").strip().upper()
+        if via_ia not in VIAS_VALIDAS:
+            via_ia = "CALLE" # Fallback de seguridad
+
         return {
-            "tipo_via": via or "CALLE",  # Fallback a CALLE si no se detecta
-            "calle": calle,
-            "numero": numero,
-            "escalera": escalera,
-            "planta": planta,
-            "puerta": puerta_parsed
+            "tipo_via": via_ia,
+            "calle": (respuesta.get("calle") or "").strip().upper(),
+            "numero": (respuesta.get("numero") or "").strip().upper(),
+            "escalera": (respuesta.get("escalera") or "").strip().upper(),
+            "planta": (respuesta.get("planta") or "").strip().upper(),
+            "puerta": (respuesta.get("puerta") or "").strip().upper()
         }
         
     except Exception as e:
-        raise Exception(f"Error al clasificar dirección con IA: {e}") from e
-
+        # Si falla la IA, usamos el fallback local
+        return classify_address_fallback(direccion_raw)
 
 def classify_address_fallback(direccion_raw: str) -> dict:
-    """
-    Clasificación fallback sin IA (lógica simple).
-    Usa heurísticas básicas para parsear la dirección.
-    
-    Args:
-        direccion_raw: Dirección completa (ej: "CL MAYOR 15")
-    
-    Returns:
-        Diccionario con campos básicos parseados
-    """
-    import re
-    
+    """Mapeo manual extendido con las vías del formulario."""
     if not direccion_raw:
-        return {
-            "tipo_via": "CALLE",
-            "calle": "",
-            "numero": "",
-            "escalera": "",
-            "planta": "",
-            "puerta": ""
-        }
-    
-    # Mapeo de abreviaturas a tipos de vía
+        return {"tipo_via": "CALLE", "calle": "", "numero": "", "escalera": "", "planta": "", "puerta": ""}
+
+    # Mapeo de abreviaturas comunes a los términos exactos del select
     via_map = {
-        "CL": "CALLE",
-        "CALLE": "CALLE",
-        "C/": "CALLE",
-        "AV": "AVENIDA",
-        "AVDA": "AVENIDA",
-        "AVENIDA": "AVENIDA",
-        "RD": "RONDA",
-        "RONDA": "RONDA",
-        "PS": "PASEO",
-        "PASEO": "PASEO",
-        "CTRA": "CARRETERA",
-        "CARRETERA": "CARRETERA",
-        "PL": "PLAZA",
-        "PLAZA": "PLAZA"
+        "CL": "CALLE", "C/": "CALLE", "AV": "AVENIDA", "AVDA": "AVENIDA",
+        "PZ": "PLAZA", "PZA": "PLAZA", "PL": "PLAZA", "PS": "PASEO",
+        "TRAV": "TRAVESIA", "TRV": "TRAVESIA", "CTRA": "CARRETERA",
+        "RD": "RONDA", "RDA": "RONDA", "URB": "URBANIZACION",
+        "BL": "BLOQUE", "ED": "EDIFICIO", "POL": "POLIGONO",
+        "GV": "GRAN VIA", "PJE": "PASAJE", "PR": "PROLONGACION"
     }
     
     parts = direccion_raw.strip().upper().split()
-    if not parts:
-        return {
-            "tipo_via": "CALLE",
-            "calle": "",
-            "numero": "",
-            "escalera": "",
-            "planta": "",
-            "puerta": ""
-        }
+    first_token = parts[0].replace(".", "") # Limpiar puntos de abreviaturas
     
-    # Intentar detectar tipo de vía en el primer token
-    first_token = parts[0]
-    tipo_via = via_map.get(first_token, "CALLE")
+    # Buscar si el primer token coincide con una vía válida o una abreviatura
+    tipo_via = "CALLE"
+    if first_token in VIAS_VALIDAS:
+        tipo_via = first_token
+    elif first_token in via_map:
+        tipo_via = via_map[first_token]
     
-    # Intentar extraer número (buscar dígitos en los tokens)
+    # Lógica simple para extraer el número (primer token que contenga un dígito)
     numero = ""
     calle_parts = []
     
-    for i, token in enumerate(parts):
-        # Si es el primer token y es tipo de vía, saltar
-        if i == 0 and first_token in via_map:
-            continue
-        # Si contiene dígitos, podría ser el número
-        if re.search(r'\d', token):
-            if not numero:
-                numero = token
+    start_idx = 1 if (first_token in VIAS_VALIDAS or first_token in via_map) else 0
+    
+    for token in parts[start_idx:]:
+        if not numero and re.search(r'\d', token):
+            numero = token
         else:
             calle_parts.append(token)
-    
-    calle = " ".join(calle_parts)
-    
+            
     return {
         "tipo_via": tipo_via,
-        "calle": calle,
+        "calle": " ".join(calle_parts),
         "numero": numero,
         "escalera": "",
         "planta": "",
