@@ -24,7 +24,7 @@ from core.client_documentation import (
 
 logger = logging.getLogger(__name__)
 
-JUSTIFICANTE_TIMEOUT_MS = 30000
+JUSTIFICANTE_TIMEOUT_MS = 120000
 IFRAME_LOAD_TIMEOUT_MS = 15000
 
 
