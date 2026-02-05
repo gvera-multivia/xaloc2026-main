@@ -9,6 +9,11 @@ Este script está adaptado específicamente para el organismo de Madrid:
 4. Incluye datos hardcodeados del representante
 5. Lo asigna haciendo POST a /AsignarA
 6. Lo encola en tramite_queue con el payload enriquecido
+
+Mejoras:
+- Fallback de matrícula: si expedientes.matricula viene vacía, se extrae de pubExp.publicación por patrón.
+- (Opcional) Fallback adicional desde rs.notas (incluido en SELECT).
+- Prevalidación de campos obligatorios antes de encolar.
 """
 
 import argparse
@@ -19,6 +24,8 @@ import re
 import sys
 from datetime import datetime
 from decimal import Decimal
+from pathlib import Path
+from typing import Any, Optional
 
 import aiohttp
 import pyodbc
@@ -36,15 +43,14 @@ load_dotenv()
 
 XVIA_EMAIL = os.getenv("XVIA_EMAIL")
 XVIA_PASSWORD = os.getenv("XVIA_PASSWORD")
-ASIGNAR_URL = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos/AsignarA"
+ASIGNAR_URL = (
+    "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos/AsignarA"
+)
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - [CLAIM-MADRID] - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler("logs/claim_madrid.log", encoding="utf-8")
-    ]
+    handlers=[logging.StreamHandler(sys.stdout), logging.FileHandler("logs/claim_madrid.log", encoding="utf-8")],
 )
 logger = logging.getLogger("claim_madrid")
 
@@ -52,7 +58,6 @@ logger = logging.getLogger("claim_madrid")
 # CONSULTAS SQL SERVER
 # =============================================================================
 
-# Consulta adaptada para Madrid con todos los campos de clientes
 SQL_FETCH_RECURSOS_MADRID = """
 SELECT 
     rs.idRecurso,
@@ -65,8 +70,15 @@ SELECT
     rs.SujetoRecurso,
     rs.FaseProcedimiento,
     rs.UsuarioAsignado,
+    rs.notas,
+
     e.matricula,
+    e.Idpublic AS exp_idpublic,
+
+    pe.publicación AS pub_publicacion,
+
     rs.cif,
+
     -- Datos detallados del cliente para NOTIFICACIÓN
     c.nif AS cliente_nif,
     c.Nombre AS cliente_nombre,
@@ -85,12 +97,15 @@ SELECT
     c.telefono1 AS cliente_tel1,
     c.telefono2 AS cliente_tel2,
     c.movil AS cliente_movil,
+
     -- Adjuntos (agrupados luego)
     att.id AS adjunto_id,
     att.Filename AS adjunto_filename
+
 FROM Recursos.RecursosExp rs
 INNER JOIN clientes c ON rs.numclient = c.numerocliente
 INNER JOIN expedientes e ON rs.idExp = e.idexpediente
+LEFT JOIN pubExp pe ON pe.Idpublic = e.Idpublic
 LEFT JOIN attachments_resource_documents att ON rs.automatic_id = att.automatic_id
 WHERE (rs.Organisme like '%SUBDIRECCION GNAL GESTION MULTAS DE MADRID%' 
        OR rs.Organisme like '%MADRID, SUBDIRECCION GENERAL DE GESTION DE MULTAS%')
@@ -110,10 +125,13 @@ WHERE idRecurso = ?
 # FUNCIONES DE APOYO
 # =============================================================================
 
-async def get_authenticated_username(session: aiohttp.ClientSession) -> str:
+
+async def get_authenticated_username(session: aiohttp.ClientSession) -> Optional[str]:
     """Obtiene el nombre del usuario autenticado."""
     try:
-        async with session.get("http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/home") as resp:
+        async with session.get(
+            "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/home"
+        ) as resp:
             html = await resp.text()
             match = re.search(r'<i class="fa fa-user-circle"[^>]*></i>\s*([^<]+)', html)
             if match:
@@ -122,6 +140,7 @@ async def get_authenticated_username(session: aiohttp.ClientSession) -> str:
     except Exception as e:
         logger.error(f"Error obteniendo nombre de usuario: {e}")
         return None
+
 
 def build_sqlserver_connection_string() -> str:
     """Construye el connection string para SQL Server."""
@@ -132,10 +151,12 @@ def build_sqlserver_connection_string() -> str:
     password = os.getenv("SQLSERVER_PASSWORD")
     return f"DRIVER={driver};SERVER={server};DATABASE={database};UID={username};PWD={password}"
 
-def _clean_str(value) -> str:
+
+def _clean_str(value: Any) -> str:
     return str(value).strip() if value is not None else ""
 
-def _convert_value(v):
+
+def _convert_value(v: Any) -> Any:
     """Convierte valores SQL Server a tipos JSON serializables."""
     if isinstance(v, Decimal):
         return float(v)
@@ -143,82 +164,49 @@ def _convert_value(v):
         return None
     return v
 
+
 def _normalize_text(text: str) -> str:
     if not text:
         return ""
     text = str(text).strip().lower()
     import unicodedata
-    return "".join(
-        c for c in unicodedata.normalize("NFD", text) if unicodedata.category(c) != "Mn"
-    )
 
+    return "".join(c for c in unicodedata.normalize("NFD", text) if unicodedata.category(c) != "Mn")
 
-def _inferir_tipo_via(domicilio: str) -> str:
-    """Intenta extraer el tipo de vía (CL, AV, RONDA, etc.) de la calle."""
-    if not domicilio:
-        return "CALLE"
-    parts = domicilio.split()
-    if not parts:
-        return "CALLE"
-    first = parts[0].upper()
-    # Mapeo básico de abreviaturas/nombres a tipos conocidos por el organismo
-    via_map = {
-        "CL": "CALLE",
-        "CALLE": "CALLE",
-        "AV": "AVENIDA",
-        "AVDA": "AVENIDA",
-        "AVENIDA": "AVENIDA",
-        "RD": "RONDA",
-        "RONDA": "RONDA",
-        "PS": "PASEO",
-        "PASEO": "PASEO",
-        "CTRA": "CARRETERA",
-        "CORTES": "PLAZA", # Ejemplo específico si se detecta
-        "PL": "PLAZA",
-        "PLAZA": "PLAZA"
-    }
-    return via_map.get(first, "CALLE")
 
 def _detectar_tipo_documento(doc: str) -> str:
     """Detecta si es NIF, NIE o PASAPORTE (Madrid solo acepta estos 3)."""
     if not doc:
         return "NIF"
     doc = doc.strip().upper()
-    if re.match(r'^[XYZ]', doc):
+    if re.match(r"^[XYZ]", doc):
         return "NIE"
-    # Pasaporte: 3 letras + nÃºmeros (heurÃ­stico)
-    if re.match(r'^[A-Z]{3}[0-9]+$', doc):
+    if re.match(r"^[A-Z]{3}[0-9]+$", doc):
         return "PASAPORTE"
-    # CIF u otros formatos => tratar como NIF para cumplir con el selector
     return "NIF"
 
-def _seleccionar_telefonos(tel1, tel2, movil) -> tuple:
+
+def _seleccionar_telefonos(tel1, tel2, movil) -> tuple[str, str]:
     """Selecciona un móvil y un teléfono de los campos disponibles."""
     all_nums = [_clean_str(tel1), _clean_str(tel2), _clean_str(movil)]
     final_movil = ""
     final_tel = ""
-    
-    # Buscar el primer móvil (empieza por 6 o 7)
+
     for n in all_nums:
-        clean_n = re.sub(r'\D', '', n)
-        if clean_n.startswith('6') or clean_n.startswith('7'):
+        clean_n = re.sub(r"\D", "", n)
+        if not clean_n:
+            continue
+        if clean_n.startswith(("6", "7")):
             if not final_movil:
                 final_movil = clean_n
             elif not final_tel:
                 final_tel = clean_n
-        elif clean_n:
+        else:
             if not final_tel:
                 final_tel = clean_n
-                
+
     return final_movil[:9], final_tel[:9]
 
-def _split_street_and_number(domicilio: str) -> tuple[str, str]:
-    if not domicilio:
-        return "", ""
-    match = re.search(r"^(.*?)(?:\s+|,\s*)(\d+[A-Z]?)\s*$", domicilio)
-    if match:
-        return match.group(1).strip(" ,"), match.group(2).strip()
-    return domicilio.strip(), ""
 
 def _inferir_prefijo_expediente(*, fase_raw: str, es_empresa: bool) -> str:
     fase_norm = _normalize_text(fase_raw)
@@ -233,8 +221,7 @@ def _inferir_prefijo_expediente(*, fase_raw: str, es_empresa: bool) -> str:
 
 def _parse_expediente(expediente: str, *, fase_raw: str = "", es_empresa: bool = False) -> dict:
     exp = _clean_str(expediente).upper()
-    
-    # Caso 1: Formato NNN/EEEEEEEEE.D (Ya tiene prefijo numérico)
+
     m1 = re.match(r"^(?P<nnn>\d{3})/(?P<exp>\d{9})\.(?P<d>\d)$", exp)
     if m1:
         return {
@@ -247,8 +234,7 @@ def _parse_expediente(expediente: str, *, fase_raw: str = "", es_empresa: bool =
             "expediente_aaaa": "",
             "expediente_exp_num": "",
         }
-    
-    # Caso 2: Formato LLL/AAAA/EEEEEEEEE (Prefijo alfabético/anual)
+
     m2 = re.match(r"^(?P<lll>[A-Z]{3})/(?P<aaaa>\d{4})/(?P<exp>\d{9})$", exp)
     if m2:
         return {
@@ -261,14 +247,17 @@ def _parse_expediente(expediente: str, *, fase_raw: str = "", es_empresa: bool =
             "expediente_eeeeeeeee": "",
             "expediente_d": "",
         }
-    
-    # Caso 3: Formato EEEEEEEEE.D (SIN PREFIJO -> INFERIR)
+
     m3 = re.match(r"^(?P<exp>\d{9})\.(?P<d>\d)$", exp)
     if m3:
         prefijo = _inferir_prefijo_expediente(fase_raw=fase_raw, es_empresa=es_empresa)
-        # Construimos el expediente reconstruido con su prefijo
         exp_reconstruido = f"{prefijo}/{exp}"
-        logger.warning("Expediente sin prefijo NNN ('%s'). Inferido: %s. Completo: %s", exp, prefijo, exp_reconstruido)
+        logger.warning(
+            "Expediente sin prefijo NNN ('%s'). Inferido: %s. Completo: %s",
+            exp,
+            prefijo,
+            exp_reconstruido,
+        )
         return {
             "expediente_completo": exp_reconstruido,
             "expediente_tipo": "opcion1",
@@ -279,7 +268,7 @@ def _parse_expediente(expediente: str, *, fase_raw: str = "", es_empresa: bool =
             "expediente_aaaa": "",
             "expediente_exp_num": "",
         }
-        
+
     logger.warning("Formato de expediente no reconocido: '%s'", exp)
     return {
         "expediente_completo": exp,
@@ -291,35 +280,25 @@ def _parse_expediente(expediente: str, *, fase_raw: str = "", es_empresa: bool =
         "expediente_aaaa": "",
         "expediente_exp_num": "",
     }
+
+
 def _load_motivos_config() -> dict:
     try:
-        import json
-        from pathlib import Path
         path = Path("config_motivos.json")
         if not path.exists():
             return {}
+        import json
+
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception as e:
         logger.warning("No se pudo cargar config_motivos.json: %s", e)
         return {}
 
-def _inferir_naturaleza_por_motivo_y_fase(
-    *,
-    motivo_key: str,
-    motivo_data: dict | None,
-    fase_raw: str,
-) -> str:
-    """
-    Determina la naturaleza (A/R/I) en función del MOTIVO (config_motivos.json)
-    y de la fase (FaseProcedimiento).
 
-    Nota: la letra no viene en el JSON, así que se infiere por reglas.
-    """
-
+def _inferir_naturaleza_por_motivo_y_fase(*, motivo_key: str, motivo_data: dict | None, fase_raw: str) -> str:
     motivo_norm = _normalize_text(motivo_key)
     fase_norm = _normalize_text(fase_raw)
 
-    # Reglas explÃ­citas por motivo/clave (mÃ¡s estable que texto libre).
     if "identificacion" in motivo_norm or "identificacion" in fase_norm:
         return "I"
 
@@ -333,7 +312,6 @@ def _inferir_naturaleza_por_motivo_y_fase(
     ):
         return "R"
 
-    # Inferencia por contenidos del motivo (asunto/expone/solicita) y fase como fallback.
     blob_parts: list[str] = [motivo_norm, fase_norm]
     if motivo_data:
         for field in ("asunto", "expone", "solicita"):
@@ -345,8 +323,6 @@ def _inferir_naturaleza_por_motivo_y_fase(
     if "recurso" in blob or "reposicion" in blob or "reclamacion" in blob or "revision" in blob:
         return "R"
 
-    # Ãšltimo recurso: si no se puede inferir, mantener comportamiento conservador.
-    # (HistÃ³ricamente se usaba "A" como fallback.)
     return "A"
 
 
@@ -369,111 +345,167 @@ def _build_expone_solicita(fase_raw: str, expediente: str, sujeto: str) -> tuple
     if not selected:
         expone = f"Se presenta escrito relativo al expediente {exp}."
         solicita = f"Se tenga por presentado el escrito. Expediente: {exp}."
-        naturaleza = _inferir_naturaleza_por_motivo_y_fase(
-            motivo_key="",
-            motivo_data=None,
-            fase_raw=fase_raw,
-        )
+        naturaleza = _inferir_naturaleza_por_motivo_y_fase(motivo_key="", motivo_data=None, fase_raw=fase_raw)
         return expone, solicita, naturaleza
 
     expone = _clean_str(selected.get("expone")).replace("{expediente}", exp).replace("{sujeto_recurso}", sujeto_txt)
     solicita = _clean_str(selected.get("solicita")).replace("{expediente}", exp).replace("{sujeto_recurso}", sujeto_txt)
 
-    naturaleza = _inferir_naturaleza_por_motivo_y_fase(
-        motivo_key=selected_key,
-        motivo_data=selected,
-        fase_raw=fase_raw,
-    )
+    naturaleza = _inferir_naturaleza_por_motivo_y_fase(motivo_key=selected_key, motivo_data=selected, fase_raw=fase_raw)
     return expone, solicita, naturaleza
+
+
+# ==========================
+# Matrícula fallback (PUBEXP)
+# ==========================
+
+_PLATE_PATTERNS = [
+    re.compile(r"\b\d{4}[A-Z]{3}\b"),           # 2390GZF
+    re.compile(r"\b[A-Z]{1,2}\d{4}[A-Z]{1,2}\b"),  # B1234CD
+    re.compile(r"\b\d{4}[A-Z]{2,3}\b"),
+]
+
+
+def _extract_plate(text: str) -> str:
+    if not text:
+        return ""
+    t = _clean_str(text).upper()
+    t = re.sub(r"\s+", " ", t)
+    for pat in _PLATE_PATTERNS:
+        m = pat.search(t)
+        if m:
+            return m.group(0).strip()
+    return ""
+
+
+def _resolve_plate_number(recurso: dict) -> tuple[str, str]:
+    """
+    Devuelve (matricula, source)
+    source: 'expedientes.matricula' | 'pubExp.publicación' | 'recursosExp.notas' | ''
+    """
+    plate = _clean_str(recurso.get("matricula")).upper()
+    if plate:
+        return plate, "expedientes.matricula"
+
+    pub = _clean_str(recurso.get("pub_publicacion"))
+    plate = _extract_plate(pub)
+    if plate:
+        return plate, "pubExp.publicación"
+
+    notas = _clean_str(recurso.get("notas"))
+    plate = _extract_plate(notas)
+    if plate:
+        return plate, "recursosExp.notas"
+
+    return "", ""
+
+
+def _prevalidate_required_fields(payload: dict) -> None:
+    missing = []
+    if not _clean_str(payload.get("plate_number")):
+        missing.append("plate_number")
+    if not _clean_str(payload.get("notif_numero_documento")):
+        missing.append("notif_numero_documento")
+    if not _clean_str(payload.get("notif_nombre_via")):
+        missing.append("notif_nombre_via")
+    if not _clean_str(payload.get("notif_numero")) and payload.get("notif_tipo_numeracion") == "NUM":
+        # si eliges NUM, número debería existir (si es S/N, no)
+        missing.append("notif_numero")
+    if missing:
+        raise ValueError(f"Payload inválido, faltan campos requeridos: {', '.join(missing)}")
+
 
 # =============================================================================
 # LÓGICA PRINCIPAL
 # =============================================================================
 
-def fetch_one_resource_madrid(conn_str: str, authenticated_user: str = None) -> dict:
+
+def fetch_one_resource_madrid(conn_str: str, authenticated_user: Optional[str] = None) -> Optional[dict]:
     """Busca UN recurso disponible de Madrid."""
     logger.info("🔍 Buscando recursos de MADRID disponibles...")
-    
-    # Formatos de Madrid: 935/564097331.0 o 719421608.4
-    regex_madrid = [
-        re.compile(r'^\d{3}/\d{9}\.\d$'),
-        re.compile(r'^\d{9}\.\d$')
-    ]
-    
-    # Madrid suele ser TExp 2 o 3, pero filtramos por organismos
+
+    regex_madrid = [re.compile(r"^\d{3}/\d{9}\.\d$"), re.compile(r"^\d{9}\.\d$")]
+
     texp_values = [2, 3]
     texp_placeholders = ",".join(["?"] * len(texp_values))
     query = SQL_FETCH_RECURSOS_MADRID.format(texp_list=texp_placeholders)
-    
+
     try:
         conn = pyodbc.connect(conn_str)
         cursor = conn.cursor()
         cursor.execute(query, texp_values)
-        
+
         columns = [column[0] for column in cursor.description]
-        recursos_map = {}
-        
+        recursos_map: dict[int, dict] = {}
+
         for row in cursor.fetchall():
             record = dict(zip(columns, row))
             id_recurso = record.get("idRecurso")
-            if not id_recurso: continue
-            
+            if not id_recurso:
+                continue
+
             if id_recurso not in recursos_map:
                 recursos_map[id_recurso] = {**record, "adjuntos": []}
-            
+
             adj_id = record.get("adjunto_id")
             if adj_id:
-                recursos_map[id_recurso]["adjuntos"].append({
-                    "id": adj_id, "filename": record.get("adjunto_filename")
-                })
-        
+                recursos_map[id_recurso]["adjuntos"].append({"id": adj_id, "filename": record.get("adjunto_filename")})
+
         conn.close()
-        
+
         for id_recurso, recurso in recursos_map.items():
             expediente = _clean_str(recurso.get("Expedient"))
             estado = recurso.get("Estado", 0)
             usuario = str(recurso.get("UsuarioAsignado", "")).strip()
-            
-            # Validar formatos Madrid
+
             expediente_valido = any(reg.match(expediente) for reg in regex_madrid)
-            
-            # Filtrar por FaseProcedimiento (reclamacion, embargo, apremio)
+
             fase_norm = _normalize_text(recurso.get("FaseProcedimiento"))
             es_fase_negra = any(x in fase_norm for x in ["reclamacion", "embargo", "apremio"])
 
             if expediente_valido and not es_fase_negra:
                 if estado == 1 and (not authenticated_user or usuario != authenticated_user):
                     continue
-                    
+
                 status_str = "LIBRE" if estado == 0 else f"EN PROCESO ({usuario})"
-                logger.info(f"✓ Recurso MADRID encontrado ({status_str}): {id_recurso} - {expediente} (Fase: {recurso.get('FaseProcedimiento')})")
+                logger.info(
+                    "✓ Recurso MADRID encontrado (%s): %s - %s (Fase: %s)",
+                    status_str,
+                    id_recurso,
+                    expediente,
+                    recurso.get("FaseProcedimiento"),
+                )
                 return recurso
-            elif es_fase_negra:
-                logger.debug(f"⏭ Omitiendo recurso {id_recurso} por fase: {recurso.get('FaseProcedimiento')}")
-                
+
         logger.warning("No se encontraron recursos de Madrid válidos")
         return None
-        
+
     except Exception as e:
         logger.error(f"Error consultando SQL Server: {e}")
         return None
 
+
 async def claim_resource(session: aiohttp.ClientSession, id_recurso: int, dry_run: bool = False) -> bool:
     """Reclama el recurso en Xvia."""
-    if dry_run: return True
+    if dry_run:
+        return True
     try:
-        async with session.get("http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos") as resp:
+        async with session.get(
+            "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos"
+        ) as resp:
             html = await resp.text()
             match = re.search(r'name="_token"\s+value="([^"]+)"', html)
-            if not match: return False
+            if not match:
+                return False
             csrf_token = match.group(1)
-        
+
         form_data = {"_token": csrf_token, "id": str(id_recurso), "recursosSel": "0"}
         async with session.post(ASIGNAR_URL, data=form_data) as resp:
             return resp.status in (200, 302, 303)
     except Exception as e:
         logger.error(f"Error en claim: {e}")
         return False
+
 
 async def build_madrid_payload(recurso: dict) -> dict:
     """Construye el payload enriquecido para Madrid con expediente normalizado."""
@@ -482,49 +514,56 @@ async def build_madrid_payload(recurso: dict) -> dict:
     nif = cif_empresa or _clean_str(recurso.get("cliente_nif"))
     fase_raw = _clean_str(recurso.get("FaseProcedimiento"))
 
-    # 1. Parseamos el expediente primero para obtener el prefijo si es necesario
     exp_parts = _parse_expediente(expediente_raw, fase_raw=fase_raw, es_empresa=bool(cif_empresa))
-    
-    # Extraemos el expediente con prefijo para usarlo en los textos de EXPONE/SOLICITA
     expediente_para_textos = exp_parts.get("expediente_completo", expediente_raw)
 
-    # 2. Generamos EXPONE y SOLICITA usando el expediente (con prefijo si se infirió)
     expone, solicita, naturaleza = _build_expone_solicita(
         fase_raw,
         expediente_para_textos,
         _clean_str(recurso.get("SujetoRecurso")),
     )
 
-    # 3. Clasificación de dirección (IA o Fallback)
+    # Matrícula: campo directo o fallback por publicación/notas
+    plate_number, plate_src = _resolve_plate_number(recurso)
+    if not plate_number:
+        logger.warning(
+            "Matrícula vacía tras fallback. idRecurso=%s idExp=%s Expedient=%s Idpublic=%s pub='%s'",
+            recurso.get("idRecurso"),
+            recurso.get("idExp"),
+            recurso.get("Expedient"),
+            recurso.get("exp_idpublic"),
+            _clean_str(recurso.get("pub_publicacion"))[:160],
+        )
+
+    # Clasificación de dirección (IA o Fallback)
     domicilio_raw = _clean_str(recurso.get("cliente_domicilio"))
     numero_db = _clean_str(recurso.get("cliente_numero"))
     poblacion = _clean_str(recurso.get("cliente_municipio"))
     piso_db = _clean_str(recurso.get("cliente_planta"))
     puerta_db = _clean_str(recurso.get("cliente_puerta"))
     escalera_db = _clean_str(recurso.get("cliente_escalera"))
-    
+
     use_ai = os.getenv("GROQ_API_KEY") is not None
     if use_ai:
         try:
-            logger.info(f"[IA] Clasificando dirección con IA: '{domicilio_raw}'")
+            logger.info("[IA] Clasificando dirección con IA: '%s'", domicilio_raw)
             clasificacion = await classify_address_with_ai(
                 direccion_raw=domicilio_raw,
                 poblacion=poblacion,
                 numero=numero_db,
                 piso=piso_db,
-                puerta=puerta_db
+                puerta=puerta_db,
             )
             notif_tipo_via = clasificacion["tipo_via"]
             notif_nombre_via = clasificacion["calle"].upper()
             notif_numero = clasificacion["numero"]
-            notif_escalera = clasificacion["escalera"] or escalera_db.upper()
-            notif_planta = clasificacion["planta"] or piso_db.upper()
-            notif_puerta = clasificacion["puerta"] or puerta_db.upper()
-
+            notif_escalera = (clasificacion.get("escalera") or escalera_db).upper()
+            notif_planta = (clasificacion.get("planta") or piso_db).upper()
+            notif_puerta = (clasificacion.get("puerta") or puerta_db).upper()
         except Exception as e:
-            logger.warning(f"[IA] Falló clasificación IA, usando fallback: {e}")
+            logger.warning("[IA] Falló clasificación IA, usando fallback: %s", e)
             use_ai = False
-    
+
     if not use_ai:
         clasificacion = classify_address_fallback(domicilio_raw)
         notif_tipo_via = clasificacion["tipo_via"]
@@ -533,9 +572,10 @@ async def build_madrid_payload(recurso: dict) -> dict:
         notif_escalera = escalera_db.upper()
         notif_planta = piso_db.upper()
         notif_puerta = puerta_db.upper()
-    
-    tipo_numeracion = "NUM" if notif_numero else "S/N"
+
+    tipo_numeracion = "NUM" if _clean_str(notif_numero) else "S/N"
     provincia_notif = _clean_str(recurso.get("cliente_provincia")).upper() or poblacion.upper()
+
     movil, tel = _seleccionar_telefonos(recurso.get("cliente_tel1"), recurso.get("cliente_tel2"), recurso.get("cliente_movil"))
 
     # Representante (Datos fijos)
@@ -549,20 +589,25 @@ async def build_madrid_payload(recurso: dict) -> dict:
         "representative_number": "169",
         "representative_zip": "08022",
         "representative_email": "info@xvia-serviciosjuridicos.com",
-        "representative_phone": "932531411", # Hardcoded
+        "representative_phone": "932531411",
     }
 
-    return {
+    payload = {
         "idRecurso": _convert_value(recurso["idRecurso"]),
         "idExp": _convert_value(recurso["idExp"]),
-        "expediente": expediente_raw, 
+        "expediente": expediente_raw,
         "numclient": _convert_value(recurso["numclient"]),
         "sujeto_recurso": _clean_str(recurso.get("SujetoRecurso")),
         "fase_procedimiento": fase_raw,
-        "plate_number": _clean_str(recurso.get("matricula")),
-        "user_phone": "932531411", # Hardcoded
+
+        "plate_number": plate_number,
+        "plate_number_source": plate_src,
+
+        "user_phone": "932531411",
         "inter_email_check": bool(_clean_str(recurso.get("cliente_email"))),
+
         **representante,
+
         "notif_tipo_documento": _detectar_tipo_documento(nif),
         "notif_numero_documento": nif,
         "notif_name": _clean_str(recurso.get("cliente_nombre")).upper(),
@@ -575,36 +620,51 @@ async def build_madrid_payload(recurso: dict) -> dict:
         "notif_tipo_via": notif_tipo_via,
         "notif_nombre_via": notif_nombre_via,
         "notif_tipo_numeracion": tipo_numeracion,
-        "notif_numero": notif_numero,
+        "notif_numero": _clean_str(notif_numero),
         "notif_portal": "",
-        "notif_escalera": notif_escalera,
-        "notif_planta": notif_planta,
-        "notif_puerta": notif_puerta,
+        "notif_escalera": _clean_str(notif_escalera),
+        "notif_planta": _clean_str(notif_planta),
+        "notif_puerta": _clean_str(notif_puerta),
         "notif_codigo_postal": _clean_str(recurso.get("cliente_cp")),
+
+        # Email/teléfono (como venías haciendo)
         "notif_email": "info@xvia-serviciosjuridicos.com",
-        "notif_movil": "", # Removed
-        "notif_telefono": "932531411", # Hardcoded
+        "notif_movil": "",  # cleared
+        "notif_telefono": "932531411",
+
         # Standard keys for core.client_documentation.client_identity_from_payload
         "cliente_nombre": _clean_str(recurso.get("cliente_nombre")).upper(),
         "cliente_apellido1": _clean_str(recurso.get("cliente_apellido1")).upper(),
         "cliente_apellido2": _clean_str(recurso.get("cliente_apellido2")).upper(),
         "razon_social": _clean_str(recurso.get("cliente_razon_social")).upper(),
-        "inter_telefono": "932531411", # Explicitly set for standard mapping
-        "rep_movil": "", # Explicitly cleared
-        "rep_telefono": "932531411", # Explicitly set
-        **exp_parts, 
+
+        "inter_telefono": "932531411",
+        "rep_movil": "",
+        "rep_telefono": "932531411",
+
+        **exp_parts,
+
         "naturaleza": naturaleza,
         "expone": expone,
         "solicita": solicita,
+
         "source": "claim_one_resource_madrid",
-        "claimed_at": datetime.now().isoformat()
+        "claimed_at": datetime.now().isoformat(),
     }
 
-async def main():
+    # Adjuntos ya agregados en fetch_one_resource_madrid
+    # (si tu worker espera archivos_adjuntos explícito, ajústalo aquí)
+    if recurso.get("adjuntos"):
+        payload["adjuntos"] = recurso["adjuntos"]
+
+    return payload
+
+
+async def main() -> int:
     parser = argparse.ArgumentParser(description="Reclama UN recurso de MADRID")
     parser.add_argument("--dry-run", action="store_true", help="Simular sin cambios")
     args = parser.parse_args()
-    
+
     if not XVIA_EMAIL or not XVIA_PASSWORD:
         logger.error("Faltan credenciales en .env")
         return 1
@@ -614,33 +674,38 @@ async def main():
     try:
         await create_authenticated_session_in_place(session, XVIA_EMAIL, XVIA_PASSWORD)
         user = await get_authenticated_username(session)
-        logger.info(f"✓ Usuario: {user}")
-        
+        logger.info("✓ Usuario: %s", user)
+
         conn_str = build_sqlserver_connection_string()
         recurso = fetch_one_resource_madrid(conn_str, user)
-        if not recurso: return 0
-        
+        if not recurso:
+            return 0
+
         id_rec = recurso["idRecurso"]
         if recurso.get("Estado") == 0:
-            if not await claim_resource(session, id_rec, args.dry_run):
+            ok = await claim_resource(session, id_rec, args.dry_run)
+            if not ok:
                 logger.error("❌ Claim falló")
                 return 1
-            logger.info(f"✅ Recurso {id_rec} reclamado vía POST")
-        
-        # Encolar en tramite_queue
+            logger.info("✅ Recurso %s reclamado vía POST", id_rec)
+
         payload = await build_madrid_payload(recurso)
+
+        # Prevalidación (falla rápido si falta matrícula u otros obligatorios)
+        _prevalidate_required_fields(payload)
+
         db = SQLiteDatabase("db/xaloc_database.db")
-        
         if not args.dry_run:
             task_id = db.insert_task("madrid", None, payload)
-            logger.info(f"📥 Tarea {task_id} encolada para MADRID")
+            logger.info("📥 Tarea %s encolada para MADRID", task_id)
         else:
-            logger.info(f"[DRY-RUN] Payload Madrid: {payload}")
+            logger.info("[DRY-RUN] Payload Madrid: %s", payload)
 
-            
     finally:
         await session.close()
+
     return 0
+
 
 if __name__ == "__main__":
     sys.exit(asyncio.run(main()))

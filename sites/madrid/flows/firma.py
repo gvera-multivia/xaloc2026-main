@@ -86,7 +86,7 @@ def _find_or_create_subfolder(base_path: Path, folder_name: str) -> Path:
 
 def _construir_ruta_recursos_telematicos(payload: dict, fase_procedimiento: Any = None) -> Path:
     client = client_identity_from_payload(payload)
-    base_path = os.getenv("CLIENT_DOCS_BASE_PATH") or r"\\SERVER-DOC\clientes"
+    base_path = r"\\SERVER-DOC\clientes"
     ruta_cliente_base = get_ruta_cliente_documentacion(client, base_path=base_path)
     
     ruta_recursos = ruta_cliente_base / "RECURSOS TELEMATICOS"
@@ -138,39 +138,19 @@ async def ejecutar_firma_madrid(
     logger.info(f"EXTRACCIÓN BINARIA DIRECTA - EXPEDIENTE: {destino_descarga.stem}")
     logger.info("=" * 80)
 
-    # 1. Definir ruta en la raíz del proyecto (LEGACY/BACKUP PATH)
-    nombre_final = f"{destino_descarga.stem}.pdf"
-    ruta_raiz = Path(".") / nombre_final
-
-    # 2. Navegar a la pantalla de firma (MODIFIED UI INTERACTION)
+    # 2. ESPERAR PANTALLA DE FIRMA
+    # (El selector del botón nos indica que estamos en la pantalla correcta)
     await page.wait_for_selector(config.firma_registrar_selector, state="visible")
-    
-    # checkbox interaction
-    logger.info("Marcando checkbox consentimiento...")
-    if await page.locator("#consentimiento").count() > 0:
-        await page.locator("#consentimiento").check()
-    
-    # button interaction (Using user specified selector)
-    logger.info("Clicando Firmar y registrar...")
-    firmar_btn = page.locator('input.button.button4[value="Firmar y registrar"]')
-    
-    if await firmar_btn.count() > 0:
-         async with page.expect_navigation(wait_until="domcontentloaded"):
-            await firmar_btn.click()
-    else:
-        logger.warning("Botón específico no encontrado, usando selector config...")
-        async with page.expect_navigation(wait_until="domcontentloaded"):
-            await page.click(config.firma_registrar_selector)
-    
-    await page.wait_for_load_state("networkidle")
+    logger.info("Pantalla de firma detectada.")
 
-    # 3. EJECUCIÓN DEL "HACK" DE CONSOLA (PRESERVED EXACTLY AS REQUESTED)
-    # Le pedimos al navegador que haga el fetch y nos devuelva el PDF en Base64
-    logger.info("Ejecutando fetch interceptor para el vehículo 5748LFZ...")
+    # 3. EXTRACCIÓN BINARIA PRE-FIRMA (FETCH HACK)
+    # Ejecutamos la extracción ANTES de firmar para validar que tenemos el documento.
+    logger.info("Ejecutando fetch interceptor para extracción pre-firma...")
     
     script_extraccion = """
     async () => {
         const btn = document.querySelector('button[name="verificar"]');
+        if (!btn) throw new Error("Botón 'verificar' no encontrado para extracción.");
         const formData = new FormData(btn.form);
         formData.append('verificar', '1');
 
@@ -188,35 +168,63 @@ async def ejecutar_firma_madrid(
     """
 
     try:
-        # Ejecutamos la lógica que funcionó en tu consola
+        # Ejecutamos la lógica de extracción
         base64_pdf = await page.evaluate(script_extraccion)
         
-        # 4. DECODIFICACIÓN Y GUARDADO FÍSICO
+        # 4. DECODIFICACIÓN Y VALIDACIÓN
         pdf_bytes = base64.b64decode(base64_pdf)
         
-        if pdf_bytes.startswith(b"%PDF"):
-            # Save to root (Legacy/Backup behavior from original script)
-            ruta_raiz.write_bytes(pdf_bytes)
-            logger.info(f"✓ DOCUMENTO ORIGINAL GUARDADO (ROOT) ({len(pdf_bytes)} bytes)")
-            
-            # Save to Protocol Path (NEW REQUIREMENT)
-            raw_exp = payload.get("expediente") or payload.get("expediente_num") or "UNKNOWN"
-            fase = payload.get("fase_procedimiento")
-            
-            ruta_recursos = _construir_ruta_recursos_telematicos(payload, fase)
-            ruta_final = _renombrar_y_mover_justificante_bytes(pdf_bytes, str(raw_exp), ruta_recursos)
-            
-            logger.info(f"✓ JUSTIFICANTE GUARDADO SEGÚN PROTOCOLO: {ruta_final}")
-            
-        else:
+        if not pdf_bytes.startswith(b"%PDF"):
             raise RuntimeError("Los datos recibidos no tienen formato PDF.")
+            
+        logger.info(f"✓ PDF VALIDADO ({len(pdf_bytes)} bytes). Procediendo a la firma final.")
+
+        # 5. GUARDADO FÍSICO
+        # Save to root (Legacy/Backup)
+        ruta_raiz.write_bytes(pdf_bytes)
+        logger.info(f"✓ DOCUMENTO ORIGINAL GUARDADO (ROOT)")
+        
+        # Save to Protocol Path
+        raw_exp = payload.get("expediente") or payload.get("expediente_num") or "UNKNOWN"
+        fase = payload.get("fase_procedimiento")
+        
+        ruta_recursos = _construir_ruta_recursos_telematicos(payload, fase)
+        ruta_final = _renombrar_y_mover_justificante_bytes(pdf_bytes, str(raw_exp), ruta_recursos)
+        logger.info(f"✓ JUSTIFICANTE GUARDADO SEGÚN PROTOCOLO: {ruta_final}")
+
+        # ====================================================================
+        # 6. ACCIÓN FINAL: CHECKBOX Y FIRMA
+        # ====================================================================
+        
+        # Marcar checkbox consentimiento
+        logger.info("Marcando checkbox consentimiento...")
+        checkbox = page.locator("#consentimiento")
+        if await checkbox.count() > 0:
+            await checkbox.check()
+        
+        # Delay humano antes del click final
+        await page.wait_for_timeout(1000)
+
+        # Click en "Firmar y registrar"
+        logger.info("Clicando botón final 'Firmar y registrar'...")
+        firmar_btn = page.locator('input.button.button4[value="Firmar y registrar"]')
+        
+        if await firmar_btn.count() > 0:
+             async with page.expect_navigation(wait_until="domcontentloaded"):
+                await firmar_btn.click()
+        else:
+            logger.warning("Selector específico no encontrado, usando config.firma_registrar_selector")
+            async with page.expect_navigation(wait_until="domcontentloaded"):
+                await page.click(config.firma_registrar_selector)
+        
+        await page.wait_for_load_state("networkidle")
+        logger.info("✓ Trámite finalizado en el portal.")
 
     except Exception as e:
-        logger.error(f"Fallo en la extracción por inyección: {e}")
+        logger.error(f"Fallo en la extracción o firma: {e}")
         raise
 
-    # 5. FINALIZACIÓN
-    # Ya no hay popups que cerrar porque nunca dejamos que se abrieran
+    # 7. FINALIZACIÓN
     logger.info("=" * 80)
     logger.info("PROCESO DE FIRMA Y EXTRACCIÓN COMPLETADO CON ÉXITO")
     logger.info("=" * 80)
