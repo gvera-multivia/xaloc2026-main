@@ -66,6 +66,60 @@ async def _rellenar_input(page: Page, selector: str, valor: str, nombre_campo: s
     return False
 
 
+async def _rellenar_y_validar_text_area(page: Page, selector: str, valor: str, nombre_campo: str = "") -> bool:
+    """
+    Rellena un textarea y valida que el contenido sea el esperado.
+    Si no coincide, reintenta con un método más lento (type).
+    """
+    if not valor:
+        return False
+    
+    try:
+        elemento = page.locator(selector).first
+        if await elemento.count() == 0:
+            return False
+        
+        # Asegurar visibilidad
+        await elemento.scroll_into_view_if_needed()
+        await elemento.wait_for(state="visible", timeout=2000)
+
+        # Limpiar y rellenar inicial
+        await elemento.click()
+        await elemento.fill(valor)
+        
+        # Delay para que el DOM se asiente antes de validar
+        await page.wait_for_timeout(300)
+        
+        # Validar
+        valor_actual = await elemento.input_value()
+        if valor_actual.strip() == valor.strip():
+            logger.debug(f"  ✓ {nombre_campo or selector} validado correctamente")
+            await _delay_humano(page)
+            return True
+        
+        # Reintento si no coincide: limpiar y usar type
+        logger.warning(f"  ⚠ {nombre_campo or selector} no coincide. Reintentando con 'type'...")
+        await elemento.click()
+        await elemento.press("Control+A")
+        await elemento.press("Backspace")
+        await elemento.type(valor, delay=20)
+        
+        await page.wait_for_timeout(500)
+        valor_actual = await elemento.input_value()
+        
+        if valor_actual.strip() == valor.strip():
+            logger.info(f"  ✓ {nombre_campo or selector} validado tras reintento")
+            await _delay_humano(page)
+            return True
+        else:
+            logger.error(f"  ✗ Error: {nombre_campo or selector} no pudo ser validado (Actual: {len(valor_actual)}, Esperado: {len(valor)})")
+            return False
+
+    except Exception as e:
+        logger.warning(f"  → Error rellenando/validando {nombre_campo or selector}: {e}")
+        return False
+
+
 def _normalizar_texto_autocomplete(texto: str) -> str:
     if texto is None:
         return ""
@@ -880,8 +934,8 @@ async def ejecutar_formulario_madrid(
     # =========================================================================
     logger.info("SECCIÓN 7: Expone y Solicita")
     
-    await _rellenar_input(page, config.expone_selector, datos.expone, "Expone")
-    await _rellenar_input(page, config.solicita_selector, datos.solicita, "Solicita")
+    await _rellenar_y_validar_text_area(page, config.expone_selector, datos.expone, "Expone")
+    await _rellenar_y_validar_text_area(page, config.solicita_selector, datos.solicita, "Solicita")
     
     logger.info(f"  → Expone: {datos.expone[:50] + '...' if len(datos.expone) > 50 else datos.expone}")
     logger.info(f"  → Solicita: {datos.solicita[:50] + '...' if len(datos.solicita) > 50 else datos.solicita}")

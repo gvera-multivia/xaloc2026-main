@@ -12,7 +12,7 @@ from pathlib import Path
 from playwright.async_api import Page, TimeoutError
 
 DELAY_MS = 500
-RECEIPT_WAIT_TIMEOUT_MS = 60000
+RECEIPT_WAIT_TIMEOUT_MS = 120000
 
 
 async def _wait_mask_hidden(page: Page, timeout_ms: int = 8000) -> None:

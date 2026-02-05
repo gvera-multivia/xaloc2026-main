@@ -20,7 +20,7 @@ async def build_base_online_payload(recurso: dict) -> dict:
     # Copia simplificada de la lógica del script principal para testear el output
     fase_raw = recurso.get("FaseProcedimiento", "").upper()
     if "IDENTIFICACION" in fase_raw: protocol = "P1"
-    elif "ALEGACION" in fase_raw: protocol = "P2"
+    elif "APREMIO" in fase_raw: protocol = "P2"
     else: protocol = "P3"
     
     exp_raw = recurso.get("Expedient", "")
@@ -60,7 +60,7 @@ async def build_base_online_payload(recurso: dict) -> dict:
 
 recursos_test = [
     {"idRecurso": 101, "Expedient": "43185-2025/40818-GIM", "SujetoRecurso": "JUAN PEREZ", "cliente_nif": "12345678Z", "matricula": "1234AAA", "FaseProcedimiento": "IDENTIFICACION"},
-    {"idRecurso": 102, "Expedient": "43-558-779-2018-11-0005780", "SujetoRecurso": "EMPRESA SL", "cliente_nif": "B12345678", "matricula": "5678BBB", "FaseProcedimiento": "ALEGACIONES"},
+    {"idRecurso": 102, "Expedient": "43-558-779-2018-11-0005780", "SujetoRecurso": "EMPRESA SL", "cliente_nif": "B12345678", "matricula": "5678BBB", "FaseProcedimiento": "PROVIDENCIA DE APREMIO"},
     {"idRecurso": 103, "Expedient": "1-2025/27474-EXE", "SujetoRecurso": "MARIA LOPEZ", "cliente_nif": "87654321X", "matricula": "9012CCC", "FaseProcedimiento": "RECURSO REPOSICION"}
 ]
 
