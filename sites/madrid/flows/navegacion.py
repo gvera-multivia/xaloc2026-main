@@ -110,17 +110,11 @@ async def _recuperar_problema_autenticacion(page: Page, config: "MadridConfig", 
 
 async def _click_certificado_y_aceptar_popup(page: Page, config: "MadridConfig") -> None:
     """
-    Click en 'DNIe / Certificado' y aceptación del popup.
-    Monitoriza la página durante ~3s antes de enviar Shift+Tab x2 (evita enviar teclas si hay error de carga).
+    Click en 'DNIe / Certificado'.
+    El certificado se asume pre-inyectado en el navegador.
     """
-
-
     await page.click(config.certificado_login_selector, timeout=config.navigation_timeout)
-    logger.info("  ƒÅ' Click en 'DNIe / Certificado'")
-
-    # El popup aparece mientras la página aún está cargando: programar Shift+Tab x2
-    # sin esperar a un estado de carga concreto.
-    await page.wait_for_timeout(getattr(config, "delay_ms", 500))
+    logger.info("  → Click en 'DNIe / Certificado'")
 
 
 
@@ -357,185 +351,189 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
     await _cerrar_pestanas_extra(page)
     
     # ========================================================================
-    # PASO 1: Navegar a URL base y click "Tramitar en línea"
+    # DETECCIÓN DE SESIÓN: ¿Ya estamos dentro o autenticados?
     # ========================================================================
-    logger.info("PASO 1: Navegando a página base y clickando 'Tramitar en línea'")
-    await page.goto(config.url_base, wait_until="domcontentloaded", timeout=config.navigation_timeout)
-    await _asegurar_no_tramite_en_curso(page)
-    logger.info(f"  → URL cargada: {page.url}")
-    
-    # Esperar estabilización del DOM (más tiempo)
-    await _esperar_dom_estable(page, timeout_ms=3000)
-    
-    # Aceptar cookies si aparecen
-    await _aceptar_cookies_si_aparece(page)
-    
-    # Delay adicional para parecer más humano
-    await page.wait_for_timeout(DELAY_ENTRE_PASOS)
-    
-    # Esperar y clickar el botón "Tramitar en línea"
-    await page.wait_for_selector(config.boton_tramitar_selector, state="visible", timeout=config.default_timeout)
-    await page.click(config.boton_tramitar_selector)
-    logger.info(f"  → Click en botón 'Tramitar en línea' ({config.boton_tramitar_selector})")
-    
-    # Esperar a que aparezca el bloque #verTodas
-    await page.wait_for_selector(config.bloque_tramitar_selector, state="visible", timeout=config.default_timeout)
-    logger.info(f"  → Bloque de tramitación visible ({config.bloque_tramitar_selector})")
-    
-    # Delay antes del siguiente paso
-    await page.wait_for_timeout(DELAY_ENTRE_PASOS)
-    
-    # ========================================================================
-    # PASO 2: Click "Registro Electrónico"
-    # ========================================================================
-    logger.info("PASO 2: Clickando 'Registro Electrónico'")
-    await page.wait_for_selector(config.registro_electronico_selector, state="visible", timeout=config.default_timeout)
-    
-    # Click y esperar navegación a servpub.madrid.es
-    async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
-        await page.click(config.registro_electronico_selector)
-    await _asegurar_no_tramite_en_curso(page)
-    
-    logger.info(f"  → Navegado a: {page.url}")
-    
-    # Esperar estabilización después de cambio de dominio
-    await _esperar_dom_estable(page, timeout_ms=2000)
-    
-    # Aceptar cookies en nuevo dominio si aparecen
-    await _aceptar_cookies_si_aparece(page)
-    
-    # Delay antes del siguiente paso
-    await page.wait_for_timeout(DELAY_ENTRE_PASOS)
-    
-    # ========================================================================
-    # PASO 3: Click primer "Continuar"
-    # ========================================================================
-    logger.info("PASO 3: Clickando primer botón 'Continuar'")
-    await page.wait_for_selector(config.continuar_1_selector, state="visible", timeout=config.default_timeout)
-    
-    async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
-        await page.click(config.continuar_1_selector)
-    await _asegurar_no_tramite_en_curso(page)
-    
-    logger.info(f"  → Navegado a: {page.url}")
-    
-    # Esperar estabilización
-    await _esperar_dom_estable(page, timeout_ms=2000)
-    
-    # Delay antes del siguiente paso
-    await page.wait_for_timeout(DELAY_ENTRE_PASOS)
-    
-    # ========================================================================
-    # PASO 4: Click "Iniciar tramitación"
-    # ========================================================================
-    logger.info("PASO 4: Clickando 'Iniciar tramitación'")
-    await page.wait_for_selector(config.iniciar_tramitacion_selector, state="visible", timeout=config.default_timeout)
-    
-    # Delay antes de la acción que llevará a la pasarela de certificados
-    await page.wait_for_timeout(DELAY_ENTRE_PASOS)
-    
-    async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
-        await page.click(config.iniciar_tramitacion_selector)
-    await _asegurar_no_tramite_en_curso(page)
-    
-    logger.info(f"  → Navegado a pantalla de login: {page.url}")
-    
-    # Esperar estabilización después de llegar a la pasarela
-    await _esperar_dom_estable(page, timeout_ms=3000)
-    
-    # Aceptar cookies en dominio de login si aparecen
-    await _aceptar_cookies_si_aparece(page)
-    
-    # Delay extra antes del paso de certificado (demo)
-    await page.wait_for_timeout(int(getattr(config, "delay_ms", 500)))
-    
-    # ========================================================================
-    # PASO 5: Click "DNIe / Certificado"
-    # ========================================================================
-    logger.info("PASO 5: Seleccionando método de acceso 'DNIe / Certificado'")
-    
-    # ========================================================================
-    # PASO 5: Click "DNIe / Certificado"
-    # ========================================================================
-    logger.info("PASO 5: Seleccionando método de acceso 'DNIe / Certificado'")
-    await page.wait_for_selector(config.certificado_login_selector, state="visible", timeout=config.default_timeout)
-    
-    # Delay antes de hacer click en certificado
-    await page.wait_for_timeout(DELAY_ENTRE_PASOS)
-    
-    # ========================================================================
-    # PASO 6: Manejar popup de certificado Windows
-    # ========================================================================
-    logger.info("PASO 6: Preparando manejo de popup de certificado Windows")
-    
-    # Click + monitorización previa antes de enviar Shift+Tab x2 (evita enviar teclas si hay error de carga)
-    await _click_certificado_y_aceptar_popup(page, config)
-
-    # Esperar a que la autenticación complete (con detección + recuperación).
-    # MODIFICADO: Timeout de 15 segundos para la automatización. Si falla, espera manual.
-    deadline = time.monotonic() + 15.0
-    reintentos_cert = 0
-    
-    manual_mode = False
-    
-    while True:
+    url_actual = page.url or ""
+    if config.url_servcla_inicial_contains in url_actual or config.url_servcla_formulario_contains in url_actual:
+        logger.info("  → Sesión ya activa detectada por URL. Saltando a selección de formulario.")
+        goto_servcla = True
+    else:
+        # Verificar si por algún motivo ya estamos autenticados aunque no estemos en la URL final
+        # (ej: si aparece el botón 'Continuar' post-auth en lugar de login)
+        boton_continuar = page.locator(config.continuar_post_auth_selector)
         try:
-            await page.wait_for_selector(
-                config.continuar_post_auth_selector,
-                state="visible",
-                timeout=2000,
-            )
-            logger.info("  → Autenticación completada exitosamente")
-            break
-        except PlaywrightTimeoutError:
-            if time.monotonic() > deadline:
-                if getattr(config.navegador, "headless", False):
-                    raise RuntimeError(
-                        "Madrid: timeout esperando autenticación post-certificado. "
-                        "Si aparece el selector de certificado, revisa la policy de Edge (AutoSelectCertificateForUrls) "
-                        "y que incluya hosts intermedios (cas.madrid.es / pasarela.clave.gob.es)."
-                    )
-                logger.warning("  ! Timeout de automatización (15s). Esperando intervención manual del usuario...")
-                logger.info("    Si el certificado no se seleccionó, hazlo manualmente y continúa.")
-                
-                # Espera infinita (timeout=0) hasta que el usuario llegue a la siguiente pantalla
+            if await boton_continuar.is_visible(timeout=2000):
+                logger.info("  → Detectado botón post-auth. Sesión probablemente activa.")
+                goto_servcla = True
+            else:
+                goto_servcla = False
+        except Exception:
+            goto_servcla = False
+
+    if not goto_servcla:
+        # ========================================================================
+        # PASO 1: Navegar a URL base y click "Tramitar en línea"
+        # ========================================================================
+        logger.info("PASO 1: Navegando a página base y clickando 'Tramitar en línea'")
+        await page.goto(config.url_base, wait_until="domcontentloaded", timeout=config.navigation_timeout)
+        await _asegurar_no_tramite_en_curso(page)
+        logger.info(f"  → URL cargada: {page.url}")
+        
+        # Esperar estabilización del DOM (más tiempo)
+        await _esperar_dom_estable(page, timeout_ms=3000)
+        
+        # Aceptar cookies si aparecen
+        await _aceptar_cookies_si_aparece(page)
+        
+        # Delay adicional para parecer más humano
+        await page.wait_for_timeout(DELAY_ENTRE_PASOS)
+        
+        # Esperar y clickar el botón "Tramitar en línea"
+        await page.wait_for_selector(config.boton_tramitar_selector, state="visible", timeout=config.default_timeout)
+        await page.click(config.boton_tramitar_selector)
+        logger.info(f"  → Click en botón 'Tramitar en línea' ({config.boton_tramitar_selector})")
+        
+        # Esperar a que aparezca el bloque #verTodas
+        await page.wait_for_selector(config.bloque_tramitar_selector, state="visible", timeout=config.default_timeout)
+        logger.info(f"  → Bloque de tramitación visible ({config.bloque_tramitar_selector})")
+        
+        # Delay antes del siguiente paso
+        await page.wait_for_timeout(DELAY_ENTRE_PASOS)
+        
+        # ========================================================================
+        # PASO 2: Click "Registro Electrónico"
+        # ========================================================================
+        logger.info("PASO 2: Clickando 'Registro Electrónico'")
+        await page.wait_for_selector(config.registro_electronico_selector, state="visible", timeout=config.default_timeout)
+        
+        # Click y esperar navegación a servpub.madrid.es
+        async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
+            await page.click(config.registro_electronico_selector)
+        await _asegurar_no_tramite_en_curso(page)
+        
+        logger.info(f"  → Navegado a: {page.url}")
+        
+        # Esperar estabilización después de cambio de dominio
+        await _esperar_dom_estable(page, timeout_ms=2000)
+        
+        # Aceptar cookies en nuevo dominio si aparecen
+        await _aceptar_cookies_si_aparece(page)
+        
+        # Delay antes del siguiente paso
+        await page.wait_for_timeout(DELAY_ENTRE_PASOS)
+        
+        # ========================================================================
+        # PASO 3: Click primer "Continuar"
+        # ========================================================================
+        logger.info("PASO 3: Clickando primer botón 'Continuar'")
+        await page.wait_for_selector(config.continuar_1_selector, state="visible", timeout=config.default_timeout)
+        
+        async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
+            await page.click(config.continuar_1_selector)
+        await _asegurar_no_tramite_en_curso(page)
+        
+        logger.info(f"  → Navegado a: {page.url}")
+        
+        # Esperar estabilización
+        await _esperar_dom_estable(page, timeout_ms=2000)
+        
+        # Delay antes del siguiente paso
+        await page.wait_for_timeout(DELAY_ENTRE_PASOS)
+        
+        # ========================================================================
+        # PASO 4: Click "Iniciar tramitación"
+        # ========================================================================
+        logger.info("PASO 4: Clickando 'Iniciar tramitación'")
+        await page.wait_for_selector(config.iniciar_tramitacion_selector, state="visible", timeout=config.default_timeout)
+        
+        # Delay antes de la acción que llevará a la pasarela de certificados
+        await page.wait_for_timeout(DELAY_ENTRE_PASOS)
+        
+        async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
+            await page.click(config.iniciar_tramitacion_selector)
+        await _asegurar_no_tramite_en_curso(page)
+        
+        logger.info(f"  → Navegado a pantalla de login: {page.url}")
+        
+        # Esperar estabilización después de llegar a la pasarela
+        await _esperar_dom_estable(page, timeout_ms=3000)
+        
+        # Aceptar cookies en dominio de login si aparecen
+        await _aceptar_cookies_si_aparece(page)
+        
+        # Delay extra antes del paso de certificado (demo)
+        await page.wait_for_timeout(int(getattr(config, "delay_ms", 500)))
+        
+        # ========================================================================
+        # PASO 5: Click "DNIe / Certificado"
+        # ========================================================================
+        logger.info("PASO 5: Seleccionando método de acceso 'DNIe / Certificado'")
+        await page.wait_for_selector(config.certificado_login_selector, state="visible", timeout=config.default_timeout)
+        
+        # Delay antes de hacer click en certificado
+        await page.wait_for_timeout(DELAY_ENTRE_PASOS)
+        
+        # ========================================================================
+        # PASO 6: Manejar popup de certificado Windows
+        # ========================================================================
+        logger.info("PASO 6: Preparando manejo de popup de certificado Windows")
+        
+        # Click + monitorización previa
+        await _click_certificado_y_aceptar_popup(page, config)
+
+        # Esperar a que la autenticación complete (con detección + recuperación).
+        deadline = time.monotonic() + 15.0
+        reintentos_cert = 0
+        
+        while True:
+            try:
                 await page.wait_for_selector(
                     config.continuar_post_auth_selector,
                     state="visible",
-                    timeout=0
+                    timeout=2000,
                 )
-                logger.info("  → Detectado avance manual post-autenticación")
+                logger.info("  → Autenticación completada exitosamente")
                 break
-
-            problema = await _detectar_problema_autenticacion(page)
-            if problema:
-                await _recuperar_problema_autenticacion(page, config, problema)
-                # Si hemos vuelto a la pantalla con selector de certificado, reintentar una vez.
-                if reintentos_cert < 1:
-                    try:
-                        await page.wait_for_selector(
-                            config.certificado_login_selector,
-                            state="visible",
-                            timeout=1500,
+            except PlaywrightTimeoutError:
+                if time.monotonic() > deadline:
+                    if getattr(config.navegador, "headless", False):
+                        raise RuntimeError(
+                            "Madrid: timeout esperando autenticación post-certificado. "
                         )
-                        reintentos_cert += 1
-                        await _click_certificado_y_aceptar_popup(page, config)
-                    except PlaywrightTimeoutError:
-                        pass
-    
-    # ========================================================================
-    # PASO 7: Click "Continuar" post-autenticación
-    # ========================================================================
-    logger.info("PASO 7: Clickando 'Continuar' tras autenticación")
-    
-    # Delay antes del siguiente paso
-    await page.wait_for_timeout(DELAY_ENTRE_PASOS)
-    
-    async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
-        await page.click(config.continuar_post_auth_selector)
-    await _asegurar_no_tramite_en_curso(page)
-    
-    logger.info(f"  → Navegado a: {page.url}")
+                    logger.warning("  ! Timeout de automatización (15s). Esperando intervención manual...")
+                    await page.wait_for_selector(
+                        config.continuar_post_auth_selector,
+                        state="visible",
+                        timeout=0
+                    )
+                    break
+
+                problema = await _detectar_problema_autenticacion(page)
+                if problema:
+                    await _recuperar_problema_autenticacion(page, config, problema)
+                    if reintentos_cert < 1:
+                        try:
+                            await page.wait_for_selector(
+                                config.certificado_login_selector,
+                                state="visible",
+                                timeout=1500,
+                            )
+                            reintentos_cert += 1
+                            await _click_certificado_y_aceptar_popup(page, config)
+                        except PlaywrightTimeoutError:
+                            pass
+        
+        # ========================================================================
+        # PASO 7: Click "Continuar" post-autenticación
+        # ========================================================================
+        logger.info("PASO 7: Clickando 'Continuar' tras autenticación")
+        await page.wait_for_timeout(DELAY_ENTRE_PASOS)
+        
+        async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
+            await page.click(config.continuar_post_auth_selector)
+        await _asegurar_no_tramite_en_curso(page)
+        
+        logger.info(f"  → Navegado a: {page.url}")
     
     # ========================================================================
     # PASO 8-9: Acceso al formulario (pantalla intermedia servcla o flujo antiguo)
