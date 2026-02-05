@@ -138,19 +138,47 @@ async def ejecutar_firma_madrid(
     logger.info(f"EXTRACCIÓN BINARIA DIRECTA - EXPEDIENTE: {destino_descarga.stem}")
     logger.info("=" * 80)
 
-    # 2. ESPERAR PANTALLA DE FIRMA
-    # (El selector del botón nos indica que estamos en la pantalla correcta)
+    # 1. Definir ruta en la raíz del proyecto (LEGACY/BACKUP PATH)
+    nombre_final = f"{destino_descarga.stem}.pdf"
+    ruta_raiz = Path(".") / nombre_final
+
+    # ====================================================================
+    # 2. ACCIÓN DE FIRMA: CHECKBOX Y CLICK FINAL
+    # ====================================================================
+    # Estamos en la pantalla de "Firma y Registro" (pre-submit)
     await page.wait_for_selector(config.firma_registrar_selector, state="visible")
     logger.info("Pantalla de firma detectada.")
+        
+    # Marcar checkbox consentimiento
+    logger.info("Marcando checkbox consentimiento...")
+    checkbox = page.locator("#consentimiento")
+    if await checkbox.count() > 0:
+        await checkbox.check()
+    
+    # Click en "Firmar y registrar" para avanzar a la pantalla final
+    logger.info("Clicando botón 'Firmar y registrar'...")
+    firmar_btn = page.locator('input.button.button4[value="Firmar y registrar"]')
+    
+    async with page.expect_navigation(wait_until="domcontentloaded"):
+        if await firmar_btn.count() > 0:
+            await firmar_btn.click()
+        else:
+            logger.warning("Selector específico no encontrado, usando config.firma_registrar_selector")
+            await page.click(config.firma_registrar_selector)
+    
+    await page.wait_for_load_state("networkidle")
+    logger.info("✓ Botón de firma pulsado. Esperando pantalla final de descarga.")
 
-    # 3. EXTRACCIÓN BINARIA PRE-FIRMA (FETCH HACK)
-    # Ejecutamos la extracción ANTES de firmar para validar que tenemos el documento.
-    logger.info("Ejecutando fetch interceptor para extracción pre-firma...")
+    # ====================================================================
+    # 3. EXTRACCIÓN BINARIA (FETCH HACK)
+    # ====================================================================
+    # Ahora que hemos firmado, el botón 'verificar' debería estar disponible.
+    logger.info("Ejecutando fetch interceptor para extracción del justificante...")
     
     script_extraccion = """
     async () => {
         const btn = document.querySelector('button[name="verificar"]');
-        if (!btn) throw new Error("Botón 'verificar' no encontrado para extracción.");
+        if (!btn) throw new Error("Botón 'verificar' no encontrado en pantalla final.");
         const formData = new FormData(btn.form);
         formData.append('verificar', '1');
 
@@ -168,7 +196,7 @@ async def ejecutar_firma_madrid(
     """
 
     try:
-        # Ejecutamos la lógica de extracción
+        # Ejecutamos la lógica que funcionó en tu consola
         base64_pdf = await page.evaluate(script_extraccion)
         
         # 4. DECODIFICACIÓN Y VALIDACIÓN
@@ -177,7 +205,7 @@ async def ejecutar_firma_madrid(
         if not pdf_bytes.startswith(b"%PDF"):
             raise RuntimeError("Los datos recibidos no tienen formato PDF.")
             
-        logger.info(f"✓ PDF VALIDADO ({len(pdf_bytes)} bytes). Procediendo a la firma final.")
+        logger.info(f"✓ PDF OBTENIDO Y VALIDADO ({len(pdf_bytes)} bytes)")
 
         # 5. GUARDADO FÍSICO
         # Save to root (Legacy/Backup)
@@ -192,39 +220,11 @@ async def ejecutar_firma_madrid(
         ruta_final = _renombrar_y_mover_justificante_bytes(pdf_bytes, str(raw_exp), ruta_recursos)
         logger.info(f"✓ JUSTIFICANTE GUARDADO SEGÚN PROTOCOLO: {ruta_final}")
 
-        # ====================================================================
-        # 6. ACCIÓN FINAL: CHECKBOX Y FIRMA
-        # ====================================================================
-        
-        # Marcar checkbox consentimiento
-        logger.info("Marcando checkbox consentimiento...")
-        checkbox = page.locator("#consentimiento")
-        if await checkbox.count() > 0:
-            await checkbox.check()
-        
-        # Delay humano antes del click final
-        await page.wait_for_timeout(1000)
-
-        # Click en "Firmar y registrar"
-        logger.info("Clicando botón final 'Firmar y registrar'...")
-        firmar_btn = page.locator('input.button.button4[value="Firmar y registrar"]')
-        
-        if await firmar_btn.count() > 0:
-             async with page.expect_navigation(wait_until="domcontentloaded"):
-                await firmar_btn.click()
-        else:
-            logger.warning("Selector específico no encontrado, usando config.firma_registrar_selector")
-            async with page.expect_navigation(wait_until="domcontentloaded"):
-                await page.click(config.firma_registrar_selector)
-        
-        await page.wait_for_load_state("networkidle")
-        logger.info("✓ Trámite finalizado en el portal.")
-
     except Exception as e:
-        logger.error(f"Fallo en la extracción o firma: {e}")
+        logger.error(f"Fallo en la extracción por inyección: {e}")
         raise
 
-    # 7. FINALIZACIÓN
+    # 6. FINALIZACIÓN
     logger.info("=" * 80)
     logger.info("PROCESO DE FIRMA Y EXTRACCIÓN COMPLETADO CON ÉXITO")
     logger.info("=" * 80)

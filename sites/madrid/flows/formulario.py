@@ -477,12 +477,21 @@ async def _rellenar_input_con_autocomplete(
         return False
 
 
-def _texto_busqueda_nombre_via(nombre_via: str, tipo_via: str | None) -> str:
+def _texto_busqueda_nombre_via(nombre_via: str, tipo_via: str | None, quitar_preposiciones: bool = False) -> str:
     """
     Texto para teclear en el input y abrir sugerencias.
-    Retorna el texto normalizado completo.
+    Si quitar_preposiciones es True, elimina partículas comunes al inicio 
+    (DE, DEL, LA, EL, LOS, LAS) para facilitar el match del autocomplete.
     """
-    return _normalizar_texto_autocomplete(nombre_via)
+    res = _normalizar_texto_autocomplete(nombre_via)
+    if quitar_preposiciones and res:
+        # Lista de preposiciones/artículos a omitir en la búsqueda
+        particulas = ["DE ", "DEL ", "LA ", "EL ", "LOS ", "LAS "]
+        for p in particulas:
+            if res.startswith(p):
+                res = res[len(p):].strip()
+                break
+    return res
 
 
 async def _rellenar_nombre_via_validado(
@@ -494,6 +503,7 @@ async def _rellenar_nombre_via_validado(
     tipo_via: str | None,
     nombre_campo: str,
     strict: bool,
+    quitar_preposiciones: bool = False,
 ) -> bool:
     """
     Rellena NOMBREVIA tecleando y seleccionando desde el autocomplete UI.
@@ -504,7 +514,7 @@ async def _rellenar_nombre_via_validado(
 
     validar_sin_error = strict
 
-    valor_tecleo = _texto_busqueda_nombre_via(valor_humano, tipo_via) or valor_humano
+    valor_tecleo = _texto_busqueda_nombre_via(valor_humano, tipo_via, quitar_preposiciones) or valor_humano
 
     logger.debug(f"[UI] {nombre_campo}: raw='{valor_humano}' tipo_via='{tipo_via or ''}' tecleo='{valor_tecleo}'")
 
@@ -740,6 +750,7 @@ async def ejecutar_formulario_madrid(
         tipo_via=rep_dir.tipo_via,
         nombre_campo="Nombre vía rep.",
         strict=False,
+        quitar_preposiciones=False, # Representante usa texto completo
     )
     await _seleccionar_opcion(page, config.representante_tipo_num_selector, rep_dir.tipo_numeracion, "Tipo num. rep.")
     await _rellenar_input(page, config.representante_numero_selector, rep_dir.numero, "Número rep.")
@@ -826,6 +837,7 @@ async def ejecutar_formulario_madrid(
         tipo_via=notif_dir.tipo_via,
         nombre_campo="Nombre vía notif.",
         strict=getattr(config, "strict_direccion", True),
+        quitar_preposiciones=True, # Notificado usa eliminación de preposiciones
     )
     await _seleccionar_opcion(page, config.notificacion_tipo_num_selector, notif_dir.tipo_numeracion, "Tipo num. notif.")
     await _rellenar_input(page, config.notificacion_numero_selector, notif_dir.numero, "Número notif.")
