@@ -89,8 +89,8 @@ def _construir_ruta_recursos_telematicos(payload: dict, fase_procedimiento: Any 
     base_path = r"\\SERVER-DOC\clientes"
     ruta_cliente_base = get_ruta_cliente_documentacion(client, base_path=base_path)
     
-    ruta_recursos = ruta_cliente_base / "RECURSOS TELEMATICOS"
-    ruta_recursos.mkdir(parents=True, exist_ok=True)
+    # Usar búsqueda flexible para evitar duplicados "TELEMÁTICOS" vs "TELEMATICOS"
+    ruta_recursos = _find_or_create_subfolder(ruta_cliente_base, "RECURSOS TELEMATICOS")
     
     if fase_procedimiento:
         folder_name = _get_folder_name_from_fase(fase_procedimiento)
