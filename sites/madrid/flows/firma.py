@@ -157,7 +157,7 @@ async def ejecutar_firma_madrid(
     
     # Click en "Firmar y registrar" para avanzar a la pantalla final
     logger.info("Clicando botón 'Firmar y registrar'...")
-    firmar_btn = page.locator('input.button.button4[value="Firmar y registrar"]')
+    firmar_btn = page.locator('input.button.button4[name="btnFirmar"]')
     
     async with page.expect_navigation(wait_until="domcontentloaded"):
         if await firmar_btn.count() > 0:

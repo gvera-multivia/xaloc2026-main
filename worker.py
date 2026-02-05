@@ -247,17 +247,14 @@ async def process_task(
             
             # --- NUEVO: MARCAR COMO COMPLETADO EN XVIA ---
             # Solo si no hubo incidencias "non-fatal" (ej: fallo al descargar justificante)
-            if site_id != "madrid" and not getattr(bot, "_exit_has_nonfatal_issues", False):
+            if not getattr(bot, "_exit_has_nonfatal_issues", False):
                 if payload.get("idRecurso"):
                     logger.info(f"Intentando marcar recurso {payload['idRecurso']} como completado en la web...")
                     success_mark = await mark_resource_complete(auth_session, payload)
                     if not success_mark:
                         logger.warning("No se pudo marcar como completado en la web, pero el trámite fue enviado.")
             else:
-                if site_id == "madrid":
-                    logger.info("Madrid: no se marca el recurso como completado en Xvia.")
-                else:
-                    logger.warning("Tarea finalizada con incidencias no fatales. NO se marcará como completado en la web.")
+                logger.warning("Tarea finalizada con incidencias no fatales. NO se marcará como completado en la web.")
 
             if db is not None and task_id is not None:
                 db.update_task_status(task_id, "completed", screenshot=str(screenshot_path))
