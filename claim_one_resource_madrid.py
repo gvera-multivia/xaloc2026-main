@@ -310,10 +310,10 @@ def _inferir_naturaleza_por_motivo_y_fase(
     fase_raw: str,
 ) -> str:
     """
-    Determina la naturaleza (A/R/I) en funciÃ³n del MOTIVO (config_motivos.json)
+    Determina la naturaleza (A/R/I) en función del MOTIVO (config_motivos.json)
     y de la fase (FaseProcedimiento).
 
-    Nota: la letra no viene en el JSON, asÃ­ que se infiere por reglas.
+    Nota: la letra no viene en el JSON, así que se infiere por reglas.
     """
 
     motivo_norm = _normalize_text(motivo_key)
@@ -437,13 +437,19 @@ def fetch_one_resource_madrid(conn_str: str, authenticated_user: str = None) -> 
             # Validar formatos Madrid
             expediente_valido = any(reg.match(expediente) for reg in regex_madrid)
             
-            if expediente_valido:
+            # Filtrar por FaseProcedimiento (reclamacion, embargo, apremio)
+            fase_norm = _normalize_text(recurso.get("FaseProcedimiento"))
+            es_fase_negra = any(x in fase_norm for x in ["reclamacion", "embargo", "apremio"])
+
+            if expediente_valido and not es_fase_negra:
                 if estado == 1 and (not authenticated_user or usuario != authenticated_user):
                     continue
                     
                 status_str = "LIBRE" if estado == 0 else f"EN PROCESO ({usuario})"
-                logger.info(f"✓ Recurso MADRID encontrado ({status_str}): {id_recurso} - {expediente}")
+                logger.info(f"✓ Recurso MADRID encontrado ({status_str}): {id_recurso} - {expediente} (Fase: {recurso.get('FaseProcedimiento')})")
                 return recurso
+            elif es_fase_negra:
+                logger.debug(f"⏭ Omitiendo recurso {id_recurso} por fase: {recurso.get('FaseProcedimiento')}")
                 
         logger.warning("No se encontraron recursos de Madrid válidos")
         return None
@@ -543,7 +549,7 @@ async def build_madrid_payload(recurso: dict) -> dict:
         "representative_number": "169",
         "representative_zip": "08022",
         "representative_email": "info@xvia-serviciosjuridicos.com",
-        "representative_phone": "722761154",
+        "representative_phone": "932531411", # Hardcoded
     }
 
     return {
@@ -554,7 +560,7 @@ async def build_madrid_payload(recurso: dict) -> dict:
         "sujeto_recurso": _clean_str(recurso.get("SujetoRecurso")),
         "fase_procedimiento": fase_raw,
         "plate_number": _clean_str(recurso.get("matricula")),
-        "user_phone": tel or movil,
+        "user_phone": "932531411", # Hardcoded
         "inter_email_check": bool(_clean_str(recurso.get("cliente_email"))),
         **representante,
         "notif_tipo_documento": _detectar_tipo_documento(nif),
@@ -576,8 +582,16 @@ async def build_madrid_payload(recurso: dict) -> dict:
         "notif_puerta": notif_puerta,
         "notif_codigo_postal": _clean_str(recurso.get("cliente_cp")),
         "notif_email": "info@xvia-serviciosjuridicos.com",
-        "notif_movil": movil or "",
-        "notif_telefono": tel or "",
+        "notif_movil": "", # Removed
+        "notif_telefono": "932531411", # Hardcoded
+        # Standard keys for core.client_documentation.client_identity_from_payload
+        "cliente_nombre": _clean_str(recurso.get("cliente_nombre")).upper(),
+        "cliente_apellido1": _clean_str(recurso.get("cliente_apellido1")).upper(),
+        "cliente_apellido2": _clean_str(recurso.get("cliente_apellido2")).upper(),
+        "razon_social": _clean_str(recurso.get("cliente_razon_social")).upper(),
+        "inter_telefono": "932531411", # Explicitly set for standard mapping
+        "rep_movil": "", # Explicitly cleared
+        "rep_telefono": "932531411", # Explicitly set
         **exp_parts, 
         "naturaleza": naturaleza,
         "expone": expone,

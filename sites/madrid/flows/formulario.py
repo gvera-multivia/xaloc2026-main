@@ -725,8 +725,8 @@ async def ejecutar_formulario_madrid(
     
     inter = datos.interesado
     
-    # Teléfono (editable) - NO RELLENAR para evitar duplicados
-    # await _rellenar_input(page, config.interesado_telefono_selector, inter.telefono, "Teléfono interesado")
+    # Teléfono (editable)
+    await _rellenar_input(page, config.interesado_telefono_selector, inter.telefono, "Teléfono interesado")
     
     # Checkboxes de confirmación
     await _marcar_checkbox(page, config.interesado_check_email_selector, inter.confirmar_email, "Email interesado")
@@ -768,9 +768,11 @@ async def ejecutar_formulario_madrid(
     
     # Contacto
     await _rellenar_input(page, config.representante_email_selector, rep_con.email, "Email rep.")
-    await _rellenar_input(page, config.representante_movil_selector, rep_con.movil, "Móvil rep.")
-    # Teléfono rep. - NO RELLENAR (formula2_COMUNES_REPRESENTANTE_TELEFONO) para evitar duplicados
-    # await _rellenar_input(page, config.representante_telefono_selector, rep_con.telefono, "Teléfono rep.")
+    if rep_con.movil:
+        await _rellenar_input(page, config.representante_movil_selector, rep_con.movil, "Móvil rep.")
+    
+    # Teléfono rep.
+    await _rellenar_input(page, config.representante_telefono_selector, rep_con.telefono, "Teléfono rep.")
     
     # Checkbox de confirmación (evita escribir en checkboxes homónimos fuera de _id21:3)
     await _marcar_checkbox(
