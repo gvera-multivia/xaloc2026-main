@@ -480,24 +480,9 @@ async def _rellenar_input_con_autocomplete(
 def _texto_busqueda_nombre_via(nombre_via: str, tipo_via: str | None) -> str:
     """
     Texto para teclear en el input y abrir sugerencias.
-
-    Si el raw viene como "PLAZA DE CHAMBERÍ" y ya se seleccionó `tipo_via=PLAZA`,
-    aquí devolvemos "CHAMBERI" (evita enviar "PLAZA DE ..." al campo NOMBREVIA).
+    Retorna el texto normalizado completo.
     """
-
-    texto = _normalizar_texto_autocomplete(nombre_via)
-    if not texto:
-        return ""
-
-    stop = {"DE", "DEL", "LA", "LAS", "LOS", "EL", "Y"}
-    tipo_norm = _normalizar_texto_autocomplete(tipo_via or "")
-    tokens = [t for t in texto.split(" ") if t and t not in stop and t != tipo_norm]
-
-    if not tokens:
-        tokens = [t for t in texto.split(" ") if t]
-
-    # Quedarnos con el último token significativo (suele ser el nombre)
-    return tokens[-1] if tokens else texto
+    return _normalizar_texto_autocomplete(nombre_via)
 
 
 async def _rellenar_nombre_via_validado(
@@ -768,8 +753,6 @@ async def ejecutar_formulario_madrid(
     
     # Contacto
     await _rellenar_input(page, config.representante_email_selector, rep_con.email, "Email rep.")
-    if rep_con.movil:
-        await _rellenar_input(page, config.representante_movil_selector, rep_con.movil, "Móvil rep.")
     
     # Teléfono rep.
     await _rellenar_input(page, config.representante_telefono_selector, rep_con.telefono, "Teléfono rep.")
