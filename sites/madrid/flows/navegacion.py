@@ -20,6 +20,40 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+async def _esta_en_servcla(page: Page, config: "MadridConfig") -> bool:
+    url = (page.url or "").lower()
+    return (config.url_servcla_inicial_contains.lower() in url) or (
+        config.url_servcla_formulario_contains.lower() in url
+    )
+
+
+async def _btn_continuar_post_auth_visible(page: Page, config: "MadridConfig") -> bool:
+    try:
+        return await page.locator(config.continuar_post_auth_selector).first.is_visible(timeout=500)
+    except Exception:
+        return False
+
+
+async def _esperar_auth_o_servcla(page: Page, config: "MadridConfig", *, timeout_ms: int) -> None:
+    """
+    Espera a que la autenticación por certificado haya terminado.
+
+    Casos válidos:
+    - Aparece el botón 'Continuar' post-auth (flujo clásico).
+    - Se navega directamente a servcla (cuando la sesión ya estaba guardada).
+    """
+    deadline = (time.monotonic() + (timeout_ms / 1000.0)) if timeout_ms > 0 else None
+
+    while True:
+        if await _esta_en_servcla(page, config):
+            return
+        if await _btn_continuar_post_auth_visible(page, config):
+            return
+        if deadline is not None and time.monotonic() > deadline:
+            raise PlaywrightTimeoutError("Timeout esperando auth (btnContinuar o servcla).")
+        await page.wait_for_timeout(250)
+
+
 async def _detectar_tramite_en_curso(page: Page) -> bool:
     locator = page.locator(
         "div.modal-alert.modal-warning span.bold",
@@ -468,72 +502,73 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
         # PASO 5: Click "DNIe / Certificado"
         # ========================================================================
         logger.info("PASO 5: Seleccionando método de acceso 'DNIe / Certificado'")
-        await page.wait_for_selector(config.certificado_login_selector, state="visible", timeout=config.default_timeout)
-        
-        # Delay antes de hacer click en certificado
-        await page.wait_for_timeout(DELAY_ENTRE_PASOS)
-        
-        # ========================================================================
-        # PASO 6: Manejar popup de certificado Windows
-        # ========================================================================
-        logger.info("PASO 6: Preparando manejo de popup de certificado Windows")
-        
-        # Click + monitorización previa
-        await _click_certificado_y_aceptar_popup(page, config)
-
-        # Esperar a que la autenticación complete (con detección + recuperación).
-        deadline = time.monotonic() + 15.0
-        reintentos_cert = 0
-        
-        while True:
-            try:
-                await page.wait_for_selector(
-                    config.continuar_post_auth_selector,
-                    state="visible",
-                    timeout=2000,
-                )
-                logger.info("  → Autenticación completada exitosamente")
-                break
-            except PlaywrightTimeoutError:
-                if time.monotonic() > deadline:
-                    if getattr(config.navegador, "headless", False):
-                        raise RuntimeError(
-                            "Madrid: timeout esperando autenticación post-certificado. "
-                        )
-                    logger.warning("  ! Timeout de automatización (15s). Esperando intervención manual...")
-                    await page.wait_for_selector(
-                        config.continuar_post_auth_selector,
-                        state="visible",
-                        timeout=0
-                    )
+        # Nota: cuando la sesión ya está guardada (trámite anterior), Madrid puede saltarse
+        # la pantalla de DNIe/certificado y navegar directo a servcla. Evitamos timeouts.
+        if await _esta_en_servcla(page, config):
+            logger.info("  → Sesión activa: ya estamos en servcla; saltando DNIe/certificado")
+        elif await _btn_continuar_post_auth_visible(page, config):
+            logger.info("  → Sesión activa: botón 'Continuar' post-auth ya visible; saltando DNIe/certificado")
+        else:
+            # Puede ocurrir que Madrid navegue automáticamente a servcla (sesión guardada)
+            # y el selector de certificado nunca llegue a aparecer. Esperamos de forma
+            # robusta a uno de: certificado, btnContinuar, o servcla.
+            deadline = time.monotonic() + (config.default_timeout / 1000.0)
+            while True:
+                if await _esta_en_servcla(page, config) or await _btn_continuar_post_auth_visible(page, config):
+                    logger.info("  → Sesión activa detectada durante la espera; saltando click certificado")
                     break
+                try:
+                    await page.wait_for_selector(config.certificado_login_selector, state="visible", timeout=500)
+                    break
+                except PlaywrightTimeoutError:
+                    if time.monotonic() > deadline:
+                        raise
+
+            if await _esta_en_servcla(page, config) or await _btn_continuar_post_auth_visible(page, config):
+                # Ya estamos autenticados o hemos saltado a servcla.
+                pass
+            else:
+                # Delay antes de hacer click en certificado
+                await page.wait_for_timeout(DELAY_ENTRE_PASOS)
+
+                # ========================================================================
+                # PASO 6: Manejar popup de certificado Windows
+                # ========================================================================
+                logger.info("PASO 6: Preparando manejo de popup de certificado Windows")
+
+                # Click + monitorización previa
+                await _click_certificado_y_aceptar_popup(page, config)
+
+                # Esperar a que la autenticación complete:
+                # - aparece btnContinuar, o
+                # - se navega directamente a servcla (sesión ya guardada)
+                try:
+                    await _esperar_auth_o_servcla(page, config, timeout_ms=15000)
+                    logger.info("  → Autenticación completada (btnContinuar o servcla)")
+                except PlaywrightTimeoutError:
+                    if getattr(config.navegador, "headless", False):
+                        raise RuntimeError("Madrid: timeout esperando autenticación post-certificado.")
+                    logger.warning("  ! Timeout de automatización (15s). Esperando intervención manual...")
+                    await _esperar_auth_o_servcla(page, config, timeout_ms=0)
 
                 problema = await _detectar_problema_autenticacion(page)
                 if problema:
                     await _recuperar_problema_autenticacion(page, config, problema)
-                    if reintentos_cert < 1:
-                        try:
-                            await page.wait_for_selector(
-                                config.certificado_login_selector,
-                                state="visible",
-                                timeout=1500,
-                            )
-                            reintentos_cert += 1
-                            await _click_certificado_y_aceptar_popup(page, config)
-                        except PlaywrightTimeoutError:
-                            pass
         
         # ========================================================================
         # PASO 7: Click "Continuar" post-autenticación
         # ========================================================================
         logger.info("PASO 7: Clickando 'Continuar' tras autenticación")
-        await page.wait_for_timeout(DELAY_ENTRE_PASOS)
-        
-        async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
-            await page.click(config.continuar_post_auth_selector)
-        await _asegurar_no_tramite_en_curso(page)
-        
-        logger.info(f"  → Navegado a: {page.url}")
+        if await _esta_en_servcla(page, config):
+            logger.info("  → Ya estamos en servcla; no existe 'Continuar' post-auth. Saltando PASO 7.")
+        else:
+            await page.wait_for_timeout(DELAY_ENTRE_PASOS)
+
+            async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
+                await page.click(config.continuar_post_auth_selector)
+            await _asegurar_no_tramite_en_curso(page)
+
+            logger.info(f"  → Navegado a: {page.url}")
     
     # ========================================================================
     # PASO 8-9: Acceso al formulario (pantalla intermedia servcla o flujo antiguo)

@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import logging
 import base64
-import os
 import shutil
 import unicodedata
-import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -20,6 +18,12 @@ from core.client_documentation import (
 )
 
 logger = logging.getLogger(__name__)
+
+class MadridFirmaNonFatalError(RuntimeError):
+    """
+    Error no fatal: el trámite pudo haberse enviado, pero falló un paso post-envío
+    (p.ej. mover el justificante a la carpeta final).
+    """
 
 # --- Helper Functions (Copied from xaloc_girona/flows/descarga_justificante.py) ---
 # Copied to implement path logic specifically, NOT download logic
@@ -99,28 +103,27 @@ def _construir_ruta_recursos_telematicos(payload: dict, fase_procedimiento: Any 
             
     return ruta_recursos
 
-def _renombrar_y_mover_justificante_bytes(
-    pdf_bytes: bytes, num_expediente: str, destino_dir: Path
-) -> Path:
-    """
-    Guarda los bytes directamente en la ruta de destino.
-    """
-    # JUSTIFICANTE - (numero de expediente) (replace . with _ and / with -)
-    clean_exp = num_expediente.replace("/", "-").replace(".", "_")
-    nombre_final = f"JUSTIFICANTE - {clean_exp}.pdf"
-    ruta_final = destino_dir / nombre_final
-    
-    # Ensure destination directory exists
+def _justificante_filename(num_expediente: str) -> str:
+    clean_exp = str(num_expediente).replace("/", "-").replace(".", "_")
+    return f"JUSTIFICANTE - {clean_exp}.pdf"
+
+
+def _guardar_justificante_temporal(pdf_bytes: bytes, *, num_expediente: str, tmp_dir: Path) -> Path:
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    tmp_path = tmp_dir / _justificante_filename(num_expediente)
+    tmp_path.write_bytes(pdf_bytes)
+    logger.info("Justificante guardado temporalmente en: %s", tmp_path)
+    return tmp_path
+
+
+def _mover_justificante_a_destino(tmp_path: Path, *, destino_dir: Path) -> Path:
     destino_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Write bytes
-    try:
-        ruta_final.write_bytes(pdf_bytes)
-        logger.info(f"✓ Justificante guardado en: {ruta_final}")
-    except Exception as e:
-        raise RuntimeError(f"Failed to save justificante to {ruta_final}: {e}") from e
-    
-    return ruta_final
+    destino_path = destino_dir / tmp_path.name
+    if destino_path.exists():
+        destino_path.unlink()
+    shutil.move(str(tmp_path), str(destino_path))
+    logger.info("Justificante movido a: %s", destino_path)
+    return destino_path
 
 # --- Main Flow ---
 
@@ -131,54 +134,47 @@ async def ejecutar_firma_madrid(
     payload: dict
 ) -> Page:
     """
-    Extrae el documento original inyectando la lógica de fetch validada en consola.
-    Garantiza el binario de 67KB y evita el visor de la extensión.
+    Descarga el PDF (verificar) en carpeta temporal y solo si está OK
+    confirma el envío (checkbox + botón). Si el envío se confirma, mueve el PDF
+    a la carpeta "RECURSOS TELEMATICOS" correspondiente del cliente.
     """
     logger.info("=" * 80)
-    logger.info(f"EXTRACCIÓN BINARIA DIRECTA - EXPEDIENTE: {destino_descarga.stem}")
+    logger.info("FIRMA MADRID - EXPEDIENTE: %s", destino_descarga.stem)
     logger.info("=" * 80)
 
-    # 1. Definir ruta en la raíz del proyecto (LEGACY/BACKUP PATH)
-    nombre_final = f"{destino_descarga.stem}.pdf"
-    ruta_raiz = Path(".") / nombre_final
+    raw_exp = payload.get("expediente") or payload.get("expediente_num") or "UNKNOWN"
+    fase = payload.get("fase_procedimiento")
+    id_recurso = payload.get("idRecurso") or destino_descarga.stem
+    tmp_dir = Path("tmp") / "madrid" / "justificantes" / str(id_recurso)
 
     # ====================================================================
-    # 2. ACCIÓN DE FIRMA: CHECKBOX Y CLICK FINAL
+    # 1. Ir a pantalla de firma (SIGNA) si no lo estamos ya
     # ====================================================================
-    # Estamos en la pantalla de "Firma y Registro" (pre-submit)
-    await page.wait_for_selector(config.firma_registrar_selector, state="visible")
-    logger.info("Pantalla de firma detectada.")
-        
-    # Marcar checkbox consentimiento
-    logger.info("Marcando checkbox consentimiento...")
-    checkbox = page.locator("#consentimiento")
-    if await checkbox.count() > 0:
-        await checkbox.check()
-    
-    # Click en "Firmar y registrar" para avanzar a la pantalla final
-    logger.info("Clicando botón 'Firmar y registrar'...")
-    firmar_btn = page.locator('input.button.button4[name="btnFirmar"]')
-    
-    async with page.expect_navigation(wait_until="domcontentloaded"):
-        if await firmar_btn.count() > 0:
-            await firmar_btn.click()
-        else:
-            logger.warning("Selector específico no encontrado, usando config.firma_registrar_selector")
-            await page.click(config.firma_registrar_selector)
-    
-    await page.wait_for_load_state("networkidle")
-    logger.info("✓ Botón de firma pulsado. Esperando pantalla final de descarga.")
+    if config.url_signa_firma_contains.lower() not in (page.url or "").lower():
+        await page.wait_for_selector(
+            config.firma_registrar_selector, state="visible", timeout=config.default_timeout
+        )
+        logger.info("Pantalla pre-firma detectada. Entrando en SIGNA (Firma y registrar)...")
+        try:
+            async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
+                await page.click(config.firma_registrar_selector)
+        except TimeoutError:
+            logger.warning("No se detectó navegación tras 'Firma y registrar'; continuando igualmente.")
 
     # ====================================================================
-    # 3. EXTRACCIÓN BINARIA (FETCH HACK)
+    # 2. Descargar justificante (verificar) a carpeta temporal
     # ====================================================================
-    # Ahora que hemos firmado, el botón 'verificar' debería estar disponible.
-    logger.info("Ejecutando fetch interceptor para extracción del justificante...")
+    await page.wait_for_selector(
+        config.verificar_documento_selector, state="attached", timeout=config.firma_navigation_timeout
+    )
+    logger.info("Pantalla SIGNA detectada (verificar disponible).")
+
+    logger.info("Descargando justificante vía fetch (verificar)...")
     
     script_extraccion = """
     async () => {
         const btn = document.querySelector('button[name="verificar"]');
-        if (!btn) throw new Error("Botón 'verificar' no encontrado en pantalla final.");
+        if (!btn) throw new Error("Botón 'verificar' no encontrado en pantalla de firma.");
         const formData = new FormData(btn.form);
         formData.append('verificar', '1');
 
@@ -195,38 +191,62 @@ async def ejecutar_firma_madrid(
     }
     """
 
+    base64_pdf = await page.evaluate(script_extraccion)
+    pdf_bytes = base64.b64decode(base64_pdf)
+
+    if not pdf_bytes.startswith(b"%PDF"):
+        raise RuntimeError("Los datos recibidos no tienen formato PDF.")
+    if len(pdf_bytes) < 10_000:
+        raise RuntimeError(f"PDF sospechosamente pequeño: {len(pdf_bytes)} bytes")
+
+    tmp_pdf_path = _guardar_justificante_temporal(
+        pdf_bytes, num_expediente=str(raw_exp), tmp_dir=tmp_dir
+    )
+
+    # ====================================================================
+    # 3. Confirmar envío (checkbox + botón final)
+    # ====================================================================
+    logger.info("Confirmando envío del trámite (checkbox + botón)...")
+    checkbox = page.locator("#consentimiento")
+    if await checkbox.count() > 0:
+        await checkbox.check()
+
+    firmar_btn = page.locator('input.button.button4[name="btnFirmar"]')
+    if await firmar_btn.count() == 0:
+        raise RuntimeError("Botón final de firma/envío no encontrado (btnFirmar).")
+
+    prev_url = page.url or ""
     try:
-        # Ejecutamos la lógica que funcionó en tu consola
-        base64_pdf = await page.evaluate(script_extraccion)
-        
-        # 4. DECODIFICACIÓN Y VALIDACIÓN
-        pdf_bytes = base64.b64decode(base64_pdf)
-        
-        if not pdf_bytes.startswith(b"%PDF"):
-            raise RuntimeError("Los datos recibidos no tienen formato PDF.")
-            
-        logger.info(f"✓ PDF OBTENIDO Y VALIDADO ({len(pdf_bytes)} bytes)")
+        async with page.expect_navigation(
+            wait_until="domcontentloaded", timeout=config.firma_navigation_timeout
+        ):
+            await firmar_btn.click()
+    except TimeoutError:
+        # A veces no hay navegación clásica (refresh parcial). El click ya se ejecutó.
+        logger.warning("No se detectó navegación tras el envío; continuando con espera blanda.")
 
-        # 5. GUARDADO FÍSICO
-        # Save to root (Legacy/Backup)
-        ruta_raiz.write_bytes(pdf_bytes)
-        logger.info(f"✓ DOCUMENTO ORIGINAL GUARDADO (ROOT)")
-        
-        # Save to Protocol Path
-        raw_exp = payload.get("expediente") or payload.get("expediente_num") or "UNKNOWN"
-        fase = payload.get("fase_procedimiento")
-        
-        ruta_recursos = _construir_ruta_recursos_telematicos(payload, fase)
-        ruta_final = _renombrar_y_mover_justificante_bytes(pdf_bytes, str(raw_exp), ruta_recursos)
-        logger.info(f"✓ JUSTIFICANTE GUARDADO SEGÚN PROTOCOLO: {ruta_final}")
+    try:
+        await page.wait_for_function(
+            "prev => window.location.href !== prev", arg=prev_url, timeout=15000
+        )
+    except Exception:
+        pass
+    await page.wait_for_timeout(1200)
 
+    # ====================================================================
+    # 4. Mover justificante a carpeta final (solo tras confirmar envío)
+    # ====================================================================
+    ruta_recursos = _construir_ruta_recursos_telematicos(payload, fase)
+    try:
+        _mover_justificante_a_destino(tmp_pdf_path, destino_dir=ruta_recursos)
     except Exception as e:
-        logger.error(f"Fallo en la extracción por inyección: {e}")
-        raise
+        raise MadridFirmaNonFatalError(
+            f"Trámite enviado, pero no se pudo mover el justificante a la carpeta final: {e}"
+        ) from e
 
-    # 6. FINALIZACIÓN
+    # 5. FINALIZACIÓN
     logger.info("=" * 80)
-    logger.info("PROCESO DE FIRMA Y EXTRACCIÓN COMPLETADO CON ÉXITO")
+    logger.info("PROCESO DE FIRMA Y ENVÍO COMPLETADO CON ÉXITO")
     logger.info("=" * 80)
     
     return page

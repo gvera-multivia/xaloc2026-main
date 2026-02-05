@@ -11,6 +11,7 @@ from core.errors import RestartRequiredError
 from sites.madrid.config import MadridConfig
 from sites.madrid.data_models import MadridTarget
 from sites.madrid.flows import ejecutar_navegacion_madrid, ejecutar_formulario_madrid, ejecutar_upload_madrid, ejecutar_firma_madrid
+from sites.madrid.flows.firma import MadridFirmaNonFatalError
 
 
 class MadridAutomation(BaseAutomation):
@@ -99,12 +100,16 @@ class MadridAutomation(BaseAutomation):
                 id_recurso = getattr(datos, 'idRecurso', 'unknown')
                 destino_verificacion = self.config.dir_screenshots / f"verificacion_{id_recurso}.pdf"
                 
-                self.page = await ejecutar_firma_madrid(
-                    self.page,
-                    self.config,
-                    destino_verificacion,
-                    datos.payload
-                )
+                try:
+                    self.page = await ejecutar_firma_madrid(
+                        self.page,
+                        self.config,
+                        destino_verificacion,
+                        datos.payload,
+                    )
+                except MadridFirmaNonFatalError as e:
+                    self.logger.warning("Firma/envío completado con incidencias no fatales: %s", e)
+                    self.mark_nonfatal_issue()
                 
                 self.logger.info("\n" + "=" * 80)
                 self.logger.info("FIRMA Y VERIFICACIÓN COMPLETADA")
