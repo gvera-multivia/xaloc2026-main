@@ -33,26 +33,26 @@ def load_config_from_json(json_path: Path) -> list[dict]:
 def init_brain_config(db_path: str, config_file: str = "organismo_config.json", *, upsert: bool = True):
     """Inicializa la configuración del brain en SQLite."""
     print("=" * 60)
-    print("🧠 INICIALIZADOR DE CONFIGURACIÓN DEL BRAIN")
+    print("BRAIN INITIALIZER")
     print("=" * 60)
     
     # Cargar configuraciones desde JSON
     config_path = Path(config_file)
-    print(f"\n📄 Cargando configuraciones desde: {config_path}")
+    print(f"\n> Loading config from: {config_path}")
     
     try:
         configs = load_config_from_json(config_path)
-        print(f"✓ Se encontraron {len(configs)} configuraciones")
+        print(f"OK Found {len(configs)} configs")
     except Exception as e:
-        print(f"✗ Error cargando configuraciones: {e}")
+        print(f"ERROR loading configs: {e}")
         return 1
     
     # Conectar a la base de datos
-    print(f"\n💾 Conectando a SQLite: {db_path}")
+    print(f"\n> Connecting to SQLite: {db_path}")
     db = SQLiteDatabase(db_path)
     
     # Insertar configuraciones
-    print("\n📥 Insertando configuraciones...")
+    print("\n> Inserting configs...")
     inserted = 0
     skipped = 0
     
@@ -61,46 +61,46 @@ def init_brain_config(db_path: str, config_file: str = "organismo_config.json", 
         try:
             if upsert:
                 config_id = db.upsert_organismo_config(config)
-                status = "✓ ACTIVO" if config.get("active") else "○ INACTIVO"
+                status = "ACTIVE" if config.get("active") else "INACTIVE"
                 print(f"  {status} {site_id:20} -> ID {config_id} (upsert)")
                 inserted += 1
             else:
                 # Intentar insertar
                 config_id = db.insert_organismo_config(config)
-                status = "✓ ACTIVO" if config.get("active") else "○ INACTIVO"
+                status = "ACTIVE" if config.get("active") else "INACTIVE"
                 print(f"  {status} {site_id:20} -> ID {config_id}")
                 inserted += 1
         except Exception as e:
             # Si ya existe, saltarlo
             if "UNIQUE constraint failed" in str(e):
-                print(f"  ⊙ EXISTE  {site_id:20} (saltado)")
+                print(f"  EXISTS  {site_id:20} (skipped)")
                 skipped += 1
             else:
-                print(f"  ✗ ERROR   {site_id:20} -> {e}")
+                print(f"  ERROR   {site_id:20} -> {e}")
     
     # Resumen
     print("\n" + "=" * 60)
-    print(f"📊 RESUMEN:")
+    print(f"SUMMARY:")
     print(f"   Insertadas: {inserted}")
     print(f"   Saltadas:   {skipped}")
     print(f"   Total:      {len(configs)}")
     print("=" * 60)
     
     # Verificar configuraciones activas
-    print("\n🔍 Verificando configuraciones activas...")
+    print("\n> Verifying active configs...")
     active_configs = db.get_active_organismo_configs()
     
     if active_configs:
-        print(f"\n✓ Configuraciones activas ({len(active_configs)}):")
+        print(f"\nActive configs ({len(active_configs)}):")
         for cfg in active_configs:
-            print(f"  • {cfg['site_id']}")
+            print(f"  - {cfg['site_id']}")
             print(f"    - Organismo: {cfg['query_organisme']}")
             print(f"    - TExp: {cfg['filtro_texp']}")
             print(f"    - Regex: {cfg['regex_expediente']}")
     else:
-        print("\n⚠️  No hay configuraciones activas")
+        print("\nWARN  No active configs")
     
-    print("\n✅ Inicialización completada\n")
+    print("\nDone\n")
     return 0
 
 
