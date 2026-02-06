@@ -818,6 +818,13 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
             return "." # Fallback explícito
         return cleaned
 
+    @staticmethod
+    def _convert_value(v: Any) -> Any:
+        from decimal import Decimal
+        if isinstance(v, Decimal):
+            return float(v)
+        return v
+
     def _build_mandatario_data(self, row: dict) -> dict:
         cif_raw = row.get("cif") or row.get("nifempresa")
         empresa_raw = row.get("Empresa") or row.get("Nombrefiscal")
@@ -969,8 +976,8 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
             
             # 3. Datos comunes
             payload = {
-                "idRecurso": r.get("idRecurso"),
-                "idExp": r.get("idExp"),
+                "idRecurso": self._convert_value(r.get("idRecurso")),
+                "idExp": self._convert_value(r.get("idExp")),
                 "user_email": "INFO@XVIA-SERVICIOSJURIDICOS.COM",
                 "denuncia_num": expediente,
                 "plate_number": self._normalize_plate(r.get("matricula")),

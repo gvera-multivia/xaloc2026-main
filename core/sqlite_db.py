@@ -4,9 +4,16 @@ Módulo de base de datos SQLite para la cola de trámites.
 import sqlite3
 import json
 import logging
+import decimal
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
+
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, decimal.Decimal):
+            return float(obj)
+        return super(DecimalEncoder, self).default(obj)
 
 class SQLiteDatabase:
     def __init__(self, db_path: str = "db/xaloc_database.db"):
@@ -162,7 +169,7 @@ class SQLiteDatabase:
 
             if result:
                 update_fields.append("result = ?")
-                params.append(json.dumps(result))
+                params.append(json.dumps(result, cls=DecimalEncoder))
 
             if error:
                 update_fields.append("error_log = ?")
@@ -200,7 +207,7 @@ class SQLiteDatabase:
             cursor.execute("""
                 INSERT INTO tramite_queue (site_id, protocol, resource_id, payload)
                 VALUES (?, ?, ?, ?)
-            """, (site_id, protocol, resource_id, json.dumps(payload)))
+            """, (site_id, protocol, resource_id, json.dumps(payload, cls=DecimalEncoder)))
             conn.commit()
             return cursor.lastrowid
         except sqlite3.IntegrityError:
@@ -446,7 +453,7 @@ class SQLiteDatabase:
                 INSERT INTO pending_authorization_queue 
                 (site_id, resource_id, payload, authorization_type, reason)
                 VALUES (?, ?, ?, ?, ?)
-            """, (site_id, resource_id, json.dumps(payload), authorization_type, reason))
+            """, (site_id, resource_id, json.dumps(payload, cls=DecimalEncoder), authorization_type, reason))
             conn.commit()
             self.logger.info(f"Tarea añadida a pending_authorization_queue: {cursor.lastrowid} (tipo: {authorization_type})")
             return cursor.lastrowid
