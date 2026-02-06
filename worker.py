@@ -236,7 +236,7 @@ async def process_task(
 
         # 6. EJECUTAR LA AUTOMATIZACIÓN
         logger.info(f"Iniciando automatización para {site_id}...")
-        if site_id == "madrid":
+        if site_id in ["madrid", "base_online"]:
             os.environ["XALOC_KEEP_BROWSER_OPEN"] = "1"
             os.environ["XALOC_KEEP_TAB_OPEN"] = "1"
 
@@ -246,13 +246,15 @@ async def process_task(
             logger.info(f"Tarea {task_id} completada. Screenshot: {screenshot_path}")
             
             # --- NUEVO: MARCAR COMO COMPLETADO EN XVIA ---
-            # Solo si no hubo incidencias "non-fatal" (ej: fallo al descargar justificante)
+            # Solo si no hubo incidencias "non-fatal" Y si no se ha pedido saltar este paso
             if not getattr(bot, "_exit_has_nonfatal_issues", False):
-                if payload.get("idRecurso"):
+                if payload.get("idRecurso") and not payload.get("skip_auto_complete"):
                     logger.info(f"Intentando marcar recurso {payload['idRecurso']} como completado en la web...")
                     success_mark = await mark_resource_complete(auth_session, payload)
                     if not success_mark:
                         logger.warning("No se pudo marcar como completado en la web, pero el trámite fue enviado.")
+                elif payload.get("skip_auto_complete"):
+                     logger.info(f"⏭️  Salto 'Marcar como Completado' solicitado por payload.")
             else:
                 logger.warning("Tarea finalizada con incidencias no fatales. NO se marcará como completado en la web.")
 

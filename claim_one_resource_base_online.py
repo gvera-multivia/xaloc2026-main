@@ -446,6 +446,7 @@ async def build_base_online_payload(recurso: dict) -> dict:
         **notif_data,
         **exp_parts,
         "source": "claim_one_resource_base_online",
+        "skip_auto_complete": True, # Solicitado por usuario: NO marcar como completado
         "claimed_at": datetime.now().isoformat(),
     }
 
