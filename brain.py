@@ -49,6 +49,7 @@ TICK_INTERVAL_SECONDS = int(os.getenv("BRAIN_TICK_SECONDS", 5))
 MAX_CLAIMS_PER_CYCLE = int(os.getenv("BRAIN_MAX_CLAIMS", 50))
 SQLITE_DB_PATH = os.getenv("SQLITE_DB_PATH", "db/xaloc_database.db")
 ENABLED_SITES_CSV = os.getenv("BRAIN_ENABLED_SITES", "").strip()
+MAX_IDLE_CYCLES = int(os.getenv("BRAIN_MAX_IDLE_CYCLES", 3))
 
 # Credenciales Xvia
 XVIA_EMAIL = os.getenv("XVIA_EMAIL")
@@ -146,6 +147,7 @@ class BrainOrchestrator:
         self.logger = logger
         self.session: Optional[aiohttp.ClientSession] = None
         self.authenticated_user: Optional[str] = None
+        self.idle_cycles_count = 0
 
         self.adapters: dict[str, SiteAdapter] = {
             "madrid": MadridAdapter(),
@@ -844,6 +846,19 @@ class BrainOrchestrator:
                     f"enqueued={stats['enqueued']}, "
                     f"errors={stats['errors']}"
                 )
+                
+                # Lógica de auto-parada: si no reclamamos nada nuevo, sumamos ciclo idle.
+                # (Claimed == 0 significa que o no había nada en SQL, o la cola local ya estaba llena)
+                if stats["claimed"] == 0:
+                    self.idle_cycles_count += 1
+                    self.logger.info(f"⏳ Ciclo sin reclamos nuevos ({self.idle_cycles_count}/{MAX_IDLE_CYCLES})")
+                else:
+                    self.idle_cycles_count = 0
+                
+                if self.idle_cycles_count >= MAX_IDLE_CYCLES:
+                    self.logger.info("🛑 No hay más recursos para reclamar tras múltiples intentos. Deteniendo Brain Orchestrator...")
+                    break
+                    
             except Exception as e:
                 self.logger.error(f"Error fatal en ciclo: {e}")
             
