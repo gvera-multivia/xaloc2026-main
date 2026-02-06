@@ -217,6 +217,8 @@ async def ejecutar_firma_madrid(
 
     prev_url = page.url or ""
     try:
+        # Madrid va lenta: esperar un poco antes de enviar el formulario
+        await page.wait_for_timeout(2000)
         async with page.expect_navigation(
             wait_until="domcontentloaded", timeout=config.firma_navigation_timeout
         ):

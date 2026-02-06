@@ -22,10 +22,13 @@ from sites.madrid.data_models import TipoExpediente, NaturalezaEscrito, TipoDocu
 
 logger = logging.getLogger(__name__)
 
-# Delays entre inputs (demo)
-DELAY_ENTRE_CAMPOS_MIN = 500  # 0.5s
-DELAY_ENTRE_CAMPOS_MAX = 500  # 0.5s
-DELAY_DESPUES_SELECT = 500    # 0.5s
+# Delays entre inputs
+# Madrid es lenta: meter "calma" extra tras cada interacción.
+DELAY_ENTRE_CAMPOS_MIN = 1500  # 1.5s (0.5s base + ~1s extra)
+DELAY_ENTRE_CAMPOS_MAX = 1500  # 1.5s
+DELAY_DESPUES_SELECT = 1500    # 1.5s
+
+ACTION_TIMEOUT_MS = 5000
 
 
 async def _delay_humano(page: Page, min_ms: int = DELAY_ENTRE_CAMPOS_MIN, max_ms: int = DELAY_ENTRE_CAMPOS_MAX) -> None:
@@ -54,7 +57,7 @@ async def _rellenar_input(page: Page, selector: str, valor: str, nombre_campo: s
                 logger.debug(f"  → Campo {nombre_campo or selector} deshabilitado, saltando")
                 return False
             
-            await elemento.first.fill(valor, timeout=1000)
+            await elemento.first.fill(valor, timeout=ACTION_TIMEOUT_MS)
             logger.debug(f"  → {nombre_campo or selector}: {valor}")
             
             # Pequeño delay después de rellenar
@@ -603,21 +606,21 @@ async def _seleccionar_opcion(page: Page, selector: str, valor: str, nombre_camp
             
             # Intentar primero por label
             try:
-                await elemento.first.select_option(label=valor, timeout=1000)
+                await elemento.first.select_option(label=valor, timeout=ACTION_TIMEOUT_MS)
                 logger.debug(f"  → {nombre_campo or selector}: {valor} (por label)")
                 await _delay_humano(page, DELAY_DESPUES_SELECT, DELAY_DESPUES_SELECT + 200)
                 return True
             except:
                 # Si falla, intentar por value
                 try:
-                    await elemento.first.select_option(value=valor, timeout=1000)
+                    await elemento.first.select_option(value=valor, timeout=ACTION_TIMEOUT_MS)
                     logger.debug(f"  → {nombre_campo or selector}: {valor} (por value)")
                     await _delay_humano(page, DELAY_DESPUES_SELECT, DELAY_DESPUES_SELECT + 200)
                     return True
                 except:
                     # Si ambos fallan, intentar por index si es numérico
                     if valor.isdigit():
-                        await elemento.first.select_option(index=int(valor), timeout=1000)
+                        await elemento.first.select_option(index=int(valor), timeout=ACTION_TIMEOUT_MS)
                         logger.debug(f"  → {nombre_campo or selector}: opción {valor} (por index)")
                         await _delay_humano(page, DELAY_DESPUES_SELECT, DELAY_DESPUES_SELECT + 200)
                         return True
@@ -643,11 +646,11 @@ async def _marcar_checkbox(page: Page, selector: str, marcar: bool, nombre_campo
             
             is_checked = await elemento.first.is_checked()
             if marcar and not is_checked:
-                await elemento.first.check(timeout=1000)
+                await elemento.first.check(timeout=ACTION_TIMEOUT_MS)
                 logger.debug(f"  → {nombre_campo or selector}: marcado")
                 await _delay_humano(page)
             elif not marcar and is_checked:
-                await elemento.first.uncheck(timeout=1000)
+                await elemento.first.uncheck(timeout=ACTION_TIMEOUT_MS)
                 logger.debug(f"  → {nombre_campo or selector}: desmarcado")
                 await _delay_humano(page)
             return True
@@ -665,7 +668,7 @@ async def _click_radio(page: Page, selector: str, nombre_campo: str = "") -> boo
     try:
         elemento = page.locator(selector)
         if await elemento.count() > 0:
-            await elemento.first.click(timeout=1000)
+            await elemento.first.click(timeout=ACTION_TIMEOUT_MS)
             logger.debug(f"  → Radio {nombre_campo or selector}: seleccionado")
             await _delay_humano(page)
             return True

@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError, Error as PlaywrightError
 
 from core.sqlite_db import SQLiteDatabase
+from core.errors import RestartRequiredError
 from core.site_registry import get_site, get_site_controller
 from core.validation import ValidationEngine, DiscrepancyReporter, DocumentDownloader
 from core.attachments import AttachmentDownloader, AttachmentInfo
@@ -241,7 +242,32 @@ async def process_task(
             os.environ["XALOC_KEEP_TAB_OPEN"] = "1"
 
         async with AutomationCls(config) as bot:
-            screenshot_path = await bot.ejecutar_flujo_completo(datos)
+            try:
+                screenshot_path = await bot.ejecutar_flujo_completo(datos)
+            except RestartRequiredError as e:
+                # Madrid (y otras sedes) pueden detectar "trámite en curso" y fallar al inicio.
+                # En ese caso: cerrar el navegador del todo, reabrir, y saltar a la siguiente tarea.
+                logger.warning(f"↻ Reinicio requerido (tarea {task_label}): {e}")
+                screenshot_path = None
+                try:
+                    screenshot_path = await bot.capture_error_screenshot("restart_required.png")
+                except Exception:
+                    pass
+
+                try:
+                    await bot.restart_browser()
+                    logger.info("Navegador reiniciado correctamente; continuando con la siguiente tarea.")
+                except Exception as restart_exc:
+                    logger.error(f"Error reiniciando navegador tras RestartRequiredError: {restart_exc}")
+
+                if db is not None and task_id is not None:
+                    db.update_task_status(
+                        task_id,
+                        "failed",
+                        error=f"RestartRequiredError: {e}",
+                        screenshot=str(screenshot_path) if screenshot_path else None,
+                    )
+                return
 
             logger.info(f"Tarea {task_id} completada. Screenshot: {screenshot_path}")
             
@@ -379,6 +405,8 @@ async def worker_loop():
                     task_id, site_id, protocol, payload = task
                     # Procesamos la tarea pasando la sesión autenticada
                     await process_task(db, task_id, site_id, protocol, payload, auth_session)
+                    # Pausa fija entre jobs para no encadenar acciones en la sede/web
+                    await asyncio.sleep(10)
                 else:
                     # Sin tareas: esperar 10 segundos antes de volver a consultar la DB
                     await asyncio.sleep(10)

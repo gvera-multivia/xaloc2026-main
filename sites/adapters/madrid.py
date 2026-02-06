@@ -44,6 +44,8 @@ SELECT
 
     -- Datos detallados del cliente para NOTIFICACIÓN
     c.nif AS cliente_nif,
+    c.nifempresa AS cliente_nif_empresa,
+    c.tipodecliente AS cliente_tipo,
     c.Nombre AS cliente_nombre,
     c.Apellido1 AS cliente_apellido1,
     c.Apellido2 AS cliente_apellido2,
@@ -437,11 +439,34 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         payloads: list[dict] = []
         for r in candidates:
             expediente_raw = self._clean_str(r.get("Expedient")).upper()
-            cif_empresa = self._clean_str(r.get("cif"))
-            nif = cif_empresa or self._clean_str(r.get("cliente_nif"))
+            cif_recurso = self._clean_str(r.get("cif"))
+            nif_individual = self._clean_str(r.get("cliente_nif"))
+            nif_empresa = self._clean_str(r.get("cliente_nif_empresa"))
+            tipo_cliente = int(r.get("cliente_tipo") or 0)
+
+            # Lógica de selección de NIF
+            if tipo_cliente == 2:
+                # Es empresa: Prioridad 1: nifempresa, Prioridad 2: rs.cif
+                nif = nif_empresa or cif_recurso
+                if not nif:
+                    logger.warning(
+                        "[MADRID] Cliente %s (%s) marcado como empresa (tipo 2) pero sin nifempresa ni cif. Saltando.",
+                        r.get("numclient"),
+                        r.get("SujetoRecurso"),
+                    )
+                    continue
+            else:
+                # Es física: Usar cliente_nif
+                nif = nif_individual
+
+            if not nif:
+                logger.warning("[MADRID] Recurso %s sin NIF válido. Saltando.", r.get("idRecurso"))
+                continue
+
+            nif = nif.strip().upper()
             fase_raw = self._clean_str(r.get("FaseProcedimiento"))
 
-            exp_parts = self._parse_expediente(expediente_raw, fase_raw=fase_raw, es_empresa=bool(cif_empresa))
+            exp_parts = self._parse_expediente(expediente_raw, fase_raw=fase_raw, es_empresa=(tipo_cliente == 2))
             expediente_para_textos = exp_parts.get("expediente_completo", expediente_raw)
 
             expone, solicita, naturaleza = self._build_expone_solicita(
