@@ -72,10 +72,13 @@ class SQLiteDatabase:
         if "resource_id" not in cols:
             cursor.execute("ALTER TABLE tramite_queue ADD COLUMN resource_id INTEGER")
 
+        # Reemplazar Ã­ndice antiguo (sin partial) por uno que dedupe solo tareas activas.
+        cursor.execute("DROP INDEX IF EXISTS ux_tramite_queue_site_resource")
         cursor.execute(
             """
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_tramite_queue_site_resource
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_tramite_queue_site_resource_active
             ON tramite_queue(site_id, resource_id)
+            WHERE resource_id IS NOT NULL AND status IN ('pending', 'processing')
             """
         )
 
@@ -90,10 +93,12 @@ class SQLiteDatabase:
                 cursor.execute("ALTER TABLE pending_authorization_queue ADD COLUMN resource_id INTEGER")
 
         if has_pending:
+            cursor.execute("DROP INDEX IF EXISTS ux_pending_authorization_site_resource")
             cursor.execute(
                 """
-                CREATE UNIQUE INDEX IF NOT EXISTS ux_pending_authorization_site_resource
+                CREATE UNIQUE INDEX IF NOT EXISTS ux_pending_authorization_site_resource_pending
                 ON pending_authorization_queue(site_id, resource_id)
+                WHERE resource_id IS NOT NULL AND status = 'pending'
                 """
             )
 
@@ -203,7 +208,15 @@ class SQLiteDatabase:
                 raise
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT id FROM tramite_queue WHERE site_id = ? AND resource_id = ? ORDER BY id DESC LIMIT 1",
+                """
+                SELECT id
+                FROM tramite_queue
+                WHERE site_id = ?
+                  AND resource_id = ?
+                  AND status IN ('pending', 'processing')
+                ORDER BY id DESC
+                LIMIT 1
+                """,
                 (site_id, resource_id),
             )
             row = cursor.fetchone()
@@ -442,7 +455,15 @@ class SQLiteDatabase:
                 raise
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT id FROM pending_authorization_queue WHERE site_id = ? AND resource_id = ? ORDER BY id DESC LIMIT 1",
+                """
+                SELECT id
+                FROM pending_authorization_queue
+                WHERE site_id = ?
+                  AND resource_id = ?
+                  AND status = 'pending'
+                ORDER BY id DESC
+                LIMIT 1
+                """,
                 (site_id, resource_id),
             )
             row = cursor.fetchone()
@@ -528,14 +549,43 @@ class SQLiteDatabase:
                 self.logger.warning(f"Tarea pendiente {pending_id} no encontrada o ya procesada")
                 conn.rollback()
                 return None
-            
+             
             # Insertar en tramite_queue
-            cursor.execute("""
-                INSERT INTO tramite_queue (site_id, resource_id, payload)
-                VALUES (?, ?, ?)
-            """, (row['site_id'], row['resource_id'], row['payload']))
-            new_task_id = cursor.lastrowid
-            
+            site_id = row["site_id"]
+            resource_id = row["resource_id"]
+            try:
+                cursor.execute(
+                    """
+                    INSERT INTO tramite_queue (site_id, resource_id, payload)
+                    VALUES (?, ?, ?)
+                    """,
+                    (site_id, resource_id, row["payload"]),
+                )
+                new_task_id = cursor.lastrowid
+            except sqlite3.IntegrityError:
+                cursor.execute(
+                    """
+                    SELECT id
+                    FROM tramite_queue
+                    WHERE site_id = ?
+                      AND resource_id = ?
+                      AND status IN ('pending', 'processing')
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (site_id, resource_id),
+                )
+                existing = cursor.fetchone()
+                if not existing:
+                    raise
+                new_task_id = int(existing[0])
+                self.logger.info(
+                    "Duplicado evitado al mover de pending_authorization_queue a tramite_queue: site_id=%s resource_id=%s (task_id=%s)",
+                    site_id,
+                    resource_id,
+                    new_task_id,
+                )
+             
             # Actualizar estado en pending_authorization_queue
             cursor.execute("""
                 UPDATE pending_authorization_queue

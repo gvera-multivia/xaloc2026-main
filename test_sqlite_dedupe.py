@@ -25,6 +25,27 @@ def test_tramite_queue_dedupe_by_site_resource() -> None:
     db_path.unlink(missing_ok=True)
 
 
+def test_tramite_queue_allows_reenqueue_after_failed() -> None:
+    db_path = _make_db_path()
+    db = SQLiteDatabase(str(db_path))
+
+    payload = {"idRecurso": 321, "expediente": "X"}
+    task1 = db.insert_task("madrid", None, payload)
+
+    conn = db.get_connection()
+    try:
+        conn.execute("UPDATE tramite_queue SET status = 'failed' WHERE id = ?", (task1,))
+        conn.commit()
+    finally:
+        conn.close()
+
+    task2 = db.insert_task("madrid", None, payload)
+
+    assert task2 != task1
+    assert task2 > task1
+    db_path.unlink(missing_ok=True)
+
+
 def test_pending_authorization_dedupe_by_site_resource() -> None:
     db_path = _make_db_path()
     db = SQLiteDatabase(str(db_path))

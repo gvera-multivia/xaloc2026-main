@@ -629,6 +629,14 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 "notif_telefono": "932531411",
 
                 **exp_parts,
+                # Alias directos para el controller (evita depender de map_data)
+                "exp_tipo": exp_parts.get("expediente_tipo"),
+                "exp_nnn": exp_parts.get("expediente_nnn"),
+                "exp_eeeeeeeee": exp_parts.get("expediente_eeeeeeeee"),
+                "exp_d": exp_parts.get("expediente_d"),
+                "exp_lll": exp_parts.get("expediente_lll"),
+                "exp_aaaa": exp_parts.get("expediente_aaaa"),
+                "exp_exp_num": exp_parts.get("expediente_exp_num"),
                 "naturaleza": naturaleza,
                 "expone": expone,
                 "solicita": solicita,
@@ -1202,7 +1210,11 @@ class BrainOrchestrator:
         return None
 
     async def run_tick(self) -> dict:
-        return await self.run_tick()
+        """
+        Ejecuta un tick del scheduler:
+        - Determina el site "locked" (no mezclar organismos).
+        - Repone la cola hasta `target_queue_depth` si hay candidatos.
+        """
 
         stats = {"claimed": 0, "enqueued": 0, "errors": 0}
 
@@ -1282,6 +1294,11 @@ class BrainOrchestrator:
         Returns:
             Dict con estadísticas: claimed, enqueued, errors
         """
+        legacy = (os.getenv("BRAIN_LEGACY_MODE") or "").strip().lower() in {"1", "true", "yes", "on"}
+        if not legacy:
+            return await self.run_tick()
+        self.logger.warning("BRAIN_LEGACY_MODE activo: usando run_cycle legacy (puede mezclar organismos).")
+
         stats = {"claimed": 0, "enqueued": 0, "errors": 0}
         
         configs = self.get_active_configs()

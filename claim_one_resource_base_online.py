@@ -134,8 +134,8 @@ def valida_expediente_base(expediente: str) -> bool:
     if re.match(r"^\d{5}-\d{4}/\d{4,5}-GIM$", exp):
         return True
 
-    # EXE / ECC: 1-2025/27474-EXE o 1-2025-140620-EXE (4-6 dígitos, / o -)
-    if re.match(r"^\d-\d{4}[/\-]\d{4,6}-(EXE|ECC)$", exp):
+    # EXE: 1-2025/27474-EXE o 1-2025-140620-EXE (4-6 dígitos, / o -)
+    if re.match(r"^\d-\d{4}[/\-]\d{4,6}-EXE$", exp):
         return True
 
     # EXCLUIR explícitamente Tipo B
@@ -146,8 +146,14 @@ def valida_expediente_base(expediente: str) -> bool:
     return False
 
 
-def determina_protocolo(fase: str) -> str:
-    """Determina si es P1, P2 o P3 según la fase del procedimiento."""
+def determina_protocolo(fase: str, expediente: str = "") -> str:
+    """ Determina si es P1, P2 o P3 según la fase y el número de expediente. """
+    exp = str(expediente).upper().strip()
+    
+    # Precedencia: Si es -EXE siempre es P3
+    if exp.endswith("-EXE"):
+        return "P3"
+        
     f = str(fase).upper()
     if any(tag in f for tag in ["IDENTIFICACION", "IDENTIFICACIÓ"]):
         return "P1"
@@ -175,8 +181,8 @@ def parse_expediente_base(expediente: str) -> dict:
             "num_butlleti": "",
         }
 
-    # EXE/ECC: 1-2025/27474-EXE o 1-2025-140620-EXE
-    m_exe = re.match(r"^(?P<id_ens>\d)-(?P<any>\d{4})[/\-](?P<num>\d{4,6})-(EXE|ECC)$", exp)
+    # EXE: 1-2025/27474-EXE o 1-2025-140620-EXE
+    m_exe = re.match(r"^(?P<id_ens>\d)-(?P<any>\d{4})[/\-](?P<num>\d{4,6})-EXE$", exp)
     if m_exe:
         return {
             "expediente_id_ens": m_exe.group("id_ens"),
@@ -369,8 +375,8 @@ def fetch_one_resource_base(conn_str: str, authenticated_user: str = None) -> di
 async def build_base_online_payload(recurso: dict) -> dict:
     """Construye el payload para BASE Online según el protocolo."""
     fase_raw = _clean_str(recurso.get("FaseProcedimiento"))
-    protocolo = determina_protocolo(fase_raw)
     expediente_raw = _clean_str(recurso.get("Expedient"))
+    protocolo = determina_protocolo(fase_raw, expediente_raw)
 
     # Datos comunes
     exp_parts = parse_expediente_base(expediente_raw)
