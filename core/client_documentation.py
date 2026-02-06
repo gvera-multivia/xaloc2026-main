@@ -97,6 +97,34 @@ def client_identity_from_db(numclient: int, conn_str: str, sujeto_recurso: str |
 
 # --- Heurística de Selección y Puntuación ---
 
+def _detect_file_type(path: Path) -> str:
+    """
+    Detecta el tipo real de un archivo leyendo sus magic numbers.
+    
+    Returns:
+        "pdf", "jpg", "jpeg", "png", or "unknown"
+    """
+    try:
+        with open(path, 'rb') as f:
+            header = f.read(16)  # Leer primeros 16 bytes
+            
+            # PDF: %PDF (25 50 44 46)
+            if header.startswith(b'%PDF'):
+                return "pdf"
+            
+            # JPEG: FF D8 FF
+            if header.startswith(b'\xff\xd8\xff'):
+                return "jpeg"
+            
+            # PNG: 89 50 4E 47 0D 0A 1A 0A
+            if header.startswith(b'\x89PNG\r\n\x1a\n'):
+                return "png"
+            
+            return "unknown"
+    except Exception as e:
+        logger.debug(f"Error detectando tipo de archivo {path.name}: {e}")
+        return "unknown"
+
 def _calculate_file_score(path: Path, categories_found: list[str]) -> int:
     """Calcula el score combinando Calidad (CF/SF) y Ubicación."""
     score = 0
@@ -109,8 +137,17 @@ def _calculate_file_score(path: Path, categories_found: list[str]) -> int:
         score += 50
     elif ext in [".jpg", ".jpeg", ".png"]: 
         score += 20
-    else: 
-        return -1000 # Formatos no deseados
+    else:
+        # Si no tiene extensión conocida, verificar el tipo real del archivo
+        detected_type = _detect_file_type(path)
+        if detected_type == "pdf":
+            score += 50  # Es un PDF sin extensión
+            logger.debug(f"Archivo sin extensión detectado como PDF: {path.name}")
+        elif detected_type in ["jpg", "jpeg", "png"]:
+            score += 20  # Es una imagen sin extensión
+            logger.debug(f"Archivo sin extensión detectado como {detected_type}: {path.name}")
+        else:
+            return -1000  # Formato no reconocido
 
     # 1. EL FACTOR DETERMINANTE: FIRMA (CF vs SF)
     # Buscamos patrones que indiquen si está firmado o no

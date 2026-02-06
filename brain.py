@@ -181,6 +181,7 @@ SELECT
     rs.FaseProcedimiento,
     rs.UsuarioAsignado,
     rs.notas,
+    rs.matricula AS rs_matricula,
 
     e.matricula,
     e.Idpublic AS exp_idpublic,
@@ -474,21 +475,39 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
 
     @staticmethod
     def _resolve_plate_number(recurso: dict) -> tuple[str, str]:
-        plate = MadridAdapter._clean_str(recurso.get("matricula"))
-        if plate:
-            return re.sub(r"\s+", "", plate).upper(), "expedientes.matricula"
+        # 1. Prioridad: Tabla recursosexp (rs.matricula)
+        plate_rs = MadridAdapter._clean_str(recurso.get("rs_matricula"))
+        if plate_rs:
+            return re.sub(r"\s+", "", plate_rs).upper(), "Recursos.RecursosExp.matricula"
 
-        pub = MadridAdapter._clean_str(recurso.get("pub_publicacion"))
-        m = re.search(r"\b([0-9]{4}[A-Z]{3}|[A-Z]{1,2}[0-9]{4}[A-Z]{1,2})\b", pub.replace(" ", "").upper())
-        if m:
-            return m.group(1), "pubExp.publicación"
+        # 2. Prioridad: Tabla expedientes (e.matricula)
+        plate_exp = MadridAdapter._clean_str(recurso.get("matricula"))
+        if plate_exp:
+            return re.sub(r"\s+", "", plate_exp).upper(), "expedientes.matricula"
 
-        notas = MadridAdapter._clean_str(recurso.get("notas"))
-        m2 = re.search(
-            r"\b([0-9]{4}[A-Z]{3}|[A-Z]{1,2}[0-9]{4}[A-Z]{1,2})\b", notas.replace(" ", "").upper()
-        )
-        if m2:
-            return m2.group(1), "rs.notas"
+        # 3. Regex en texto (Publicación o Notas)
+        # Regex mejorada que permite espacios y guiones opcionales pero respeta word boundaries
+        regex = r"\b([0-9]{4}[\s-]*[A-Z]{3}|[A-Z]{1,2}[\s-]*[0-9]{4}[\s-]*[A-Z]{1,2})\b"
+
+        def _try_extract(text: str, source_name: str) -> tuple[str, str] | None:
+            if not text:
+                return None
+            m = re.search(regex, text.upper())
+            if m:
+                # Limpiar la matrícula encontrada de espacios y guiones
+                clean_plate = m.group(1).replace(" ", "").replace("-", "")
+                return clean_plate, source_name
+            return None
+
+        # 3.a Publicación
+        res_pub = _try_extract(MadridAdapter._clean_str(recurso.get("pub_publicacion")), "pubExp.publicación")
+        if res_pub:
+            return res_pub
+
+        # 3.b Notas
+        res_notas = _try_extract(MadridAdapter._clean_str(recurso.get("notas")), "rs.notas")
+        if res_notas:
+            return res_notas
 
         return "", ""
 
