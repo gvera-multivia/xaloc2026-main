@@ -93,19 +93,28 @@ class BaseAutomation:
 
             async with BaseAutomation._shared_lock:
                 if BaseAutomation._shared_context and BaseAutomation._shared_fingerprint == fingerprint:
-                    self.playwright = BaseAutomation._shared_playwright
-                    self.context = BaseAutomation._shared_context
+                	try:
+                		self.playwright = BaseAutomation._shared_playwright
+                		self.context = BaseAutomation._shared_context
 
-                    if BaseAutomation._shared_home_page is None:
-                        if self.context.pages:
-                            BaseAutomation._shared_home_page = self.context.pages[0]
-                        else:
-                            BaseAutomation._shared_home_page = await self.context.new_page()
+                		if BaseAutomation._shared_home_page is None:
+                			if self.context.pages:
+                				BaseAutomation._shared_home_page = self.context.pages[0]
+                			else:
+                				BaseAutomation._shared_home_page = await self.context.new_page()
+                		elif BaseAutomation._shared_home_page.is_closed():
+                			BaseAutomation._shared_home_page = await self.context.new_page()
 
-                    self.page = await self.context.new_page()
-                    self.page.set_default_timeout(self.config.timeouts.general)
-                    self.logger.info("Navegador reutilizado (XALOC_KEEP_BROWSER_OPEN=1)")
-                    return
+                		self.page = await self.context.new_page()
+                		self.page.set_default_timeout(self.config.timeouts.general)
+                		self.logger.info("Navegador reutilizado (XALOC_KEEP_BROWSER_OPEN=1)")
+                		return
+                	except Exception as e:
+                		self.logger.warning(f"Fallo al reutilizar contexto compartido ({e}). Limpiando estado...")
+                		BaseAutomation._shared_context = None
+                		BaseAutomation._shared_playwright = None
+                		BaseAutomation._shared_home_page = None
+                		BaseAutomation._shared_fingerprint = None
 
                 if BaseAutomation._shared_context and BaseAutomation._shared_fingerprint != fingerprint:
                     self.logger.warning(
@@ -213,16 +222,26 @@ class BaseAutomation:
             return
 
         if self.context:
-            try:
-                await self.context.close()
-            finally:
-                self.context = None
-                self.page = None
+        	try:
+        		await self.context.close()
+        	except Exception:
+        		pass
+        	finally:
+        		self.context = None
+        		self.page = None
+        		# Si era el contexto compartido, limpiar punteros de clase
+        		BaseAutomation._shared_context = None
+        		BaseAutomation._shared_home_page = None
+
         if self.playwright:
-            try:
-                await self.playwright.stop()
-            finally:
-                self.playwright = None
+        	try:
+        		await self.playwright.stop()
+        	except Exception:
+        		pass
+        	finally:
+        		self.playwright = None
+        		BaseAutomation._shared_playwright = None
+        		BaseAutomation._shared_fingerprint = None
         self.logger.info("Navegador cerrado")
 
     async def restart_browser(self) -> None:
