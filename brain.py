@@ -418,11 +418,51 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 .replace("{sujeto_recurso}", sujeto)
             )
 
-        blob = " ".join([MadridAdapter._normalize_text(selected_key), MadridAdapter._normalize_text(fase_raw)])
+        selected_key_norm = MadridAdapter._normalize_text(selected_key)
+        blob = " ".join(
+            [
+                selected_key_norm,
+                fase_norm,
+                MadridAdapter._normalize_text(asunto),
+                MadridAdapter._normalize_text(expone),
+                MadridAdapter._normalize_text(solicita),
+            ]
+        )
+
+        # Naturaleza del escrito:
+        # - "A": Alegación
+        # - "R": Recurso (incluye Resolución sancionadora, Apremio, Embargo, etc.)
+        # - "I": Identificación del conductor
+        #
+        # Regla: si hay match en config_motivos, preferimos mapping por key para evitar falsos positivos
+        # (p.ej. "propuesta de resolucion" puede contener la palabra "recurso" en el texto).
         naturaleza = "A"
-        if "identificacion" in blob:
+        if selected_key_norm in {"identificacion"} or "identificacion" in blob:
             naturaleza = "I"
-        elif any(tag in blob for tag in ["recurso", "reposicion", "reclamacion", "revision", "apremio", "embargo"]):
+        elif selected_key_norm in {"denuncia", "propuesta de resolucion", "subsanacion"}:
+            naturaleza = "A"
+        elif selected_key_norm in {
+            "sancion",
+            "apremio",
+            "embargo",
+            "reclamaciones",
+            "requerimiento embargo",
+            "extraordinario de revision",
+        }:
+            naturaleza = "R"
+        elif any(
+            tag in blob
+            for tag in [
+                "recurso",
+                "reposicion",
+                "reclamacion",
+                "revision",
+                "apremio",
+                "embargo",
+                "resolucion sancionadora",
+                "sancion",
+            ]
+        ):
             naturaleza = "R"
 
         if not (asunto and expone and solicita):
