@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS tramite_queue (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     site_id TEXT NOT NULL,          -- 'madrid', 'base_online', 'xaloc_girona'
     protocol TEXT,                  -- 'P1', 'P2', 'P3'
+    resource_id INTEGER,            -- idRecurso remoto (para dedupe)
     payload JSON NOT NULL,          -- Datos del formulario en JSON
     status TEXT DEFAULT 'pending',  -- 'pending', 'processing', 'completed', 'failed'
     attempts INTEGER DEFAULT 0,
@@ -35,6 +36,7 @@ CREATE TABLE IF NOT EXISTS organismo_config (
 CREATE TABLE IF NOT EXISTS pending_authorization_queue (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     site_id TEXT NOT NULL,              -- 'xaloc_girona', 'madrid', etc.
+    resource_id INTEGER,                -- idRecurso remoto (para dedupe)
     payload JSON NOT NULL,              -- Datos del trámite en JSON
     authorization_type TEXT NOT NULL,   -- 'gesdoc', 'manual', etc.
     reason TEXT,                        -- Motivo por el que requiere autorización

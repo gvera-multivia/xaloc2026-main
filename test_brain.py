@@ -65,7 +65,7 @@ SELECT
     rs.SujetoRecurso,
     rs.FaseProcedimiento
 FROM Recursos.RecursosExp rs
-WHERE rs.Organisme LIKE ?
+WHERE {organisme_like_clause}
   AND rs.TExp IN ({texp_list})
   AND rs.Estado = 0
   AND rs.Expedient IS NOT NULL
@@ -139,7 +139,20 @@ def test_fetch_recursos(config: dict, conn_str: str, max_recursos: int = 5) -> l
     texp_values = [int(x.strip()) for x in config["filtro_texp"].split(",")]
     texp_placeholders = ",".join(["?"] * len(texp_values))
     
-    query = SQL_FETCH_RECURSOS.format(texp_list=texp_placeholders)
+    # Manejar múltiples patrones LIKE (separados por espacios)
+    query_organisme_raw = config["query_organisme"]
+    patterns = [p.strip() for p in query_organisme_raw.split(" ") if p.strip()]
+    
+    if not patterns:
+        patterns = ["%"]
+    
+    like_clauses = ["rs.Organisme LIKE ?"] * len(patterns)
+    organisme_like_clause = " AND ".join(like_clauses)
+    
+    query = SQL_FETCH_RECURSOS.format(
+        organisme_like_clause=organisme_like_clause,
+        texp_list=texp_placeholders
+    )
     
     try:
         logger.info("🔌 Conectando a SQL Server...")
@@ -147,7 +160,7 @@ def test_fetch_recursos(config: dict, conn_str: str, max_recursos: int = 5) -> l
         cursor = conn.cursor()
         
         logger.info("🔍 Ejecutando consulta...")
-        cursor.execute(query, [config["query_organisme"]] + texp_values)
+        cursor.execute(query, patterns + texp_values)
         
         columns = [column[0] for column in cursor.description]
         results = []

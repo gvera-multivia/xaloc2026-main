@@ -82,7 +82,7 @@ FROM Recursos.RecursosExp rs
 INNER JOIN clientes c ON rs.numclient = c.numerocliente
 INNER JOIN expedientes e ON rs.idExp = e.idexpediente
 LEFT JOIN attachments_resource_documents att ON rs.automatic_id = att.automatic_id
-WHERE rs.Organisme LIKE ?
+WHERE {organisme_like_clause}
   AND rs.TExp IN ({texp_list})
   AND rs.Estado IN (0, 1)
   AND rs.Expedient IS NOT NULL
@@ -140,13 +140,26 @@ def fetch_one_resource(config: dict, conn_str: str, authenticated_user: str = No
     
     texp_values = [int(x.strip()) for x in config["filtro_texp"].split(",")]
     texp_placeholders = ",".join(["?"] * len(texp_values))
+
+    # Manejar múltiples patrones LIKE (separados por espacios)
+    query_organisme_raw = config["query_organisme"]
+    patterns = [p.strip() for p in query_organisme_raw.split(" ") if p.strip()]
     
-    query = SQL_FETCH_RECURSOS.format(texp_list=texp_placeholders)
+    if not patterns:
+        patterns = ["%"]
+    
+    like_clauses = ["rs.Organisme LIKE ?"] * len(patterns)
+    organisme_like_clause = " AND ".join(like_clauses)
+    
+    query = SQL_FETCH_RECURSOS.format(
+        organisme_like_clause=organisme_like_clause,
+        texp_list=texp_placeholders
+    )
     
     try:
         conn = pyodbc.connect(conn_str)
         cursor = conn.cursor()
-        cursor.execute(query, [config["query_organisme"]] + texp_values)
+        cursor.execute(query, patterns + texp_values)
         
         columns = [column[0] for column in cursor.description]
         regex = re.compile(config["regex_expediente"])

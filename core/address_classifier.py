@@ -110,6 +110,89 @@ async def classify_address_with_ai(
         # Si falla la IA, usamos el fallback local
         return classify_address_fallback(direccion_raw)
 
+async def classify_addresses_batch_with_ai(
+    items: list[dict],
+    *,
+    api_key: Optional[str] = None,
+) -> dict[str, dict]:
+    """
+    Clasifica un lote de direcciones en una sola llamada al LLM.
+
+    Returns:
+        Mapping { "<idRecurso>": {tipo_via, calle, numero, escalera, planta, puerta} }.
+    """
+    client = _get_groq_client(api_key)
+
+    compact_items: list[dict] = []
+    for it in items or []:
+        rid = it.get("idRecurso")
+        if rid is None:
+            continue
+        compact_items.append(
+            {
+                "idRecurso": str(rid),
+                "direccion_raw": (it.get("direccion_raw") or "").strip(),
+                "poblacion": (it.get("poblacion") or "").strip(),
+                "numero": (it.get("numero") or "").strip(),
+                "piso": (it.get("piso") or "").strip(),
+                "puerta": (it.get("puerta") or "").strip(),
+            }
+        )
+
+    if not compact_items:
+        return {}
+
+    system = (
+        _build_prompt_sistema().strip()
+        + "\n\n"
+        + (
+            "OBJETIVO EXTRA (BATCH):\n"
+            "- Recibirás un JSON con una lista 'items'.\n"
+            "- Devuelve EXCLUSIVAMENTE un objeto JSON cuyo mapping sea:\n"
+            "  { \"<idRecurso>\": { via, calle, numero, escalera, planta, puerta } }\n"
+            "- No incluyas claves adicionales fuera de ese mapping.\n"
+            "- Si una dirección no se puede parsear, usa via='CALLE' y el resto vacío."
+        )
+    )
+
+    user = json.dumps({"items": compact_items}, ensure_ascii=False)
+
+    chat_completion = client.chat.completions.create(
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        model=MODELO,
+        response_format={"type": "json_object"},
+        temperature=0.1,
+    )
+
+    raw = chat_completion.choices[0].message.content
+    respuesta = json.loads(raw)
+
+    if not isinstance(respuesta, dict):
+        raise ValueError("Respuesta batch no es un objeto JSON.")
+
+    out: dict[str, dict] = {}
+    for rid, val in respuesta.items():
+        if not isinstance(val, dict):
+            continue
+
+        via_ia = (val.get("via") or "").strip().upper()
+        if via_ia not in VIAS_VALIDAS:
+            via_ia = "CALLE"
+
+        out[str(rid)] = {
+            "tipo_via": via_ia,
+            "calle": (val.get("calle") or "").strip().upper(),
+            "numero": (val.get("numero") or "").strip().upper(),
+            "escalera": (val.get("escalera") or "").strip().upper(),
+            "planta": (val.get("planta") or "").strip().upper(),
+            "puerta": (val.get("puerta") or "").strip().upper(),
+        }
+
+    return out
+
 def classify_address_fallback(direccion_raw: str) -> dict:
     """Mapeo manual extendido con las vías del formulario."""
     if not direccion_raw:

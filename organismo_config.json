@@ -12,12 +12,12 @@
         },
         {
             "site_id": "madrid",
-            "query_organisme": "%MADRID%",
+            "query_organisme": "%GESTION% %MULTAS% %MADRID%",
             "filtro_texp": "2,3",
-            "regex_expediente": "^.*$",
+            "regex_expediente": "^(\\d{3}/\\d{9}\\.\\d|\\d{9}\\.\\d)$",
             "login_url": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login",
             "recursos_url": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos",
-            "active": false,
+            "active": true,
             "notes": "Pendiente de definir formato de expediente específico"
         }
     ]

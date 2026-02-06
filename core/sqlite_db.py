@@ -34,6 +34,7 @@ class SQLiteDatabase:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     site_id TEXT NOT NULL,
                     protocol TEXT,
+                    resource_id INTEGER,
                     payload JSON NOT NULL,
                     status TEXT DEFAULT 'pending',
                     attempts INTEGER DEFAULT 0,
@@ -46,6 +47,7 @@ class SQLiteDatabase:
                     attachments_metadata JSON
                 );
                 """)
+            self._apply_migrations(conn)
             conn.commit()
         except Exception as e:
             self.logger.error(f"Error inicializando DB: {e}")
@@ -55,6 +57,45 @@ class SQLiteDatabase:
     def get_connection(self) -> sqlite3.Connection:
         """Devuelve una conexión a la base de datos."""
         return sqlite3.connect(self.db_path)
+
+    def _apply_migrations(self, conn: sqlite3.Connection) -> None:
+        """
+        Aplica migraciones idempotentes sobre una DB existente.
+
+        Nota: `schema.sql` solo crea tablas si no existen; si cambian columnas,
+        hay que añadirlas vía ALTER.
+        """
+        cursor = conn.cursor()
+
+        cursor.execute("PRAGMA table_info(tramite_queue)")
+        cols = {row[1] for row in cursor.fetchall()}  # (cid, name, type, notnull, dflt_value, pk)
+        if "resource_id" not in cols:
+            cursor.execute("ALTER TABLE tramite_queue ADD COLUMN resource_id INTEGER")
+
+        cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_tramite_queue_site_resource
+            ON tramite_queue(site_id, resource_id)
+            """
+        )
+
+        cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='pending_authorization_queue'"
+        )
+        has_pending = cursor.fetchone() is not None
+        if has_pending:
+            cursor.execute("PRAGMA table_info(pending_authorization_queue)")
+            pending_cols = {row[1] for row in cursor.fetchall()}
+            if "resource_id" not in pending_cols:
+                cursor.execute("ALTER TABLE pending_authorization_queue ADD COLUMN resource_id INTEGER")
+
+        if has_pending:
+            cursor.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS ux_pending_authorization_site_resource
+                ON pending_authorization_queue(site_id, resource_id)
+                """
+            )
 
     def get_pending_task(self) -> Optional[Tuple[int, str, str, Dict[str, Any]]]:
         """
@@ -141,20 +182,92 @@ class SQLiteDatabase:
         """
         Inserta una nueva tarea en la cola.
         """
+        resource_id = payload.get("idRecurso")
+        try:
+            if resource_id is not None:
+                resource_id = int(resource_id)
+        except Exception:
+            resource_id = None
+
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO tramite_queue (site_id, protocol, payload)
-                VALUES (?, ?, ?)
-            """, (site_id, protocol, json.dumps(payload)))
+                INSERT INTO tramite_queue (site_id, protocol, resource_id, payload)
+                VALUES (?, ?, ?, ?)
+            """, (site_id, protocol, resource_id, json.dumps(payload)))
             conn.commit()
             return cursor.lastrowid
+        except sqlite3.IntegrityError:
+            if resource_id is None:
+                raise
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id FROM tramite_queue WHERE site_id = ? AND resource_id = ? ORDER BY id DESC LIMIT 1",
+                (site_id, resource_id),
+            )
+            row = cursor.fetchone()
+            existing_id = int(row[0]) if row else -1
+            self.logger.info(
+                "Duplicado evitado en tramite_queue: site_id=%s resource_id=%s (task_id=%s)",
+                site_id,
+                resource_id,
+                existing_id,
+            )
+            return existing_id
         except Exception as e:
             self.logger.error(f"Error insertando tarea: {e}")
             raise
         finally:
             conn.close()
+
+    def count_tasks(self, site_id: str, statuses: tuple[str, ...] = ("pending", "processing")) -> int:
+        """Cuenta tareas por site y status."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            placeholders = ",".join(["?"] * len(statuses))
+            cursor.execute(
+                f"SELECT COUNT(*) FROM tramite_queue WHERE site_id = ? AND status IN ({placeholders})",
+                (site_id, *statuses),
+            )
+            return int(cursor.fetchone()[0])
+        finally:
+            conn.close()
+
+    def count_tasks_any(self, statuses: tuple[str, ...] = ("pending", "processing")) -> Dict[str, int]:
+        """Cuenta tareas agrupadas por site_id para los status indicados."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            placeholders = ",".join(["?"] * len(statuses))
+            cursor.execute(
+                f"""
+                SELECT site_id, COUNT(*) as c
+                FROM tramite_queue
+                WHERE status IN ({placeholders})
+                GROUP BY site_id
+                """,
+                statuses,
+            )
+            return {str(site_id): int(c) for site_id, c in cursor.fetchall()}
+        finally:
+            conn.close()
+
+    def get_locked_site_by_priority(
+        self,
+        priorities: Dict[str, int],
+        statuses: tuple[str, ...] = ("pending", "processing"),
+    ) -> Optional[str]:
+        """
+        Devuelve el site_id que debe quedar "lockeado" segÃºn prioridad,
+        si hay tareas pendientes/en proceso en la cola.
+        """
+        counts = self.count_tasks_any(statuses=statuses)
+        candidates = [s for s, c in counts.items() if c > 0]
+        if not candidates:
+            return None
+        return sorted(candidates, key=lambda s: (priorities.get(s, 999), s))[0]
 
     # ==========================================================================
     # MÉTODOS PARA ORGANISMO_CONFIG
@@ -220,6 +333,69 @@ class SQLiteDatabase:
         finally:
             conn.close()
 
+    def upsert_organismo_config(self, config: Dict[str, Any]) -> int:
+        """
+        Inserta o actualiza una configuración de organismo (por site_id).
+
+        Returns:
+            ID de la fila en organismo_config.
+        """
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM organismo_config WHERE site_id = ?", (config["site_id"],))
+            row = cursor.fetchone()
+            if row:
+                config_id = int(row["id"])
+                cursor.execute(
+                    """
+                    UPDATE organismo_config
+                    SET query_organisme = ?,
+                        filtro_texp = ?,
+                        regex_expediente = ?,
+                        login_url = ?,
+                        recursos_url = ?,
+                        active = ?,
+                        updated_at = ?
+                    WHERE site_id = ?
+                    """,
+                    (
+                        config["query_organisme"],
+                        config["filtro_texp"],
+                        config["regex_expediente"],
+                        config["login_url"],
+                        config["recursos_url"],
+                        config.get("active", 1),
+                        datetime.now().isoformat(),
+                        config["site_id"],
+                    ),
+                )
+                conn.commit()
+                return config_id
+
+            cursor.execute(
+                """
+                INSERT INTO organismo_config (
+                    site_id, query_organisme, filtro_texp,
+                    regex_expediente, login_url, recursos_url, active
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    config["site_id"],
+                    config["query_organisme"],
+                    config["filtro_texp"],
+                    config["regex_expediente"],
+                    config["login_url"],
+                    config["recursos_url"],
+                    config.get("active", 1),
+                ),
+            )
+            conn.commit()
+            return int(cursor.lastrowid)
+        finally:
+            conn.close()
+
     # ==========================================================================
     # MÉTODOS PARA PENDING_AUTHORIZATION_QUEUE (GESDOC)
     # ==========================================================================
@@ -243,17 +419,41 @@ class SQLiteDatabase:
         Returns:
             ID de la tarea insertada
         """
+        resource_id = payload.get("idRecurso")
+        try:
+            if resource_id is not None:
+                resource_id = int(resource_id)
+        except Exception:
+            resource_id = None
+
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO pending_authorization_queue 
-                (site_id, payload, authorization_type, reason)
-                VALUES (?, ?, ?, ?)
-            """, (site_id, json.dumps(payload), authorization_type, reason))
+                (site_id, resource_id, payload, authorization_type, reason)
+                VALUES (?, ?, ?, ?, ?)
+            """, (site_id, resource_id, json.dumps(payload), authorization_type, reason))
             conn.commit()
             self.logger.info(f"Tarea añadida a pending_authorization_queue: {cursor.lastrowid} (tipo: {authorization_type})")
             return cursor.lastrowid
+        except sqlite3.IntegrityError:
+            if resource_id is None:
+                raise
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id FROM pending_authorization_queue WHERE site_id = ? AND resource_id = ? ORDER BY id DESC LIMIT 1",
+                (site_id, resource_id),
+            )
+            row = cursor.fetchone()
+            existing_id = int(row[0]) if row else -1
+            self.logger.info(
+                "Duplicado evitado en pending_authorization_queue: site_id=%s resource_id=%s (pending_id=%s)",
+                site_id,
+                resource_id,
+                existing_id,
+            )
+            return existing_id
         except Exception as e:
             self.logger.error(f"Error insertando tarea de autorización pendiente: {e}")
             raise
@@ -319,7 +519,7 @@ class SQLiteDatabase:
             
             # Obtener la tarea pendiente
             cursor.execute("""
-                SELECT site_id, payload FROM pending_authorization_queue
+                SELECT site_id, resource_id, payload FROM pending_authorization_queue
                 WHERE id = ? AND status = 'pending'
             """, (pending_id,))
             row = cursor.fetchone()
@@ -331,9 +531,9 @@ class SQLiteDatabase:
             
             # Insertar en tramite_queue
             cursor.execute("""
-                INSERT INTO tramite_queue (site_id, payload)
-                VALUES (?, ?)
-            """, (row['site_id'], row['payload']))
+                INSERT INTO tramite_queue (site_id, resource_id, payload)
+                VALUES (?, ?, ?)
+            """, (row['site_id'], row['resource_id'], row['payload']))
             new_task_id = cursor.lastrowid
             
             # Actualizar estado en pending_authorization_queue

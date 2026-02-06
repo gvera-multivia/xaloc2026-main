@@ -30,7 +30,7 @@ def load_config_from_json(json_path: Path) -> list[dict]:
     return data.get("configs", [])
 
 
-def init_brain_config(db_path: str, config_file: str = "organismo_config.json"):
+def init_brain_config(db_path: str, config_file: str = "organismo_config.json", *, upsert: bool = True):
     """Inicializa la configuración del brain en SQLite."""
     print("=" * 60)
     print("🧠 INICIALIZADOR DE CONFIGURACIÓN DEL BRAIN")
@@ -59,11 +59,17 @@ def init_brain_config(db_path: str, config_file: str = "organismo_config.json"):
     for config in configs:
         site_id = config.get("site_id")
         try:
-            # Intentar insertar
-            config_id = db.insert_organismo_config(config)
-            status = "✓ ACTIVO" if config.get("active") else "○ INACTIVO"
-            print(f"  {status} {site_id:20} -> ID {config_id}")
-            inserted += 1
+            if upsert:
+                config_id = db.upsert_organismo_config(config)
+                status = "✓ ACTIVO" if config.get("active") else "○ INACTIVO"
+                print(f"  {status} {site_id:20} -> ID {config_id} (upsert)")
+                inserted += 1
+            else:
+                # Intentar insertar
+                config_id = db.insert_organismo_config(config)
+                status = "✓ ACTIVO" if config.get("active") else "○ INACTIVO"
+                print(f"  {status} {site_id:20} -> ID {config_id}")
+                inserted += 1
         except Exception as e:
             # Si ya existe, saltarlo
             if "UNIQUE constraint failed" in str(e):
@@ -112,10 +118,25 @@ def main():
         default="organismo_config.json",
         help="Ruta al archivo JSON de configuración"
     )
-    
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--upsert",
+        action="store_true",
+        help="Actualiza/crea configs (default)",
+    )
+    group.add_argument(
+        "--no-upsert",
+        action="store_true",
+        help="Solo inserta; si existe, se salta",
+    )
+
     args = parser.parse_args()
-    
-    return init_brain_config(args.db_path, args.config_file)
+
+    upsert = True
+    if args.no_upsert:
+        upsert = False
+
+    return init_brain_config(args.db_path, args.config_file, upsert=upsert)
 
 
 if __name__ == "__main__":

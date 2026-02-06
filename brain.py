@@ -24,7 +24,7 @@ import re
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import aiohttp
 import pyodbc
@@ -34,6 +34,7 @@ from core.sqlite_db import SQLiteDatabase
 from core.xvia_auth import create_authenticated_session_in_place
 from core.nt_expediente_fixer import is_nt_pattern, fix_nt_expediente
 from core.client_documentation import check_requires_gesdoc
+from core.address_classifier import classify_addresses_batch_with_ai, classify_address_fallback
 
 
 # =============================================================================
@@ -43,8 +44,10 @@ from core.client_documentation import check_requires_gesdoc
 load_dotenv()
 
 SYNC_INTERVAL_SECONDS = int(os.getenv("BRAIN_SYNC_INTERVAL", 300))
+TICK_INTERVAL_SECONDS = int(os.getenv("BRAIN_TICK_SECONDS", 5))
 MAX_CLAIMS_PER_CYCLE = int(os.getenv("BRAIN_MAX_CLAIMS", 50))
 SQLITE_DB_PATH = os.getenv("SQLITE_DB_PATH", "db/xaloc_database.db")
+ENABLED_SITES_CSV = os.getenv("BRAIN_ENABLED_SITES", "").strip()
 
 # Credenciales Xvia
 XVIA_EMAIL = os.getenv("XVIA_EMAIL")
@@ -93,7 +96,7 @@ SELECT
 FROM Recursos.RecursosExp rs
 INNER JOIN clientes c ON rs.numclient = c.numerocliente
 INNER JOIN expedientes e ON rs.idExp = e.idexpediente
-WHERE rs.Organisme LIKE ?
+WHERE {organisme_like_clause}
   AND rs.TExp IN ({texp_list})
   AND rs.Estado = 0
   AND rs.Expedient IS NOT NULL
@@ -105,6 +108,541 @@ SELECT TExp, UsuarioAsignado
 FROM Recursos.RecursosExp
 WHERE idRecurso = ?
 """
+
+
+# =============================================================================
+# ADAPTERS Y POLÍTICAS
+# =============================================================================
+
+SITE_PRIORITIES: dict[str, int] = {
+    "madrid": 0,
+    "base_online": 1,
+}
+
+
+def _parse_enabled_sites(csv_value: str) -> Optional[set[str]]:
+    value = (csv_value or "").strip()
+    if not value:
+        return None
+    items = [p.strip() for p in value.split(",")]
+    return {p for p in items if p}
+
+
+class SiteAdapter:
+    site_id: str
+    priority: int
+    target_queue_depth: int
+    max_refill_batch: int
+
+    def __init__(self, *, site_id: str, priority: int, target_queue_depth: int, max_refill_batch: int):
+        self.site_id = site_id
+        self.priority = priority
+        self.target_queue_depth = target_queue_depth
+        self.max_refill_batch = max_refill_batch
+
+    def fetch_candidates(
+        self,
+        *,
+        config: dict,
+        conn_str: str,
+        authenticated_user: Optional[str],
+        limit: int,
+    ) -> list[dict]:
+        raise NotImplementedError
+
+    async def ensure_claimed(self, orchestrator: "BrainOrchestrator", candidate: dict) -> bool:
+        estado = int(candidate.get("Estado") or 0)
+        if estado == 1:
+            return True
+        return await orchestrator.claim_resource_with_retries(
+            id_recurso=int(candidate["idRecurso"]),
+            expediente=str(candidate.get("Expedient") or ""),
+        )
+
+    async def build_payloads(self, candidates: list[dict]) -> list[dict]:
+        raise NotImplementedError
+
+
+class MadridAdapter(SiteAdapter):
+    ADJUNTO_URL_TEMPLATE = (
+        "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf-adjuntos/{id}"
+    )
+
+    SQL_FETCH_RECURSOS_MADRID = """
+SELECT 
+    rs.idRecurso,
+    rs.idExp,
+    rs.Expedient,
+    rs.Organisme,
+    rs.TExp,
+    rs.Estado,
+    rs.numclient,
+    rs.SujetoRecurso,
+    rs.FaseProcedimiento,
+    rs.UsuarioAsignado,
+    rs.notas,
+
+    e.matricula,
+    e.Idpublic AS exp_idpublic,
+
+    pe.publicación AS pub_publicacion,
+
+    rs.cif,
+
+    -- Datos detallados del cliente para NOTIFICACIÓN
+    c.nif AS cliente_nif,
+    c.Nombre AS cliente_nombre,
+    c.Apellido1 AS cliente_apellido1,
+    c.Apellido2 AS cliente_apellido2,
+    c.Nombrefiscal AS cliente_razon_social,
+    c.provincia AS cliente_provincia,
+    c.poblacion AS cliente_municipio,
+    c.calle AS cliente_domicilio,
+    c.numero AS cliente_numero,
+    c.escalera AS cliente_escalera,
+    c.piso AS cliente_planta,
+    c.puerta AS cliente_puerta,
+    c.Cpostal AS cliente_cp,
+    c.email AS cliente_email,
+    c.telefono1 AS cliente_tel1,
+    c.telefono2 AS cliente_tel2,
+    c.movil AS cliente_movil,
+
+    -- Adjuntos (agrupados luego)
+    att.id AS adjunto_id,
+    att.Filename AS adjunto_filename
+
+FROM Recursos.RecursosExp rs
+INNER JOIN clientes c ON rs.numclient = c.numerocliente
+INNER JOIN expedientes e ON rs.idExp = e.idexpediente
+LEFT JOIN pubExp pe ON pe.Idpublic = e.Idpublic
+LEFT JOIN attachments_resource_documents att ON rs.automatic_id = att.automatic_id
+WHERE {organisme_like_clause}
+  AND rs.TExp IN ({texp_list})
+  AND rs.Estado IN (0, 1)
+  AND rs.Expedient IS NOT NULL
+ORDER BY rs.Estado ASC, rs.idRecurso ASC
+"""
+
+    def __init__(self):
+        super().__init__(site_id="madrid", priority=0, target_queue_depth=2, max_refill_batch=5)
+        self._regex_madrid = re.compile(r"^(\d{3}/\d{9}\.\d|\d{9}\.\d)$")
+
+    @staticmethod
+    def _clean_str(v: Any) -> str:
+        return str(v).strip() if v is not None else ""
+
+    @staticmethod
+    def _normalize_text(text: Any) -> str:
+        import unicodedata
+
+        if not text:
+            return ""
+        t = str(text).strip().lower()
+        return "".join(c for c in unicodedata.normalize("NFD", t) if unicodedata.category(c) != "Mn")
+
+    def fetch_candidates(
+        self,
+        *,
+        config: dict,
+        conn_str: str,
+        authenticated_user: Optional[str],
+        limit: int,
+    ) -> list[dict]:
+        texp_values = [2, 3]
+        texp_placeholders = ",".join(["?"] * len(texp_values))
+        
+        # Manejar múltiples patrones LIKE (separados por espacios)
+        query_organisme_raw = config.get("query_organisme", "%")
+        patterns = [p.strip() for p in query_organisme_raw.split(" ") if p.strip()]
+        
+        if not patterns:
+            patterns = ["%"]
+        
+        like_clauses = ["rs.Organisme LIKE ?"] * len(patterns)
+        organisme_like_clause = " AND ".join(like_clauses)
+        
+        query = self.SQL_FETCH_RECURSOS_MADRID.format(
+            organisme_like_clause=organisme_like_clause,
+            texp_list=texp_placeholders
+        )
+
+        conn = pyodbc.connect(conn_str)
+        try:
+            cursor = conn.cursor()
+            cursor.execute(query, patterns + texp_values)
+            columns = [column[0] for column in cursor.description]
+
+            recursos_map: dict[int, dict] = {}
+            for row in cursor.fetchall():
+                record = dict(zip(columns, row))
+                rid = record.get("idRecurso")
+                if not rid:
+                    continue
+                rid_int = int(rid)
+
+                if rid_int not in recursos_map:
+                    recursos_map[rid_int] = {**record, "adjuntos": []}
+
+                adj_id = record.get("adjunto_id")
+                if adj_id:
+                    filename = self._clean_str(record.get("adjunto_filename"))
+                    if filename:
+                        recursos_map[rid_int]["adjuntos"].append(
+                            {
+                                "id": int(adj_id),
+                                "filename": filename,
+                                "url": self.ADJUNTO_URL_TEMPLATE.format(id=int(adj_id)),
+                            }
+                        )
+
+            out: list[dict] = []
+            for _, recurso in recursos_map.items():
+                if limit and len(out) >= limit:
+                    break
+
+                expediente = self._clean_str(recurso.get("Expedient")).upper()
+                if not expediente or not self._regex_madrid.match(expediente):
+                    continue
+
+                fase_norm = self._normalize_text(recurso.get("FaseProcedimiento"))
+                if any(x in fase_norm for x in ["reclamacion", "embargo", "apremio"]):
+                    continue
+
+                estado = int(recurso.get("Estado") or 0)
+                usuario = self._clean_str(recurso.get("UsuarioAsignado"))
+                if estado == 1 and authenticated_user and usuario != authenticated_user:
+                    continue
+                if estado == 1 and not authenticated_user:
+                    continue
+
+                out.append(recurso)
+
+            return out
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _inferir_prefijo_expediente(*, fase_raw: str, es_empresa: bool) -> str:
+        fase_norm = MadridAdapter._normalize_text(fase_raw)
+        if "identificacion" in fase_norm:
+            return "911" if es_empresa else "912"
+        if "denuncia" in fase_norm:
+            return "911" if es_empresa else "912"
+        if "sancion" in fase_norm or "resolucion" in fase_norm:
+            return "931" if es_empresa else "935"
+        return "935"
+
+    @staticmethod
+    def _parse_expediente(expediente: str, *, fase_raw: str = "", es_empresa: bool = False) -> dict:
+        exp = MadridAdapter._clean_str(expediente).upper()
+
+        m1 = re.match(r"^(?P<nnn>\d{3})/(?P<exp>\d{9})\.(?P<d>\d)$", exp)
+        if m1:
+            return {
+                "expediente_completo": exp,
+                "expediente_tipo": "opcion1",
+                "expediente_nnn": m1.group("nnn"),
+                "expediente_eeeeeeeee": m1.group("exp"),
+                "expediente_d": m1.group("d"),
+                "expediente_lll": "",
+                "expediente_aaaa": "",
+                "expediente_exp_num": "",
+            }
+
+        m3 = re.match(r"^(?P<exp>\d{9})\.(?P<d>\d)$", exp)
+        if m3:
+            prefijo = MadridAdapter._inferir_prefijo_expediente(fase_raw=fase_raw, es_empresa=es_empresa)
+            exp_reconstruido = f"{prefijo}/{exp}"
+            return {
+                "expediente_completo": exp_reconstruido,
+                "expediente_tipo": "opcion1",
+                "expediente_nnn": prefijo,
+                "expediente_eeeeeeeee": m3.group("exp"),
+                "expediente_d": m3.group("d"),
+                "expediente_lll": "",
+                "expediente_aaaa": "",
+                "expediente_exp_num": "",
+            }
+
+        return {
+            "expediente_completo": exp,
+            "expediente_tipo": "",
+            "expediente_nnn": "",
+            "expediente_eeeeeeeee": "",
+            "expediente_d": "",
+            "expediente_lll": "",
+            "expediente_aaaa": "",
+            "expediente_exp_num": "",
+        }
+
+    @staticmethod
+    def _load_motivos_config() -> dict:
+        try:
+            path = Path("config_motivos.json")
+            if not path.exists():
+                return {}
+            import json as _json
+
+            return _json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _build_expone_solicita(fase_raw: str, expediente: str, sujeto: str) -> tuple[str, str, str]:
+        config = MadridAdapter._load_motivos_config()
+        fase_norm = MadridAdapter._normalize_text(fase_raw)
+
+        selected: dict | None = None
+        selected_key = ""
+        for key, value in (config or {}).items():
+            key_norm = MadridAdapter._normalize_text(key)
+            if key_norm and key_norm in fase_norm:
+                selected = value
+                selected_key = key
+                break
+
+        asunto = ""
+        expone = ""
+        solicita = ""
+        if selected:
+            asunto = MadridAdapter._clean_str(selected.get("asunto")).replace("{expediente}", expediente).replace(
+                "{sujeto_recurso}", sujeto
+            )
+            expone = MadridAdapter._clean_str(selected.get("expone")).replace("{expediente}", expediente).replace(
+                "{sujeto_recurso}", sujeto
+            )
+            solicita = (
+                MadridAdapter._clean_str(selected.get("solicita"))
+                .replace("{expediente}", expediente)
+                .replace("{sujeto_recurso}", sujeto)
+            )
+
+        blob = " ".join([MadridAdapter._normalize_text(selected_key), MadridAdapter._normalize_text(fase_raw)])
+        naturaleza = "A"
+        if "identificacion" in blob:
+            naturaleza = "I"
+        elif any(tag in blob for tag in ["recurso", "reposicion", "reclamacion", "revision", "apremio", "embargo"]):
+            naturaleza = "R"
+
+        if not (asunto and expone and solicita):
+            asunto = asunto or f"Recurso expediente {expediente}"
+            expone = expone or "..."
+            solicita = solicita or "..."
+
+        return expone, solicita, naturaleza
+
+    @staticmethod
+    def _resolve_plate_number(recurso: dict) -> tuple[str, str]:
+        plate = MadridAdapter._clean_str(recurso.get("matricula"))
+        if plate:
+            return re.sub(r"\s+", "", plate).upper(), "expedientes.matricula"
+
+        pub = MadridAdapter._clean_str(recurso.get("pub_publicacion"))
+        m = re.search(r"\b([0-9]{4}[A-Z]{3}|[A-Z]{1,2}[0-9]{4}[A-Z]{1,2})\b", pub.replace(" ", "").upper())
+        if m:
+            return m.group(1), "pubExp.publicación"
+
+        notas = MadridAdapter._clean_str(recurso.get("notas"))
+        m2 = re.search(
+            r"\b([0-9]{4}[A-Z]{3}|[A-Z]{1,2}[0-9]{4}[A-Z]{1,2})\b", notas.replace(" ", "").upper()
+        )
+        if m2:
+            return m2.group(1), "rs.notas"
+
+        return "", ""
+
+    @staticmethod
+    def _detectar_tipo_documento(doc: str) -> str:
+        if not doc:
+            return "NIF"
+        d = doc.strip().upper()
+        if re.match(r"^[A-Z]{3}[0-9]+", d):
+            return "PS"
+        return "NIF"
+
+    @staticmethod
+    def _convert_value(v: Any) -> Any:
+        from decimal import Decimal
+
+        if isinstance(v, Decimal):
+            return float(v)
+        return v
+
+    @staticmethod
+    def _prevalidate_required_fields(payload: dict) -> None:
+        required = [
+            "idRecurso",
+            "expediente_tipo",
+            "naturaleza",
+            "expone",
+            "solicita",
+            "rep_tipo_via",
+            "rep_tipo_numeracion",
+            "rep_cp",
+            "rep_municipio",
+            "rep_provincia",
+            "rep_pais",
+            "notif_tipo_documento",
+            "notif_numero_documento",
+            "notif_name",
+            "notif_surname1",
+            "notif_pais",
+            "notif_provincia",
+            "notif_municipio",
+            "notif_tipo_via",
+            "notif_nombre_via",
+            "notif_tipo_numeracion",
+            "notif_codigo_postal",
+        ]
+        missing = [k for k in required if not str(payload.get(k) or "").strip()]
+        if payload.get("notif_tipo_numeracion") == "NUM" and not str(payload.get("notif_numero") or "").strip():
+            missing.append("notif_numero")
+        if missing:
+            raise ValueError(f"Payload Madrid inválido, faltan campos: {', '.join(sorted(set(missing)))}")
+
+    async def build_payloads(self, candidates: list[dict]) -> list[dict]:
+        if not candidates:
+            return []
+
+        items: list[dict] = []
+        for r in candidates:
+            items.append(
+                {
+                    "idRecurso": r.get("idRecurso"),
+                    "direccion_raw": self._clean_str(r.get("cliente_domicilio")),
+                    "poblacion": self._clean_str(r.get("cliente_municipio")),
+                    "numero": self._clean_str(r.get("cliente_numero")),
+                    "piso": self._clean_str(r.get("cliente_planta")),
+                    "puerta": self._clean_str(r.get("cliente_puerta")),
+                }
+            )
+
+        batch_mapping: dict[str, dict] = {}
+        if os.getenv("GROQ_API_KEY"):
+            try:
+                batch_mapping = await classify_addresses_batch_with_ai(items)
+            except Exception as e:
+                logger.warning("[MADRID][IA] Falló batch LLM, usando fallback local: %s", e)
+                batch_mapping = {}
+
+        payloads: list[dict] = []
+        for r in candidates:
+            expediente_raw = self._clean_str(r.get("Expedient")).upper()
+            cif_empresa = self._clean_str(r.get("cif"))
+            nif = cif_empresa or self._clean_str(r.get("cliente_nif"))
+            fase_raw = self._clean_str(r.get("FaseProcedimiento"))
+
+            exp_parts = self._parse_expediente(expediente_raw, fase_raw=fase_raw, es_empresa=bool(cif_empresa))
+            expediente_para_textos = exp_parts.get("expediente_completo", expediente_raw)
+
+            expone, solicita, naturaleza = self._build_expone_solicita(
+                fase_raw,
+                expediente_para_textos,
+                self._clean_str(r.get("SujetoRecurso")),
+            )
+
+            plate_number, plate_src = self._resolve_plate_number(r)
+
+            rid = str(r.get("idRecurso"))
+            clasif = batch_mapping.get(rid)
+            domicilio_raw = self._clean_str(r.get("cliente_domicilio"))
+            numero_db = self._clean_str(r.get("cliente_numero"))
+            poblacion = self._clean_str(r.get("cliente_municipio"))
+            piso_db = self._clean_str(r.get("cliente_planta"))
+            puerta_db = self._clean_str(r.get("cliente_puerta"))
+            escalera_db = self._clean_str(r.get("cliente_escalera"))
+
+            if not clasif:
+                clasif = classify_address_fallback(domicilio_raw)
+
+            notif_tipo_via = (clasif.get("tipo_via") or "CALLE").upper()
+            notif_nombre_via = (clasif.get("calle") or "").upper()
+            notif_numero = (clasif.get("numero") or numero_db).upper()
+            notif_escalera = ((clasif.get("escalera") or escalera_db) or "").upper()
+            notif_planta = ((clasif.get("planta") or piso_db) or "").upper()
+            notif_puerta = ((clasif.get("puerta") or puerta_db) or "").upper()
+
+            tipo_numeracion = "NUM" if self._clean_str(notif_numero) else "S/N"
+            provincia_notif = self._clean_str(r.get("cliente_provincia")).upper() or poblacion.upper()
+
+            representante = {
+                "rep_tipo_via": "RONDA",
+                "rep_tipo_numeracion": "NUM",
+                "representative_city": "BARCELONA",
+                "representative_province": "BARCELONA",
+                "representative_country": "ESPAÑA",
+                "representative_street": "GENERAL MITRE, DEL",
+                "representative_number": "169",
+                "representative_zip": "08022",
+                "representative_email": "info@xvia-serviciosjuridicos.com",
+                "representative_phone": "932531411",
+                "rep_nombre_via": "GENERAL MITRE, DEL",
+                "rep_numero": "169",
+                "rep_cp": "08022",
+                "rep_municipio": "BARCELONA",
+                "rep_provincia": "BARCELONA",
+                "rep_pais": "ESPAÑA",
+                "rep_email": "info@xvia-serviciosjuridicos.com",
+                "rep_movil": "932531411",
+                "rep_telefono": "932531411",
+                "rep_tipo_numeracion": "NUM",
+            }
+
+            payload = {
+                "idRecurso": self._convert_value(r.get("idRecurso")),
+                "idExp": self._convert_value(r.get("idExp")),
+                "expediente": expediente_raw,
+                "numclient": self._convert_value(r.get("numclient")),
+                "sujeto_recurso": self._clean_str(r.get("SujetoRecurso")),
+                "fase_procedimiento": fase_raw,
+
+                "plate_number": plate_number,
+                "plate_number_source": plate_src,
+
+                "user_phone": "932531411",
+                "inter_telefono": "932531411",
+                "inter_email_check": bool(self._clean_str(r.get("cliente_email"))),
+
+                **representante,
+
+                "notif_tipo_documento": self._detectar_tipo_documento(nif),
+                "notif_numero_documento": nif,
+                "notif_name": self._clean_str(r.get("cliente_nombre")).upper(),
+                "notif_surname1": self._clean_str(r.get("cliente_apellido1")).upper(),
+                "notif_surname2": self._clean_str(r.get("cliente_apellido2")).upper(),
+                "notif_razon_social": self._clean_str(r.get("cliente_razon_social")).upper(),
+                "notif_pais": "ESPAÑA",
+                "notif_provincia": provincia_notif,
+                "notif_municipio": poblacion.upper(),
+                "notif_tipo_via": notif_tipo_via,
+                "notif_nombre_via": notif_nombre_via,
+                "notif_tipo_numeracion": tipo_numeracion,
+                "notif_numero": self._clean_str(notif_numero),
+                "notif_portal": "",
+                "notif_escalera": self._clean_str(notif_escalera),
+                "notif_planta": self._clean_str(notif_planta),
+                "notif_puerta": self._clean_str(notif_puerta),
+                "notif_codigo_postal": self._clean_str(r.get("cliente_cp")),
+                "notif_email": "info@xvia-serviciosjuridicos.com",
+                "notif_movil": "",
+                "notif_telefono": "932531411",
+
+                **exp_parts,
+                "naturaleza": naturaleza,
+                "expone": expone,
+                "solicita": solicita,
+
+                "adjuntos": r.get("adjuntos") or [],
+
+                "source": "brain_orchestrator",
+                "claimed_at": datetime.now().isoformat(),
+            }
+
+            self._prevalidate_required_fields(payload)
+            payloads.append(payload)
+
+        return payloads
 
 
 # =============================================================================
@@ -129,6 +667,10 @@ class BrainOrchestrator:
         self.logger = logger
         self.session: Optional[aiohttp.ClientSession] = None
         self.authenticated_user: Optional[str] = None
+
+        self.adapters: dict[str, SiteAdapter] = {
+            "madrid": MadridAdapter(),
+        }
         
     # -------------------------------------------------------------------------
     # PASO 0: Inicializar sesión autenticada
@@ -217,12 +759,26 @@ class BrainOrchestrator:
         texp_values = [int(x.strip()) for x in config["filtro_texp"].split(",")]
         texp_placeholders = ",".join(["?"] * len(texp_values))
         
-        query = SQL_FETCH_RECURSOS.format(texp_list=texp_placeholders)
+        # Manejar múltiples patrones LIKE (separados por espacios)
+        query_organisme_raw = config["query_organisme"]
+        patterns = [p.strip() for p in query_organisme_raw.split(" ") if p.strip()]
+        
+        if not patterns:
+            patterns = ["%"]
+        
+        like_clauses = ["rs.Organisme LIKE ?"] * len(patterns)
+        organisme_like_clause = " AND ".join(like_clauses)
+        
+        query = SQL_FETCH_RECURSOS.format(
+            organisme_like_clause=organisme_like_clause,
+            texp_list=texp_placeholders
+        )
+
         
         try:
             conn = pyodbc.connect(self.sqlserver_conn_str)
             cursor = conn.cursor()
-            cursor.execute(query, [config["query_organisme"]] + texp_values)
+            cursor.execute(query, patterns + texp_values)
             
             columns = [column[0] for column in cursor.description]
             results = []
@@ -325,6 +881,70 @@ class BrainOrchestrator:
         except Exception as e:
             self.logger.error(f"Error en claim vía POST para {expediente}: {e}")
             return False
+
+    async def post_claim_resource(self, id_recurso: int) -> bool:
+        """
+        Hace POST a /AsignarA (sin verificar en SQL Server).
+        """
+        if self.dry_run:
+            return True
+
+        if not self.session:
+            self.logger.error("Sesión no inicializada")
+            return False
+
+        try:
+            async with self.session.get(
+                "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos"
+            ) as resp:
+                html = await resp.text()
+                match = re.search(r'name="_token"\s+value="([^"]+)"', html)
+                if not match:
+                    self.logger.error("No se pudo obtener el token CSRF del HTML")
+                    return False
+                csrf_token = match.group(1)
+
+            form_data = {
+                "_token": csrf_token,
+                "id": str(id_recurso),
+                "recursosSel": "0",
+            }
+
+            async with self.session.post(ASIGNAR_URL, data=form_data) as resp:
+                return resp.status in (200, 302, 303)
+
+        except Exception as e:
+            self.logger.error(f"Error en POST claim (sin verify) idRecurso={id_recurso}: {e}")
+            return False
+
+    async def claim_resource_with_retries(
+        self,
+        *,
+        id_recurso: int,
+        expediente: str,
+        retries: int = 5,
+        delays_seconds: tuple[float, ...] = (0.5, 1.0, 2.0, 3.0, 5.0),
+    ) -> bool:
+        """
+        Reclama recurso vÃ­a POST y verifica en SQL Server con retries/backoff.
+        """
+        if self.dry_run:
+            self.logger.info(f"[DRY-RUN] Claim simulado (retries) para idRecurso={id_recurso}")
+            return True
+
+        ok_post = await self.post_claim_resource(id_recurso)
+        if not ok_post:
+            return False
+
+        for attempt in range(max(retries, 1)):
+            if self.verify_claim_in_db(id_recurso):
+                self.logger.info(f"✓ Recurso {id_recurso} ({expediente}) reclamado/verificado")
+                return True
+            delay = delays_seconds[min(attempt, len(delays_seconds) - 1)]
+            await asyncio.sleep(delay)
+
+        self.logger.warning(f"POST exitoso pero claim no confirmado en DB para idRecurso={id_recurso}")
+        return False
     
     def verify_claim_in_db(self, id_recurso: int) -> bool:
         """
@@ -539,6 +1159,122 @@ class BrainOrchestrator:
     # -------------------------------------------------------------------------
     # CICLO PRINCIPAL
     # -------------------------------------------------------------------------
+    def _get_enabled_adapters_and_configs(self) -> tuple[list[SiteAdapter], dict[str, dict]]:
+        enabled_sites = _parse_enabled_sites(ENABLED_SITES_CSV)
+
+        configs = {cfg["site_id"]: cfg for cfg in self.get_active_configs()}
+        adapters: list[SiteAdapter] = []
+        for site_id, adapter in self.adapters.items():
+            if enabled_sites is not None and site_id not in enabled_sites:
+                continue
+            if site_id not in configs:
+                continue
+            adapters.append(adapter)
+
+        adapters.sort(key=lambda a: (a.priority, a.site_id))
+        return adapters, configs
+
+    async def _choose_site_to_refill(self, adapters: list[SiteAdapter], configs: dict[str, dict]) -> Optional[str]:
+        priorities = dict(SITE_PRIORITIES)
+        for a in adapters:
+            priorities[a.site_id] = a.priority
+
+        # Lock global: si hay cualquier tarea pending/processing en cola, NO mezclar.
+        locked = self.db.get_locked_site_by_priority(priorities)
+        if locked:
+            return locked
+
+        for adapter in adapters:
+            if adapter.site_id not in configs:
+                continue
+            try:
+                candidates = adapter.fetch_candidates(
+                    config=configs[adapter.site_id],
+                    conn_str=self.sqlserver_conn_str,
+                    authenticated_user=self.authenticated_user,
+                    limit=1,
+                )
+                if candidates:
+                    return adapter.site_id
+            except Exception as e:
+                self.logger.error(f"[{adapter.site_id}] Error consultando candidatos remotos: {e}")
+
+        return None
+
+    async def run_tick(self) -> dict:
+        return await self.run_tick()
+
+        stats = {"claimed": 0, "enqueued": 0, "errors": 0}
+
+        adapters, configs = self._get_enabled_adapters_and_configs()
+        if not adapters:
+            self.logger.warning("No hay adapters habilitados/configurados (revisa organismo_config + BRAIN_ENABLED_SITES)")
+            return stats
+
+        site_id = await self._choose_site_to_refill(adapters, configs)
+        if not site_id:
+            self.logger.info("No hay lock ni candidatos remotos disponibles en sites habilitados.")
+            return stats
+
+        adapter = self.adapters.get(site_id)
+        config = configs.get(site_id)
+        if not adapter or not config:
+            self.logger.warning(f"[{site_id}] Sin adapter/config; saltando.")
+            return stats
+
+        queue_depth = self.db.count_tasks(site_id)
+        if queue_depth >= adapter.target_queue_depth:
+            self.logger.info(f"[{site_id}] Cola OK (depth={queue_depth} >= target={adapter.target_queue_depth}); no se repone.")
+            return stats
+
+        self.logger.info(
+            f"[{site_id}] Refill: queue_depth={queue_depth} target={adapter.target_queue_depth} batch={adapter.max_refill_batch}"
+        )
+
+        try:
+            await self.init_session(config["login_url"])
+            candidates = adapter.fetch_candidates(
+                config=config,
+                conn_str=self.sqlserver_conn_str,
+                authenticated_user=self.authenticated_user,
+                limit=adapter.max_refill_batch,
+            )
+            if not candidates:
+                self.logger.info(f"[{site_id}] Sin candidatos remotos válidos.")
+                return stats
+
+            claimed_candidates: list[dict] = []
+            for cand in candidates:
+                try:
+                    ok = await adapter.ensure_claimed(self, cand)
+                    if ok:
+                        claimed_candidates.append(cand)
+                        if int(cand.get("Estado") or 0) == 0:
+                            stats["claimed"] += 1
+                except Exception as e:
+                    self.logger.error(f"[{site_id}] Error reclamando candidato: {e}")
+                    stats["errors"] += 1
+
+            if not claimed_candidates:
+                self.logger.info(f"[{site_id}] No se pudo reclamar ningún candidato.")
+                return stats
+
+            payloads = await adapter.build_payloads(claimed_candidates)
+            for payload in payloads:
+                try:
+                    self.enqueue_locally(site_id, payload)
+                    stats["enqueued"] += 1
+                except Exception as e:
+                    self.logger.error(f"[{site_id}] Error encolando tarea: {e}")
+                    stats["errors"] += 1
+
+            if not self.dry_run:
+                self.db.update_last_sync(site_id)
+
+            return stats
+        finally:
+            await self.close_session()
+
     async def run_cycle(self) -> dict:
         """
         Ejecuta un ciclo completo de sincronización.
@@ -602,7 +1338,7 @@ class BrainOrchestrator:
         """Bucle infinito del orquestador."""
         self.logger.info("=" * 60)
         self.logger.info("🧠 BRAIN ORCHESTRATOR INICIADO")
-        self.logger.info(f"   Intervalo: {SYNC_INTERVAL_SECONDS}s")
+        self.logger.info(f"   Tick: {TICK_INTERVAL_SECONDS}s")
         self.logger.info(f"   Max claims/ciclo: {MAX_CLAIMS_PER_CYCLE}")
         self.logger.info(f"   Dry-run: {self.dry_run}")
         self.logger.info("=" * 60)
@@ -619,8 +1355,8 @@ class BrainOrchestrator:
             except Exception as e:
                 self.logger.error(f"Error fatal en ciclo: {e}")
             
-            self.logger.info(f"💤 Esperando {SYNC_INTERVAL_SECONDS}s...")
-            await asyncio.sleep(SYNC_INTERVAL_SECONDS)
+            self.logger.info(f"💤 Esperando {TICK_INTERVAL_SECONDS}s...")
+            await asyncio.sleep(TICK_INTERVAL_SECONDS)
 
 
 # =============================================================================
