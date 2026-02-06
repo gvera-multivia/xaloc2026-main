@@ -13,7 +13,7 @@ async def subir_archivos_por_modal(
     page: Page,
     archivos: list[Path],
     *,
-    max_archivos: int = 1,
+    max_archivos: int = 10,
     boton_abrir_regex: str = r"Carregar\s+fitxer",
 ) -> None:
     """

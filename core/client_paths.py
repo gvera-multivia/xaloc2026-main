@@ -18,9 +18,17 @@ class ClientIdentity:
     apellido2: Optional[str] = None
 
 
+def strip_accents(text: str) -> str:
+    """Elimina tildes y normaliza a caracteres básicos."""
+    if not text:
+        return ""
+    text = unicodedata.normalize("NFD", text)
+    return "".join(ch for ch in text if not unicodedata.combining(ch))
+
+
 def get_alpha_folder(char: str) -> str:
     """Retorna la subcarpeta alfabética correspondiente."""
-    char = char.upper()
+    char = strip_accents(char).upper()
     if char in "0123456789": return "0-9 (NUMEROS)"
     if char in "ABC": return "A-C"
     if char in "DE": return "D-E"
@@ -54,8 +62,7 @@ def normalize_client_folder_name(value: str) -> str:
     if value is None:
         return ""
     text = value.strip().upper().replace("_", " ")
-    text = unicodedata.normalize("NFD", text)
-    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = strip_accents(text)
     text = re.sub(r"[^\w\s]", " ", text)
     return re.sub(r"\s+", " ", text).strip()
 

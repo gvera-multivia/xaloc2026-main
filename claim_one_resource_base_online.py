@@ -28,6 +28,7 @@ from dotenv import load_dotenv
 from core.sqlite_db import SQLiteDatabase
 from core.xvia_auth import create_authenticated_session_in_place
 from core.address_classifier import classify_address_with_ai, classify_address_fallback
+from core.client_documentation import build_required_client_documents_for_payload
 
 # =============================================================================
 # CONFIGURACIÓN
@@ -449,6 +450,32 @@ async def build_base_online_payload(recurso: dict) -> dict:
         "skip_auto_complete": True, # Solicitado por usuario: NO marcar como completado
         "claimed_at": datetime.now().isoformat(),
     }
+
+    # Recoger adjuntos de la DB
+    adjuntos_db = []
+    for adj in recurso.get("adjuntos", []):
+        filename = adj.get("filename")
+        if filename:
+            # Asumimos que los archivos están en la carpeta tmp si vienen de Xvia
+            # o que el worker sabrá resolverlos si son rutas completas.
+            # En este contexto, solemos recibirlos como nombres de archivo.
+            adjuntos_db.append(Path("tmp/downloads") / filename)
+
+    # Recoger documentación del cliente (DNI, CIF, AUT, ESCR)
+    client_docs = []
+    try:
+        conn_str = build_sqlserver_connection_string()
+        client_docs = await build_required_client_documents_for_payload(
+            payload,
+            sqlserver_conn_str=conn_str,
+            strict=False # No fallar si falta algo, subir lo que haya
+        )
+    except Exception as e:
+        logger.warning(f"Error cargando documentación del cliente: {e}")
+
+    # Lista total de archivos
+    archivos_totales = [str(p) for p in (adjuntos_db + client_docs)]
+    payload["archivos"] = archivos_totales
 
     if protocolo == "P1":
         payload["llicencia_conduccio"] = ""  # Pendiente de definición

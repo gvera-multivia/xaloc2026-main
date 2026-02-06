@@ -83,7 +83,7 @@ async def rellenar_formulario_p3(page: Page, config: BaseOnlineConfig, data: Bas
     # 7. Subida de documentos (modal + iframe)
     archivos = data.archivos_adjuntos or []
     archivos_paths: list[Path] = list(archivos)
-    await subir_archivos_por_modal(page, archivos_paths, max_archivos=1)
+    await subir_archivos_por_modal(page, archivos_paths)
 
     # 8. Confirmación (llegar hasta la pantalla de firma)
     await _avanzar_a_presentacion_p3(page)
