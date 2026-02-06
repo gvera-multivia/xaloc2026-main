@@ -430,6 +430,7 @@ async def build_base_online_payload(recurso: dict) -> dict:
     payload = {
         "idRecurso": _convert_value(recurso["idRecurso"]),
         "idExp": _convert_value(recurso["idExp"]),
+        "numclient": _convert_value(recurso.get("numclient")), # Añadido para documentación
         "protocol": protocolo,
         "user_phone": tel,
         "user_email": "info@xvia-serviciosjuridicos.com",
@@ -437,6 +438,11 @@ async def build_base_online_payload(recurso: dict) -> dict:
         "data_denuncia": formatear_fecha(recurso.get("FAlta")),
         "nif": nif,
         "name": _clean_str(recurso.get("SujetoRecurso")).upper(),
+        # Campos detallados de identidad para client_documentation.py
+        "cliente_nombre": _clean_str(recurso.get("cliente_nombre")),
+        "cliente_apellido1": _clean_str(recurso.get("cliente_apellido1")),
+        "cliente_apellido2": _clean_str(recurso.get("cliente_apellido2")),
+        "cliente_razon_social": _clean_str(recurso.get("cliente_razon_social")),
         **notif_data,
         **exp_parts,
         "source": "claim_one_resource_base_online",

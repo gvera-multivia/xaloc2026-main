@@ -42,7 +42,7 @@ class SelectedClientDocuments:
 
 def client_identity_from_payload(payload: dict) -> ClientIdentity:
     """Extrae la identidad del cliente del payload."""
-    sujeto_recurso = ((payload.get("sujeto_recurso") or payload.get("SujetoRecurso") or "")).strip() or None
+    sujeto_recurso = ((payload.get("sujeto_recurso") or payload.get("SujetoRecurso") or payload.get("name") or "")).strip() or None
 
     mandatario = payload.get("mandatario") or {}
     if isinstance(mandatario, dict) and (mandatario.get("tipo_persona") or "").strip():
@@ -68,9 +68,24 @@ def client_identity_from_payload(payload: dict) -> ClientIdentity:
         return ClientIdentity(is_company=False, sujeto_recurso=sujeto_recurso,
                                nombre=nombre, apellido1=ap1, apellido2=ap2)
 
-    empresa = (payload.get("empresa") or payload.get("razon_social") or payload.get("notif_razon_social") or "").strip()
+    empresa = (payload.get("empresa") or payload.get("razon_social") or payload.get("notif_razon_social") or payload.get("cliente_razon_social") or "").strip()
     if empresa:
         return ClientIdentity(is_company=True, sujeto_recurso=sujeto_recurso, empresa=empresa)
+    
+    # FALLBACK: Si tenemos un nombre completo en sujeto_recurso/name pero no los campos desglosados
+    if sujeto_recurso:
+        # Intentamos detectar si es empresa de forma básica
+        is_company = any(s in sujeto_recurso.upper() for s in [" S.L.", " S.A.", " SL ", " SA ", " S.C.P."])
+        
+        # Como client_paths.py usa sujeto_recurso con prioridad, devolvemos identidad básica
+        if is_company:
+             return ClientIdentity(is_company=True, sujeto_recurso=sujeto_recurso, empresa=sujeto_recurso)
+        else:
+             # Para persona física, si faltan nombre/apellidos, usamos sujeto_recurso como nombre sucio
+             # o lo dejamos vacío si ClientIdentity lo permite. 
+             # Para evitar errores en otros sitios, intentamos un split muy básico o pasamos strings vacíos.
+             # Viendo client_paths.py -> get_client_folder_name usa sujeto_recurso PRIMERO.
+             return ClientIdentity(is_company=False, sujeto_recurso=sujeto_recurso, nombre=sujeto_recurso, apellido1="", apellido2="")
 
     raise RequiredClientDocumentsError("No se pudo inferir la identidad del cliente.")
 
