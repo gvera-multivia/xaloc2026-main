@@ -337,6 +337,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 "denuncia_num": expediente,
                 "plate_number": self._normalize_plate(r.get("matricula")),
                 "expediente_num": expediente,
+                "expediente": expediente,  # Alias para el orquestador
                 "sujeto_recurso": sujeto_recurso,
                 "motivos": motivos_text,
                 "adjuntos": r.get("adjuntos") or [],
