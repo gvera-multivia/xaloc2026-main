@@ -105,7 +105,14 @@ class BaseAutomation:
                 		elif BaseAutomation._shared_home_page.is_closed():
                 			BaseAutomation._shared_home_page = await self.context.new_page()
 
-                		self.page = await self.context.new_page()
+                		# Reutilización de pestaña (XALOC_KEEP_TAB_OPEN=1)
+                		if os.getenv("XALOC_KEEP_TAB_OPEN") == "1":
+                			self.page = BaseAutomation._shared_home_page
+                			self.logger.info("Pestaña reutilizada de sesión compartida (XALOC_KEEP_TAB_OPEN=1)")
+                		else:
+                			self.page = await self.context.new_page()
+                			self.logger.info("Contexto compartido, pero nueva pestaña creada")
+
                 		self.page.set_default_timeout(self.config.timeouts.general)
                 		self.logger.info("Navegador reutilizado (XALOC_KEEP_BROWSER_OPEN=1)")
                 		return
@@ -163,7 +170,15 @@ class BaseAutomation:
                 else:
                     BaseAutomation._shared_home_page = await self.context.new_page()
 
-                self.page = await self.context.new_page()
+                # Reutilización de pestaña (XALOC_KEEP_TAB_OPEN=1)
+                if os.getenv("XALOC_KEEP_TAB_OPEN") == "1":
+                    # Usar la pestaña home como la pestaña de trabajo
+                    self.page = BaseAutomation._shared_home_page
+                    self.logger.info("Pestaña reutilizada (XALOC_KEEP_TAB_OPEN=1)")
+                else:
+                    self.page = await self.context.new_page()
+                    self.logger.info("Nueva pestaña creada")
+
                 self.page.set_default_timeout(self.config.timeouts.general)
                 self.logger.info("Navegador listo (compartido)")
                 return

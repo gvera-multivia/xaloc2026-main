@@ -106,11 +106,25 @@ async def _seleccionar_modo_notificacion_email(page: Page) -> None:
 
     await radio.wait_for(state="visible", timeout=15000)
     await radio.scroll_into_view_if_needed()
+    
+    # Intentar el check inicial
     try:
         await radio.check()
     except Exception:
         await radio.click()
+    
     await page.wait_for_timeout(DELAY_MS)
+    
+    # VALIDACIÓN: A veces no se activa el campo #contact22. 
+    # Si pasan 5s y no aparece, volvemos a clicar el radio.
+    try:
+        await page.wait_for_selector("#contact22", state="visible", timeout=5000)
+    except Exception:
+        logging.warning("Campo #contact22 no apareció tras 5s. Re-clicando modo de notificación electrónica...")
+        await radio.click()
+        await page.wait_for_timeout(1000)
+        # Una espera final para asegurar que ahora sí esté
+        await page.wait_for_selector("#contact22", state="visible", timeout=5000)
 
 
 async def _rellenar_persona_juridica(page: Page, m: DatosMandatario) -> None:
