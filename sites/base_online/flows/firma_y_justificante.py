@@ -301,6 +301,32 @@ async def _find_justificante_action_locator(page: Page, *, timeout_ms: int = 600
     raise TimeoutError("No se encontró el botón/enlace de 'Imprimir justificante/justificant' dentro del timeout.")
 
 
+async def _find_signar_presentar_trigger(page: Page, *, timeout_ms: int = 30000):
+    candidates = [
+        page.locator("input[type='button'][value='Signar i Presentar']"),
+        page.locator("input[type='button'][value='Signar i presentar']"),
+        page.locator("input[type='submit'][value='Signar i Presentar']"),
+        page.locator("input[type='submit'][value='Signar i presentar']"),
+        page.locator("input[type='button'][onclick*='mostrarProcessant']"),
+        page.locator("input[type='submit'][onclick*='mostrarProcessant']"),
+    ]
+    deadline = time.monotonic() + (timeout_ms / 1000)
+    while time.monotonic() < deadline:
+        for locator in candidates:
+            try:
+                if await locator.count() > 0:
+                    first = locator.first
+                    try:
+                        await first.wait_for(state="visible", timeout=1500)
+                        return first
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+        await page.wait_for_timeout(300)
+    raise TimeoutError("No se encontro el boton de firma 'Signar i Presentar/presentar' dentro del timeout.")
+
+
 async def firmar_presentar_y_descargar_justificante(page: Page, *, payload: dict) -> Path:
     """
     BASE Online (P3): pulsa 'Signar i Presentar', firma en el popup, espera success y descarga justificante.
@@ -309,8 +335,7 @@ async def firmar_presentar_y_descargar_justificante(page: Page, *, payload: dict
     fase = payload.get("fase_procedimiento")
     id_recurso = payload.get("idRecurso") or "unknown"
 
-    trigger = page.locator("input[type='button'][value='Signar i Presentar']").first
-    await trigger.wait_for(state="visible", timeout=30000)
+    trigger = await _find_signar_presentar_trigger(page, timeout_ms=30000)
 
     logger.info("[BASE] Abriendo popup de firma...")
     await _abrir_modal_firma(page, trigger)

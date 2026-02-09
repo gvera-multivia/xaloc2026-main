@@ -67,8 +67,6 @@ async def ejecutar_p2(page: Page, data: BaseOnlineP2Data, *, payload: dict) -> N
     await page.wait_for_timeout(DELAY_MS)
     await page.wait_for_load_state("domcontentloaded")
 
-    boton_firma = page.locator("input[type='button'][value='Signar i Presentar']").first
-    await boton_firma.wait_for(state="visible", timeout=20000)
-    logging.info("[P2] Pantalla 'Signar i Presentar' detectada.")
+    logging.info("[P2] Preparando firma y presentacion...")
 
     await firmar_presentar_y_descargar_justificante(page, payload=payload)
