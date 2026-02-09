@@ -46,7 +46,7 @@ load_dotenv()
 
 SYNC_INTERVAL_SECONDS = int(os.getenv("BRAIN_SYNC_INTERVAL", 300))
 TICK_INTERVAL_SECONDS = int(os.getenv("BRAIN_TICK_SECONDS", 5))
-MAX_CLAIMS_PER_CYCLE = int(os.getenv("BRAIN_MAX_CLAIMS", 50))
+MAX_CLAIMS_PER_CYCLE = int(os.getenv("BRAIN_MAX_CLAIMS", 10))
 SQLITE_DB_PATH = os.getenv("SQLITE_DB_PATH", "db/xaloc_database.db")
 ENABLED_SITES_CSV = os.getenv("BRAIN_ENABLED_SITES", "").strip()
 MAX_IDLE_CYCLES = int(os.getenv("BRAIN_MAX_IDLE_CYCLES", 3))
@@ -744,7 +744,7 @@ class BrainOrchestrator:
                 config=config,
                 conn_str=self.sqlserver_conn_str,
                 authenticated_user=self.authenticated_user,
-                limit=adapter.max_refill_batch,
+                limit=min(adapter.max_refill_batch, MAX_CLAIMS_PER_CYCLE),
             )
             if not candidates:
                 self.logger.info(f"[{site_id}] Sin candidatos remotos válidos.")
