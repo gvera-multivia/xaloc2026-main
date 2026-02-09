@@ -116,6 +116,22 @@ class SQLiteDatabase:
                 """
             )
 
+        # Ampliar regex de Xaloc para aceptar expedientes con sufijo -SAD (y sin sufijo).
+        cursor.execute(
+            """
+            UPDATE organismo_config
+            SET regex_expediente = '^\\d{4}/\\d+(?:-(?:MUL|SAD))?$',
+                updated_at = ?
+            WHERE site_id = 'xaloc_girona'
+              AND (
+                    regex_expediente = '^\\d{4}/\\d{6}-MUL$'
+                 OR regex_expediente = '^\\d{4}/\\d+-MUL$'
+                 OR regex_expediente = '^\\d{4}/\\d+(?:-MUL)?$'
+              )
+            """,
+            (datetime.now().isoformat(),),
+        )
+
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS job_runs (

@@ -19,6 +19,7 @@ def test_formatting():
         ("2025-257608-MUL", "2025/257608-MUL", True),
         ("2025-257339-MUL", "2025/257339-MUL", True),
         ("2025-257939-MUL", "2025/257939-MUL", True),
+        ("2025/219303-SAD", "2025/219303-SAD", True),
         # Casos bordes
         ("  2026-123-MUL  ", "2026/123-MUL", True),
         ("NT/12345678/2024/000000000", "NT/12345678/2024/000000000", False), # NT no se corrige con fix_format, se corrige con fix_nt_expediente

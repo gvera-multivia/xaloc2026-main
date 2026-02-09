@@ -27,7 +27,7 @@ PATRON_BUSQUEDA_MUL_SQL = "%[0-9][0-9][0-9][0-9]/[0-9][0-9][0-9][0-9][0-9][0-9]-
 PATRON_BUSQUEDA_BASE_SQL = "%[0-9][0-9][0-9][0-9]/[0-9][0-9][0-9][0-9][0-9][0-9]%"
 
 # Extrae YYYY/NNNN... con o sin -MUL desde texto libre
-EXP_EXTRACT_REGEX = re.compile(r"\b(?:19|20)\d{2}/\d+(?:-MUL)?\b", re.IGNORECASE)
+EXP_EXTRACT_REGEX = re.compile(r"\b(?:19|20)\d{2}/\d+(?:-(?:MUL|SAD))?\b", re.IGNORECASE)
 
 
 def is_nt_pattern(expediente: str) -> bool:
