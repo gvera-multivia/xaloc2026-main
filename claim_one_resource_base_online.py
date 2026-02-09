@@ -452,6 +452,7 @@ async def build_base_online_payload(recurso: dict) -> dict:
         # Por defecto, el worker marcará el recurso como completado en XVIA al finalizar correctamente.
         "claimed_at": datetime.now().isoformat(),
     }
+    payload["num_butlleti"] = expediente_raw
 
     # Recoger adjuntos de la DB
     adjuntos_db = []
