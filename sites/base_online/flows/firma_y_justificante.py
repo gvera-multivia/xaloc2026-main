@@ -265,6 +265,7 @@ def _iter_page_frames(page: Page):
 async def _find_justificante_action_locator(page: Page, *, timeout_ms: int = 60000):
     justificante_re = re.compile(r"Imprimir\s+justific(?:ant|ante)", re.IGNORECASE)
     imprimir_re = re.compile(r"Imprimir", re.IGNORECASE)
+    justificant_registre_re = re.compile(r"Justificant\s+de\s+registre", re.IGNORECASE)
 
     deadline = time.monotonic() + (timeout_ms / 1000)
     last_error: Exception | None = None
@@ -279,6 +280,8 @@ async def _find_justificante_action_locator(page: Page, *, timeout_ms: int = 600
                     frame.locator("a.button.default").filter(has_text=imprimir_re),
                     frame.locator("input[type='submit'][value*='Imprimir'], input[type='button'][value*='Imprimir']"),
                     frame.locator("button").filter(has_text=imprimir_re),
+                    frame.locator("button").filter(has_text=justificant_registre_re),
+                    frame.locator("button[onclick*='justificant']"),
                 ]
                 for locator in candidates:
                     if await locator.count() > 0:
@@ -296,9 +299,43 @@ async def _find_justificante_action_locator(page: Page, *, timeout_ms: int = 600
 
     if last_error is not None:
         raise TimeoutError(
-            "No se encontró el botón/enlace de 'Imprimir justificante/justificant' dentro del timeout."
+            "No se encontró el botón/enlace de justificante dentro del timeout."
         ) from last_error
-    raise TimeoutError("No se encontró el botón/enlace de 'Imprimir justificante/justificant' dentro del timeout.")
+    raise TimeoutError("No se encontró el botón/enlace de justificante dentro del timeout.")
+
+
+async def _descargar_desde_popup_visor(popup_doc: Page, tmp_path: Path) -> bool:
+    try:
+        await popup_doc.wait_for_load_state("domcontentloaded")
+    except Exception:
+        pass
+
+    # Preferimos CSV estampado: a onclick="descarrega(true)"
+    try:
+        csv_link = popup_doc.locator("a[onclick*='descarrega(true)']").first
+        if await csv_link.count() > 0:
+            download_task = asyncio.create_task(popup_doc.wait_for_event("download", timeout=15000))
+            await csv_link.click()
+            download = await download_task
+            await download.save_as(tmp_path)
+            return True
+    except Exception:
+        pass
+
+    # Fallback robusto: construir URL de descarga desde JS y bajar por fetch en el contexto autenticado del popup.
+    try:
+        csv_url = await popup_doc.evaluate(
+            "() => (typeof generarUrlDescarrega === 'function' ? generarUrlDescarrega(true) : '')"
+        )
+        csv_url = (csv_url or "").strip()
+        if csv_url:
+            pdf_bytes = await _descargar_pdf_via_fetch(popup_doc, csv_url)
+            tmp_path.write_bytes(pdf_bytes)
+            return True
+    except Exception:
+        pass
+
+    return False
 
 
 async def _find_signar_presentar_trigger(page: Page, *, timeout_ms: int = 30000):
@@ -416,12 +453,13 @@ async def firmar_presentar_y_descargar_justificante(page: Page, *, payload: dict
         except Exception:
             pass
 
-        url = popup_doc.url or ""
-        if not url or url == "about:blank":
-            raise RuntimeError("Popup del justificante sin URL válida (about:blank).")
-
-        pdf_bytes = await _descargar_pdf_via_fetch(popup_doc, url)
-        tmp_path.write_bytes(pdf_bytes)
+        ok_popup_download = await _descargar_desde_popup_visor(popup_doc, tmp_path)
+        if not ok_popup_download:
+            url = popup_doc.url or ""
+            if not url or url == "about:blank":
+                raise RuntimeError("Popup del justificante sin URL válida (about:blank).")
+            pdf_bytes = await _descargar_pdf_via_fetch(popup_doc, url)
+            tmp_path.write_bytes(pdf_bytes)
         try:
             await popup_doc.close()
         except Exception:
