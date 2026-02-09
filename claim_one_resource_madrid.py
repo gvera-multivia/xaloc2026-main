@@ -424,7 +424,7 @@ def fetch_one_resource_madrid(conn_str: str, authenticated_user: Optional[str] =
     """Busca UN recurso disponible de Madrid."""
     logger.info("🔍 Buscando recursos de MADRID disponibles...")
 
-    regex_madrid = [re.compile(r"^\d{3}/\d{9}\.\d$"), re.compile(r"^\d{9}\.\d$")]
+    regex_madrid = [re.compile(r"^\d{3}/\d{8,9}\.\d$"), re.compile(r"^\d{8,9}\.\d$")]
 
     texp_values = [2, 3]
     texp_placeholders = ",".join(["?"] * len(texp_values))

@@ -21,7 +21,7 @@ def test_job_filtering():
         {"idRecurso": 5, "Expedient": "123/123456789.0", "FaseProcedimiento": "Sancion", "Estado": 0},
     ]
 
-    regex_madrid = [claim_one_resource_madrid.re.compile(r'^\d{3}/\d{9}\.\d$')]
+    regex_madrid = [claim_one_resource_madrid.re.compile(r"^\d{3}/\d{8,9}\.\d$")]
     
     results = []
     for rec in recursos:

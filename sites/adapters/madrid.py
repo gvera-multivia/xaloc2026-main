@@ -19,6 +19,7 @@ class MadridAdapter(SiteAdapter):
     ADJUNTO_URL_TEMPLATE = (
         "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf-adjuntos/{id}"
     )
+    DEFAULT_REGEX_EXPEDIENTE = r"^(\d{3}/\d{8,9}\.\d|\d{8,9}\.\d)$"
 
     SQL_FETCH_RECURSOS_MADRID = """
 SELECT 
@@ -86,7 +87,8 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
 
     def __init__(self):
         super().__init__(site_id="madrid", priority=0, target_queue_depth=2, max_refill_batch=5)
-        self._regex_madrid = re.compile(r"^(\d{3}/\d{9}\.\d|\d{9}\.\d)$")
+        self._regex_expediente_cache: dict[str, re.Pattern[str]] = {}
+        self._regex_expediente_fallback = re.compile(self.DEFAULT_REGEX_EXPEDIENTE)
 
     @staticmethod
     def _clean_str(v: Any) -> str:
@@ -125,6 +127,16 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         authenticated_user: Optional[str],
         limit: int,
     ) -> list[dict]:
+        regex_pattern = self._clean_str(config.get("regex_expediente")) or self.DEFAULT_REGEX_EXPEDIENTE
+        regex = self._regex_expediente_cache.get(regex_pattern)
+        if regex is None:
+            try:
+                regex = re.compile(regex_pattern)
+            except re.error:
+                logger.warning(f"[madrid] Regex inválido en config.regex_expediente: {regex_pattern!r}. Usando fallback.")
+                regex = self._regex_expediente_fallback
+            self._regex_expediente_cache[regex_pattern] = regex
+
         texp_values = [2, 3]
         texp_placeholders = ",".join(["?"] * len(texp_values))
 
@@ -175,8 +187,10 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                     break
 
                 expediente = self._clean_str(recurso.get("Expedient")).upper()
-                if not expediente or not self._regex_madrid.match(expediente):
+                expediente = re.sub(r"\s+", "", expediente)
+                if not expediente or not regex.match(expediente):
                     continue
+                recurso["Expedient"] = expediente
 
                 fase_norm = self._normalize_text(recurso.get("FaseProcedimiento"))
                 if any(x in fase_norm for x in ["reclamacion", "embargo", "apremio"]):
@@ -210,7 +224,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
     def _parse_expediente(expediente: str, *, fase_raw: str = "", es_empresa: bool = False) -> dict:
         exp = MadridAdapter._clean_str(expediente).upper()
 
-        m1 = re.match(r"^(?P<nnn>\d{3})/(?P<exp>\d{9})\.(?P<d>\d)$", exp)
+        m1 = re.match(r"^(?P<nnn>\d{3})/(?P<exp>\d{8,9})\.(?P<d>\d)$", exp)
         if m1:
             return {
                 "expediente_completo": exp,
@@ -223,10 +237,10 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 "expediente_exp_num": "",
             }
 
-        m3 = re.match(r"^(?P<exp>\d{9})\.(?P<d>\d)$", exp)
+        m3 = re.match(r"^(?P<exp>\d{8,9})\.(?P<d>\d)$", exp)
         if m3:
             prefijo = MadridAdapter._inferir_prefijo_expediente(fase_raw=fase_raw, es_empresa=es_empresa)
-            exp_reconstruido = f"{prefijo}/{exp}"
+            exp_reconstruido = f"{prefijo}/{m3.group('exp')}.{m3.group('d')}"
             return {
                 "expediente_completo": exp_reconstruido,
                 "expediente_tipo": "opcion1",
