@@ -20,6 +20,7 @@ import re
 import sys
 from datetime import datetime
 from decimal import Decimal
+from pathlib import Path
 
 import aiohttp
 import pyodbc
@@ -51,6 +52,8 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger("claim_base_online")
+MULTIVIA_PHONE = "932531411"
+MULTIVIA_EMAIL = "info@xvia-serviciosjuridicos.com"
 
 # =============================================================================
 # CONSULTAS SQL SERVER
@@ -135,8 +138,8 @@ def valida_expediente_base(expediente: str) -> bool:
     if re.match(r"^\d{5}-\d{4}/\d{4,5}-GIM$", exp):
         return True
 
-    # EXE: 1-2025/27474-EXE o 1-2025-140620-EXE (4-6 dígitos, / o -)
-    if re.match(r"^\d-\d{4}[/\-]\d{4,6}-EXE$", exp):
+    # EXE/ECC: 1-2025/27474-EXE o 1-2025-140620-ECC (4-6 dígitos, / o -)
+    if re.match(r"^\d-\d{4}[/\-]\d{4,6}-(EXE|ECC)$", exp):
         return True
 
     # EXCLUIR explícitamente Tipo B
@@ -149,19 +152,15 @@ def valida_expediente_base(expediente: str) -> bool:
 
 def determina_protocolo(fase: str, expediente: str = "") -> str:
     """ Determina si es P1, P2 o P3 según la fase y el número de expediente. """
-    exp = str(expediente).upper().strip()
-    
-    # Precedencia: Si es -EXE siempre es P3
-    if exp.endswith("-EXE"):
-        return "P3"
-        
-    f = str(fase).upper()
-    if any(tag in f for tag in ["IDENTIFICACION", "IDENTIFICACIÓ"]):
+    f = _normalize_text(fase)
+    if "identificacion" in f:
         return "P1"
-    if "APREMIO" in f:
+
+    # P2 = alegaciones (no reposición)
+    if any(tag in f for tag in ("denuncia", "propuesta", "subsanacion", "alegacion", "alegaciones")):
         return "P2"
 
-    # SI NO es apremio o identificacion es P3
+    # Resto = recurso de reposición
     return "P3"
 
 
@@ -182,8 +181,8 @@ def parse_expediente_base(expediente: str) -> dict:
             "num_butlleti": "",
         }
 
-    # EXE: 1-2025/27474-EXE o 1-2025-140620-EXE
-    m_exe = re.match(r"^(?P<id_ens>\d)-(?P<any>\d{4})[/\-](?P<num>\d{4,6})-EXE$", exp)
+    # EXE/ECC: 1-2025/27474-EXE o 1-2025-140620-ECC
+    m_exe = re.match(r"^(?P<id_ens>\d)-(?P<any>\d{4})[/\-](?P<num>\d{4,6})-(EXE|ECC)$", exp)
     if m_exe:
         return {
             "expediente_id_ens": m_exe.group("id_ens"),
@@ -435,12 +434,13 @@ async def build_base_online_payload(recurso: dict) -> dict:
         "fase_procedimiento": fase_raw,  # Para organizar justificantes (RECURSOS TELEMATICOS)
         "expediente": expediente_raw,  # Referencia original del recurso
         "protocol": protocolo,
-        "user_phone": tel,
-        "user_email": "info@xvia-serviciosjuridicos.com",
+        "user_phone": MULTIVIA_PHONE,
+        "user_email": MULTIVIA_EMAIL,
         "plate_number": _clean_str(recurso.get("matricula")),
         "data_denuncia": formatear_fecha(recurso.get("FAlta")),
         "nif": nif,
         "name": _clean_str(recurso.get("SujetoRecurso")).upper(),
+        "phone_original": tel,
         # Campos detallados de identidad para client_documentation.py
         "cliente_nombre": _clean_str(recurso.get("cliente_nombre")),
         "cliente_apellido1": _clean_str(recurso.get("cliente_apellido1")),
@@ -478,11 +478,19 @@ async def build_base_online_payload(recurso: dict) -> dict:
     # Lista total de archivos
     archivos_totales = [str(p) for p in (adjuntos_db + client_docs)]
     payload["archivos"] = archivos_totales
+    if recurso.get("adjuntos"):
+        payload["adjuntos"] = recurso["adjuntos"]
 
     if protocolo == "P1":
         payload["llicencia_conduccio"] = ""  # Pendiente de definición
 
     if protocolo == "P2":
+        payload["p2_nif"] = nif
+        payload["p2_rao_social"] = _clean_str(recurso.get("cliente_razon_social")) or _clean_str(
+            recurso.get("SujetoRecurso")
+        ).upper()
+        payload["p2_exposo"] = expone
+        payload["p2_solicito"] = solicita
         payload["exposo"] = expone
         payload["solicito"] = solicita
 
