@@ -7,6 +7,12 @@ from sites.base_online.data_models import BaseOnlineReposicionData
 from sites.base_online.flows.reposicion import rellenar_formulario_p3
 
 
-async def ejecutar_p3(page: Page, config: BaseOnlineConfig, data: BaseOnlineReposicionData) -> None:
-    await rellenar_formulario_p3(page, config, data)
+async def ejecutar_p3(
+    page: Page,
+    config: BaseOnlineConfig,
+    data: BaseOnlineReposicionData,
+    *,
+    payload: dict,
+) -> None:
+    await rellenar_formulario_p3(page, config, data, payload=payload)
 

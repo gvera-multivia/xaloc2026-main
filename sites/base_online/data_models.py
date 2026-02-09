@@ -97,4 +97,5 @@ class BaseOnlineTarget:
     p3: BaseOnlineReposicionData | None = None
     # Compat (arquitectura anterior)
     reposicion: BaseOnlineReposicionData | None = None
-    p1: BaseOnlineP1Data | None = None
+    # Payload crudo (para pasos post-envío como guardar justificantes)
+    payload: dict | None = None

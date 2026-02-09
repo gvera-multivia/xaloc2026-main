@@ -27,6 +27,7 @@ class BaseOnlineController:
         self,
         *,
         protocol: str | None = None,
+        payload: dict | None = None,
         # P1: Solicitud de identificación de conductor
         p1_telefon_mobil: str | None = None,
         p1_telefon_fix: str | None = None,
@@ -125,7 +126,7 @@ class BaseOnlineController:
                 identificacio=identificacio,
                 archivos_adjuntos=_require_paths("p1_archivos", p1_archivos),
             )
-            return BaseOnlineTarget(protocol=protocol_norm, p1=p1)
+            return BaseOnlineTarget(protocol=protocol_norm, p1=p1, payload=payload)
 
         if protocol_norm == "P2":
             contacte = BaseOnlineP1ContactData(
@@ -152,7 +153,7 @@ class BaseOnlineController:
                 solicito=_require("p2_solicito", p2_solicito),
                 archivos_adjuntos=_require_paths("p2_archivos", p2_archivos),
             )
-            return BaseOnlineTarget(protocol=protocol_norm, p2=p2)
+            return BaseOnlineTarget(protocol=protocol_norm, p2=p2, payload=payload)
 
         reposicion = BaseOnlineReposicionData(
             tipus_objecte=_require("p3_tipus_objecte", p3_tipus_objecte),
@@ -162,13 +163,14 @@ class BaseOnlineController:
             solicito=_require("p3_solicito", p3_solicito),
             archivos_adjuntos=_require_paths("p3_archivos", p3_archivos),
         )
-        return BaseOnlineTarget(protocol=protocol_norm, p3=reposicion, reposicion=reposicion)
+        return BaseOnlineTarget(protocol=protocol_norm, p3=reposicion, reposicion=reposicion, payload=payload)
 
     def map_data(self, data: dict) -> dict:
         """
         Mapea claves genéricas de DB/JSON a argumentos de create_target.
         """
         return {
+            "payload": data,
             "p1_telefon_mobil": data.get("p1_telefon_mobil") or data.get("user_phone"),
             "p1_telefon_fix": data.get("p1_telefon_fix"),
             "p1_correu": data.get("p1_correu") or data.get("user_email"),

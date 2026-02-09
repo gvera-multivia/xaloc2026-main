@@ -11,6 +11,7 @@ from playwright.async_api import Page
 
 from sites.base_online.config import BaseOnlineConfig
 from sites.base_online.data_models import BaseOnlineReposicionData
+from sites.base_online.flows.firma_y_justificante import firmar_presentar_y_descargar_justificante
 from sites.base_online.flows.upload import subir_archivos_por_modal
 
 
@@ -35,10 +36,16 @@ async def _avanzar_a_presentacion_p3(page: Page) -> None:
 
     boton_firma = page.locator("input[type='button'][value='Signar i Presentar']").first
     await boton_firma.wait_for(state="visible", timeout=20000)
-    logging.info("[P3] Pantalla 'Signar i Presentar' detectada (no se pulsa en modo demo).")
+    logging.info("[P3] Pantalla 'Signar i Presentar' detectada.")
 
 
-async def rellenar_formulario_p3(page: Page, config: BaseOnlineConfig, data: BaseOnlineReposicionData) -> None:
+async def rellenar_formulario_p3(
+    page: Page,
+    config: BaseOnlineConfig,
+    data: BaseOnlineReposicionData,
+    *,
+    payload: dict,
+) -> None:
     logging.info("[P3] Rellenando formulario de Recurso de Reposición...")
     delay_ms = getattr(config, "delay_ms", 500)
 
@@ -87,3 +94,6 @@ async def rellenar_formulario_p3(page: Page, config: BaseOnlineConfig, data: Bas
 
     # 8. Confirmación (llegar hasta la pantalla de firma)
     await _avanzar_a_presentacion_p3(page)
+
+    # 9. Firma + presentación + descarga del justificante
+    await firmar_presentar_y_descargar_justificante(page, payload=payload)

@@ -432,6 +432,8 @@ async def build_base_online_payload(recurso: dict) -> dict:
         "idRecurso": _convert_value(recurso["idRecurso"]),
         "idExp": _convert_value(recurso["idExp"]),
         "numclient": _convert_value(recurso.get("numclient")), # Añadido para documentación
+        "fase_procedimiento": fase_raw,  # Para organizar justificantes (RECURSOS TELEMATICOS)
+        "expediente": expediente_raw,  # Referencia original del recurso
         "protocol": protocolo,
         "user_phone": tel,
         "user_email": "info@xvia-serviciosjuridicos.com",
