@@ -145,7 +145,7 @@ def valida_expediente_base(expediente: str) -> bool:
     # EXCLUIR explícitamente Tipo B
     if re.match(r"^\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{7}$", exp):
         logger.info(f"⛔ Expediente Tipo B excluido por regla: {exp}")
-        return False
+        return True
 
     return False
 
