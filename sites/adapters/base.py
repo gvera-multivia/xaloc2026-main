@@ -209,6 +209,30 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
             conn.close()
 
     async def build_payloads(self, candidates: list[dict]) -> list[dict]:
+        if not candidates:
+            return []
+
+        # Preparar datos para clasificación por IA en batch
+        from core.address_classifier import classify_address_fallback, classify_addresses_batch_with_ai
+
+        items_for_ia: list[dict] = []
+        for r in candidates:
+            items_for_ia.append({
+                "idRecurso": r.get("idRecurso"),
+                "direccion_raw": self._clean_str(r.get("cliente_domicilio")),
+                "poblacion": self._clean_str(r.get("cliente_municipio")),
+                "numero": self._clean_str(r.get("cliente_numero")),
+                "piso": self._clean_str(r.get("cliente_planta")),
+                "puerta": self._clean_str(r.get("cliente_puerta")),
+            })
+
+        batch_mapping: dict[str, dict] = {}
+        if os.getenv("GROQ_API_KEY"):
+            try:
+                batch_mapping = await classify_addresses_batch_with_ai(items_for_ia)
+            except Exception as e:
+                logger.warning("[base_online][IA] Falló batch LLM, usando fallback: %s", e)
+
         payloads: list[dict] = []
         for r in candidates:
             fase_raw = self._clean_str(r.get("FaseProcedimiento"))
@@ -223,34 +247,31 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
             exp_parts = self._parse_expediente_base(expediente_raw)
             nif = self._clean_str(r.get("cif") or r.get("cliente_nif"))
             
-            # Dirección
+            # Datos de dirección (優先 IA batch -> fallback)
+            rid_str = str(r.get("idRecurso"))
+            clasif = batch_mapping.get(rid_str)
+            
             domicilio_raw = self._clean_str(r.get("cliente_domicilio"))
             poblacion = self._clean_str(r.get("cliente_municipio"))
             numero_db = self._clean_str(r.get("cliente_numero"))
             cp = self._clean_str(r.get("cliente_cp"))
             provincia = self._clean_str(r.get("cliente_provincia")) or poblacion
 
+            if not clasif:
+                clasif = classify_address_fallback(domicilio_raw)
+
             notif_data = {
-                "address_sigla": "CALLE", # Fallback
-                "address_street": domicilio_raw.upper(),
-                "address_number": numero_db,
+                "address_sigla": (clasif.get("tipo_via") or "CALLE").upper(),
+                "address_street": (clasif.get("calle") or domicilio_raw).upper(),
+                "address_number": (clasif.get("numero") or numero_db).upper(),
                 "address_zip": cp,
                 "address_city": poblacion.upper(),
                 "address_province": provincia.upper(),
                 "address_country": "ESPAÑA",
+                "address_esc": (clasif.get("escalera") or r.get("cliente_escalera") or "").upper(),
+                "address_planta": (clasif.get("planta") or r.get("cliente_planta") or "").upper(),
+                "address_puerta": (clasif.get("puerta") or r.get("cliente_puerta") or "").upper(),
             }
-
-            if os.getenv("GROQ_API_KEY"):
-                from core.address_classifier import classify_address_with_ai
-                try:
-                    cl = await classify_address_with_ai(direccion_raw=domicilio_raw, poblacion=poblacion, numero=numero_db)
-                    notif_data.update({
-                        "address_sigla": cl["tipo_via"],
-                        "address_street": cl["calle"].upper(),
-                        "address_number": cl["numero"] or numero_db,
-                    })
-                except Exception:
-                    pass
 
             expone, solicita = self._get_motivos_base(fase_raw, expediente_raw, r.get("SujetoRecurso"))
 
@@ -278,10 +299,9 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
 
             # Documentación del cliente
             try:
-                # Reutilizamos el connection string global (esto asume que brain.py o similar lo inyectará)
-                # En este contexto, simplificamos o usamos lo que hay en client_documentation
                 from brain import build_sqlserver_connection_string
                 conn_str = build_sqlserver_connection_string()
+                from core.client_documentation import build_required_client_documents_for_payload
                 client_docs = await build_required_client_documents_for_payload(payload, sqlserver_conn_str=conn_str, strict=False)
                 payload["archivos"] = [str(p) for p in client_docs]
             except Exception as e:
