@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 import shutil
+import time
 import unicodedata
 from pathlib import Path
 from typing import Any
@@ -178,7 +179,21 @@ async def _descargar_pdf_via_fetch(page: Page, url: str) -> bytes:
 async def _click_y_capturar_descarga_o_popup(page: Page, link_locator) -> tuple[Any | None, Page | None]:
     popup_task = asyncio.create_task(page.wait_for_event("popup", timeout=15000))
     download_task = asyncio.create_task(page.wait_for_event("download", timeout=15000))
-    await link_locator.click()
+    try:
+        try:
+            await link_locator.scroll_into_view_if_needed(timeout=2000)
+        except Exception:
+            pass
+
+        try:
+            await link_locator.click(timeout=5000)
+        except Exception:
+            # Fallback: dispara el click desde el DOM para esquivar overlays / pointer intercept.
+            await link_locator.evaluate("(el) => el.click()")
+    except Exception:
+        popup_task.cancel()
+        download_task.cancel()
+        raise
 
     done, pending = await asyncio.wait({popup_task, download_task}, return_when=asyncio.FIRST_COMPLETED)
     for task in pending:
@@ -198,6 +213,57 @@ async def _click_y_capturar_descarga_o_popup(page: Page, link_locator) -> tuple[
         else:
             popup = result
     return download, popup
+
+
+def _iter_page_frames(page: Page):
+    try:
+        frames = list(page.frames)
+    except Exception:
+        frames = []
+    if page.main_frame not in frames:
+        frames.insert(0, page.main_frame)
+    else:
+        frames.sort(key=lambda f: 0 if f == page.main_frame else 1)
+    return frames
+
+
+async def _find_justificante_action_locator(page: Page, *, timeout_ms: int = 60000):
+    justificante_re = re.compile(r"Imprimir\s+justific(?:ant|ante)", re.IGNORECASE)
+    imprimir_re = re.compile(r"Imprimir", re.IGNORECASE)
+
+    deadline = time.monotonic() + (timeout_ms / 1000)
+    last_error: Exception | None = None
+
+    while time.monotonic() < deadline:
+        for frame in _iter_page_frames(page):
+            try:
+                candidates = [
+                    frame.locator("a.button.default").filter(has_text=justificante_re),
+                    frame.locator("a").filter(has_text=justificante_re),
+                    frame.locator("a[onclick*='jsfcljs']").filter(has_text=imprimir_re),
+                    frame.locator("a.button.default").filter(has_text=imprimir_re),
+                    frame.locator("input[type='submit'][value*='Imprimir'], input[type='button'][value*='Imprimir']"),
+                    frame.locator("button").filter(has_text=imprimir_re),
+                ]
+                for locator in candidates:
+                    if await locator.count() > 0:
+                        first = locator.first
+                        try:
+                            await first.wait_for(state="attached", timeout=2000)
+                        except Exception:
+                            pass
+                        return first
+            except Exception as e:
+                last_error = e
+                continue
+
+        await page.wait_for_timeout(500)
+
+    if last_error is not None:
+        raise TimeoutError(
+            "No se encontró el botón/enlace de 'Imprimir justificante/justificant' dentro del timeout."
+        ) from last_error
+    raise TimeoutError("No se encontró el botón/enlace de 'Imprimir justificante/justificant' dentro del timeout.")
 
 
 async def firmar_presentar_y_descargar_justificante(page: Page, *, payload: dict) -> Path:
@@ -263,8 +329,12 @@ async def firmar_presentar_y_descargar_justificante(page: Page, *, payload: dict
         or "UNKNOWN"
     )
 
-    link = page.locator("a.button.default", has_text=re.compile(r"Imprimir\\s+justificant", re.IGNORECASE)).first
-    await link.wait_for(state="visible", timeout=30000)
+    try:
+        await page.wait_for_load_state("domcontentloaded", timeout=10000)
+    except Exception:
+        pass
+
+    link = await _find_justificante_action_locator(page, timeout_ms=60000)
 
     tmp_dir = Path("tmp") / "base_online" / "justificantes" / str(id_recurso)
     tmp_dir.mkdir(parents=True, exist_ok=True)
