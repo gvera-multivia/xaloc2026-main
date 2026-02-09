@@ -113,16 +113,41 @@ def _extraer_expediente_desde_success_text(texto: str) -> str | None:
     return None
 
 
-async def _obtener_popup_si_existe(page: Page, trigger_locator) -> Page | None:
+async def _abrir_modal_firma(page: Page, trigger_locator) -> None:
+    """
+    En BASE no se abre un popup de ventana: se abre un modal Bootstrap (#signatura)
+    con un iframe #contingut_signatura. Abrimos el modal evitando bloqueos del backdrop.
+    """
+    modal = page.locator("#signatura").first
+
+    # Si ya está abierto, no hacer nada.
     try:
-        async with page.expect_popup(timeout=10000) as p:
-            await trigger_locator.click()
-        popup = await p.value
-        await popup.wait_for_load_state("domcontentloaded")
-        return popup
-    except TimeoutError:
-        await trigger_locator.click()
-        return None
+        if await modal.is_visible():
+            return
+    except Exception:
+        pass
+
+    # Preferir la función JS (evita "backdrop intercepts pointer events").
+    try:
+        await page.evaluate(
+            """() => {
+              if (typeof peticioDeSignatura === 'function') return peticioDeSignatura();
+              if (typeof signarEnvelopedModal === 'function') return signarEnvelopedModal();
+              return null;
+            }"""
+        )
+    except Exception:
+        pass
+
+    # Fallback: click forzado sobre el botón visible (puede estar parcialmente tapado por el modal).
+    try:
+        await trigger_locator.click(force=True, timeout=5000)
+    except Exception:
+        pass
+
+    await modal.wait_for(state="visible", timeout=POPUP_TIMEOUT_MS)
+    iframe = page.locator("iframe#contingut_signatura").first
+    await iframe.wait_for(state="attached", timeout=POPUP_TIMEOUT_MS)
 
 
 async def _mover_a_destino(tmp_path: Path, *, destino_dir: Path) -> Path:
@@ -187,11 +212,11 @@ async def firmar_presentar_y_descargar_justificante(page: Page, *, payload: dict
     await trigger.wait_for(state="visible", timeout=30000)
 
     logger.info("[BASE] Abriendo popup de firma...")
-    popup = await _obtener_popup_si_existe(page, trigger)
-    popup_page = popup or page
+    await _abrir_modal_firma(page, trigger)
+    popup_frame = page.frame_locator("#contingut_signatura").first
 
     logger.info("[BASE] Confirmando checkbox en popup...")
-    checkbox = popup_page.locator("#confirmacio").first
+    checkbox = popup_frame.locator("#confirmacio").first
     await checkbox.wait_for(state="visible", timeout=POPUP_TIMEOUT_MS)
     try:
         await checkbox.check()
@@ -199,20 +224,30 @@ async def firmar_presentar_y_descargar_justificante(page: Page, *, payload: dict
         await checkbox.click()
 
     logger.info("[BASE] Click en 'Signar' dentro del popup...")
-    sig_button = popup_page.locator("#form_0\\:sig_button").first
+    sig_button = popup_frame.locator("#form_0\\:sig_button").first
     await sig_button.wait_for(state="visible", timeout=POPUP_TIMEOUT_MS)
     await sig_button.click()
 
     logger.info("[BASE] Cerrando popup (Continuar)...")
-    close_button = popup_page.locator("#form_0\\:close_button").first
+    close_button = popup_frame.locator("#form_0\\:close_button").first
     await close_button.wait_for(state="visible", timeout=POPUP_TIMEOUT_MS)
     await close_button.click()
 
-    if popup is not None:
-        try:
-            await popup.wait_for_event("close", timeout=20000)
-        except TimeoutError:
-            pass
+    # Esperar a que el modal se cierre en la página principal.
+    try:
+        await page.wait_for_function(
+            """() => {
+              const el = document.getElementById('signatura');
+              if (!el) return true;
+              const style = window.getComputedStyle(el);
+              const hidden = el.getAttribute('aria-hidden') === 'true';
+              const displayNone = style && style.display === 'none';
+              return hidden || displayNone || !el.classList.contains('in');
+            }""",
+            timeout=30000,
+        )
+    except Exception:
+        pass
 
     logger.info("[BASE] Esperando mensaje de éxito tras cerrar popup...")
     success = page.locator("div.success").first
