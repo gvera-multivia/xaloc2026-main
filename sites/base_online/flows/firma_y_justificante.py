@@ -98,7 +98,7 @@ def _sanitize_filename_component(value: str) -> str:
 
 def _justificante_filename(num_expediente: str) -> str:
     clean_exp = _sanitize_filename_component(num_expediente)
-    return f"JUSTIFICANTE - {clean_exp}.pdf"
+    return f"JUSTIFICANTE- {clean_exp}.pdf"
 
 
 def _extraer_expediente_desde_success_text(texto: str) -> str | None:
@@ -112,6 +112,41 @@ def _extraer_expediente_desde_success_text(texto: str) -> str | None:
     if m:
         return m.group(1).strip()
     return None
+
+
+def _extraer_expediente_desde_payload(payload: dict) -> str | None:
+    """
+    Preferir SIEMPRE el expediente que viene de base de datos (payload), no el que devuelve la web.
+    """
+    for key in ("expediente", "Expedient", "expediente_num", "expediente_raw", "expediente_base"):
+        val = payload.get(key)
+        if val:
+            return str(val).strip()
+    return None
+
+
+def _normalizar_expediente_para_nombre(expediente_raw: str) -> str:
+    """
+    Extrae/normaliza el expediente para usarlo en nombre de archivo.
+    - Quita puntos finales y espacios
+    - Si viene con texto alrededor, intenta extraer el token de expediente
+    """
+    exp = (expediente_raw or "").strip()
+    exp = exp.rstrip(".").strip()
+    if not exp:
+        return "UNKNOWN"
+
+    # Patrones comunes BASE: 43150-2026/3320-GIM, 1-2026/899-GIR, 1-2025/27474-EXE, etc.
+    patterns = [
+        r"\b\d{5}-\d{4}/\d{1,10}-[A-Z]{2,5}\b",
+        r"\b\d-\d{4}[/\-]\d{1,10}-[A-Z]{2,5}\b",
+    ]
+    for pat in patterns:
+        m = re.search(pat, exp)
+        if m:
+            return m.group(0)
+
+    return exp
 
 
 async def _abrir_modal_firma(page: Page, trigger_locator) -> None:
@@ -321,13 +356,9 @@ async def firmar_presentar_y_descargar_justificante(page: Page, *, payload: dict
     success_text = (await success.inner_text()).strip()
     logger.info("[BASE] Success detectado: %s", " ".join(success_text.split())[:200])
 
-    expediente = (
-        _extraer_expediente_desde_success_text(success_text)
-        or payload.get("expediente")
-        or payload.get("expediente_num")
-        or payload.get("expediente_raw")
-        or "UNKNOWN"
-    )
+    expediente_db = _extraer_expediente_desde_payload(payload)
+    expediente_web = _extraer_expediente_desde_success_text(success_text)
+    expediente = _normalizar_expediente_para_nombre(expediente_db or expediente_web or "UNKNOWN")
 
     try:
         await page.wait_for_load_state("domcontentloaded", timeout=10000)
