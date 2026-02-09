@@ -141,6 +141,8 @@ class MadridController:
         )
 
         tipo_doc_raw = _require("notif_tipo_documento", notif_tipo_documento).upper()
+        if tipo_doc_raw == "PS":
+            tipo_doc_raw = "PASAPORTE"
         try:
             tipo_doc = TipoDocumento[tipo_doc_raw]
         except KeyError as e:

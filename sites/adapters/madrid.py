@@ -79,6 +79,11 @@ WHERE {organisme_like_clause}
 ORDER BY rs.Estado ASC, rs.idRecurso ASC
 """
 
+    RE_DNI = re.compile(r"^\d{8}[A-Z]$")
+    RE_NIE = re.compile(r"^[XYZ]\d{7}[A-Z]$")
+    RE_CIF = re.compile(r"^[ABCDEFGHJNPQRSUVW]\d{7}[0-9A-J]$")
+    RE_PASAPORTE_SIMPLE = re.compile(r"^[A-Z]{2,3}\d{5,9}$")
+
     def __init__(self):
         super().__init__(site_id="madrid", priority=0, target_queue_depth=2, max_refill_batch=5)
         self._regex_madrid = re.compile(r"^(\d{3}/\d{9}\.\d|\d{9}\.\d)$")
@@ -86,6 +91,22 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
     @staticmethod
     def _clean_str(v: Any) -> str:
         return str(v).strip() if v is not None else ""
+
+    @staticmethod
+    def _normalize_document_id(doc: Any) -> str:
+        """
+        Normaliza documentos (NIF/NIE/PASAPORTE) para uso en formularios:
+        - Uppercase
+        - Elimina prefijo 'ES' si existe (p.ej. 'ESB12345678')
+        - Elimina separadores (espacios, guiones, puntos, etc.)
+        """
+        if not doc:
+            return ""
+        d = str(doc).strip().upper()
+        if d.startswith("ES") and len(d) > 2:
+            d = d[2:]
+        d = re.sub(r"[^A-Z0-9]+", "", d)
+        return d
 
     @staticmethod
     def _normalize_text(text: Any) -> str:
@@ -364,11 +385,25 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
 
     @staticmethod
     def _detectar_tipo_documento(doc: str) -> str:
-        if not doc:
+        """
+        Detecta el tipo de documento para el selector del formulario de Madrid.
+        Valores esperados: NIF, NIE, PASAPORTE.
+        """
+        d = MadridAdapter._normalize_document_id(doc)
+        if not d:
             return "NIF"
-        d = doc.strip().upper()
-        if re.match(r"^[A-Z]{3}[0-9]+", d):
-            return "PS"
+
+        if MadridAdapter.RE_NIE.match(d) or re.match(r"^[XYZ]\d{7,8}$", d):
+            return "NIE"
+
+        # DNI/NIF persona física o CIF persona jurídica (Madrid usa "NIF" para ambos)
+        if MadridAdapter.RE_DNI.match(d) or MadridAdapter.RE_CIF.match(d) or re.match(r"^[KLM]\d{7}[A-Z0-9]$", d):
+            return "NIF"
+
+        # Pasaportes: muy variables, pero suele ser alfanumérico.
+        if MadridAdapter.RE_PASAPORTE_SIMPLE.match(d) or (re.search(r"[A-Z]", d) and re.search(r"\d", d) and 6 <= len(d) <= 15):
+            return "PASAPORTE"
+
         return "NIF"
 
     @staticmethod
@@ -463,7 +498,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 logger.warning("[MADRID] Recurso %s sin NIF válido. Saltando.", r.get("idRecurso"))
                 continue
 
-            nif = nif.strip().upper()
+            nif = self._normalize_document_id(nif)
             fase_raw = self._clean_str(r.get("FaseProcedimiento"))
 
             exp_parts = self._parse_expediente(expediente_raw, fase_raw=fase_raw, es_empresa=(tipo_cliente == 2))

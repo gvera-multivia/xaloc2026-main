@@ -537,22 +537,37 @@ class BrainOrchestrator:
             motivos_text = f"ASUNTO: Recurso expediente {expediente}\n\nEXPONE: ...\n\nSOLICITA: ..."
         
         # --- Construir mandatario ---
-        def _extraer_documento_control(documento: str) -> tuple:
-            doc_clean = documento.strip().upper()
+        def _normalize_document_id(doc: str) -> str:
+            if not doc:
+                return ""
+            d = doc.strip().upper()
+            if d.startswith("ES") and len(d) > 2:
+                d = d[2:]
+            return re.sub(r"[^A-Z0-9]+", "", d)
+
+        def _extraer_documento_control(documento: str) -> tuple[str, str]:
+            doc_clean = _normalize_document_id(documento)
             if len(doc_clean) < 2:
                 return ("", "")
             return (doc_clean[:-1], doc_clean[-1])
-        
+
         def _detectar_tipo_documento(doc: str) -> str:
-            if not doc:
+            """
+            Detecta documento del notificado (Madrid): NIF, NIE o PASAPORTE.
+            """
+            d = _normalize_document_id(doc)
+            if not d:
                 return "NIF"
-            doc = doc.strip().upper()
-            if re.match(r'^[A-Z]{3}[0-9]+', doc):
-                return "PS"
+            if re.match(r"^[XYZ]\d{7}[A-Z]$", d) or re.match(r"^[XYZ]\d{7,8}$", d):
+                return "NIE"
+            if re.match(r"^\d{8}[A-Z]$", d) or re.match(r"^[ABCDEFGHJNPQRSUVW]\d{7}[0-9A-J]$", d) or re.match(r"^[KLM]\d{7}[A-Z0-9]$", d):
+                return "NIF"
+            if re.match(r"^[A-Z]{2,3}\d{5,9}$", d) or (re.search(r"[A-Z]", d) and re.search(r"\d", d) and 6 <= len(d) <= 15):
+                return "PASAPORTE"
             return "NIF"
         
         empresa = _clean_str(recurso.get("Empresa") or recurso.get("Nombrefiscal")).upper()
-        cif = _clean_str(recurso.get("cif") or recurso.get("nifempresa")).upper()
+        cif = _normalize_document_id(_clean_str(recurso.get("cif") or recurso.get("nifempresa")))
         
         if empresa or cif:
             # Persona JURÍDICA
@@ -565,9 +580,12 @@ class BrainOrchestrator:
             }
         else:
             # Persona FÍSICA
-            nif = _clean_str(recurso.get("cliente_nif")).upper()
-            doc_num, doc_ctrl = _extraer_documento_control(nif) if nif else ("", "")
+            nif = _normalize_document_id(_clean_str(recurso.get("cliente_nif")))
             tipo_doc = _detectar_tipo_documento(nif)
+            if tipo_doc == "PASAPORTE":
+                doc_num, doc_ctrl = nif, ""
+            else:
+                doc_num, doc_ctrl = _extraer_documento_control(nif) if nif else ("", "")
             mandatario = {
                 "tipo_persona": "FISICA",
                 "tipo_doc": tipo_doc,
