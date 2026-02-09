@@ -734,8 +734,9 @@ class BrainOrchestrator:
     async def run_tick(self) -> dict:
         """
         Ejecuta un tick del scheduler:
-        - Determina el site "locked" (no mezclar organismos).
-        - Repone la cola hasta `target_queue_depth` si hay candidatos.
+        - Recorre todos los sites habilitados (sin lock global).
+        - Repone cola por site hasta su target.
+        - Respeta el limite global MAX_CLAIMS_PER_CYCLE.
         """
 
         stats = {"claimed": 0, "enqueued": 0, "errors": 0}
@@ -745,98 +746,108 @@ class BrainOrchestrator:
             self.logger.warning("No hay adapters habilitados/configurados (revisa organismo_config + BRAIN_ENABLED_SITES)")
             return stats
 
-        site_id = await self._choose_site_to_refill(adapters, configs)
-        if not site_id:
-            self.logger.info("No hay lock ni candidatos remotos disponibles en sites habilitados.")
-            return stats
+        remaining_claim_budget = MAX_CLAIMS_PER_CYCLE
 
-        adapter = self.adapters.get(site_id)
-        config = configs.get(site_id)
-        if not adapter or not config:
-            self.logger.warning(f"[{site_id}] Sin adapter/config; saltando.")
-            return stats
+        for adapter in adapters:
+            if remaining_claim_budget <= 0:
+                break
 
-        if self.queue_backend == "redis":
-            queue_depth = self.queue_gateway.count_ready(site_id)
-        else:
-            queue_depth = self.db.count_tasks(site_id)
-        if queue_depth >= adapter.target_queue_depth:
-            self.logger.info(f"[{site_id}] Cola OK (depth={queue_depth} >= target={adapter.target_queue_depth}); no se repone.")
-            return stats
+            site_id = adapter.site_id
+            config = configs.get(site_id)
+            if not config:
+                self.logger.warning(f"[{site_id}] Sin config activa; saltando.")
+                continue
 
-        self.logger.info(
-            f"[{site_id}] Refill: queue_depth={queue_depth} target={adapter.target_queue_depth} batch={adapter.max_refill_batch}"
-        )
+            if self.queue_backend == "redis":
+                queue_depth = self.queue_gateway.count_ready(site_id)
+            else:
+                queue_depth = self.db.count_tasks(site_id)
 
-        try:
-            await self.init_session(config["login_url"])
-            candidates = adapter.fetch_candidates(
-                config=config,
-                conn_str=self.sqlserver_conn_str,
-                authenticated_user=self.authenticated_user,
-                limit=min(adapter.max_refill_batch, MAX_CLAIMS_PER_CYCLE),
+            if queue_depth >= adapter.target_queue_depth:
+                self.logger.info(f"[{site_id}] Cola OK (depth={queue_depth} >= target={adapter.target_queue_depth}); no se repone.")
+                continue
+
+            site_slots = max(adapter.target_queue_depth - queue_depth, 0)
+            site_limit = min(adapter.max_refill_batch, site_slots, remaining_claim_budget)
+            if site_limit <= 0:
+                continue
+
+            self.logger.info(
+                f"[{site_id}] Refill: queue_depth={queue_depth} target={adapter.target_queue_depth} batch={site_limit}"
             )
-            if not candidates:
-                self.logger.info(f"[{site_id}] Sin candidatos remotos válidos.")
-                return stats
 
-            filtered_candidates: list[dict] = []
-            skipped_duplicates = 0
-            for cand in candidates:
-                rid = cand.get("idRecurso")
-                try:
-                    rid_int = int(rid)
-                except Exception:
-                    rid_int = None
+            try:
+                await self.init_session(config["login_url"])
+                candidates = adapter.fetch_candidates(
+                    config=config,
+                    conn_str=self.sqlserver_conn_str,
+                    authenticated_user=self.authenticated_user,
+                    limit=site_limit,
+                )
+                if not candidates:
+                    self.logger.info(f"[{site_id}] Sin candidatos remotos validos.")
+                    continue
 
-                if rid_int is not None:
-                    if self.db.has_active_task_for_resource(site_id, rid_int):
-                        skipped_duplicates += 1
-                        continue
-                    if self.db.has_pending_authorization_for_resource(site_id, rid_int):
-                        skipped_duplicates += 1
-                        continue
-                filtered_candidates.append(cand)
+                filtered_candidates: list[dict] = []
+                skipped_duplicates = 0
+                for cand in candidates:
+                    rid = cand.get("idRecurso")
+                    try:
+                        rid_int = int(rid)
+                    except Exception:
+                        rid_int = None
 
-            if skipped_duplicates:
-                self.logger.info(f"[{site_id}] Candidatos omitidos por duplicado activo/pending: {skipped_duplicates}")
+                    if rid_int is not None:
+                        if self.db.has_active_task_for_resource(site_id, rid_int):
+                            skipped_duplicates += 1
+                            continue
+                        if self.db.has_pending_authorization_for_resource(site_id, rid_int):
+                            skipped_duplicates += 1
+                            continue
+                    filtered_candidates.append(cand)
 
-            candidates = filtered_candidates
-            if not candidates:
-                self.logger.info(f"[{site_id}] Todos los candidatos ya estaban en cola o pendientes de autorización.")
-                return stats
+                if skipped_duplicates:
+                    self.logger.info(f"[{site_id}] Candidatos omitidos por duplicado activo/pending: {skipped_duplicates}")
 
-            claimed_candidates: list[dict] = []
-            for cand in candidates:
-                try:
-                    ok = await adapter.ensure_claimed(self, cand)
-                    if ok:
-                        claimed_candidates.append(cand)
-                        if int(cand.get("Estado") or 0) == 0:
-                            stats["claimed"] += 1
-                except Exception as e:
-                    self.logger.error(f"[{site_id}] Error reclamando candidato: {e}")
-                    stats["errors"] += 1
+                if not filtered_candidates:
+                    self.logger.info(f"[{site_id}] Todos los candidatos ya estaban en cola o pendientes de autorizacion.")
+                    continue
 
-            if not claimed_candidates:
-                self.logger.info(f"[{site_id}] No se pudo reclamar ningún candidato.")
-                return stats
+                claimed_candidates: list[dict] = []
+                for cand in filtered_candidates:
+                    if remaining_claim_budget <= 0:
+                        break
+                    try:
+                        ok = await adapter.ensure_claimed(self, cand)
+                        if ok:
+                            claimed_candidates.append(cand)
+                            if int(cand.get("Estado") or 0) == 0:
+                                stats["claimed"] += 1
+                            remaining_claim_budget -= 1
+                    except Exception as e:
+                        self.logger.error(f"[{site_id}] Error reclamando candidato: {e}")
+                        stats["errors"] += 1
 
-            payloads = await adapter.build_payloads(claimed_candidates)
-            for payload in payloads:
-                try:
-                    await self.enqueue_locally(site_id, payload)
-                    stats["enqueued"] += 1
-                except Exception as e:
-                    self.logger.error(f"[{site_id}] Error encolando tarea: {e}")
-                    stats["errors"] += 1
+                if not claimed_candidates:
+                    self.logger.info(f"[{site_id}] No se pudo reclamar ningun candidato.")
+                    continue
 
-            if not self.dry_run:
-                self.db.update_last_sync(site_id)
+                payloads = await adapter.build_payloads(claimed_candidates)
+                for payload in payloads:
+                    try:
+                        await self.enqueue_locally(site_id, payload)
+                        stats["enqueued"] += 1
+                    except Exception as e:
+                        self.logger.error(f"[{site_id}] Error encolando tarea: {e}")
+                        stats["errors"] += 1
 
-            return stats
-        finally:
-            await self.close_session()
+                if not self.dry_run:
+                    self.db.update_last_sync(site_id)
+
+            finally:
+                await self.close_session()
+
+        return stats
 
     async def run_cycle(self) -> dict:
         """
@@ -921,9 +932,8 @@ class BrainOrchestrator:
                     f"errors={stats['errors']}"
                 )
                 
-                # Lógica de auto-parada: si no reclamamos nada nuevo, sumamos ciclo idle.
-                # (Claimed == 0 significa que o no había nada en SQL, o la cola local ya estaba llena)
-                if stats["claimed"] == 0:
+                # Lógica de auto-parada: solo contar idle cuando no hubo ni reclamos ni encolados.
+                if stats["claimed"] == 0 and stats["enqueued"] == 0:
                     self.idle_cycles_count += 1
                     self.logger.info(f"⏳ Ciclo sin reclamos nuevos ({self.idle_cycles_count}/{MAX_IDLE_CYCLES})")
                 else:
