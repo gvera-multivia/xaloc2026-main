@@ -5,6 +5,8 @@ import sqlite3
 import json
 import logging
 import decimal
+import asyncio
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
@@ -29,12 +31,17 @@ class SQLiteDatabase:
         conn = self.get_connection()
         try:
             # Buscar el schema.sql en db/schema.sql relativo a la raíz
-            schema_path = Path("db/schema.sql")
-            if schema_path.exists():
+            schema_paths = [Path("db/schema.sql"), Path("db/schema_job_runs.sql")]
+            applied_any_schema = False
+            for schema_path in schema_paths:
+                if not schema_path.exists():
+                    continue
                 with open(schema_path, "r", encoding="utf-8") as f:
                     schema = f.read()
                 conn.executescript(schema)
-            else:
+                applied_any_schema = True
+
+            if not applied_any_schema:
                 # Fallback simple si no encuentra el archivo (aunque debería)
                 conn.execute("""
                 CREATE TABLE IF NOT EXISTS tramite_queue (
@@ -108,6 +115,37 @@ class SQLiteDatabase:
                 WHERE resource_id IS NOT NULL AND status = 'pending'
                 """
             )
+
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS job_runs (
+                job_id TEXT PRIMARY KEY,
+                site_id TEXT NOT NULL,
+                resource_id INTEGER,
+                protocol TEXT,
+                state TEXT NOT NULL DEFAULT 'created',
+                attempt INTEGER NOT NULL DEFAULT 0,
+                max_attempts INTEGER NOT NULL DEFAULT 3,
+                error_code TEXT,
+                error_message TEXT,
+                payload_snapshot JSON,
+                result_snapshot JSON,
+                worker_id TEXT,
+                trace_id TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                queued_at TIMESTAMP,
+                started_at TIMESTAMP,
+                finished_at TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS ix_job_runs_site_state
+            ON job_runs(site_id, state)
+            """
+        )
 
     def get_pending_task(self) -> Optional[Tuple[int, str, str, Dict[str, Any]]]:
         """
@@ -337,6 +375,173 @@ class SQLiteDatabase:
         if not candidates:
             return None
         return sorted(candidates, key=lambda s: (priorities.get(s, 999), s))[0]
+
+    # ==========================================================================
+    # METODOS PARA JOB_RUNS (LEDGER)
+    # ==========================================================================
+
+    def upsert_job_run(
+        self,
+        *,
+        job_id: str,
+        site_id: str,
+        resource_id: Optional[int],
+        protocol: Optional[str],
+        payload_snapshot: Optional[Dict[str, Any]],
+        state: str,
+        attempt: int = 0,
+        max_attempts: int = 3,
+        trace_id: Optional[str] = None,
+    ) -> None:
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            now = datetime.now().isoformat()
+            queued_at = now if state == "queued" else None
+            started_at = now if state == "processing" else None
+            finished_at = now if state in {"completed", "failed", "dead", "cancelled"} else None
+            cursor.execute(
+                """
+                INSERT INTO job_runs (
+                    job_id, site_id, resource_id, protocol, state, attempt, max_attempts,
+                    payload_snapshot, trace_id, queued_at, started_at, finished_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(job_id) DO UPDATE SET
+                    site_id=excluded.site_id,
+                    resource_id=excluded.resource_id,
+                    protocol=excluded.protocol,
+                    state=excluded.state,
+                    attempt=excluded.attempt,
+                    max_attempts=excluded.max_attempts,
+                    payload_snapshot=COALESCE(excluded.payload_snapshot, job_runs.payload_snapshot),
+                    trace_id=COALESCE(excluded.trace_id, job_runs.trace_id),
+                    queued_at=COALESCE(excluded.queued_at, job_runs.queued_at),
+                    started_at=COALESCE(excluded.started_at, job_runs.started_at),
+                    finished_at=COALESCE(excluded.finished_at, job_runs.finished_at),
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    job_id,
+                    site_id,
+                    resource_id,
+                    protocol,
+                    state,
+                    attempt,
+                    max_attempts,
+                    json.dumps(payload_snapshot, cls=DecimalEncoder) if payload_snapshot is not None else None,
+                    trace_id,
+                    queued_at,
+                    started_at,
+                    finished_at,
+                    now,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def update_job_run_state(
+        self,
+        job_id: str,
+        state: str,
+        *,
+        attempt: Optional[int] = None,
+        started: bool = False,
+        finished: bool = False,
+        error_code: Optional[str] = None,
+        error_message: Optional[str] = None,
+        worker_id: Optional[str] = None,
+        result_snapshot: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            fields = ["state = ?", "updated_at = ?"]
+            params: list[Any] = [state, datetime.now().isoformat()]
+
+            if attempt is not None:
+                fields.append("attempt = ?")
+                params.append(int(attempt))
+
+            if started:
+                fields.append("started_at = ?")
+                params.append(datetime.now().isoformat())
+
+            if state == "queued":
+                fields.append("queued_at = ?")
+                params.append(datetime.now().isoformat())
+
+            if finished:
+                fields.append("finished_at = ?")
+                params.append(datetime.now().isoformat())
+
+            if error_code is not None:
+                fields.append("error_code = ?")
+                params.append(error_code)
+
+            if error_message is not None:
+                fields.append("error_message = ?")
+                params.append(error_message)
+
+            if worker_id is not None:
+                fields.append("worker_id = ?")
+                params.append(worker_id)
+
+            if result_snapshot is not None:
+                fields.append("result_snapshot = ?")
+                params.append(json.dumps(result_snapshot, cls=DecimalEncoder))
+
+            params.append(job_id)
+            cursor.execute(f"UPDATE job_runs SET {', '.join(fields)} WHERE job_id = ?", params)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_job_run(self, job_id: str) -> Optional[Dict[str, Any]]:
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM job_runs WHERE job_id = ?", (job_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def count_job_runs(self, site_id: str, states: tuple[str, ...]) -> int:
+        if not states:
+            return 0
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            placeholders = ",".join(["?"] * len(states))
+            cursor.execute(
+                f"SELECT COUNT(*) FROM job_runs WHERE site_id = ? AND state IN ({placeholders})",
+                (site_id, *states),
+            )
+            return int(cursor.fetchone()[0])
+        finally:
+            conn.close()
+
+    def count_job_runs_any(self, states: tuple[str, ...]) -> Dict[str, int]:
+        if not states:
+            return {}
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            placeholders = ",".join(["?"] * len(states))
+            cursor.execute(
+                f"""
+                SELECT site_id, COUNT(*) as c
+                FROM job_runs
+                WHERE state IN ({placeholders})
+                GROUP BY site_id
+                """,
+                states,
+            )
+            return {str(site_id): int(c) for site_id, c in cursor.fetchall()}
+        finally:
+            conn.close()
 
     # ==========================================================================
     # MÉTODOS PARA ORGANISMO_CONFIG
@@ -606,41 +811,57 @@ class SQLiteDatabase:
                 conn.rollback()
                 return None
              
-            # Insertar en tramite_queue
             site_id = row["site_id"]
             resource_id = row["resource_id"]
-            try:
-                cursor.execute(
-                    """
-                    INSERT INTO tramite_queue (site_id, resource_id, payload)
-                    VALUES (?, ?, ?)
-                    """,
-                    (site_id, resource_id, row["payload"]),
+            queue_backend = (os.getenv("QUEUE_BACKEND", "sqlite") or "sqlite").strip().lower()
+            if queue_backend == "redis":
+                from core.queue_gateway import build_queue_gateway
+
+                payload = json.loads(row["payload"])
+                queue_gateway = build_queue_gateway(backend=queue_backend, db=self)
+                enqueued, job_id = asyncio.run(
+                    queue_gateway.enqueue(site_id=site_id, protocol=None, payload=payload)
                 )
-                new_task_id = cursor.lastrowid
-            except sqlite3.IntegrityError:
-                cursor.execute(
-                    """
-                    SELECT id
-                    FROM tramite_queue
-                    WHERE site_id = ?
-                      AND resource_id = ?
-                      AND status IN ('pending', 'processing')
-                    ORDER BY id DESC
-                    LIMIT 1
-                    """,
-                    (site_id, resource_id),
-                )
-                existing = cursor.fetchone()
-                if not existing:
-                    raise
-                new_task_id = int(existing[0])
+                new_task_id = -1
                 self.logger.info(
-                    "Duplicado evitado al mover de pending_authorization_queue a tramite_queue: site_id=%s resource_id=%s (task_id=%s)",
-                    site_id,
-                    resource_id,
-                    new_task_id,
+                    "Tarea autorizada publicada en Redis: pending_id=%s job_id=%s enqueued=%s",
+                    pending_id,
+                    job_id,
+                    enqueued,
                 )
+            else:
+                try:
+                    cursor.execute(
+                        """
+                        INSERT INTO tramite_queue (site_id, resource_id, payload)
+                        VALUES (?, ?, ?)
+                        """,
+                        (site_id, resource_id, row["payload"]),
+                    )
+                    new_task_id = cursor.lastrowid
+                except sqlite3.IntegrityError:
+                    cursor.execute(
+                        """
+                        SELECT id
+                        FROM tramite_queue
+                        WHERE site_id = ?
+                          AND resource_id = ?
+                          AND status IN ('pending', 'processing')
+                        ORDER BY id DESC
+                        LIMIT 1
+                        """,
+                        (site_id, resource_id),
+                    )
+                    existing = cursor.fetchone()
+                    if not existing:
+                        raise
+                    new_task_id = int(existing[0])
+                    self.logger.info(
+                        "Duplicado evitado al mover de pending_authorization_queue a tramite_queue: site_id=%s resource_id=%s (task_id=%s)",
+                        site_id,
+                        resource_id,
+                        new_task_id,
+                    )
              
             # Actualizar estado en pending_authorization_queue
             cursor.execute("""

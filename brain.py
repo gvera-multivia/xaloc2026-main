@@ -22,6 +22,7 @@ import logging
 import os
 import re
 import sys
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -31,6 +32,7 @@ import pyodbc
 from dotenv import load_dotenv
 
 from core.sqlite_db import SQLiteDatabase
+from core.queue_gateway import build_queue_gateway
 from core.xvia_auth import create_authenticated_session_in_place
 from core.nt_expediente_fixer import is_nt_pattern, fix_nt_expediente
 from core.client_documentation import check_requires_gesdoc
@@ -50,6 +52,7 @@ MAX_CLAIMS_PER_CYCLE = int(os.getenv("BRAIN_MAX_CLAIMS", 10))
 SQLITE_DB_PATH = os.getenv("SQLITE_DB_PATH", "db/xaloc_database.db")
 ENABLED_SITES_CSV = os.getenv("BRAIN_ENABLED_SITES", "").strip()
 MAX_IDLE_CYCLES = int(os.getenv("BRAIN_MAX_IDLE_CYCLES", 3))
+QUEUE_BACKEND = (os.getenv("QUEUE_BACKEND", "sqlite") or "sqlite").strip().lower()
 
 # Credenciales Xvia
 XVIA_EMAIL = os.getenv("XVIA_EMAIL")
@@ -148,6 +151,8 @@ class BrainOrchestrator:
         self.session: Optional[aiohttp.ClientSession] = None
         self.authenticated_user: Optional[str] = None
         self.idle_cycles_count = 0
+        self.queue_backend = QUEUE_BACKEND
+        self.queue_gateway = build_queue_gateway(backend=self.queue_backend, db=self.db)
 
         self.adapters: dict[str, SiteAdapter] = {
             "madrid": MadridAdapter(),
@@ -624,19 +629,27 @@ class BrainOrchestrator:
     # -------------------------------------------------------------------------
     # PASO 5: Encolar tarea
     # -------------------------------------------------------------------------
-    def enqueue_locally(self, site_id: str, payload: dict) -> int:
+    async def enqueue_locally(self, site_id: str, payload: dict) -> str:
         """
         Inserta la tarea en la cola apropiada.
         
         Si el caso requiere autorización GESDOC → pending_authorization_queue
         Si NO requiere GESDOC → tramite_queue (procesamiento normal)
         """
+        job_id = str(payload.get("job_id") or uuid.uuid4())
+        payload["job_id"] = job_id
+
         if self.dry_run:
             self.logger.info(f"[DRY-RUN] Encolado simulado: {payload['expediente']}")
-            return -1
+            return job_id
         
         # Verificar si requiere GESDOC antes de encolar
         requires_gesdoc, reason = check_requires_gesdoc(payload)
+        resource_id = payload.get("idRecurso")
+        try:
+            resource_id = int(resource_id) if resource_id is not None else None
+        except Exception:
+            resource_id = None
         
         if requires_gesdoc:
             # Enviar a cola de autorización pendiente
@@ -647,17 +660,26 @@ class BrainOrchestrator:
                 authorization_type="gesdoc",
                 reason=reason
             )
+            self.db.upsert_job_run(
+                job_id=job_id,
+                site_id=site_id,
+                resource_id=resource_id,
+                protocol=None,
+                payload_snapshot=payload,
+                state="awaiting_auth",
+            )
             self.logger.info(
                 f"📋 Tarea {pending_id} en pending_authorization_queue: {payload['expediente']}"
             )
-            return pending_id
+            return job_id
         
         # No requiere GESDOC → cola normal
-        task_id = self.db.insert_task(site_id, None, payload)
-        self.logger.info(
-            f"📥 Tarea {task_id} encolada: {payload['expediente']} -> {site_id}"
-        )
-        return task_id
+        enqueued, queued_job_id = await self.queue_gateway.enqueue(site_id=site_id, protocol=None, payload=payload)
+        if enqueued:
+            self.logger.info(f"Tarea {queued_job_id} encolada: {payload['expediente']} -> {site_id}")
+        else:
+            self.logger.info(f"Tarea duplicada omitida: {payload['expediente']} -> {site_id}")
+        return queued_job_id
     
     # -------------------------------------------------------------------------
     # CICLO PRINCIPAL
@@ -682,8 +704,13 @@ class BrainOrchestrator:
         for a in adapters:
             priorities[a.site_id] = a.priority
 
-        # Lock global: si hay cualquier tarea pending/processing en cola, NO mezclar.
-        locked = self.db.get_locked_site_by_priority(priorities)
+        # Lock global: si hay cualquier tarea queued/processing, NO mezclar.
+        if self.queue_backend == "redis":
+            counts = self.db.count_job_runs_any(states=("queued", "processing"))
+            candidates = [s for s, c in counts.items() if c > 0]
+            locked = sorted(candidates, key=lambda s: (priorities.get(s, 999), s))[0] if candidates else None
+        else:
+            locked = self.db.get_locked_site_by_priority(priorities)
         if locked:
             return locked
 
@@ -729,7 +756,10 @@ class BrainOrchestrator:
             self.logger.warning(f"[{site_id}] Sin adapter/config; saltando.")
             return stats
 
-        queue_depth = self.db.count_tasks(site_id)
+        if self.queue_backend == "redis":
+            queue_depth = self.queue_gateway.count_ready(site_id)
+        else:
+            queue_depth = self.db.count_tasks(site_id)
         if queue_depth >= adapter.target_queue_depth:
             self.logger.info(f"[{site_id}] Cola OK (depth={queue_depth} >= target={adapter.target_queue_depth}); no se repone.")
             return stats
@@ -795,7 +825,7 @@ class BrainOrchestrator:
             payloads = await adapter.build_payloads(claimed_candidates)
             for payload in payloads:
                 try:
-                    self.enqueue_locally(site_id, payload)
+                    await self.enqueue_locally(site_id, payload)
                     stats["enqueued"] += 1
                 except Exception as e:
                     self.logger.error(f"[{site_id}] Error encolando tarea: {e}")
@@ -851,7 +881,7 @@ class BrainOrchestrator:
                             
                             # Construir payload y encolar
                             payload = self.build_payload(recurso, config)
-                            self.enqueue_locally(site_id, payload)
+                            await self.enqueue_locally(site_id, payload)
                             stats["enqueued"] += 1
                             
                     except Exception as e:

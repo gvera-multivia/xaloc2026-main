@@ -157,7 +157,7 @@ class BaseOnlineController:
 
         reposicion = BaseOnlineReposicionData(
             tipus_objecte=_require("p3_tipus_objecte", p3_tipus_objecte),
-            dades_especifiques=(p3_dades_especifiques or "").strip() or None,
+            dades_especifiques=(p3_dades_especifiques or ".").strip() or None,
             tipus_solicitud_value=_require("p3_tipus_solicitud_value", p3_tipus_solicitud_value),
             exposo=_require("p3_exposo", p3_exposo),
             solicito=_require("p3_solicito", p3_solicito),

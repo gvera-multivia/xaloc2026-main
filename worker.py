@@ -5,6 +5,7 @@ import sys
 import inspect
 import traceback
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 import subprocess
@@ -14,6 +15,7 @@ from dotenv import load_dotenv
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError, Error as PlaywrightError
 
 from core.sqlite_db import SQLiteDatabase
+from core.queue_gateway import build_queue_gateway
 from core.errors import RestartRequiredError
 from core.site_registry import get_site, get_site_controller
 from core.validation import ValidationEngine, DiscrepancyReporter, DocumentDownloader
@@ -41,6 +43,12 @@ logger = logging.getLogger("worker")
 # Cargar credenciales GESDOC desde .env
 GESDOC_USER = os.getenv("GESDOC_USER")
 GESDOC_PWD = os.getenv("GESDOC_PWD")
+
+@dataclass
+class ProcessOutcome:
+    success: bool
+    error: Optional[str] = None
+    screenshot: Optional[str] = None
 
 def _call_with_supported_kwargs(fn, **kwargs):
     """Llama a fn solo con los argumentos que acepta."""
@@ -137,13 +145,12 @@ async def _download_document_and_attachments(
     return archivos_para_subir
 
 async def process_task(
-    db: Optional[SQLiteDatabase],
     task_id: Optional[int],
     site_id: str,
     protocol: Optional[str],
     payload: dict,
     auth_session: Optional[aiohttp.ClientSession] = None
-):
+) -> ProcessOutcome:
     task_label = str(task_id) if task_id is not None else "TEST"
     logger.info(f"Procesando tarea ID: {task_label} - Site: {site_id} - Protocol: {protocol}")
     prev_keep_browser_open = os.getenv("XALOC_KEEP_BROWSER_OPEN")
@@ -260,14 +267,11 @@ async def process_task(
                 except Exception as restart_exc:
                     logger.error(f"Error reiniciando navegador tras RestartRequiredError: {restart_exc}")
 
-                if db is not None and task_id is not None:
-                    db.update_task_status(
-                        task_id,
-                        "failed",
-                        error=f"RestartRequiredError: {e}",
-                        screenshot=str(screenshot_path) if screenshot_path else None,
-                    )
-                return
+                return ProcessOutcome(
+                    success=False,
+                    error=f"RestartRequiredError: {e}",
+                    screenshot=str(screenshot_path) if screenshot_path else None,
+                )
 
             logger.info(f"Tarea {task_id} completada. Screenshot: {screenshot_path}")
             
@@ -284,60 +288,55 @@ async def process_task(
             else:
                 logger.warning("Tarea finalizada con incidencias no fatales. NO se marcará como completado en la web.")
 
-            if db is not None and task_id is not None:
-                db.update_task_status(task_id, "completed", screenshot=str(screenshot_path))
+            return ProcessOutcome(
+                success=True,
+                screenshot=str(screenshot_path) if screenshot_path else None,
+            )
 
     except PlaywrightTimeoutError as e:
         error_msg = f"Timeout de Playwright: Elemento no encontrado o página no cargó a tiempo"
         logger.error(f"⏱️  Error en tarea {task_label}: {error_msg}")
         logger.error(f"Detalles: {str(e)}")
         logger.error(traceback.format_exc())
-        if db is not None and task_id is not None:
-            db.update_task_status(task_id, "failed", error=error_msg)
+        return ProcessOutcome(success=False, error=error_msg)
     
     except PlaywrightError as e:
         error_msg = f"Error de Playwright: {str(e)}"
         logger.error(f"🎭 Error en tarea {task_label}: {error_msg}")
         logger.error("Posibles causas: elemento no encontrado, selector incorrecto, o cambio en la estructura de la página")
         logger.error(traceback.format_exc())
-        if db is not None and task_id is not None:
-            db.update_task_status(task_id, "failed", error=error_msg)
+        return ProcessOutcome(success=False, error=error_msg)
     
     except asyncio.TimeoutError as e:
         error_msg = f"Timeout al procesar tarea {task_label}"
         logger.error(f"⏱️  {error_msg}")
         logger.error(f"Detalles: La operación excedió el tiempo límite de espera")
         logger.error(traceback.format_exc())
-        if db is not None and task_id is not None:
-            db.update_task_status(task_id, "failed", error=error_msg)
+        return ProcessOutcome(success=False, error=error_msg)
     
     except RequiredClientDocumentsError as e:
         error_msg = f"Documentación del cliente faltante: {e}"
         logger.error(f"📄 Error en tarea {task_label}: {error_msg}")
         logger.error(traceback.format_exc())
-        if db is not None and task_id is not None:
-            db.update_task_status(task_id, "failed", error=error_msg)
+        return ProcessOutcome(success=False, error=error_msg)
     
     except ValueError as e:
         error_msg = str(e)
         logger.error(f"❌ Error de validación en tarea {task_label}: {error_msg}")
         logger.error(traceback.format_exc())
-        if db is not None and task_id is not None:
-            db.update_task_status(task_id, "failed", error=error_msg)
+        return ProcessOutcome(success=False, error=error_msg)
     
     except RuntimeError as e:
         error_msg = str(e)
         logger.error(f"⚠️  Error de ejecución en tarea {task_label}: {error_msg}")
         logger.error(traceback.format_exc())
-        if db is not None and task_id is not None:
-            db.update_task_status(task_id, "failed", error=error_msg)
+        return ProcessOutcome(success=False, error=error_msg)
     
     except FileNotFoundError as e:
         error_msg = f"Archivo no encontrado: {e}"
         logger.error(f"📁 Error en tarea {task_label}: {error_msg}")
         logger.error(traceback.format_exc())
-        if db is not None and task_id is not None:
-            db.update_task_status(task_id, "failed", error=error_msg)
+        return ProcessOutcome(success=False, error=error_msg)
     
     except Exception as e:
         # Captura cualquier otro error no previsto
@@ -345,8 +344,7 @@ async def process_task(
         error_msg = str(e)
         logger.error(f"💥 Error inesperado ({error_type}) en tarea {task_label}: {error_msg}")
         logger.error(traceback.format_exc())
-        if db is not None and task_id is not None:
-            db.update_task_status(task_id, "failed", error=f"{error_type}: {error_msg}")
+        return ProcessOutcome(success=False, error=f"{error_type}: {error_msg}")
     
     finally:
         if prev_keep_browser_open is None:
@@ -362,7 +360,10 @@ async def process_task(
 
 async def worker_loop():
     db = SQLiteDatabase()
+    queue_backend = (os.getenv("QUEUE_BACKEND", "sqlite") or "sqlite").strip().lower()
+    queue_gateway = build_queue_gateway(backend=queue_backend, db=db)
     logger.info("Iniciando Worker Loop. Esperando tareas...")
+    logger.info(f"Backend de cola activo: {queue_backend}")
 
     # Cargar credenciales
     load_dotenv()
@@ -400,11 +401,23 @@ async def worker_loop():
         # Bucle principal de procesamiento
         while True:
             try:
-                task = db.get_pending_task()
-                if task:
-                    task_id, site_id, protocol, payload = task
-                    # Procesamos la tarea pasando la sesión autenticada
-                    await process_task(db, task_id, site_id, protocol, payload, auth_session)
+                job = await queue_gateway.reserve(timeout_seconds=10)
+                if job:
+                    outcome = await process_task(
+                        job.queue_ref,
+                        job.site_id,
+                        job.protocol,
+                        job.payload,
+                        auth_session,
+                    )
+                    if outcome.success:
+                        await queue_gateway.ack(
+                            job,
+                            result={"screenshot_path": outcome.screenshot} if outcome.screenshot else None,
+                            screenshot=outcome.screenshot,
+                        )
+                    else:
+                        await queue_gateway.nack(job, error=outcome.error or "unknown_error", retryable=False)
                     # Pausa fija entre jobs para no encadenar acciones en la sede/web
                     await asyncio.sleep(10)
                 else:
