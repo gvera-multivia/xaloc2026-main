@@ -28,9 +28,14 @@ async def ejecutar_p2(page: Page, data: BaseOnlineP2Data, *, payload: dict) -> N
 
     logging.info("[P2] Aportando alegaciones (paso 2)...")
     tiene_expediente = bool(data.expedient_id_ens or data.expedient_any or data.expedient_num)
-    tiene_butlleti = bool(data.butlleti and data.butlleti.strip())
+    butlleti_value = (
+        (data.butlleti or "").strip()
+        or str(payload.get("num_butlleti") or "").strip()
+        or str(payload.get("expediente") or "").strip()
+    )
+    tiene_butlleti = bool(butlleti_value)
     if not (tiene_expediente or tiene_butlleti):
-        raise ValueError("P2: es obligatorio indicar Núm. Expedient o Núm. Butlletí.")
+        raise ValueError("P2: es obligatorio indicar Num. Expedient o Num. Butlleti.")
 
     if tiene_expediente:
         await page.locator("#form\\:clau_expedient_id_ens").first.fill(data.expedient_id_ens or "")
@@ -45,8 +50,23 @@ async def ejecutar_p2(page: Page, data: BaseOnlineP2Data, *, payload: dict) -> N
         await page.wait_for_timeout(DELAY_MS)
 
     if tiene_butlleti:
-        await page.locator("#form\\:butlleti").first.fill(data.butlleti or "")
+        locator_butlleti = page.locator("#form\\:butlleti").first
+        await locator_butlleti.fill(butlleti_value)
         await page.wait_for_timeout(DELAY_MS)
+        # Some JSF variants do not persist fill() unless input/change events are dispatched.
+        await page.evaluate(
+            """([selector, value]) => {
+                const el = document.querySelector(selector);
+                if (!el) return false;
+                el.value = value;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                return true;
+            }""",
+            ["#form\\:butlleti", butlleti_value],
+        )
+        await page.wait_for_timeout(DELAY_MS)
+        logging.info("[P2] Butlleti informado: %s", butlleti_value)
 
     await page.locator("#form\\:exposo").first.fill(data.exposo or "")
     await page.wait_for_timeout(DELAY_MS)
@@ -68,5 +88,4 @@ async def ejecutar_p2(page: Page, data: BaseOnlineP2Data, *, payload: dict) -> N
     await page.wait_for_load_state("domcontentloaded")
 
     logging.info("[P2] Preparando firma y presentacion...")
-
     await firmar_presentar_y_descargar_justificante(page, payload=payload)
