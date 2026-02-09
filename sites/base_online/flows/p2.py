@@ -1,18 +1,18 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from playwright.async_api import Page
 
 from sites.base_online.data_models import BaseOnlineP2Data
 from sites.base_online.flows.common import rellenar_contacto
+from sites.base_online.flows.firma_y_justificante import firmar_presentar_y_descargar_justificante
 from sites.base_online.flows.upload import subir_archivos_por_modal
 
 DELAY_MS = 500
 
 
-async def ejecutar_p2(page: Page, data: BaseOnlineP2Data) -> None:
+async def ejecutar_p2(page: Page, data: BaseOnlineP2Data, *, payload: dict) -> None:
     logging.info("[P2] Rellenando formulario de alegaciones (paso 1)...")
 
     await page.locator("#form\\:nif").first.fill(data.nif)
@@ -68,5 +68,7 @@ async def ejecutar_p2(page: Page, data: BaseOnlineP2Data) -> None:
     await page.wait_for_load_state("domcontentloaded")
 
     boton_firma = page.locator("input[type='button'][value='Signar i Presentar']").first
-    if await boton_firma.count() > 0:
-        logging.info("[P2] Pantalla 'Signar i Presentar' detectada (no se pulsa en modo demo).")
+    await boton_firma.wait_for(state="visible", timeout=20000)
+    logging.info("[P2] Pantalla 'Signar i Presentar' detectada.")
+
+    await firmar_presentar_y_descargar_justificante(page, payload=payload)

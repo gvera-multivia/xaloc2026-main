@@ -42,7 +42,7 @@ class BaseOnlineAutomation(BaseAutomation):
                 self.logger.info("=" * 50)
                 if not datos.p2:
                     raise ValueError("Faltan datos de P2.")
-                await ejecutar_p2(self.page, datos.p2)
+                await ejecutar_p2(self.page, datos.p2, payload=datos.payload or {})
 
             if datos.protocol.upper() == "P3":
                 self.logger.info("\n" + "=" * 50)
