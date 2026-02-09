@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+﻿#!/usr/bin/env python
 """
 claim_one_resource_base_online.py - Reclama UN solo recurso de BASE Online y lo encola para el worker.
 
@@ -178,7 +178,7 @@ def parse_expediente_base(expediente: str) -> dict:
             "expediente_id_ens": m_gim.group("id_ens"),
             "expediente_any": m_gim.group("any"),
             "expediente_num": m_gim.group("num"),
-            "num_butlleti": "",
+            "num_butlleti": exp,
         }
 
     # EXE/ECC: 1-2025/27474-EXE o 1-2025-140620-ECC
@@ -188,7 +188,7 @@ def parse_expediente_base(expediente: str) -> dict:
             "expediente_id_ens": m_exe.group("id_ens"),
             "expediente_any": m_exe.group("any"),
             "expediente_num": m_exe.group("num"),
-            "num_butlleti": "",
+            "num_butlleti": exp,
         }
 
     # Tipo B u otros: fallback (se mantiene por robustez)
