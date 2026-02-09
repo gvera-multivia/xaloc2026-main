@@ -640,9 +640,10 @@ class BrainOrchestrator:
         """
         job_id = str(payload.get("job_id") or uuid.uuid4())
         payload["job_id"] = job_id
+        protocol = payload.get("protocol") or payload.get("naturaleza")
 
         if self.dry_run:
-            self.logger.info(f"[DRY-RUN] Encolado simulado: {payload['expediente']}")
+            self.logger.info(f"[DRY-RUN] Encolado simulado: {payload['expediente']} (Protocol: {protocol})")
             return job_id
         
         # Verificar si requiere GESDOC antes de encolar
@@ -666,7 +667,7 @@ class BrainOrchestrator:
                 job_id=job_id,
                 site_id=site_id,
                 resource_id=resource_id,
-                protocol=None,
+                protocol=protocol,
                 payload_snapshot=payload,
                 state="awaiting_auth",
             )
@@ -676,7 +677,7 @@ class BrainOrchestrator:
             return job_id
         
         # No requiere GESDOC → cola normal
-        enqueued, queued_job_id = await self.queue_gateway.enqueue(site_id=site_id, protocol=None, payload=payload)
+        enqueued, queued_job_id = await self.queue_gateway.enqueue(site_id=site_id, protocol=protocol, payload=payload)
         if enqueued:
             self.logger.info(f"Tarea {queued_job_id} encolada: {payload['expediente']} -> {site_id}")
         else:
