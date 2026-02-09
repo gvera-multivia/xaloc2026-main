@@ -750,6 +750,32 @@ class BrainOrchestrator:
                 self.logger.info(f"[{site_id}] Sin candidatos remotos válidos.")
                 return stats
 
+            filtered_candidates: list[dict] = []
+            skipped_duplicates = 0
+            for cand in candidates:
+                rid = cand.get("idRecurso")
+                try:
+                    rid_int = int(rid)
+                except Exception:
+                    rid_int = None
+
+                if rid_int is not None:
+                    if self.db.has_active_task_for_resource(site_id, rid_int):
+                        skipped_duplicates += 1
+                        continue
+                    if self.db.has_pending_authorization_for_resource(site_id, rid_int):
+                        skipped_duplicates += 1
+                        continue
+                filtered_candidates.append(cand)
+
+            if skipped_duplicates:
+                self.logger.info(f"[{site_id}] Candidatos omitidos por duplicado activo/pending: {skipped_duplicates}")
+
+            candidates = filtered_candidates
+            if not candidates:
+                self.logger.info(f"[{site_id}] Todos los candidatos ya estaban en cola o pendientes de autorización.")
+                return stats
+
             claimed_candidates: list[dict] = []
             for cand in candidates:
                 try:

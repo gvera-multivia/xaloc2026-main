@@ -274,6 +274,55 @@ class SQLiteDatabase:
         finally:
             conn.close()
 
+    def has_active_task_for_resource(
+        self,
+        site_id: str,
+        resource_id: int,
+        statuses: tuple[str, ...] = ("pending", "processing"),
+    ) -> bool:
+        """Indica si ya existe una tarea activa para (site_id, resource_id)."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            placeholders = ",".join(["?"] * len(statuses))
+            cursor.execute(
+                f"""
+                SELECT 1
+                FROM tramite_queue
+                WHERE site_id = ?
+                  AND resource_id = ?
+                  AND status IN ({placeholders})
+                LIMIT 1
+                """,
+                (site_id, int(resource_id), *statuses),
+            )
+            return cursor.fetchone() is not None
+        finally:
+            conn.close()
+
+    def has_pending_authorization_for_resource(self, site_id: str, resource_id: int) -> bool:
+        """Indica si ya existe autorización pendiente para (site_id, resource_id)."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT 1
+                FROM pending_authorization_queue
+                WHERE site_id = ?
+                  AND resource_id = ?
+                  AND status = 'pending'
+                LIMIT 1
+                """,
+                (site_id, int(resource_id)),
+            )
+            return cursor.fetchone() is not None
+        except sqlite3.OperationalError:
+            # Si la tabla aún no existe en una DB antigua, asumimos que no hay pendientes.
+            return False
+        finally:
+            conn.close()
+
     def get_locked_site_by_priority(
         self,
         priorities: Dict[str, int],
