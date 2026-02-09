@@ -86,7 +86,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
     RE_PASAPORTE_SIMPLE = re.compile(r"^[A-Z]{2,3}\d{5,9}$")
 
     def __init__(self):
-        super().__init__(site_id="madrid", priority=0, target_queue_depth=2, max_refill_batch=10)
+        super().__init__(site_id="madrid", priority=0, target_queue_depth=10, max_refill_batch=10)
         self._regex_expediente_cache: dict[str, re.Pattern[str]] = {}
         self._regex_expediente_fallback = re.compile(self.DEFAULT_REGEX_EXPEDIENTE)
 
