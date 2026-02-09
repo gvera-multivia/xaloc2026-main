@@ -37,7 +37,8 @@ from core.xvia_auth import create_authenticated_session_in_place
 from core.nt_expediente_fixer import is_nt_pattern, fix_nt_expediente
 from core.client_documentation import check_requires_gesdoc
 from core.address_classifier import classify_addresses_batch_with_ai, classify_address_fallback
-from sites.adapters import MadridAdapter, SiteAdapter, XalocAdapter
+from sites.adapters import MadridAdapter, XalocAdapter, BaseOnlineAdapter
+from sites.adapters.site_adapter import SiteAdapter
 
 
 # =============================================================================
@@ -48,7 +49,7 @@ load_dotenv()
 
 SYNC_INTERVAL_SECONDS = int(os.getenv("BRAIN_SYNC_INTERVAL", 300))
 TICK_INTERVAL_SECONDS = int(os.getenv("BRAIN_TICK_SECONDS", 5))
-MAX_CLAIMS_PER_CYCLE = int(os.getenv("BRAIN_MAX_CLAIMS", 10))
+MAX_CLAIMS_PER_CYCLE = int(os.getenv("BRAIN_MAX_CLAIMS", 999999))
 SQLITE_DB_PATH = os.getenv("SQLITE_DB_PATH", "db/xaloc_database.db")
 ENABLED_SITES_CSV = os.getenv("BRAIN_ENABLED_SITES", "").strip()
 MAX_IDLE_CYCLES = int(os.getenv("BRAIN_MAX_IDLE_CYCLES", 3))
@@ -121,7 +122,8 @@ WHERE idRecurso = ?
 
 SITE_PRIORITIES: dict[str, int] = {
     "madrid": 0,
-    "base_online": 1,
+    "xaloc_girona": 1,
+    "base_online": 2,
 }
 
 
@@ -157,8 +159,8 @@ class BrainOrchestrator:
         self.adapters: dict[str, SiteAdapter] = {
             "madrid": MadridAdapter(),
             "xaloc_girona": XalocAdapter(),
+            "base_online": BaseOnlineAdapter(),
         }
-
 
 
         
@@ -416,7 +418,7 @@ class BrainOrchestrator:
         delays_seconds: tuple[float, ...] = (0.5, 1.0, 2.0, 3.0, 5.0),
     ) -> bool:
         """
-        Reclama recurso vÃ­a POST y verifica en SQL Server con retries/backoff.
+        Reclama recurso vía POST y verifica en SQL Server con retries/backoff.
         """
         if self.dry_run:
             self.logger.info(f"[DRY-RUN] Claim simulado (retries) para idRecurso={id_recurso}")
@@ -549,13 +551,13 @@ class BrainOrchestrator:
             if d.startswith("ES") and len(d) > 2:
                 d = d[2:]
             return re.sub(r"[^A-Z0-9]+", "", d)
-
+ 
         def _extraer_documento_control(documento: str) -> tuple[str, str]:
             doc_clean = _normalize_document_id(documento)
             if len(doc_clean) < 2:
                 return ("", "")
             return (doc_clean[:-1], doc_clean[-1])
-
+ 
         def _detectar_tipo_documento(doc: str) -> str:
             """
             Detecta documento del notificado (Madrid): NIF, NIE o PASAPORTE.
@@ -653,7 +655,7 @@ class BrainOrchestrator:
         
         if requires_gesdoc:
             # Enviar a cola de autorización pendiente
-            self.logger.warning(f"⏸️ Requiere GESDOC: {payload['expediente']} - {reason}")
+            self.logger.warning(f"Pause Requiere GESDOC: {payload['expediente']} - {reason}")
             pending_id = self.db.insert_pending_authorization(
                 site_id=site_id,
                 payload=payload,
@@ -722,7 +724,7 @@ class BrainOrchestrator:
                     config=configs[adapter.site_id],
                     conn_str=self.sqlserver_conn_str,
                     authenticated_user=self.authenticated_user,
-                    limit=1,
+                    limit=9999,
                 )
                 if candidates:
                     return adapter.site_id
@@ -758,23 +760,12 @@ class BrainOrchestrator:
                 self.logger.warning(f"[{site_id}] Sin config activa; saltando.")
                 continue
 
-            if self.queue_backend == "redis":
-                queue_depth = self.queue_gateway.count_ready(site_id)
-            else:
-                queue_depth = self.db.count_tasks(site_id)
+            # Agresivo: No miramos queue_depth ni slots. Pillamos todo.
+            self.logger.info(f"[{site_id}] Refill AGRESIVO: Buscando todos los recursos disponibles.")
 
-            if queue_depth >= adapter.target_queue_depth:
-                self.logger.info(f"[{site_id}] Cola OK (depth={queue_depth} >= target={adapter.target_queue_depth}); no se repone.")
-                continue
-
-            site_slots = max(adapter.target_queue_depth - queue_depth, 0)
-            site_limit = min(adapter.max_refill_batch, site_slots, remaining_claim_budget)
-            if site_limit <= 0:
-                continue
-
-            self.logger.info(
-                f"[{site_id}] Refill: queue_depth={queue_depth} target={adapter.target_queue_depth} batch={site_limit}"
-            )
+            # self.logger.info(
+            #     f"[{site_id}] Refill: queue_depth={queue_depth} target={adapter.target_queue_depth} batch={site_limit}"
+            # )
 
             try:
                 await self.init_session(config["login_url"])
@@ -782,7 +773,7 @@ class BrainOrchestrator:
                     config=config,
                     conn_str=self.sqlserver_conn_str,
                     authenticated_user=self.authenticated_user,
-                    limit=site_limit,
+                    limit=9999,
                 )
                 if not candidates:
                     self.logger.info(f"[{site_id}] Sin candidatos remotos validos.")
@@ -798,52 +789,37 @@ class BrainOrchestrator:
                         rid_int = None
 
                     if rid_int is not None:
-                        if self.db.has_active_task_for_resource(site_id, rid_int):
-                            skipped_duplicates += 1
-                            continue
-                        if self.db.has_pending_authorization_for_resource(site_id, rid_int):
-                            skipped_duplicates += 1
-                            continue
-                    filtered_candidates.append(cand)
-
-                if skipped_duplicates:
-                    self.logger.info(f"[{site_id}] Candidatos omitidos por duplicado activo/pending: {skipped_duplicates}")
-
+                        # Si ya existe en la cola local, saltar (Esto se verifica dentro de enqueue_locally o por duplicidad)
+                        filtered_candidates.append(cand)
+                
+                if skipped_duplicates > 0:
+                    self.logger.info(f"[{site_id}] {skipped_duplicates} duplicados omitidos ya presentes en la cola.")
+                
                 if not filtered_candidates:
-                    self.logger.info(f"[{site_id}] Todos los candidatos ya estaban en cola o pendientes de autorizacion.")
                     continue
 
-                claimed_candidates: list[dict] = []
-                for cand in filtered_candidates:
+                payloads = await adapter.build_payloads(filtered_candidates)
+                
+                for payload in payloads:
                     if remaining_claim_budget <= 0:
                         break
-                    try:
-                        ok = await adapter.ensure_claimed(self, cand)
-                        if ok:
-                            claimed_candidates.append(cand)
-                            if int(cand.get("Estado") or 0) == 0:
-                                stats["claimed"] += 1
-                            remaining_claim_budget -= 1
-                    except Exception as e:
-                        self.logger.error(f"[{site_id}] Error reclamando candidato: {e}")
-                        stats["errors"] += 1
 
-                if not claimed_candidates:
-                    self.logger.info(f"[{site_id}] No se pudo reclamar ningun candidato.")
-                    continue
+                    rid = int(payload["idRecurso"])
+                    exp = str(payload.get("expediente") or "")
 
-                payloads = await adapter.build_payloads(claimed_candidates)
-                for payload in payloads:
-                    try:
+                    # CLAIM
+                    if await adapter.ensure_claimed(self, payload):
+                        # ENQUEUE
                         await self.enqueue_locally(site_id, payload)
+                        stats["claimed"] += 1
                         stats["enqueued"] += 1
-                    except Exception as e:
-                        self.logger.error(f"[{site_id}] Error encolando tarea: {e}")
+                        remaining_claim_budget -= 1
+                    else:
                         stats["errors"] += 1
 
-                if not self.dry_run:
-                    self.db.update_last_sync(site_id)
-
+            except Exception as e:
+                self.logger.exception(f"[{site_id}] Error en ciclo de reposicion: {e}")
+                stats["errors"] += 1
             finally:
                 await self.close_session()
 
@@ -856,98 +832,110 @@ class BrainOrchestrator:
         Returns:
             Dict con estadísticas: claimed, enqueued, errors
         """
-        legacy = (os.getenv("BRAIN_LEGACY_MODE") or "").strip().lower() in {"1", "true", "yes", "on"}
-        if not legacy:
-            return await self.run_tick()
-        self.logger.warning("BRAIN_LEGACY_MODE activo: usando run_cycle legacy (puede mezclar organismos).")
-
         stats = {"claimed": 0, "enqueued": 0, "errors": 0}
         
-        configs = self.get_active_configs()
-        if not configs:
-            self.logger.warning("No hay configuraciones activas")
+        # 1. Obtener configuraciones activas y habilitadas
+        enabled_sites = _parse_enabled_sites(ENABLED_SITES_CSV)
+        active_configs = self.get_active_configs()
+        
+        if enabled_sites is not None:
+            active_configs = [c for c in active_configs if c["site_id"] in enabled_sites]
+            
+        if not active_configs:
+            self.logger.warning("No hay organismos habilitados en BRAIN_ENABLED_SITES o configuraciones activas")
+            return stats
+
+        # 2. Elegir el sitio a reponer según prioridad y estado de la cola
+        adapters, configs = self._get_enabled_adapters_and_configs()
+        site_to_refill = await self._choose_site_to_refill(adapters, configs)
+        
+        if not site_to_refill:
+            self.idle_cycles_count += 1
+            self.logger.info(f"Nada que hacer en este ciclo (Idle: {self.idle_cycles_count}/{MAX_IDLE_CYCLES}).")
             return stats
         
-        self.logger.info(f"Procesando {len(configs)} configuraciones activas")
+        self.idle_cycles_count = 0 # Reiniciar contador si hay trabajo
+        config = configs[site_to_refill]
+        adapter = self.adapters[site_to_refill]
         
-        for config in configs:
-            site_id = config["site_id"]
-            self.logger.info(f"── Iniciando sync para: {site_id}")
+        self.logger.info(f"--- Iniciando sincronización para {site_to_refill} ---")
+        
+        try:
+            # 3. Inicializar sesión y login
+            await self.init_session(config["login_url"])
+            if not self.session and not self.dry_run:
+                self.logger.error("No se pudo establecer sesión")
+                return stats
             
-            try:
-                # Inicializar sesión autenticada
-                await self.init_session(config["login_url"])
+            # Agresivo: Pillamos todo sin mirar slots ni presupuesto
+            fetch_limit = 9999
+            
+            self.logger.info(f"Buscando todos los recursos para {site_to_refill} (AGRESIVO)...")
                 
-                # Obtener recursos
-                recursos = self.fetch_remote_resources(config)
+            self.logger.info(f"Buscando hasta {fetch_limit} recursos para {site_to_refill}...")
+            candidates = adapter.fetch_candidates(
+                config=config, 
+                conn_str=self.sqlserver_conn_str,
+                authenticated_user=self.authenticated_user,
+                limit=fetch_limit
+            )
+            
+            if not candidates:
+                self.logger.info(f"No hay recursos adicionales para {site_to_refill}")
+                return stats
+            
+            # 5. Construir payloads (usando el adapter)
+            payloads = await adapter.build_payloads(candidates)
+            
+            # 6. Reclamar y encolar
+            for payload in payloads:
+                id_recurso = int(payload["idRecurso"])
+                expediente = payload.get("expediente") or payload.get("denuncia_num")
                 
-                for recurso in recursos[:MAX_CLAIMS_PER_CYCLE]:
-                    try:
-                        # Intentar claim vía POST
-                        if await self.claim_resource_via_post(
-                            recurso["idRecurso"],
-                            recurso["Expedient"]
-                        ):
-                            stats["claimed"] += 1
-                            
-                            # Construir payload y encolar
-                            payload = self.build_payload(recurso, config)
-                            await self.enqueue_locally(site_id, payload)
-                            stats["enqueued"] += 1
-                            
-                    except Exception as e:
-                        self.logger.error(f"Error procesando recurso: {e}")
-                        stats["errors"] += 1
-                
-                # Cerrar sesión
-                await self.close_session()
-                
-                # Actualizar timestamp de última sincronización
-                if not self.dry_run:
-                    self.db.update_last_sync(site_id)
+                # Reclamar recurso (asegurando estado 1)
+                # Note: adapter.ensure_claimed ya maneja el claim si es necesario
+                if await adapter.ensure_claimed(self, payload):
+                    # Encolar localmente (esto incluye el check de GESDOC)
+                    await self.enqueue_locally(site_to_refill, payload)
+                    stats["claimed"] += 1
+                    stats["enqueued"] += 1
+                else:
+                    stats["errors"] += 1
+                    self.logger.error(f"Error reclamando recurso {id_recurso} ({expediente})")
                     
-            except Exception as e:
-                self.logger.error(f"Error en config {site_id}: {e}")
-                stats["errors"] += 1
-                await self.close_session()
-        
+        except Exception as e:
+            self.logger.exception(f"Error crítico en ciclo de sincronización de {site_to_refill}: {e}")
+            stats["errors"] += 1
+        finally:
+            await self.close_session()
+            
         return stats
-    
-    async def run_forever(self):
+
+    async def run_forever(self) -> None:
         """Bucle infinito del orquestador."""
-        self.logger.info("=" * 60)
-        self.logger.info("🧠 BRAIN ORCHESTRATOR INICIADO")
-        self.logger.info(f"   Tick: {TICK_INTERVAL_SECONDS}s")
-        self.logger.info(f"   Max claims/ciclo: {MAX_CLAIMS_PER_CYCLE}")
-        self.logger.info(f"   Dry-run: {self.dry_run}")
-        self.logger.info("=" * 60)
+        self.logger.info(f"=== Brain Orchestrator Iniciado (Sync: {SYNC_INTERVAL_SECONDS}s, Budget: {MAX_CLAIMS_PER_CYCLE}) ===")
+        self.logger.info(f"Adapters habilitados: {', '.join(self.adapters.keys())}")
         
         while True:
             try:
-                stats = await self.run_cycle()
-                self.logger.info(
-                    f"📊 Ciclo completado: "
-                    f"claimed={stats['claimed']}, "
-                    f"enqueued={stats['enqueued']}, "
-                    f"errors={stats['errors']}"
-                )
+                # En lugar de run_cycle (1 solo site), usamos run_tick (todos los sites hasta presupuesto)
+                stats = await self.run_tick()
                 
-                # Lógica de auto-parada: solo contar idle cuando no hubo ni reclamos ni encolados.
-                if stats["claimed"] == 0 and stats["enqueued"] == 0:
+                # Auto-stop logic
+                if stats["claimed"] == 0 and stats["enqueued"] == 0 and stats["errors"] == 0:
                     self.idle_cycles_count += 1
-                    self.logger.info(f"⏳ Ciclo sin reclamos nuevos ({self.idle_cycles_count}/{MAX_IDLE_CYCLES})")
                 else:
                     self.idle_cycles_count = 0
-                
+
                 if self.idle_cycles_count >= MAX_IDLE_CYCLES:
-                    self.logger.info("🛑 No hay más recursos para reclamar tras múltiples intentos. Deteniendo Brain Orchestrator...")
+                    self.logger.info(f"!!! Se ha alcanzado el nÃºmero mÃ¡ximo de ciclos inactivos ({MAX_IDLE_CYCLES}). Deteniendo el orquestador.")
                     break
-                    
+
+                self.logger.info(f"Próximo tick en {SYNC_INTERVAL_SECONDS} segundos...")
             except Exception as e:
-                self.logger.error(f"Error fatal en ciclo: {e}")
+                self.logger.error(f"Error inesperado en el bucle principal: {e}")
             
-            self.logger.info(f"💤 Esperando {TICK_INTERVAL_SECONDS}s...")
-            await asyncio.sleep(TICK_INTERVAL_SECONDS)
+            await asyncio.sleep(SYNC_INTERVAL_SECONDS)
 
 
 # =============================================================================
@@ -1018,7 +1006,7 @@ def main():
     
     # Ejecutar
     if args.once:
-        stats = asyncio.run(orchestrator.run_cycle())
+        stats = asyncio.run(orchestrator.run_tick())
         print(f"Ciclo completado: {stats}")
     else:
         asyncio.run(orchestrator.run_forever())

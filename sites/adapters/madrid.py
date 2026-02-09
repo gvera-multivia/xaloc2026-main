@@ -10,7 +10,7 @@ from typing import Any, Optional
 import pyodbc
 
 from core.address_classifier import classify_address_fallback, classify_addresses_batch_with_ai
-from .base import SiteAdapter
+from .site_adapter import SiteAdapter
 
 logger = logging.getLogger("brain")
 
@@ -86,7 +86,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
     RE_PASAPORTE_SIMPLE = re.compile(r"^[A-Z]{2,3}\d{5,9}$")
 
     def __init__(self):
-        super().__init__(site_id="madrid", priority=0, target_queue_depth=10, max_refill_batch=10)
+        super().__init__(site_id="madrid", priority=0)
         self._regex_expediente_cache: dict[str, re.Pattern[str]] = {}
         self._regex_expediente_fallback = re.compile(self.DEFAULT_REGEX_EXPEDIENTE)
 

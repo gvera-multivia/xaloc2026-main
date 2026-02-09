@@ -7,7 +7,7 @@ from typing import Any, Optional
 
 import pyodbc
 
-from .base import SiteAdapter
+from .site_adapter import SiteAdapter
 from core.nt_expediente_fixer import is_nt_pattern, fix_nt_expediente
 from core.xaloc_expediente_utils import is_valid_format, fix_format
 
@@ -57,7 +57,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
 """
 
     def __init__(self):
-        super().__init__(site_id="xaloc_girona", priority=1, target_queue_depth=5, max_refill_batch=10)
+        super().__init__(site_id="xaloc_girona", priority=1)
 
     @staticmethod
     def _clean_str(v: Any) -> str:

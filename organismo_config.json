@@ -19,6 +19,16 @@
             "recursos_url": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos",
             "active": true,
             "notes": "SUBDIRECCION GNAL GESTION MULTAS DE MADRID - Multas de tráfico"
+        },
+        {
+            "site_id": "base_online",
+            "query_organisme": "%BASE%",
+            "filtro_texp": "2,3",
+            "regex_expediente": "",
+            "login_url": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login",
+            "recursos_url": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos",
+            "active": true,
+            "notes": "BASE Online - Trámites de multas"
         }
     ]
 }
