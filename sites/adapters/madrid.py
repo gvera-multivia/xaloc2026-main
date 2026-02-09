@@ -429,6 +429,33 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         return v
 
     @staticmethod
+    def _extract_street_name_from_raw(raw_address: str) -> str:
+        """
+        Intenta recuperar un nombre de vía desde una dirección libre cuando la IA/fallback no lo devuelve.
+        """
+        raw = MadridAdapter._clean_str(raw_address).upper()
+        if not raw:
+            return ""
+
+        # Quitar separadores frecuentes y espacios redundantes.
+        text = re.sub(r"[,;]+", " ", raw)
+        text = re.sub(r"\s+", " ", text).strip()
+        if not text:
+            return ""
+
+        tokens = text.split(" ")
+        filtered: list[str] = []
+        for tok in tokens:
+            # Omitimos tokens típicos de numeración o puerta.
+            if re.fullmatch(r"\d+[A-Z]?", tok):
+                continue
+            if tok in {"S/N", "SN", "N", "NUM", "NUMERO", "Nº", "PISO", "PTA", "PUERTA", "ESC", "ESCALERA"}:
+                continue
+            filtered.append(tok)
+
+        return " ".join(filtered).strip()
+
+    @staticmethod
     def _prevalidate_required_fields(payload: dict) -> None:
         required = [
             "idRecurso",
@@ -540,6 +567,11 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
 
             notif_tipo_via = (clasif.get("tipo_via") or "CALLE").upper()
             notif_nombre_via = (clasif.get("calle") or "").upper()
+            if not notif_nombre_via:
+                notif_nombre_via = self._extract_street_name_from_raw(domicilio_raw)
+            if not notif_nombre_via and poblacion:
+                # Último fallback para pasar validación mínima.
+                notif_nombre_via = poblacion.upper()
             notif_numero = (clasif.get("numero") or numero_db).upper()
             notif_escalera = ((clasif.get("escalera") or escalera_db) or "").upper()
             notif_planta = ((clasif.get("planta") or piso_db) or "").upper()
@@ -622,7 +654,16 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 "claimed_at": datetime.now().isoformat(),
             }
 
-            self._prevalidate_required_fields(payload)
+            try:
+                self._prevalidate_required_fields(payload)
+            except ValueError as e:
+                logger.warning(
+                    "[MADRID] Recurso %s descartado por payload inválido: %s",
+                    r.get("idRecurso"),
+                    e,
+                )
+                continue
+
             payloads.append(payload)
 
         return payloads
