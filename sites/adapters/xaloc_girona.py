@@ -321,7 +321,11 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         finally:
             conn.close()
 
-    async def build_payloads(self, candidates: list[dict]) -> list[dict]:
+    async def build_payloads(
+        self,
+        candidates: list[dict],
+        on_discard: Optional[SiteAdapter.DiscardCallback] = None,
+    ) -> list[dict]:
         if not candidates:
             return []
             

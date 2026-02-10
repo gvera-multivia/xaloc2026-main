@@ -1,8 +1,8 @@
-#!/usr/bin/env python
+﻿#!/usr/bin/env python
 """
 brain.py - Orquestador principal del sistema Xvia.
 
-Este módulo es responsable de:
+Este mÃ³dulo es responsable de:
 1. Detectar recursos disponibles en SQL Server
 2. Autenticarse en la plataforma Xvia con aiohttp
 3. Reclamar recursos mediante POST al endpoint /AsignarA
@@ -34,6 +34,7 @@ from dotenv import load_dotenv
 
 from core.sqlite_db import SQLiteDatabase
 from core.queue_gateway import build_queue_gateway
+from core.realtime_store import build_realtime_store
 from core.xvia_auth import create_authenticated_session_in_place
 from core.nt_expediente_fixer import is_nt_pattern, fix_nt_expediente
 from core.client_documentation import check_requires_gesdoc
@@ -43,7 +44,7 @@ from sites.adapters.site_adapter import SiteAdapter
 
 
 # =============================================================================
-# CONFIGURACIÓN
+# CONFIGURACIÃ“N
 # =============================================================================
 
 load_dotenv()
@@ -95,7 +96,7 @@ SELECT
     rs.numclient,
     rs.SujetoRecurso,
     rs.FaseProcedimiento,
-    -- Campos para identificación del cliente (GESDOC check)
+    -- Campos para identificaciÃ³n del cliente (GESDOC check)
     rs.Empresa,
     rs.cif,
     c.Nombrefiscal,
@@ -104,7 +105,7 @@ SELECT
     c.Nombre AS cliente_nombre,
     c.Apellido1 AS cliente_apellido1,
     c.Apellido2 AS cliente_apellido2,
-    -- Campo matrícula desde expedientes
+    -- Campo matrÃ­cula desde expedientes
     e.matricula
 FROM Recursos.RecursosExp rs
 INNER JOIN clientes c ON rs.numclient = c.numerocliente
@@ -124,7 +125,7 @@ WHERE idRecurso = ?
 
 
 # =============================================================================
-# ADAPTERS Y POLÍTICAS
+# ADAPTERS Y POLÃTICAS
 # =============================================================================
 
 SITE_PRIORITIES: dict[str, int] = {
@@ -143,8 +144,8 @@ def _parse_enabled_sites(csv_value: str) -> Optional[set[str]]:
 
 class BrainOrchestrator:
     """
-    Orquestador central que gestiona la detección, reclamación y 
-    distribución de recursos desde SQL Server hacia los workers locales.
+    Orquestador central que gestiona la detecciÃ³n, reclamaciÃ³n y 
+    distribuciÃ³n de recursos desde SQL Server hacia los workers locales.
     """
     
     def __init__(
@@ -161,6 +162,7 @@ class BrainOrchestrator:
         self.authenticated_user: Optional[str] = None
         self.queue_backend = QUEUE_BACKEND
         self.queue_gateway = build_queue_gateway(backend=self.queue_backend, db=self.db)
+        self.realtime_store = build_realtime_store(logger=self.logger)
 
         self.adapters: dict[str, SiteAdapter] = {
             "madrid": MadridAdapter(),
@@ -168,18 +170,37 @@ class BrainOrchestrator:
             "base_online": BaseOnlineAdapter(),
         }
 
+    def _record_incident_once(
+        self,
+        *,
+        site_id: str,
+        incident_type: str,
+        reason: str,
+        resource_id: Optional[int],
+        expediente: Optional[str],
+        payload: Optional[dict[str, Any]] = None,
+    ) -> None:
+        self.realtime_store.record_incident_once(
+            site_id=site_id,
+            incident_type=incident_type,
+            reason=reason,
+            resource_id=resource_id,
+            expediente=expediente,
+            payload=payload,
+        )
+
 
         
     # -------------------------------------------------------------------------
-    # PASO 0: Inicializar sesión autenticada
+    # PASO 0: Inicializar sesiÃ³n autenticada
     # -------------------------------------------------------------------------
     async def init_session(self, login_url: str) -> None:
-        """Inicializa sesión aiohttp y realiza login en Xvia."""
+        """Inicializa sesiÃ³n aiohttp y realiza login en Xvia."""
         if self.dry_run:
-            self.logger.info("[DRY-RUN] Saltando inicialización de sesión")
+            self.logger.info("[DRY-RUN] Saltando inicializaciÃ³n de sesiÃ³n")
             return
         
-        # Configuración de cookies y headers (igual que en worker.py)
+        # ConfiguraciÃ³n de cookies y headers (igual que en worker.py)
         cookie_jar = aiohttp.CookieJar(unsafe=True)
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -199,22 +220,22 @@ class BrainOrchestrator:
                 XVIA_PASSWORD,
                 login_url
             )
-            self.logger.info("✓ Sesión XVIA autenticada correctamente")
+            self.logger.info("âœ“ SesiÃ³n XVIA autenticada correctamente")
             
             # Obtener nombre del usuario autenticado
             self.authenticated_user = await self.get_authenticated_username()
             if self.authenticated_user:
-                self.logger.info(f"✓ Usuario autenticado: {self.authenticated_user}")
+                self.logger.info(f"âœ“ Usuario autenticado: {self.authenticated_user}")
             else:
-                self.logger.warning("⚠️ No se pudo obtener el nombre del usuario autenticado")
+                self.logger.warning("âš ï¸ No se pudo obtener el nombre del usuario autenticado")
                 
         except Exception as e:
             await self.session.close()
             self.session = None
-            raise RuntimeError(f"Error en autenticación: {e}")
+            raise RuntimeError(f"Error en autenticaciÃ³n: {e}")
             
     async def get_authenticated_username(self) -> Optional[str]:
-        """Obtiene el nombre del usuario autenticado desde la página de Xvia."""
+        """Obtiene el nombre del usuario autenticado desde la pÃ¡gina de Xvia."""
         if not self.session:
             return None
         try:
@@ -231,7 +252,7 @@ class BrainOrchestrator:
             return None
     
     async def close_session(self) -> None:
-        """Cierra la sesión."""
+        """Cierra la sesiÃ³n."""
         if self.session:
             await self.session.close()
             self.session = None
@@ -252,12 +273,12 @@ class BrainOrchestrator:
         - Organisme LIKE config.query_organisme
         - TExp IN (filtro_texp)
         - Estado = 0
-        - Expedient válido según regex
+        - Expedient vÃ¡lido segÃºn regex
         """
         texp_values = [int(x.strip()) for x in config["filtro_texp"].split(",")]
         texp_placeholders = ",".join(["?"] * len(texp_values))
         
-        # Manejar múltiples patrones LIKE (separados por espacios)
+        # Manejar mÃºltiples patrones LIKE (separados por espacios)
         query_organisme_raw = config["query_organisme"]
         patterns = [p.strip() for p in query_organisme_raw.split(" ") if p.strip()]
         
@@ -297,29 +318,30 @@ class BrainOrchestrator:
                         corrected = fix_nt_expediente(self.sqlserver_conn_str, id_exp)
                         if corrected and regex.match(corrected):
                             self.logger.info(
-                                f"✅ Expediente NT/ corregido: '{expediente}' -> '{corrected}'"
+                                f"âœ… Expediente NT/ corregido: '{expediente}' -> '{corrected}'"
                             )
                             record["Expedient"] = corrected
                             results.append(record)
                         else:
                             self.logger.warning(
-                                f"❌ Expediente NT/ no corregible: {expediente}"
+                                f"âŒ Expediente NT/ no corregible: {expediente}"
                             )
                     else:
                         self.logger.debug(
                             f"Expediente descartado por regex: {expediente}"
                         )
-                        self.db.add_incident(
-                            id_recurso=record.get("idRecurso"),
-                            n_exp=str(expediente or ""),
-                            tipo="REGEX_DISCARDED",
-                            motivo="Expediente descartado por regex del organismo",
-                            site_id=config.get("site_id"),
+                        self._record_incident_once(
+                            site_id=str(config.get("site_id") or ""),
+                            incident_type="REGEX_DISCARDED",
+                            reason="Expediente descartado por regex del organismo",
+                            resource_id=record.get("idRecurso"),
+                            expediente=str(expediente or ""),
+                            payload={"record": record},
                         )
             
             conn.close()
             self.logger.info(
-                f"[{config['site_id']}] Encontrados {len(results)} recursos válidos"
+                f"[{config['site_id']}] Encontrados {len(results)} recursos vÃ¡lidos"
             )
             return results
             
@@ -328,7 +350,7 @@ class BrainOrchestrator:
             return []
     
     # -------------------------------------------------------------------------
-    # PASO 3: Reclamar recurso vía POST
+    # PASO 3: Reclamar recurso vÃ­a POST
     # -------------------------------------------------------------------------
     async def claim_resource_via_post(
         self, 
@@ -344,11 +366,11 @@ class BrainOrchestrator:
             return True
         
         if not self.session:
-            self.logger.error("Sesión no inicializada")
+            self.logger.error("SesiÃ³n no inicializada")
             return False
         
         try:
-            # Siempre obtener token CSRF fresco de la página antes de cada POST
+            # Siempre obtener token CSRF fresco de la pÃ¡gina antes de cada POST
             async with self.session.get(
                 "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos"
             ) as resp:
@@ -374,17 +396,17 @@ class BrainOrchestrator:
                 if resp.status in (200, 302, 303):
                     # Verificar en SQL Server que el claim fue exitoso
                     if self.verify_claim_in_db(id_recurso):
-                        self.logger.info(f"✓ Recurso {id_recurso} ({expediente}) reclamado exitosamente")
+                        self.logger.info(f"âœ“ Recurso {id_recurso} ({expediente}) reclamado exitosamente")
                         return True
                     else:
-                        self.logger.warning(f"✗ POST exitoso pero claim no confirmado en DB para {id_recurso}")
+                        self.logger.warning(f"âœ— POST exitoso pero claim no confirmado en DB para {id_recurso}")
                         return False
                 else:
-                    self.logger.error(f"✗ POST falló con status {resp.status}")
+                    self.logger.error(f"âœ— POST fallÃ³ con status {resp.status}")
                     return False
                     
         except Exception as e:
-            self.logger.error(f"Error en claim vía POST para {expediente}: {e}")
+            self.logger.error(f"Error en claim vÃ­a POST para {expediente}: {e}")
             return False
 
     async def post_claim_resource(self, id_recurso: int) -> bool:
@@ -395,7 +417,7 @@ class BrainOrchestrator:
             return True
 
         if not self.session:
-            self.logger.error("Sesión no inicializada")
+            self.logger.error("SesiÃ³n no inicializada")
             return False
 
         try:
@@ -431,7 +453,7 @@ class BrainOrchestrator:
         delays_seconds: tuple[float, ...] = (0.5, 1.0, 2.0, 3.0, 5.0),
     ) -> bool:
         """
-        Reclama recurso vía POST y verifica en SQL Server con retries/backoff.
+        Reclama recurso vÃ­a POST y verifica en SQL Server con retries/backoff.
         """
         if self.dry_run:
             self.logger.info(f"[DRY-RUN] Claim simulado (retries) para idRecurso={id_recurso}")
@@ -443,7 +465,7 @@ class BrainOrchestrator:
 
         for attempt in range(max(retries, 1)):
             if self.verify_claim_in_db(id_recurso):
-                self.logger.info(f"✓ Recurso {id_recurso} ({expediente}) reclamado/verificado")
+                self.logger.info(f"âœ“ Recurso {id_recurso} ({expediente}) reclamado/verificado")
                 return True
             delay = delays_seconds[min(attempt, len(delays_seconds) - 1)]
             await asyncio.sleep(delay)
@@ -457,7 +479,7 @@ class BrainOrchestrator:
         Un recurso se considera reclamado si:
         - TExp cambia a 1.
         - O Estado pasa a ser > 0 (En proceso).
-        - O UsuarioAsignado deja de estar vacío.
+        - O UsuarioAsignado deja de estar vacÃ­o.
         """
         try:
             conn = pyodbc.connect(self.sqlserver_conn_str)
@@ -472,7 +494,7 @@ class BrainOrchestrator:
             
             if row:
                 texp, estado, usuario = row
-                # El claim es válido si el estado ha pasado a 1 y el usuario asignado es el nuestro
+                # El claim es vÃ¡lido si el estado ha pasado a 1 y el usuario asignado es el nuestro
                 # TExp debe ser 2 o 3 (el 1 y 4 no los hacemos)
                 
                 # Normalizamos el usuario para comparar
@@ -482,10 +504,10 @@ class BrainOrchestrator:
                 is_claimed = (estado == 1) and (usuario_db == nuestro_usuario)
                 
                 if is_claimed:
-                    self.logger.info(f"✅ Claim verificado: Estado={estado}, Usuario='{usuario_db}'")
+                    self.logger.info(f"âœ… Claim verificado: Estado={estado}, Usuario='{usuario_db}'")
                     return True
                 else:
-                    self.logger.warning(f"⚠️ Claim NO verificado: TExp={texp}, Estado={estado}, Usuario='{usuario_db}' (Esperado: Estado=1, Usuario='{nuestro_usuario}')")
+                    self.logger.warning(f"âš ï¸ Claim NO verificado: TExp={texp}, Estado={estado}, Usuario='{usuario_db}' (Esperado: Estado=1, Usuario='{nuestro_usuario}')")
             return False
         except Exception as e:
             self.logger.error(f"Error verificando claim en DB: {e}")
@@ -537,7 +559,7 @@ class BrainOrchestrator:
         else:
             motivos_config = {}
         
-        # --- Obtener motivos según fase ---
+        # --- Obtener motivos segÃºn fase ---
         expediente = _clean_str(recurso.get("Expedient"))
         fase_raw = recurso.get("FaseProcedimiento")
         sujeto_raw = _clean_str(recurso.get("SujetoRecurso")).upper()
@@ -553,7 +575,7 @@ class BrainOrchestrator:
                 break
         
         if not motivos_text:
-            self.logger.warning(f"No se encontró configuración de motivos para fase: {fase_raw}")
+            self.logger.warning(f"No se encontrÃ³ configuraciÃ³n de motivos para fase: {fase_raw}")
             motivos_text = f"ASUNTO: Recurso expediente {expediente}\n\nEXPONE: ...\n\nSOLICITA: ..."
         
         # --- Construir mandatario ---
@@ -590,7 +612,7 @@ class BrainOrchestrator:
         cif = _normalize_document_id(_clean_str(recurso.get("cif") or recurso.get("nifempresa")))
         
         if empresa or cif:
-            # Persona JURÍDICA
+            # Persona JURÃDICA
             cif_doc, cif_ctrl = _extraer_documento_control(cif) if cif else ("", "")
             mandatario = {
                 "tipo_persona": "JURIDICA",
@@ -599,7 +621,7 @@ class BrainOrchestrator:
                 "cif_control": cif_ctrl
             }
         else:
-            # Persona FÍSICA
+            # Persona FÃSICA
             nif = _normalize_document_id(_clean_str(recurso.get("cliente_nif")))
             tipo_doc = _detectar_tipo_documento(nif)
             if tipo_doc == "PASAPORTE":
@@ -632,7 +654,7 @@ class BrainOrchestrator:
             "motivos": motivos_text,
             "mandatario": mandatario,
             "adjuntos": [],
-            # Campos adicionales para identificación
+            # Campos adicionales para identificaciÃ³n
             "empresa": empresa,
             "cliente_nombre": _clean_str(recurso.get("cliente_nombre")),
             "cliente_apellido1": _clean_str(recurso.get("cliente_apellido1")),
@@ -648,8 +670,8 @@ class BrainOrchestrator:
         """
         Inserta la tarea en la cola apropiada.
         
-        Si el caso requiere autorización GESDOC → pending_authorization_queue
-        Si NO requiere GESDOC → tramite_queue (procesamiento normal)
+        Si el caso requiere autorizaciÃ³n GESDOC â†’ pending_authorization_queue
+        Si NO requiere GESDOC â†’ tramite_queue (procesamiento normal)
         """
         job_id = str(payload.get("job_id") or uuid.uuid4())
         payload["job_id"] = job_id
@@ -659,8 +681,12 @@ class BrainOrchestrator:
             self.logger.info(f"[DRY-RUN] Encolado simulado: {payload['expediente']} (Protocol: {protocol})")
             return EnqueueResult(job_id=job_id, enqueued=True, queue="ready")
         
-        # Verificar si requiere GESDOC antes de encolar
-        requires_gesdoc, reason = check_requires_gesdoc(payload)
+        # Verificar si requiere GESDOC antes de encolar (salvo bypass explÃ­cito)
+        skip_gesdoc_check = bool(payload.get("disable_gesdoc"))
+        requires_gesdoc = False
+        reason = None
+        if not skip_gesdoc_check:
+            requires_gesdoc, reason = check_requires_gesdoc(payload)
         resource_id = payload.get("idRecurso")
         try:
             resource_id = int(resource_id) if resource_id is not None else None
@@ -668,14 +694,15 @@ class BrainOrchestrator:
             resource_id = None
         
         if requires_gesdoc:
-            # Enviar a cola de autorización pendiente
+            # Enviar a cola de autorizaciÃ³n pendiente
             self.logger.warning(f"Pause Requiere GESDOC: {payload['expediente']} - {reason}")
-            self.db.add_incident(
-                id_recurso=resource_id,
-                n_exp=str(payload.get("expediente") or payload.get("expediente_num") or ""),
-                tipo="REQUIRES_GESDOC",
-                motivo=reason or "Requiere autorización GESDOC",
+            self._record_incident_once(
                 site_id=site_id,
+                incident_type="REQUIRES_GESDOC",
+                reason=reason or "Requiere autorizacion GESDOC",
+                resource_id=resource_id,
+                expediente=str(payload.get("expediente") or payload.get("expediente_num") or ""),
+                payload=payload,
             )
             pending_id = self.db.insert_pending_authorization(
                 site_id=site_id,
@@ -692,11 +719,11 @@ class BrainOrchestrator:
                 state="awaiting_auth",
             )
             self.logger.info(
-                f"📋 Tarea {pending_id} en pending_authorization_queue: {payload['expediente']}"
+                f"ðŸ“‹ Tarea {pending_id} en pending_authorization_queue: {payload['expediente']}"
             )
             return EnqueueResult(job_id=job_id, enqueued=True, queue="pending_authorization")
         
-        # No requiere GESDOC → cola normal
+        # No requiere GESDOC â†’ cola normal
         enqueued, queued_job_id = await self.queue_gateway.enqueue(site_id=site_id, protocol=protocol, payload=payload)
         if enqueued:
             self.logger.info(f"Tarea {queued_job_id} encolada: {payload['expediente']} -> {site_id}")
@@ -743,12 +770,13 @@ class BrainOrchestrator:
             try:
                 def _on_discard(item: dict) -> None:
                     try:
-                        self.db.add_incident(
-                            id_recurso=item.get("idRecurso"),
-                            n_exp=str(item.get("Expedient") or item.get("expediente") or ""),
-                            tipo=str(item.get("tipo_incidencia") or "SITE_RULE_DISCARDED"),
-                            motivo=str(item.get("motivo") or ""),
+                        self._record_incident_once(
                             site_id=str(item.get("site_id") or adapter.site_id),
+                            incident_type=str(item.get("tipo_incidencia") or "SITE_RULE_DISCARDED"),
+                            reason=str(item.get("motivo") or ""),
+                            resource_id=item.get("idRecurso"),
+                            expediente=str(item.get("Expedient") or item.get("expediente") or ""),
+                            payload=item,
                         )
                     except Exception:
                         return
@@ -805,12 +833,13 @@ class BrainOrchestrator:
                 await self.init_session(config["login_url"])
                 def _on_discard(item: dict) -> None:
                     try:
-                        self.db.add_incident(
-                            id_recurso=item.get("idRecurso"),
-                            n_exp=str(item.get("Expedient") or item.get("expediente") or ""),
-                            tipo=str(item.get("tipo_incidencia") or "SITE_RULE_DISCARDED"),
-                            motivo=str(item.get("motivo") or ""),
+                        self._record_incident_once(
                             site_id=str(item.get("site_id") or site_id),
+                            incident_type=str(item.get("tipo_incidencia") or "SITE_RULE_DISCARDED"),
+                            reason=str(item.get("motivo") or ""),
+                            resource_id=item.get("idRecurso"),
+                            expediente=str(item.get("Expedient") or item.get("expediente") or ""),
+                            payload=item,
                         )
                     except Exception:
                         return
@@ -845,7 +874,7 @@ class BrainOrchestrator:
                 if not filtered_candidates:
                     continue
 
-                payloads = await adapter.build_payloads(filtered_candidates)
+                payloads = await adapter.build_payloads(filtered_candidates, on_discard=_on_discard)
                 per_site = stats["per_site"].setdefault(
                     site_id,
                     {"ready": 0, "pending_authorization": 0, "duplicates": 0, "claimed": 0, "errors": 0},
@@ -883,14 +912,26 @@ class BrainOrchestrator:
             finally:
                 await self.close_session()
 
+        if stats["per_site"]:
+            for site_id, s in stats["per_site"].items():
+                self.logger.info(
+                    "[%s] Encolados: ready=%s pending_auth=%s duplicados=%s claimed=%s errors=%s",
+                    site_id,
+                    s.get("ready", 0),
+                    s.get("pending_authorization", 0),
+                    s.get("duplicates", 0),
+                    s.get("claimed", 0),
+                    s.get("errors", 0),
+                )
+
         return stats
 
     async def run_cycle(self) -> dict:
         """
-        Ejecuta un ciclo completo de sincronización.
+        Ejecuta un ciclo completo de sincronizaciÃ³n.
         
         Returns:
-            Dict con estadísticas: claimed, enqueued, errors
+            Dict con estadÃ­sticas: claimed, enqueued, errors
         """
         stats = {"claimed": 0, "enqueued": 0, "errors": 0, "per_site": {}}
         
@@ -905,7 +946,7 @@ class BrainOrchestrator:
             self.logger.warning("No hay organismos habilitados en BRAIN_ENABLED_SITES o configuraciones activas")
             return stats
 
-        # 2. Elegir el sitio a reponer según prioridad y estado de la cola
+        # 2. Elegir el sitio a reponer segÃºn prioridad y estado de la cola
         adapters, configs = self._get_enabled_adapters_and_configs()
         site_to_refill = await self._choose_site_to_refill(adapters, configs)
         
@@ -915,13 +956,13 @@ class BrainOrchestrator:
         config = configs[site_to_refill]
         adapter = self.adapters[site_to_refill]
         
-        self.logger.info(f"--- Iniciando sincronización para {site_to_refill} ---")
+        self.logger.info(f"--- Iniciando sincronizaciÃ³n para {site_to_refill} ---")
         
         try:
-            # 3. Inicializar sesión y login
+            # 3. Inicializar sesiÃ³n y login
             await self.init_session(config["login_url"])
             if not self.session and not self.dry_run:
-                self.logger.error("No se pudo establecer sesión")
+                self.logger.error("No se pudo establecer sesiÃ³n")
                 return stats
             
             # Agresivo: Pillamos todo sin mirar slots ni presupuesto
@@ -932,12 +973,13 @@ class BrainOrchestrator:
             self.logger.info(f"Buscando hasta {fetch_limit} recursos para {site_to_refill}...")
             def _on_discard(item: dict) -> None:
                 try:
-                    self.db.add_incident(
-                        id_recurso=item.get("idRecurso"),
-                        n_exp=str(item.get("Expedient") or item.get("expediente") or ""),
-                        tipo=str(item.get("tipo_incidencia") or "SITE_RULE_DISCARDED"),
-                        motivo=str(item.get("motivo") or ""),
+                    self._record_incident_once(
                         site_id=str(item.get("site_id") or site_to_refill),
+                        incident_type=str(item.get("tipo_incidencia") or "SITE_RULE_DISCARDED"),
+                        reason=str(item.get("motivo") or ""),
+                        resource_id=item.get("idRecurso"),
+                        expediente=str(item.get("Expedient") or item.get("expediente") or ""),
+                        payload=item,
                     )
                 except Exception:
                     return
@@ -955,7 +997,7 @@ class BrainOrchestrator:
                 return stats
             
             # 5. Construir payloads (usando el adapter)
-            payloads = await adapter.build_payloads(candidates)
+            payloads = await adapter.build_payloads(candidates, on_discard=_on_discard)
             per_site = stats["per_site"].setdefault(
                 site_to_refill,
                 {"ready": 0, "pending_authorization": 0, "duplicates": 0, "claimed": 0, "errors": 0},
@@ -987,7 +1029,7 @@ class BrainOrchestrator:
                     self.logger.error(f"Error reclamando recurso {id_recurso} ({expediente})")
                     
         except Exception as e:
-            self.logger.exception(f"Error crítico en ciclo de sincronización de {site_to_refill}: {e}")
+            self.logger.exception(f"Error crÃ­tico en ciclo de sincronizaciÃ³n de {site_to_refill}: {e}")
             stats["errors"] += 1
         finally:
             await self.close_session()
@@ -1014,21 +1056,10 @@ class BrainOrchestrator:
         while True:
             try:
                 # En lugar de run_cycle (1 solo site), usamos run_tick (todos los sites hasta presupuesto)
-                stats = await self.run_tick()
-                
-                # Auto-stop logic (disabled)
-                if True:
-                    pass
-                else:
-                    pass
-
-                if False:
-                    pass
-                    pass
-
-                self.logger.info(f"Próximo tick en {SYNC_INTERVAL_SECONDS} segundos...")
+                await self.run_tick()
+                self.logger.info(f"Proximo tick en {SYNC_INTERVAL_SECONDS} segundos...")
             except KeyboardInterrupt:
-                self.logger.info("Deteniendo brain por interrupción de teclado (Ctrl+C)...")
+                self.logger.info("Deteniendo brain por interrupcion de teclado (Ctrl+C)...")
                 break
             except Exception as e:
                 self.logger.error(f"Error inesperado en el bucle principal: {e}")
@@ -1112,3 +1143,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

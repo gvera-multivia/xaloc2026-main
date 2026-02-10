@@ -505,7 +505,11 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         if missing:
             raise ValueError(f"Payload Madrid inválido, faltan campos: {', '.join(sorted(set(missing)))}")
 
-    async def build_payloads(self, candidates: list[dict]) -> list[dict]:
+    async def build_payloads(
+        self,
+        candidates: list[dict],
+        on_discard: Optional[SiteAdapter.DiscardCallback] = None,
+    ) -> list[dict]:
         if not candidates:
             return []
 

@@ -193,15 +193,30 @@ async def _pulsar_boton_enviar(page: Page) -> None:
     logging.info("📤 Pulsando botón de ENVIAR...")
     
     try:
-        # Esperamos navegación tras el click
+        # Usamos no_wait_after=True para que el click no intente esperar a la navegación,
+        # delegando esa responsabilidad al expect_navigation con un timeout mayor.
         async with page.expect_navigation(wait_until="domcontentloaded", timeout=RECEIPT_WAIT_TIMEOUT_MS):
-            await boton_enviar.click()
+            await boton_enviar.click(no_wait_after=True)
         logging.info("✓ Formulario enviado exitosamente")
     except TimeoutError:
-        # Si no hay navegación inmediata, intentar click de todas formas
-        logging.warning("Timeout esperando navegación, intentando click directo...")
-        await boton_enviar.click()
-        await page.wait_for_timeout(2000)
+        # Si hay timeout, comprobamos si ya estamos en la página del justificante
+        # Esto ocurre si la navegación se completó pero Playwright no lo detectó a tiempo
+        if "TramitaJustif" in page.url:
+            logging.info("✓ Redirección detectada tras el click (aunque Playwright dio timeout). Continuando...")
+            return
+
+        # Si no estamos en la página del justificante, intentar click directo como fallback
+        logging.warning("Timeout esperando navegación y no se detecta la URL de destino. Intentando click directo...")
+        try:
+            await boton_enviar.click(timeout=10000)
+            await page.wait_for_timeout(2000)
+        except Exception as e:
+            logging.error(f"Fallo en el intento de click de recuperación: {e}")
+            # Si ya estamos en la URL de destino, ignoramos el error del click
+            if "TramitaJustif" in page.url:
+                logging.info("✓ Confirmada URL de destino tras fallo del click de recuperación.")
+                return
+            raise
     
     await page.wait_for_timeout(DELAY_MS)
 

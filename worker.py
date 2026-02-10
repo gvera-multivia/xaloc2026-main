@@ -8,7 +8,7 @@ import os
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 import subprocess
@@ -28,7 +28,7 @@ from core.xvia_auth import create_authenticated_session_in_place, mark_resource_
 from core.sqlserver_utils import build_sqlserver_connection_string
 from core.xvia_deselect import deselect_resource
 from core.worker_logging import setup_worker_logging
-from core.execution_report import ExecutionTracker
+from core.realtime_store import build_realtime_store
 
 # Configuracion de URLs y Directorios
 DOCUMENT_URL_TEMPLATE = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf/{idRecurso}"
@@ -163,8 +163,9 @@ async def process_task(
 
         # 3.1 AÑADIR DOCUMENTACIÓN OBLIGATORIA DEL CLIENTE (para todas las webs)
         require_client_docs = (os.getenv("REQUIRE_CLIENT_DOCS") or "1").strip().lower() not in {"0", "false", "no", "off"}
+        disable_gesdoc = bool(payload.get("disable_gesdoc"))
         merge_client_docs = (os.getenv("CLIENT_DOCS_MERGE") or "0").strip().lower() not in {"0", "false", "no", "off"}
-        if require_client_docs:
+        if require_client_docs and not disable_gesdoc:
             try:
                 # MODIFICADO: Ahora es async y acepta credenciales GESDOC
                 extra_docs = await build_required_client_documents_for_payload(
@@ -199,6 +200,8 @@ async def process_task(
                     raise ValueError(f"GESDOC no configurado: {e}") from e
                 else:
                     raise
+        elif disable_gesdoc:
+            logger.info("GESDOC deshabilitado por payload (disable_gesdoc=1). Se omite la documentación obligatoria de cliente en worker.")
 
         # 4. PREPARAR AUTOMATIZACIÓN
         try:
@@ -274,7 +277,12 @@ async def process_task(
             # --- NUEVO: MARCAR COMO COMPLETADO EN XVIA ---
             # Solo si no hubo incidencias "non-fatal" Y si no se ha pedido saltar este paso
             if not getattr(bot, "_exit_has_nonfatal_issues", False):
-                if payload.get("idRecurso") and not payload.get("skip_auto_complete"):
+                # Omitir marcado para Base Online P1 y P2 (en testing)
+                is_base_p1_p2 = site_id == "base_online" and protocol in ["P1", "P2"]
+                
+                if is_base_p1_p2:
+                    logger.info(f"⏭️  Saltando marcado autom. en XVIA para {site_id} {protocol} (Modo Testing).")
+                elif payload.get("idRecurso") and not payload.get("skip_auto_complete"):
                     logger.info(f"Intentando marcar recurso {payload['idRecurso']} como completado en la web...")
                     success_mark = await mark_resource_complete(auth_session, payload)
                     if not success_mark:
@@ -360,7 +368,7 @@ async def worker_loop():
     logger = setup_worker_logging(run_id)
 
     db = SQLiteDatabase()
-    tracker = ExecutionTracker(db=db, run_id=run_id)
+    realtime_store = build_realtime_store(logger=logger)
     queue_backend = (os.getenv("QUEUE_BACKEND", "sqlite") or "sqlite").strip().lower()
     queue_gateway = build_queue_gateway(backend=queue_backend, db=db)
     logger.info("Iniciando Worker Loop. Esperando tareas...")
@@ -420,6 +428,7 @@ async def worker_loop():
                             job.resource_id,
                         )
                         started = time.perf_counter()
+                        started_at = datetime.now(timezone.utc)
                         outcome = await process_task(
                             job.queue_ref,
                             job.site_id,
@@ -428,6 +437,7 @@ async def worker_loop():
                             auth_session,
                         )
                         elapsed = time.perf_counter() - started
+                        ended_at = datetime.now(timezone.utc)
                         if outcome.success:
                             success_jobs += 1
                             await queue_gateway.ack(
@@ -435,11 +445,15 @@ async def worker_loop():
                                 result={"screenshot_path": outcome.screenshot} if outcome.screenshot else None,
                                 screenshot=outcome.screenshot,
                             )
-                            tracker.record_success(
+                            realtime_store.record_task_success(
                                 payload=job.payload,
                                 site_id=job.site_id,
-                                justificante_path=outcome.screenshot,
-                                elapsed_seconds=elapsed,
+                                resource_id=job.resource_id,
+                                job_id=job.job_id,
+                                protocol=job.protocol,
+                                result={"screenshot_path": outcome.screenshot, "elapsed_seconds": elapsed},
+                                started_at=started_at,
+                                ended_at=ended_at,
                             )
                         else:
                             failed_jobs += 1
@@ -452,17 +466,16 @@ async def worker_loop():
                                     else " No se pudo liberar recurso en XVIA."
                                 )
                                 base_error = outcome.error or "unknown_error"
-                                db.add_incident(
-                                    id_recurso=job.resource_id,
-                                    n_exp=str(
-                                        job.payload.get("expediente")
-                                        or job.payload.get("expediente_num")
-                                        or job.payload.get("denuncia_num")
-                                        or ""
-                                    ),
-                                    tipo="RETRY_EXHAUSTED",
-                                    motivo=f"{base_error}{suffix}",
+                                realtime_store.record_task_failed_final(
                                     site_id=job.site_id,
+                                    resource_id=job.resource_id,
+                                    job_id=job.job_id,
+                                    protocol=job.protocol,
+                                    payload=job.payload,
+                                    error_message=f"{base_error}{suffix}",
+                                    started_at=started_at,
+                                    ended_at=ended_at,
+                                    extra={"xvia_deselected": bool(deselected)},
                                 )
 
                             await queue_gateway.nack(
@@ -486,7 +499,6 @@ async def worker_loop():
                     logger.info("⚡ El worker continuará procesando tareas después de este error...")
                     await asyncio.sleep(5)
     finally:
-        report_paths = tracker.save_reports()
         logger.info(
             "Resumen ejecución run=%s processed=%s success=%s failed=%s",
             run_id,
@@ -494,8 +506,6 @@ async def worker_loop():
             success_jobs,
             failed_jobs,
         )
-        logger.info("Reporte incidencias: %s", report_paths["incidencias"])
-        logger.info("Reporte éxitos: %s", report_paths["exitos"])
         logger.info("Worker finalizado correctamente.")
 
 if __name__ == "__main__":

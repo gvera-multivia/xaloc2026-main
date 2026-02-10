@@ -8,3 +8,4 @@ requests
 openpyxl
 groq
 redis
+psycopg[binary]

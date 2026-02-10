@@ -33,5 +33,9 @@ class SiteAdapter:
             expediente=str(candidate.get("Expedient") or ""),
         )
 
-    async def build_payloads(self, candidates: list[dict]) -> list[dict]:
+    async def build_payloads(
+        self,
+        candidates: list[dict],
+        on_discard: Optional[DiscardCallback] = None,
+    ) -> list[dict]:
         raise NotImplementedError
