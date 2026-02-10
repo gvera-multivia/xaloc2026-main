@@ -192,7 +192,15 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         return f"ASUNTO: {asunto}\n\nEXPONE: {expone}\n\nSOLICITA: {solicita}"
 
 
-    def fetch_candidates(self, *, config: dict, conn_str: str, authenticated_user: Optional[str], limit: int) -> list[dict]:
+    def fetch_candidates(
+        self,
+        *,
+        config: dict,
+        conn_str: str,
+        authenticated_user: Optional[str],
+        limit: int,
+        on_discard: Optional[SiteAdapter.DiscardCallback] = None,
+    ) -> list[dict]:
         texp_values = [2, 3] # Hardcoded logic from xaloc_task.py
         texp_placeholders = ",".join(["?"] * len(texp_values))
         

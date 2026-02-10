@@ -735,11 +735,24 @@ class BrainOrchestrator:
             if adapter.site_id not in configs:
                 continue
             try:
+                def _on_discard(item: dict) -> None:
+                    try:
+                        self.db.add_incident(
+                            id_recurso=item.get("idRecurso"),
+                            n_exp=str(item.get("Expedient") or item.get("expediente") or ""),
+                            tipo=str(item.get("tipo_incidencia") or "SITE_RULE_DISCARDED"),
+                            motivo=str(item.get("motivo") or ""),
+                            site_id=str(item.get("site_id") or adapter.site_id),
+                        )
+                    except Exception:
+                        return
+
                 candidates = adapter.fetch_candidates(
                     config=configs[adapter.site_id],
                     conn_str=self.sqlserver_conn_str,
                     authenticated_user=self.authenticated_user,
                     limit=9999,
+                    on_discard=_on_discard,
                 )
                 if candidates:
                     return adapter.site_id
@@ -784,11 +797,24 @@ class BrainOrchestrator:
 
             try:
                 await self.init_session(config["login_url"])
+                def _on_discard(item: dict) -> None:
+                    try:
+                        self.db.add_incident(
+                            id_recurso=item.get("idRecurso"),
+                            n_exp=str(item.get("Expedient") or item.get("expediente") or ""),
+                            tipo=str(item.get("tipo_incidencia") or "SITE_RULE_DISCARDED"),
+                            motivo=str(item.get("motivo") or ""),
+                            site_id=str(item.get("site_id") or site_id),
+                        )
+                    except Exception:
+                        return
+
                 candidates = adapter.fetch_candidates(
                     config=config,
                     conn_str=self.sqlserver_conn_str,
                     authenticated_user=self.authenticated_user,
                     limit=9999,
+                    on_discard=_on_discard,
                 )
                 if not candidates:
                     self.logger.info(f"[{site_id}] Sin candidatos remotos validos.")
@@ -888,11 +914,24 @@ class BrainOrchestrator:
             self.logger.info(f"Buscando todos los recursos para {site_to_refill} (AGRESIVO)...")
                 
             self.logger.info(f"Buscando hasta {fetch_limit} recursos para {site_to_refill}...")
+            def _on_discard(item: dict) -> None:
+                try:
+                    self.db.add_incident(
+                        id_recurso=item.get("idRecurso"),
+                        n_exp=str(item.get("Expedient") or item.get("expediente") or ""),
+                        tipo=str(item.get("tipo_incidencia") or "SITE_RULE_DISCARDED"),
+                        motivo=str(item.get("motivo") or ""),
+                        site_id=str(item.get("site_id") or site_to_refill),
+                    )
+                except Exception:
+                    return
+
             candidates = adapter.fetch_candidates(
                 config=config, 
                 conn_str=self.sqlserver_conn_str,
                 authenticated_user=self.authenticated_user,
-                limit=fetch_limit
+                limit=fetch_limit,
+                on_discard=_on_discard,
             )
             
             if not candidates:

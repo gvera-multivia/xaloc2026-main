@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Callable, Optional
 
 
 class SiteAdapter:
     site_id: str
     priority: int
+
+    DiscardCallback = Callable[[dict[str, Any]], None]
 
     def __init__(self, *, site_id: str, priority: int):
         self.site_id = site_id
@@ -18,6 +20,7 @@ class SiteAdapter:
         conn_str: str,
         authenticated_user: Optional[str],
         limit: int,
+        on_discard: Optional[DiscardCallback] = None,
     ) -> list[dict]:
         raise NotImplementedError
 

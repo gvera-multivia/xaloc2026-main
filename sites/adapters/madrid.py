@@ -126,6 +126,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         conn_str: str,
         authenticated_user: Optional[str],
         limit: int,
+        on_discard: Optional[SiteAdapter.DiscardCallback] = None,
     ) -> list[dict]:
         regex_pattern = self._clean_str(config.get("regex_expediente")) or self.DEFAULT_REGEX_EXPEDIENTE
         regex = self._regex_expediente_cache.get(regex_pattern)
@@ -194,6 +195,23 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
 
                 fase_norm = self._normalize_text(recurso.get("FaseProcedimiento"))
                 if any(x in fase_norm for x in ["reclamacion", "embargo", "apremio"]):
+                    if on_discard:
+                        try:
+                            on_discard(
+                                {
+                                    "site_id": "madrid",
+                                    "idRecurso": recurso.get("idRecurso"),
+                                    "Expedient": recurso.get("Expedient"),
+                                    "tipo_incidencia": "SITE_RULE_DISCARDED",
+                                    "motivo": (
+                                        "Madrid: trámite no reclamable por regla de sede (fase negra: "
+                                        f"{self._clean_str(recurso.get('FaseProcedimiento'))}). "
+                                        "Revisar si el trámite está mal formado o si debe tratarse manualmente."
+                                    ),
+                                }
+                            )
+                        except Exception:
+                            pass
                     continue
 
                 estado = int(recurso.get("Estado") or 0)

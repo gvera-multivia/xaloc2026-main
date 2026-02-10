@@ -160,7 +160,15 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         solicita = self._clean_str(selected.get("solicita")).replace("{expediente}", exp).replace("{sujeto_recurso}", sujeto_txt)
         return expone, solicita
 
-    def fetch_candidates(self, *, config: dict, conn_str: str, authenticated_user: Optional[str], limit: int) -> list[dict]:
+    def fetch_candidates(
+        self,
+        *,
+        config: dict,
+        conn_str: str,
+        authenticated_user: Optional[str],
+        limit: int,
+        on_discard: Optional[SiteAdapter.DiscardCallback] = None,
+    ) -> list[dict]:
         texp_values = [2, 3]
         texp_placeholders = ",".join(["?"] * len(texp_values))
         query = self.SQL_FETCH_RECURSOS_BASE.format(texp_list=texp_placeholders)
