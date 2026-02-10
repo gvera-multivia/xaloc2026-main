@@ -23,6 +23,7 @@ import os
 import re
 import sys
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -47,12 +48,11 @@ from sites.adapters.site_adapter import SiteAdapter
 
 load_dotenv()
 
-SYNC_INTERVAL_SECONDS = int(os.getenv("BRAIN_SYNC_INTERVAL", 300))
+SYNC_INTERVAL_SECONDS = int(os.getenv("BRAIN_SYNC_INTERVAL", 500))
 TICK_INTERVAL_SECONDS = int(os.getenv("BRAIN_TICK_SECONDS", 5))
 MAX_CLAIMS_PER_CYCLE = int(os.getenv("BRAIN_MAX_CLAIMS", 999999))
 SQLITE_DB_PATH = os.getenv("SQLITE_DB_PATH", "db/xaloc_database.db")
 ENABLED_SITES_CSV = os.getenv("BRAIN_ENABLED_SITES", "").strip()
-MAX_IDLE_CYCLES = int(os.getenv("BRAIN_MAX_IDLE_CYCLES", 3))
 QUEUE_BACKEND = (os.getenv("QUEUE_BACKEND", "sqlite") or "sqlite").strip().lower()
 
 # Credenciales Xvia
@@ -71,6 +71,13 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger("brain")
+
+
+@dataclass
+class EnqueueResult:
+    job_id: str
+    enqueued: bool
+    queue: str  # "ready", "pending_authorization", "duplicate"
 
 
 # =============================================================================
@@ -152,7 +159,6 @@ class BrainOrchestrator:
         self.logger = logger
         self.session: Optional[aiohttp.ClientSession] = None
         self.authenticated_user: Optional[str] = None
-        self.idle_cycles_count = 0
         self.queue_backend = QUEUE_BACKEND
         self.queue_gateway = build_queue_gateway(backend=self.queue_backend, db=self.db)
 
@@ -638,7 +644,7 @@ class BrainOrchestrator:
     # -------------------------------------------------------------------------
     # PASO 5: Encolar tarea
     # -------------------------------------------------------------------------
-    async def enqueue_locally(self, site_id: str, payload: dict) -> str:
+    async def enqueue_locally(self, site_id: str, payload: dict) -> EnqueueResult:
         """
         Inserta la tarea en la cola apropiada.
         
@@ -651,7 +657,7 @@ class BrainOrchestrator:
 
         if self.dry_run:
             self.logger.info(f"[DRY-RUN] Encolado simulado: {payload['expediente']} (Protocol: {protocol})")
-            return job_id
+            return EnqueueResult(job_id=job_id, enqueued=True, queue="ready")
         
         # Verificar si requiere GESDOC antes de encolar
         requires_gesdoc, reason = check_requires_gesdoc(payload)
@@ -688,7 +694,7 @@ class BrainOrchestrator:
             self.logger.info(
                 f"📋 Tarea {pending_id} en pending_authorization_queue: {payload['expediente']}"
             )
-            return job_id
+            return EnqueueResult(job_id=job_id, enqueued=True, queue="pending_authorization")
         
         # No requiere GESDOC → cola normal
         enqueued, queued_job_id = await self.queue_gateway.enqueue(site_id=site_id, protocol=protocol, payload=payload)
@@ -696,7 +702,7 @@ class BrainOrchestrator:
             self.logger.info(f"Tarea {queued_job_id} encolada: {payload['expediente']} -> {site_id}")
         else:
             self.logger.info(f"Tarea duplicada omitida: {payload['expediente']} -> {site_id}")
-        return queued_job_id
+        return EnqueueResult(job_id=queued_job_id, enqueued=enqueued, queue=("ready" if enqueued else "duplicate"))
     
     # -------------------------------------------------------------------------
     # CICLO PRINCIPAL
@@ -769,7 +775,7 @@ class BrainOrchestrator:
         - Respeta el limite global MAX_CLAIMS_PER_CYCLE.
         """
 
-        stats = {"claimed": 0, "enqueued": 0, "errors": 0}
+        stats = {"claimed": 0, "enqueued": 0, "errors": 0, "per_site": {}}
 
         adapters, configs = self._get_enabled_adapters_and_configs()
         if not adapters:
@@ -840,6 +846,10 @@ class BrainOrchestrator:
                     continue
 
                 payloads = await adapter.build_payloads(filtered_candidates)
+                per_site = stats["per_site"].setdefault(
+                    site_id,
+                    {"ready": 0, "pending_authorization": 0, "duplicates": 0, "claimed": 0, "errors": 0},
+                )
                 
                 for payload in payloads:
                     if remaining_claim_budget <= 0:
@@ -851,12 +861,21 @@ class BrainOrchestrator:
                     # CLAIM
                     if await adapter.ensure_claimed(self, payload):
                         # ENQUEUE
-                        await self.enqueue_locally(site_id, payload)
+                        enqueue_res = await self.enqueue_locally(site_id, payload)
                         stats["claimed"] += 1
-                        stats["enqueued"] += 1
+                        per_site["claimed"] += 1
+                        if enqueue_res.queue == "ready" and enqueue_res.enqueued:
+                            stats["enqueued"] += 1
+                            per_site["ready"] += 1
+                        elif enqueue_res.queue == "pending_authorization":
+                            stats["enqueued"] += 1
+                            per_site["pending_authorization"] += 1
+                        else:
+                            per_site["duplicates"] += 1
                         remaining_claim_budget -= 1
                     else:
                         stats["errors"] += 1
+                        per_site["errors"] += 1
 
             except Exception as e:
                 self.logger.exception(f"[{site_id}] Error en ciclo de reposicion: {e}")
@@ -873,7 +892,7 @@ class BrainOrchestrator:
         Returns:
             Dict con estadísticas: claimed, enqueued, errors
         """
-        stats = {"claimed": 0, "enqueued": 0, "errors": 0}
+        stats = {"claimed": 0, "enqueued": 0, "errors": 0, "per_site": {}}
         
         # 1. Obtener configuraciones activas y habilitadas
         enabled_sites = _parse_enabled_sites(ENABLED_SITES_CSV)
@@ -891,11 +910,8 @@ class BrainOrchestrator:
         site_to_refill = await self._choose_site_to_refill(adapters, configs)
         
         if not site_to_refill:
-            self.idle_cycles_count += 1
-            self.logger.info(f"Nada que hacer en este ciclo (Idle: {self.idle_cycles_count}/{MAX_IDLE_CYCLES}).")
+            self.logger.info("Nada que hacer en este ciclo (sin candidatos).")
             return stats
-        
-        self.idle_cycles_count = 0 # Reiniciar contador si hay trabajo
         config = configs[site_to_refill]
         adapter = self.adapters[site_to_refill]
         
@@ -940,6 +956,10 @@ class BrainOrchestrator:
             
             # 5. Construir payloads (usando el adapter)
             payloads = await adapter.build_payloads(candidates)
+            per_site = stats["per_site"].setdefault(
+                site_to_refill,
+                {"ready": 0, "pending_authorization": 0, "duplicates": 0, "claimed": 0, "errors": 0},
+            )
             
             # 6. Reclamar y encolar
             for payload in payloads:
@@ -950,11 +970,20 @@ class BrainOrchestrator:
                 # Note: adapter.ensure_claimed ya maneja el claim si es necesario
                 if await adapter.ensure_claimed(self, payload):
                     # Encolar localmente (esto incluye el check de GESDOC)
-                    await self.enqueue_locally(site_to_refill, payload)
+                    enqueue_res = await self.enqueue_locally(site_to_refill, payload)
                     stats["claimed"] += 1
-                    stats["enqueued"] += 1
+                    per_site["claimed"] += 1
+                    if enqueue_res.queue == "ready" and enqueue_res.enqueued:
+                        stats["enqueued"] += 1
+                        per_site["ready"] += 1
+                    elif enqueue_res.queue == "pending_authorization":
+                        stats["enqueued"] += 1
+                        per_site["pending_authorization"] += 1
+                    else:
+                        per_site["duplicates"] += 1
                 else:
                     stats["errors"] += 1
+                    per_site["errors"] += 1
                     self.logger.error(f"Error reclamando recurso {id_recurso} ({expediente})")
                     
         except Exception as e:
@@ -962,7 +991,19 @@ class BrainOrchestrator:
             stats["errors"] += 1
         finally:
             await self.close_session()
-            
+
+        if stats["per_site"]:
+            for site_id, s in stats["per_site"].items():
+                self.logger.info(
+                    "[%s] Encolados: ready=%s pending_auth=%s duplicados=%s claimed=%s errors=%s",
+                    site_id,
+                    s.get("ready", 0),
+                    s.get("pending_authorization", 0),
+                    s.get("duplicates", 0),
+                    s.get("claimed", 0),
+                    s.get("errors", 0),
+                )
+
         return stats
 
     async def run_forever(self) -> None:
@@ -975,17 +1016,20 @@ class BrainOrchestrator:
                 # En lugar de run_cycle (1 solo site), usamos run_tick (todos los sites hasta presupuesto)
                 stats = await self.run_tick()
                 
-                # Auto-stop logic
-                if stats["claimed"] == 0 and stats["enqueued"] == 0 and stats["errors"] == 0:
-                    self.idle_cycles_count += 1
+                # Auto-stop logic (disabled)
+                if True:
+                    pass
                 else:
-                    self.idle_cycles_count = 0
+                    pass
 
-                if self.idle_cycles_count >= MAX_IDLE_CYCLES:
-                    self.logger.info(f"!!! Se ha alcanzado el nÃºmero mÃ¡ximo de ciclos inactivos ({MAX_IDLE_CYCLES}). Deteniendo el orquestador.")
-                    break
+                if False:
+                    pass
+                    pass
 
                 self.logger.info(f"Próximo tick en {SYNC_INTERVAL_SECONDS} segundos...")
+            except KeyboardInterrupt:
+                self.logger.info("Deteniendo brain por interrupción de teclado (Ctrl+C)...")
+                break
             except Exception as e:
                 self.logger.error(f"Error inesperado en el bucle principal: {e}")
             
