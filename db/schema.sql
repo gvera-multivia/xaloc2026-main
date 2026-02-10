@@ -46,3 +46,17 @@ CREATE TABLE IF NOT EXISTS pending_authorization_queue (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     notes TEXT                          -- Notas adicionales
 );
+
+-- Incidencias consolidadas de worker y orquestador
+CREATE TABLE IF NOT EXISTS incidencias (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    idRecurso INTEGER,
+    nExp TEXT,
+    tipo_incidencia TEXT NOT NULL,      -- RETRY_EXHAUSTED, REQUIRES_GESDOC, REGEX_DISCARDED
+    motivo TEXT,
+    site_id TEXT,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS ix_incidencias_site_tipo_time
+ON incidencias(site_id, tipo_incidencia, timestamp);

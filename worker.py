@@ -5,7 +5,10 @@ import sys
 import inspect
 import traceback
 import os
+import time
+import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 import subprocess
@@ -23,20 +26,13 @@ from core.attachments import AttachmentDownloader, AttachmentInfo
 from core.client_documentation import RequiredClientDocumentsError, build_required_client_documents_for_payload
 from core.xvia_auth import create_authenticated_session_in_place, mark_resource_complete
 from core.sqlserver_utils import build_sqlserver_connection_string
+from core.xvia_deselect import deselect_resource
+from core.worker_logging import setup_worker_logging
+from core.execution_report import ExecutionTracker
 
 # Configuracion de URLs y Directorios
 DOCUMENT_URL_TEMPLATE = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf/{idRecurso}"
 DOWNLOAD_DIR = Path("tmp/downloads")
-
-# Configuracion de logging para el Worker
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - [WORKER] - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler("logs/worker.log", encoding="utf-8")
-    ]
-)
 
 logger = logging.getLogger("worker")
 
@@ -359,10 +355,16 @@ async def process_task(
         logger.info(f"Finalizando procesamiento de tarea {task_label}")
 
 async def worker_loop():
+    global logger
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:8]
+    logger = setup_worker_logging(run_id)
+
     db = SQLiteDatabase()
+    tracker = ExecutionTracker(db=db, run_id=run_id)
     queue_backend = (os.getenv("QUEUE_BACKEND", "sqlite") or "sqlite").strip().lower()
     queue_gateway = build_queue_gateway(backend=queue_backend, db=db)
     logger.info("Iniciando Worker Loop. Esperando tareas...")
+    logger.info("Run ID: %s", run_id)
     logger.info(f"Backend de cola activo: {queue_backend}")
 
     # Cargar credenciales
@@ -389,52 +391,112 @@ async def worker_loop():
     }
 
     # Iniciamos la sesión persistente con el tarro de cookies especial
-    async with aiohttp.ClientSession(headers=headers, cookie_jar=cookie_jar) as auth_session:
-        try:
-            # Intentar el login único inicial
-            await create_authenticated_session_in_place(auth_session, auth_email, auth_password)
-            logger.info("XVIA Session lista y persistente (Cookies almacenadas).")
-        except Exception as e:
-            logger.error(f"Error crítico de autenticación inicial: {e}")
-            return # Si no podemos loguear al inicio, el worker no puede trabajar
+    processed_jobs = 0
+    success_jobs = 0
+    failed_jobs = 0
 
-        # Bucle principal de procesamiento
-        while True:
+    try:
+        async with aiohttp.ClientSession(headers=headers, cookie_jar=cookie_jar) as auth_session:
             try:
-                job = await queue_gateway.reserve(timeout_seconds=10)
-                if job:
-                    outcome = await process_task(
-                        job.queue_ref,
-                        job.site_id,
-                        job.protocol,
-                        job.payload,
-                        auth_session,
-                    )
-                    if outcome.success:
-                        await queue_gateway.ack(
-                            job,
-                            result={"screenshot_path": outcome.screenshot} if outcome.screenshot else None,
-                            screenshot=outcome.screenshot,
-                        )
-                    else:
-                        await queue_gateway.nack(job, error=outcome.error or "unknown_error", retryable=False)
-                    # Pausa fija entre jobs para no encadenar acciones en la sede/web
-                    await asyncio.sleep(10)
-                else:
-                    # Sin tareas: esperar 10 segundos antes de volver a consultar la DB
-                    await asyncio.sleep(10)
-                    
-            except KeyboardInterrupt:
-                logger.info("Deteniendo worker por interrupción de teclado (Ctrl+C)...")
-                break
+                # Intentar el login único inicial
+                await create_authenticated_session_in_place(auth_session, auth_email, auth_password)
+                logger.info("XVIA Session lista y persistente (Cookies almacenadas).")
             except Exception as e:
-                error_type = type(e).__name__
-                logger.error(f"💥 Error inesperado en el bucle principal ({error_type}): {e}")
-                logger.error(traceback.format_exc())
-                logger.info("⚡ El worker continuará procesando tareas después de este error...")
-                await asyncio.sleep(5)
+                logger.error(f"Error crítico de autenticación inicial: {e}")
+                return  # Si no podemos loguear al inicio, el worker no puede trabajar
 
-    logger.info("Worker finalizado correctamente.")
+            # Bucle principal de procesamiento
+            while True:
+                try:
+                    job = await queue_gateway.reserve(timeout_seconds=10)
+                    if job:
+                        processed_jobs += 1
+                        logger.info(
+                            "Procesando job %s (intento %s/%s) site=%s resource=%s",
+                            job.job_id,
+                            int(job.attempt) + 1,
+                            job.max_attempts,
+                            job.site_id,
+                            job.resource_id,
+                        )
+                        started = time.perf_counter()
+                        outcome = await process_task(
+                            job.queue_ref,
+                            job.site_id,
+                            job.protocol,
+                            job.payload,
+                            auth_session,
+                        )
+                        elapsed = time.perf_counter() - started
+                        if outcome.success:
+                            success_jobs += 1
+                            await queue_gateway.ack(
+                                job,
+                                result={"screenshot_path": outcome.screenshot} if outcome.screenshot else None,
+                                screenshot=outcome.screenshot,
+                            )
+                            tracker.record_success(
+                                payload=job.payload,
+                                site_id=job.site_id,
+                                justificante_path=outcome.screenshot,
+                                elapsed_seconds=elapsed,
+                            )
+                        else:
+                            failed_jobs += 1
+                            exhausted = (int(job.attempt) + 1) >= int(job.max_attempts)
+                            if exhausted and job.resource_id is not None:
+                                deselected = await deselect_resource(auth_session, int(job.resource_id))
+                                suffix = (
+                                    " Recurso liberado en XVIA."
+                                    if deselected
+                                    else " No se pudo liberar recurso en XVIA."
+                                )
+                                base_error = outcome.error or "unknown_error"
+                                db.add_incident(
+                                    id_recurso=job.resource_id,
+                                    n_exp=str(
+                                        job.payload.get("expediente")
+                                        or job.payload.get("expediente_num")
+                                        or job.payload.get("denuncia_num")
+                                        or ""
+                                    ),
+                                    tipo="RETRY_EXHAUSTED",
+                                    motivo=f"{base_error}{suffix}",
+                                    site_id=job.site_id,
+                                )
+
+                            await queue_gateway.nack(
+                                job,
+                                error=outcome.error or "unknown_error",
+                                retryable=True,
+                            )
+                        # Pausa fija entre jobs para no encadenar acciones en la sede/web
+                        await asyncio.sleep(10)
+                    else:
+                        # Sin tareas: esperar 10 segundos antes de volver a consultar la cola
+                        await asyncio.sleep(10)
+
+                except KeyboardInterrupt:
+                    logger.info("Deteniendo worker por interrupción de teclado (Ctrl+C)...")
+                    break
+                except Exception as e:
+                    error_type = type(e).__name__
+                    logger.error(f"💥 Error inesperado en el bucle principal ({error_type}): {e}")
+                    logger.error(traceback.format_exc())
+                    logger.info("⚡ El worker continuará procesando tareas después de este error...")
+                    await asyncio.sleep(5)
+    finally:
+        report_paths = tracker.save_reports()
+        logger.info(
+            "Resumen ejecución run=%s processed=%s success=%s failed=%s",
+            run_id,
+            processed_jobs,
+            success_jobs,
+            failed_jobs,
+        )
+        logger.info("Reporte incidencias: %s", report_paths["incidencias"])
+        logger.info("Reporte éxitos: %s", report_paths["exitos"])
+        logger.info("Worker finalizado correctamente.")
 
 if __name__ == "__main__":
     if sys.platform == "win32":

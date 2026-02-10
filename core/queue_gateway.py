@@ -106,11 +106,10 @@ class SQLiteQueueGateway(QueueGateway):
         self.db.update_job_run_state(job.job_id, "completed", finished=True, result_snapshot=result)
 
     async def nack(self, job: QueueJob, *, error: str, retryable: bool = False) -> None:
-        if job.queue_ref is not None:
-            self.db.update_task_status(job.queue_ref, "failed", error=error)
-
         next_attempt = int(job.attempt) + 1
         if retryable and next_attempt < int(job.max_attempts):
+            if job.queue_ref is not None:
+                self.db.requeue_task(job.queue_ref, error=error)
             self.db.update_job_run_state(
                 job.job_id,
                 "queued",
@@ -118,6 +117,9 @@ class SQLiteQueueGateway(QueueGateway):
                 error_message=error,
             )
             return
+
+        if job.queue_ref is not None:
+            self.db.update_task_status(job.queue_ref, "failed", error=error)
 
         final_state = "dead" if retryable else "failed"
         self.db.update_job_run_state(
@@ -139,4 +141,3 @@ def build_queue_gateway(*, backend: Optional[str], db: SQLiteDatabase):
 
         return RedisQueueGateway(db=db)
     return SQLiteQueueGateway(db=db)
-

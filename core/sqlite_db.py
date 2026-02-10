@@ -162,6 +162,25 @@ class SQLiteDatabase:
             ON job_runs(site_id, state)
             """
         )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS incidencias (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                idRecurso INTEGER,
+                nExp TEXT,
+                tipo_incidencia TEXT NOT NULL,
+                motivo TEXT,
+                site_id TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS ix_incidencias_site_tipo_time
+            ON incidencias(site_id, tipo_incidencia, timestamp)
+            """
+        )
 
     def get_pending_task(self) -> Optional[Tuple[int, str, str, Dict[str, Any]]]:
         """
@@ -325,6 +344,26 @@ class SQLiteDatabase:
                 statuses,
             )
             return {str(site_id): int(c) for site_id, c in cursor.fetchall()}
+        finally:
+            conn.close()
+
+    def requeue_task(self, task_id: int, error: Optional[str] = None) -> None:
+        """Devuelve una tarea en processing a pending para reintento."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE tramite_queue
+                SET status = 'pending',
+                    processed_at = NULL,
+                    error_log = ?,
+                    attempts = COALESCE(attempts, 0) + 1
+                WHERE id = ?
+                """,
+                ((error or "").strip() or None, task_id),
+            )
+            conn.commit()
         finally:
             conn.close()
 
@@ -556,6 +595,73 @@ class SQLiteDatabase:
                 states,
             )
             return {str(site_id): int(c) for site_id, c in cursor.fetchall()}
+        finally:
+            conn.close()
+
+    # ==========================================================================
+    # METODOS PARA INCIDENCIAS
+    # ==========================================================================
+
+    def add_incident(
+        self,
+        *,
+        id_recurso: Optional[int],
+        n_exp: Optional[str],
+        tipo: str,
+        motivo: Optional[str],
+        site_id: Optional[str],
+    ) -> int:
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO incidencias (idRecurso, nExp, tipo_incidencia, motivo, site_id)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    int(id_recurso) if id_recurso is not None else None,
+                    (n_exp or "").strip() or None,
+                    str(tipo),
+                    (motivo or "").strip() or None,
+                    (site_id or "").strip() or None,
+                ),
+            )
+            conn.commit()
+            return int(cursor.lastrowid)
+        finally:
+            conn.close()
+
+    def list_incidents(
+        self,
+        *,
+        site_id: Optional[str] = None,
+        tipo: Optional[str] = None,
+    ) -> list[Dict[str, Any]]:
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            clauses = []
+            params: list[Any] = []
+            if site_id:
+                clauses.append("site_id = ?")
+                params.append(site_id)
+            if tipo:
+                clauses.append("tipo_incidencia = ?")
+                params.append(tipo)
+
+            where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+            cursor.execute(
+                f"""
+                SELECT id, idRecurso, nExp, tipo_incidencia, motivo, site_id, timestamp
+                FROM incidencias
+                {where_sql}
+                ORDER BY timestamp ASC, id ASC
+                """,
+                params,
+            )
+            return [dict(row) for row in cursor.fetchall()]
         finally:
             conn.close()
 

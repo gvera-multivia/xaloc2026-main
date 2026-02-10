@@ -303,6 +303,13 @@ class BrainOrchestrator:
                         self.logger.debug(
                             f"Expediente descartado por regex: {expediente}"
                         )
+                        self.db.add_incident(
+                            id_recurso=record.get("idRecurso"),
+                            n_exp=str(expediente or ""),
+                            tipo="REGEX_DISCARDED",
+                            motivo="Expediente descartado por regex del organismo",
+                            site_id=config.get("site_id"),
+                        )
             
             conn.close()
             self.logger.info(
@@ -657,6 +664,13 @@ class BrainOrchestrator:
         if requires_gesdoc:
             # Enviar a cola de autorización pendiente
             self.logger.warning(f"Pause Requiere GESDOC: {payload['expediente']} - {reason}")
+            self.db.add_incident(
+                id_recurso=resource_id,
+                n_exp=str(payload.get("expediente") or payload.get("expediente_num") or ""),
+                tipo="REQUIRES_GESDOC",
+                motivo=reason or "Requiere autorización GESDOC",
+                site_id=site_id,
+            )
             pending_id = self.db.insert_pending_authorization(
                 site_id=site_id,
                 payload=payload,
