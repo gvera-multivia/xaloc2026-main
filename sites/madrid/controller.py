@@ -37,6 +37,7 @@ class MadridController:
         self,
         *,
         headless: bool = True,
+        idRecurso: int | None = None,
         exp_tipo: str | None = None,
         exp_nnn: str | None = None,
         exp_eeeeeeeee: str | None = None,
@@ -73,6 +74,10 @@ class MadridController:
         notif_nombre_via: str | None = None,
         notif_tipo_numeracion: str | None = None,
         notif_numero: str | None = None,
+        notif_portal: str | None = None,
+        notif_escalera: str | None = None,
+        notif_planta: str | None = None,
+        notif_puerta: str | None = None,
         notif_codigo_postal: str | None = None,
         notif_email: str | None = None,
         notif_movil: str | None = None,
@@ -81,6 +86,7 @@ class MadridController:
         expone: str | None = None,
         solicita: str | None = None,
         archivos: list[str] | None = None,
+        payload: dict | None = None,
     ) -> MadridTarget:
         def _require(name: str, value: str | None) -> str:
             v = (value or "").strip()
@@ -135,6 +141,8 @@ class MadridController:
         )
 
         tipo_doc_raw = _require("notif_tipo_documento", notif_tipo_documento).upper()
+        if tipo_doc_raw == "PS":
+            tipo_doc_raw = "PASAPORTE"
         try:
             tipo_doc = TipoDocumento[tipo_doc_raw]
         except KeyError as e:
@@ -156,14 +164,18 @@ class MadridController:
                 municipio=_require("notif_municipio", notif_municipio),
                 tipo_via=_require("notif_tipo_via", notif_tipo_via),
                 nombre_via=_require("notif_nombre_via", notif_nombre_via),
-                tipo_numeracion=_require("notif_tipo_numeracion", notif_tipo_numeracion),
-                numero=_require("notif_numero", notif_numero),
+                tipo_numeracion=(notif_tipo_numeracion or "S/N").strip(),  # Default S/N si no hay
+                numero=(notif_numero or "").strip(),  # Opcional: puede no tener número
+                portal=(notif_portal or "").strip(),
+                escalera=(notif_escalera or "").strip(),
+                planta=(notif_planta or "").strip(),
+                puerta=(notif_puerta or "").strip(),
                 codigo_postal=_require("notif_codigo_postal", notif_codigo_postal),
             ),
             contacto=ContactoData(
                 email=_require("notif_email", notif_email),
-                movil=_require("notif_movil", notif_movil),
-                telefono=_require("notif_telefono", notif_telefono),
+                movil=(notif_movil or "").strip(),  # Opcional: puede no tener móvil
+                telefono=(notif_telefono or "").strip(),  # Opcional: puede no tener teléfono fijo
             ),
         )
 
@@ -179,7 +191,7 @@ class MadridController:
 
         form_data = MadridFormData(
             expediente=expediente,
-            matricula=_require("matricula", matricula),
+            matricula=(matricula or "").strip(),  # Opcional: algunos expedientes no tienen matrícula
             interesado=interesado,
             representante=representante,
             notificacion=notificacion,
@@ -193,8 +205,10 @@ class MadridController:
         archivos_final = archivos
 
         return MadridTarget(
+            idRecurso=idRecurso,
             form_data=form_data,
             archivos_adjuntos=[Path(a) for a in archivos_final] if archivos_final else [],
+            payload=payload or {},
             headless=headless,
         )
 
@@ -205,6 +219,8 @@ class MadridController:
         Mapea claves genéricas de DB a argumentos de create_target.
         """
         return {
+            # ID del recurso (para nombrar archivos)
+            "idRecurso": data.get("idRecurso"),
             # Permite dos formatos:
             # - "genérico" (plate_number, representative_*, etc.) para worker-tasks
             # - "avanzado" (matricula, rep_*, exp_*) para sobreescribir defaults del controlador
@@ -213,7 +229,7 @@ class MadridController:
             "inter_email_check": data.get("inter_email_check"),
             "rep_tipo_via": data.get("rep_tipo_via"),
             "rep_nombre_via": data.get("rep_nombre_via") or data.get("representative_street"),
-            "rep_tipo_numeracion": data.get("rep_tipo_numeracion") or data.get("representative_number_type"),
+            "rep_tipo_numeracion": data.get("rep_tipo_numeracion"),
             "rep_numero": data.get("rep_numero") or data.get("representative_number"),
             "rep_cp": data.get("rep_cp") or data.get("representative_zip"),
             "rep_municipio": data.get("rep_municipio") or data.get("representative_city"),
@@ -221,7 +237,7 @@ class MadridController:
             "rep_pais": data.get("rep_pais") or data.get("representative_country"),
             "rep_email": data.get("rep_email") or data.get("representative_email"),
             "rep_movil": data.get("rep_movil") or data.get("representative_phone"),
-            "rep_telefono": data.get("rep_telefono") or data.get("user_phone"),
+            "rep_telefono": data.get("rep_telefono") or data.get("representative_phone"),
             "notif_copiar_desde": data.get("notif_copiar_desde"),
             "notif_tipo_documento": data.get("notif_tipo_documento"),
             "notif_numero_documento": data.get("notif_numero_documento"),
@@ -231,15 +247,19 @@ class MadridController:
             "notif_razon_social": data.get("notif_razon_social"),
             "notif_pais": data.get("notif_pais"),
             "notif_provincia": data.get("notif_provincia"),
-            "notif_municipio": data.get("notif_municipio") or data.get("rep_municipio") or data.get("representative_city"),
-            "notif_tipo_via": data.get("notif_tipo_via") or data.get("rep_tipo_via"),
-            "notif_nombre_via": data.get("notif_nombre_via") or data.get("rep_nombre_via") or data.get("representative_street"),
-            "notif_tipo_numeracion": data.get("notif_tipo_numeracion") or data.get("rep_tipo_numeracion") or data.get("representative_number_type"),
-            "notif_numero": data.get("notif_numero") or data.get("rep_numero") or data.get("representative_number"),
-            "notif_codigo_postal": data.get("notif_codigo_postal") or data.get("rep_cp") or data.get("representative_zip"),
-            "notif_email": data.get("notif_email") or data.get("rep_email") or data.get("representative_email"),
-            "notif_movil": data.get("notif_movil") or data.get("rep_movil") or data.get("representative_phone"),
-            "notif_telefono": data.get("notif_telefono") or data.get("rep_telefono") or data.get("user_phone"),
+            "notif_municipio": data.get("notif_municipio"),
+            "notif_tipo_via": data.get("notif_tipo_via"),
+            "notif_nombre_via": data.get("notif_nombre_via"),
+            "notif_tipo_numeracion": data.get("notif_tipo_numeracion"),
+            "notif_numero": data.get("notif_numero"),
+            "notif_portal": data.get("notif_portal"),
+            "notif_escalera": data.get("notif_escalera"),
+            "notif_planta": data.get("notif_planta"),
+            "notif_puerta": data.get("notif_puerta"),
+            "notif_codigo_postal": data.get("notif_codigo_postal"),
+            "notif_email": data.get("notif_email"),
+            "notif_movil": data.get("notif_movil"),
+            "notif_telefono": data.get("notif_telefono"),
             "exp_tipo": data.get("exp_tipo") or data.get("expediente_tipo"),
             "exp_nnn": data.get("exp_nnn") or data.get("expediente_nnn"),
             "exp_eeeeeeeee": data.get("exp_eeeeeeeee") or data.get("expediente_eeeeeeeee"),
@@ -251,6 +271,7 @@ class MadridController:
             "expone": data.get("expone"),
             "solicita": data.get("solicita"),
             "archivos": data.get("archivos") or data.get("archivos_adjuntos"),
+            "payload": data,
         }
 
 def get_controller() -> MadridController:

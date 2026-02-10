@@ -158,11 +158,17 @@ class MadridTarget:
     Contenedor principal de datos para la automatización de Madrid.
     Similar a BaseOnlineTarget.
     """
+    # ID del recurso (para nombrar archivos de verificación)
+    idRecurso: Optional[int] = None
+    
     # Datos del formulario
     form_data: MadridFormData = field(default_factory=MadridFormData)
     
     # Archivos adjuntos (para la pantalla posterior)
     archivos_adjuntos: list[Path] = field(default_factory=list)
+
+    # Payload crudo original (para lógica de paths y notificaciones)
+    payload: dict = field(default_factory=dict)
     
     # Metadatos de ejecución
     headless: bool = True

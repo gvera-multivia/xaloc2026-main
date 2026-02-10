@@ -6,14 +6,14 @@ from pathlib import Path
 
 from playwright.async_api import Page
 
-DELAY_MS = 500
+DELAY_MS = 2000
 
 
 async def subir_archivos_por_modal(
     page: Page,
     archivos: list[Path],
     *,
-    max_archivos: int = 1,
+    max_archivos: int = 10,
     boton_abrir_regex: str = r"Carregar\s+fitxer",
 ) -> None:
     """
@@ -36,32 +36,60 @@ async def subir_archivos_por_modal(
         if not archivo.exists():
             raise FileNotFoundError(f"Archivo no encontrado: {archivo}")
 
-        logging.info(f"Subiendo archivo {idx}/{len(archivos_a_subir)}: {archivo}")
+        logging.info(f"Subiendo archivo {idx}/{len(archivos_a_subir)}: {archivo.name}")
 
-        await page.get_by_role("button", name=re.compile(boton_abrir_regex, re.IGNORECASE)).first.click()
+        # Asegurarse de que el botón de abrir está listo
+        boton_abrir = page.get_by_role("button", name=re.compile(boton_abrir_regex, re.IGNORECASE)).first
+        await boton_abrir.wait_for(state="visible", timeout=10000)
+        await boton_abrir.click()
         await page.wait_for_timeout(DELAY_MS)
 
         modal = page.locator("#fitxer").first
         await modal.wait_for(state="visible", timeout=15000)
+        await page.wait_for_timeout(DELAY_MS)
 
         frame = page.frame_locator("#contingut_fitxer").first
         file_input = frame.locator("input[type='file'][name='qqfile']").first
+        
+        # Esperar al input y asegurar que el frame ha cargado algo
         await file_input.wait_for(state="attached", timeout=20000)
-        await file_input.set_input_files(str(archivo.resolve()))
         await page.wait_for_timeout(DELAY_MS)
+
+        logging.info(f"Estableciendo archivo en el input: {archivo.name}")
+        await file_input.set_input_files(str(archivo.resolve()))
+        
+        # Retardo extra tras seleccionar para que la web procese el evento
+        await page.wait_for_timeout(DELAY_MS * 1.5)
 
         boton_carregar = frame.locator("#penjar_fitxers").first
         if await boton_carregar.count() > 0:
+            logging.info("Click en botón 'Penjar' / 'Carregar'...")
             await boton_carregar.click()
             await page.wait_for_timeout(DELAY_MS)
 
+        logging.info("Esperando que aparezca el mensaje de éxito (#textSuccess)...")
         success_text = frame.locator("#textSuccess").first
-        await success_text.wait_for(state="visible", timeout=30000)
-        texto = (await success_text.inner_text()).strip()
-        if archivo.name.lower() not in texto.lower():
-            raise RuntimeError(f"Upload no confirmado. textSuccess='{texto}'")
+        
+        # Esperar específicamente a que el texto contenga el nombre del archivo actual
+        # para evitar confusiones con subidas previas si el iframe no se ha limpiado.
+        try:
+            # Intentamos esperar a que el texto del archivo aparezca
+            await frame.locator("#textSuccess", has_text=archivo.name).wait_for(state="visible", timeout=30000)
+        except Exception:
+            logging.warning(f"No se detectó el nombre '{archivo.name}' en #textSuccess, esperando visibilidad genérica.")
+            await success_text.wait_for(state="visible", timeout=15000)
 
+        texto = (await success_text.inner_text()).strip()
+        logging.info(f"Resultado subida: {texto}")
+        
+        if archivo.name.lower() not in texto.lower():
+            # Si el texto no coincide, lanzamos error para no seguir con un estado inconsistente
+            raise RuntimeError(f"Upload no confirmado para {archivo.name}. Se recibió: '{texto}'")
+
+        await page.wait_for_timeout(DELAY_MS)
+        logging.info("Click en 'Continuar' para cerrar el modal.")
         await frame.locator("#continuar").first.click()
+        
         await page.wait_for_timeout(DELAY_MS)
         await modal.wait_for(state="hidden", timeout=15000)
         await page.wait_for_timeout(DELAY_MS)

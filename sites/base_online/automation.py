@@ -42,7 +42,7 @@ class BaseOnlineAutomation(BaseAutomation):
                 self.logger.info("=" * 50)
                 if not datos.p2:
                     raise ValueError("Faltan datos de P2.")
-                await ejecutar_p2(self.page, datos.p2)
+                await ejecutar_p2(self.page, datos.p2, payload=datos.payload or {})
 
             if datos.protocol.upper() == "P3":
                 self.logger.info("\n" + "=" * 50)
@@ -51,7 +51,7 @@ class BaseOnlineAutomation(BaseAutomation):
                 p3_data = datos.p3 or datos.reposicion
                 if not p3_data:
                     raise ValueError("Faltan datos de P3.")
-                await ejecutar_p3(self.page, self.config, p3_data)
+                await ejecutar_p3(self.page, self.config, p3_data, payload=datos.payload or {})
 
             filename = f"base_online_{datos.protocol.lower()}.png"
             path = self.config.dir_screenshots / filename

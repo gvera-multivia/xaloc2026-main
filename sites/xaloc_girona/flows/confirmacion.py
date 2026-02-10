@@ -5,6 +5,7 @@ Flujo de confirmación final con pausa interactiva y envío real
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -12,7 +13,7 @@ from pathlib import Path
 from playwright.async_api import Page, TimeoutError
 
 DELAY_MS = 500
-RECEIPT_WAIT_TIMEOUT_MS = 60000
+RECEIPT_WAIT_TIMEOUT_MS = 120000
 
 
 async def _wait_mask_hidden(page: Page, timeout_ms: int = 8000) -> None:
@@ -129,6 +130,11 @@ def _esperar_confirmacion_usuario() -> None:
     """
     Pausa la ejecución esperando que el usuario presione Enter para confirmar el envío.
     """
+    confirm = (os.getenv("XALOC_CONFIRM_BEFORE_SEND") or "").strip().lower() in {"1", "true", "yes", "on"}
+    if not confirm:
+        logging.info("XALOC_CONFIRM_BEFORE_SEND desactivado; continuando sin pausa interactiva.")
+        return
+
     print("\n" + "="*80)
     print("⚠️  PAUSA INTERACTIVA")
     print("="*80)
@@ -150,7 +156,7 @@ def _esperar_confirmacion_usuario() -> None:
     except KeyboardInterrupt:
         logging.warning("⚠️  Usuario canceló el envío con Ctrl+C")
         print("\n\n❌ Proceso cancelado por el usuario.")
-        sys.exit(0)
+        raise
 
 
 async def _pulsar_boton_enviar(page: Page) -> None:

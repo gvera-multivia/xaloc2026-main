@@ -162,6 +162,8 @@ async def ejecutar_upload_madrid(page: Page, config: MadridConfig, archivos: lis
             )
 
     await page.wait_for_selector(config.adjuntos_continuar_selector, state="visible", timeout=config.default_timeout)
+    # Madrid va lenta: dejar margen antes de continuar tras subir archivos
+    await page.wait_for_timeout(2000)
     async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
         await page.click(config.adjuntos_continuar_selector)
 

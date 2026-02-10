@@ -35,9 +35,21 @@ async def _aceptar_cookies_si_aparece(page: Page) -> None:
 
 
 async def ejecutar_login(page: Page, config: XalocConfig) -> Page:
+    # 1. Comprobar si ya estamos en el formulario (por reutilización de pestaña)
+    # url_post_login suele ser algo como "http://.../sta/sta/sta"
+    actual_url = page.url
+    if config.url_post_login in actual_url:
+        logging.info("Pestaña ya está en el formulario STA. Saltando login.")
+        return page
+
     logging.info(f"Navegando a {config.url_base}")
     await page.goto(config.url_base, wait_until="networkidle")
     await page.wait_for_timeout(getattr(config, "delay_ms", DELAY_MS))
+
+    # 2. Tras el goto, puede que hayamos redirigido directamente al formulario si hay sesión activa
+    if config.url_post_login in page.url:
+        logging.info("Redirección directa detectada (sesión activa). Saltando login.")
+        return page
 
     await _aceptar_cookies_si_aparece(page)
 

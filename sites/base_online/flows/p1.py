@@ -216,7 +216,7 @@ async def _rellenar_identificacion_conductor(page: Page, data: BaseOnlineP1Data)
     archivos = list(data.archivos_adjuntos or [])
     if not archivos:
         raise ValueError("P1: falta 'archivos_adjuntos' (al menos 1 archivo).")
-    await subir_archivos_por_modal(page, archivos, max_archivos=1)
+    await subir_archivos_por_modal(page, archivos)
 
     await page.locator("input[type='submit'][name='form:j_id29'][value='Continuar']").first.click()
     await page.wait_for_timeout(DELAY_MS)

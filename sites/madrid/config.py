@@ -43,7 +43,10 @@ class MadridConfig(BaseConfig):
     
     # Paso 6: Certificado (popup de Windows)
     stealth_disable_webdriver: bool = True
-    
+
+    # Validaciones del formulario (p.ej. dirección / calle contra BBDD)
+    strict_direccion: bool = True
+     
     # Paso 7: Botón "Continuar" tras autenticación
     continuar_post_auth_selector: str = "#btnContinuar"
     
@@ -88,7 +91,8 @@ class MadridConfig(BaseConfig):
     # =========================================================================
     
     # Solo tocamos teléfono y checkboxes de confirmación dentro de la sección _id21:2
-    interesado_telefono_selector: str = "input[name*='_id21:2'].formula2_COMUNES_INTERESADO_TELEFONO"
+    # Nota: NO rellenamos este campo, solo está documentado
+    interesado_telefono_selector: str = "input[id*='_id21:2'][id*='_id28'][id*='_id31'][id*='_id35'].formula2_COMUNES_INTERESADO_TELEFONO"
     interesado_check_email_selector: str = "input[name*='_id21:2'].formula2_COMUNES_INTERESADO_CHECKEMAIL"
     interesado_check_sms_selector: str = "input[name*='_id21:2'].formula2_COMUNES_INTERESADO_CHECKSMS"
     
@@ -119,9 +123,9 @@ class MadridConfig(BaseConfig):
     representante_codpostal_selector: str = "input[name*='_id21:3'].formula2_COMUNES_REPRESENTANTE_CODPOSTAL"
     
     # Contacto (Email, Móvil, Teléfono)
-    representante_email_selector: str = "input[name*='_id21:3'].formula2_COMUNES_REPRESENTANTE_EMAIL"
-    representante_movil_selector: str = "input[name*='_id21:3'].formula2_COMUNES_REPRESENTANTE_MOVIL"
-    representante_telefono_selector: str = "input[name*='_id21:3'].formula2_COMUNES_REPRESENTANTE_TELEFONO"
+    representante_email_selector: str = "input[id*='_id21:3'][id*='_id28'][id*='_id31'][id*='_id35'].formula2_COMUNES_REPRESENTANTE_EMAIL"
+    representante_movil_selector: str = "input[id*='_id21:3'][id*='_id28:7'][id*='_id31:1'].formula2_COMUNES_REPRESENTANTE_MOVIL"
+    representante_telefono_selector: str = "input[id*='_id21:3'][id*='_id28'][id*='_id31'][id*='_id35'].formula2_COMUNES_REPRESENTANTE_TELEFONO"
     
     # Checkboxes de confirmación (Representante)
     representante_check_email_selector: str = "input[name*='_id21:3'].formula2_COMUNES_REPRESENTANTE_CHECKEMAIL"
@@ -158,9 +162,9 @@ class MadridConfig(BaseConfig):
     notificacion_codpostal_selector: str = "input[name*='_id21:5'].formula2_COMUNES_NOTIFICACION_CODPOSTAL"
     
     # Contacto
-    notificacion_email_selector: str = "input[name*='_id21:5'].formula2_COMUNES_NOTIFICACION_EMAIL"
-    notificacion_movil_selector: str = "input[name*='_id21:5'].formula2_COMUNES_NOTIFICACION_MOVIL"
-    notificacion_telefono_selector: str = "input[name*='_id21:5'].formula2_COMUNES_NOTIFICACION_TELEFONO"
+    notificacion_email_selector: str = "input[id*='_id21:5'][id*='_id28'][id*='_id31'][id*='_id35'].formula2_COMUNES_NOTIFICACION_EMAIL"
+    notificacion_movil_selector: str = "input[id*='_id21:5'][id*='_id28:9'][id*='_id31:1'].formula2_COMUNES_NOTIFICACION_MOVIL"
+    notificacion_telefono_selector: str = "input[id*='_id21:5'][id*='_id28:9'][id*='_id31:2'].formula2_COMUNES_NOTIFICACION_TELEFONO"
     
     # =========================================================================
     # FORMULARIO - Sección 6: Naturaleza del escrito
@@ -191,8 +195,25 @@ class MadridConfig(BaseConfig):
     # Botón "Continuar" tras adjuntar documentos
     adjuntos_continuar_selector: str = "input[id='formDesigner:_id699'][type='submit'][value='Continuar']"
 
-    # Botón final "Firma y registrar" (NO se pulsa en modo demo)
+    # Botón final "Firma y registrar"
     firma_registrar_selector: str = "input#btRedireccion"
+    
+    # =========================================================================
+    # FIRMA Y VERIFICACIÓN DE DOCUMENTO
+    # =========================================================================
+    
+    # URL esperada tras click en "Firma y registrar"
+    url_signa_firma_contains: str = "servcla.madrid.es/SIGNA_WBFIRMAR/solicitarFirma.do"
+    
+    # Botón "Verificar documento" en la página de firma
+    verificar_documento_selector: str = "button[name='verificar'][value='1']"
+    
+    # Patrón de URL para el popup de visualización
+    url_visualizar_documento_pattern: str = "visualizarDocumento.do"
+    
+    # Timeouts específicos para firma
+    firma_navigation_timeout: int = 90000  # 90s (puede tardar más en cargar SIGNA)
+    popup_wait_timeout: int = 30000  # 30s para esperar el popup
     
     # =========================================================================
     # Configuración de esperas

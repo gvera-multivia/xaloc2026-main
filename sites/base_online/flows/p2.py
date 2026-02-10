@@ -1,18 +1,18 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from playwright.async_api import Page
 
 from sites.base_online.data_models import BaseOnlineP2Data
 from sites.base_online.flows.common import rellenar_contacto
+from sites.base_online.flows.firma_y_justificante import firmar_presentar_y_descargar_justificante
 from sites.base_online.flows.upload import subir_archivos_por_modal
 
 DELAY_MS = 500
 
 
-async def ejecutar_p2(page: Page, data: BaseOnlineP2Data) -> None:
+async def ejecutar_p2(page: Page, data: BaseOnlineP2Data, *, payload: dict) -> None:
     logging.info("[P2] Rellenando formulario de alegaciones (paso 1)...")
 
     await page.locator("#form\\:nif").first.fill(data.nif)
@@ -28,9 +28,14 @@ async def ejecutar_p2(page: Page, data: BaseOnlineP2Data) -> None:
 
     logging.info("[P2] Aportando alegaciones (paso 2)...")
     tiene_expediente = bool(data.expedient_id_ens or data.expedient_any or data.expedient_num)
-    tiene_butlleti = bool(data.butlleti and data.butlleti.strip())
+    butlleti_value = (
+        (data.butlleti or "").strip()
+        or str(payload.get("num_butlleti") or "").strip()
+        or str(payload.get("expediente") or "").strip()
+    )
+    tiene_butlleti = bool(butlleti_value)
     if not (tiene_expediente or tiene_butlleti):
-        raise ValueError("P2: es obligatorio indicar Núm. Expedient o Núm. Butlletí.")
+        raise ValueError("P2: es obligatorio indicar Num. Expedient o Num. Butlleti.")
 
     if tiene_expediente:
         await page.locator("#form\\:clau_expedient_id_ens").first.fill(data.expedient_id_ens or "")
@@ -45,8 +50,23 @@ async def ejecutar_p2(page: Page, data: BaseOnlineP2Data) -> None:
         await page.wait_for_timeout(DELAY_MS)
 
     if tiene_butlleti:
-        await page.locator("#form\\:butlleti").first.fill(data.butlleti or "")
+        locator_butlleti = page.locator("#form\\:butlleti").first
+        await locator_butlleti.fill(butlleti_value)
         await page.wait_for_timeout(DELAY_MS)
+        # Some JSF variants do not persist fill() unless input/change events are dispatched.
+        await page.evaluate(
+            """([selector, value]) => {
+                const el = document.querySelector(selector);
+                if (!el) return false;
+                el.value = value;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                return true;
+            }""",
+            ["#form\\:butlleti", butlleti_value],
+        )
+        await page.wait_for_timeout(DELAY_MS)
+        logging.info("[P2] Butlleti informado: %s", butlleti_value)
 
     await page.locator("#form\\:exposo").first.fill(data.exposo or "")
     await page.wait_for_timeout(DELAY_MS)
@@ -61,12 +81,11 @@ async def ejecutar_p2(page: Page, data: BaseOnlineP2Data) -> None:
     archivos = list(data.archivos_adjuntos or [])
     if not archivos:
         raise ValueError("P2: falta 'archivos_adjuntos' (al menos 1 archivo).")
-    await subir_archivos_por_modal(page, archivos, max_archivos=1)
+    await subir_archivos_por_modal(page, archivos)
 
     await page.locator("input[type='submit'][name='form:j_id29'][value='Continuar']").first.click()
     await page.wait_for_timeout(DELAY_MS)
     await page.wait_for_load_state("domcontentloaded")
 
-    boton_firma = page.locator("input[type='button'][value='Signar i Presentar']").first
-    if await boton_firma.count() > 0:
-        logging.info("[P2] Pantalla 'Signar i Presentar' detectada (no se pulsa en modo demo).")
+    logging.info("[P2] Preparando firma y presentacion...")
+    await firmar_presentar_y_descargar_justificante(page, payload=payload)
