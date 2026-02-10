@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -13,6 +14,7 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
+
 <body>
     <div id="root"></div>
 
@@ -31,39 +33,47 @@
             const [loading, setLoading] = useState(true);
             const [historyPage, setHistoryPage] = useState(1);
             const [totalSuccesses, setTotalSuccesses] = useState(0);
+            const [apiError, setApiError] = useState(null);
 
             const fetchData = async () => {
                 try {
                     // Fetch Live
-                    const liveRes = await fetch(`${API_BASE}/queue/live?day=${selectedDay}`);
-                    if (liveRes.ok) setLiveItem(await liveRes.json());
+                    const liveRes = await fetch(`${API_BASE}/queue/live?day=${selectedDay}`).catch(() => null);
+                    if (liveRes && liveRes.ok) setLiveItem(await liveRes.json());
                     else setLiveItem(null);
 
                     // Fetch Queue
-                    const queueRes = await fetch(`${API_BASE}/queue/current?day=${selectedDay}&page=1&page_size=10`);
-                    if (queueRes.ok) {
+                    const queueRes = await fetch(`${API_BASE}/queue/current?day=${selectedDay}&page=1&page_size=10`).catch(() => null);
+                    if (queueRes && queueRes.ok) {
                         const qData = await queueRes.json();
                         setQueue(qData.items);
                     }
 
                     // Fetch History (Successes Today)
-                    const histRes = await fetch(`${API_BASE}/history/successes?day=${selectedDay}&page=${historyPage}&page_size=5`);
-                    if (histRes.ok) {
+                    const histRes = await fetch(`${API_BASE}/history/successes?day=${selectedDay}&page=${historyPage}&page_size=5`).catch(() => null);
+                    if (histRes && histRes.ok) {
                         const hData = await histRes.json();
                         setSuccesses(hData.items);
                         setTotalSuccesses(hData.total);
                     }
 
                     // Fetch Incidents (Today)
-                    const incRes = await fetch(`${API_BASE}/history/incidents?day=${selectedDay}&page=1&page_size=100`);
-                    if (incRes.ok) {
+                    const incRes = await fetch(`${API_BASE}/history/incidents?day=${selectedDay}&page=1&page_size=100`).catch(() => null);
+                    if (incRes && incRes.ok) {
                         const iData = await incRes.json();
                         setIncidents(iData.items);
+                    }
+
+                    if (!liveRes && !queueRes && !histRes && !incRes) {
+                        setApiError("No se pudo conectar con el backend (API)");
+                    } else {
+                        setApiError(null);
                     }
 
                     setLoading(false);
                 } catch (err) {
                     console.error("Error fetching data:", err);
+                    setLoading(false);
                 }
             };
 
@@ -81,9 +91,10 @@
                             <p style={{ color: 'var(--text-muted)' }}>Real-time monitoring system</p>
                         </div>
                         <div className="filters">
-                            <input 
-                                type="date" 
-                                value={selectedDay} 
+                            {apiError && <span style={{ color: '#ef4444', marginRight: '1rem', fontWeight: '800' }}>⚠️ {apiError}</span>}
+                            <input
+                                type="date"
+                                value={selectedDay}
                                 onChange={(e) => setSelectedDay(e.target.value)}
                             />
                         </div>
@@ -135,19 +146,22 @@
                                             <td><span style={{ color: 'var(--success)' }}>✓ Completado</span></td>
                                         </tr>
                                     ))}
-                                    {successes.length === 0 && (
+                                    {successes.length === 0 && !loading && (
                                         <tr><td colSpan="4" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>Sin trámites realizados hoy</td></tr>
+                                    )}
+                                    {loading && (
+                                        <tr><td colSpan="4" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>Cargando datos...</td></tr>
                                     )}
                                 </tbody>
                             </table>
                             <div className="pagination">
-                                <button 
-                                    className="page-btn" 
+                                <button
+                                    className="page-btn"
                                     onClick={() => setHistoryPage(p => Math.max(1, p - 1))}
                                     disabled={historyPage === 1}
                                 >Anterior</button>
                                 <button className="page-btn active">{historyPage}</button>
-                                <button 
+                                <button
                                     className="page-btn"
                                     onClick={() => setHistoryPage(p => p + 1)}
                                     disabled={successes.length < 5}
@@ -173,7 +187,7 @@
                                             <td style={{ color: 'var(--text-muted)' }}>{item.site_id}</td>
                                         </tr>
                                     ))}
-                                    {queue.length === 0 && (
+                                    {queue.length === 0 && !loading && (
                                         <tr><td colSpan="2" style={{ textAlign: 'center' }}>Cola vacía</td></tr>
                                     )}
                                 </tbody>
@@ -188,7 +202,7 @@
                     <div className={`modal-overlay ${showModal ? 'active' : ''}`} onClick={() => setShowModal(false)}>
                         <div className="glass modal" onClick={e => e.stopPropagation()}>
                             <button className="modal-close" onClick={() => setShowModal(false)}>×</button>
-                            <h2 style={{ marginBottom: '1.5rem', color: var(--error) }}>Incidencias de Hoy</h2>
+                            <h2 style={{ marginBottom: '1.5rem', color: 'var(--error)' }}>Incidencias de Hoy</h2>
                             <table>
                                 <thead>
                                     <tr>
@@ -220,4 +234,5 @@
         root.render(<App />);
     </script>
 </body>
+
 </html>
