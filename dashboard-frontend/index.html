@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Xaloc Premium Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <!-- React and Babel for single file development -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        const API_BASE = 'http://localhost:8000/api'; // Adjust if needed
+
+        function App() {
+            const [liveItem, setLiveItem] = useState(null);
+            const [queue, setQueue] = useState([]);
+            const [successes, setSuccesses] = useState([]);
+            const [incidents, setIncidents] = useState([]);
+            const [selectedDay, setSelectedDay] = useState(new Date().toISOString().split('T')[0]);
+            const [showModal, setShowModal] = useState(false);
+            const [loading, setLoading] = useState(true);
+            const [historyPage, setHistoryPage] = useState(1);
+            const [totalSuccesses, setTotalSuccesses] = useState(0);
+
+            const fetchData = async () => {
+                try {
+                    // Fetch Live
+                    const liveRes = await fetch(`${API_BASE}/queue/live?day=${selectedDay}`);
+                    if (liveRes.ok) setLiveItem(await liveRes.json());
+                    else setLiveItem(null);
+
+                    // Fetch Queue
+                    const queueRes = await fetch(`${API_BASE}/queue/current?day=${selectedDay}&page=1&page_size=10`);
+                    if (queueRes.ok) {
+                        const qData = await queueRes.json();
+                        setQueue(qData.items);
+                    }
+
+                    // Fetch History (Successes Today)
+                    const histRes = await fetch(`${API_BASE}/history/successes?day=${selectedDay}&page=${historyPage}&page_size=5`);
+                    if (histRes.ok) {
+                        const hData = await histRes.json();
+                        setSuccesses(hData.items);
+                        setTotalSuccesses(hData.total);
+                    }
+
+                    // Fetch Incidents (Today)
+                    const incRes = await fetch(`${API_BASE}/history/incidents?day=${selectedDay}&page=1&page_size=100`);
+                    if (incRes.ok) {
+                        const iData = await incRes.json();
+                        setIncidents(iData.items);
+                    }
+
+                    setLoading(false);
+                } catch (err) {
+                    console.error("Error fetching data:", err);
+                }
+            };
+
+            useEffect(() => {
+                fetchData();
+                const interval = setInterval(fetchData, 5000);
+                return () => clearInterval(interval);
+            }, [selectedDay, historyPage]);
+
+            return (
+                <div className="dashboard-container">
+                    <header>
+                        <div className="title-group">
+                            <h1>Xaloc Dashboard</h1>
+                            <p style={{ color: 'var(--text-muted)' }}>Real-time monitoring system</p>
+                        </div>
+                        <div className="filters">
+                            <input 
+                                type="date" 
+                                value={selectedDay} 
+                                onChange={(e) => setSelectedDay(e.target.value)}
+                            />
+                        </div>
+                    </header>
+
+                    <section className="live-section">
+                        <div className="live-card glass">
+                            <div>
+                                <div className="live-tag">
+                                    <span className="live-dot"></span>
+                                    En Directo
+                                </div>
+                                <h2 style={{ marginTop: '1rem', fontSize: '2rem' }}>
+                                    {liveItem ? `Tramitando: ${liveItem.resource_id}` : 'Ningún trámite activo'}
+                                </h2>
+                                <p style={{ color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+                                    {liveItem ? `Site: ${liveItem.site_id} | Protocolo: ${liveItem.protocol}` : 'Esperando nuevos recursos...'}
+                                </p>
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                                <span style={{ fontSize: '3rem' }}>⚡</span>
+                            </div>
+                        </div>
+                    </section>
+
+                    <div className="dashboard-grid">
+                        <div className="glass table-container">
+                            <div className="table-header">
+                                <h3>Historial de Hoy</h3>
+                                <span className="live-tag" style={{ animation: 'none', background: 'rgba(99, 102, 241, 0.2)', color: 'var(--primary)' }}>
+                                    {totalSuccesses} Procesados
+                                </span>
+                            </div>
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Recurso</th>
+                                        <th>Site</th>
+                                        <th>Protocolo</th>
+                                        <th>Estado</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {successes.map((item, idx) => (
+                                        <tr key={idx}>
+                                            <td style={{ fontWeight: '600' }}>{item.resource_id}</td>
+                                            <td>{item.site_id}</td>
+                                            <td>{item.protocol}</td>
+                                            <td><span style={{ color: 'var(--success)' }}>✓ Completado</span></td>
+                                        </tr>
+                                    ))}
+                                    {successes.length === 0 && (
+                                        <tr><td colSpan="4" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>Sin trámites realizados hoy</td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                            <div className="pagination">
+                                <button 
+                                    className="page-btn" 
+                                    onClick={() => setHistoryPage(p => Math.max(1, p - 1))}
+                                    disabled={historyPage === 1}
+                                >Anterior</button>
+                                <button className="page-btn active">{historyPage}</button>
+                                <button 
+                                    className="page-btn"
+                                    onClick={() => setHistoryPage(p => p + 1)}
+                                    disabled={successes.length < 5}
+                                >Siguiente</button>
+                            </div>
+                        </div>
+
+                        <div className="glass table-container">
+                            <div className="table-header">
+                                <h3>Cola Pendiente</h3>
+                            </div>
+                            <table style={{ fontSize: '0.9rem' }}>
+                                <thead>
+                                    <tr>
+                                        <th>Recurso</th>
+                                        <th>Site</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {queue.map((item, idx) => (
+                                        <tr key={idx}>
+                                            <td>{item.resource_id}</td>
+                                            <td style={{ color: 'var(--text-muted)' }}>{item.site_id}</td>
+                                        </tr>
+                                    ))}
+                                    {queue.length === 0 && (
+                                        <tr><td colSpan="2" style={{ textAlign: 'center' }}>Cola vacía</td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <button className="btn-incidencias" onClick={() => setShowModal(true)}>
+                        <span>⚠️</span> INCIDENCIAS PARPADEANDO
+                    </button>
+
+                    <div className={`modal-overlay ${showModal ? 'active' : ''}`} onClick={() => setShowModal(false)}>
+                        <div className="glass modal" onClick={e => e.stopPropagation()}>
+                            <button className="modal-close" onClick={() => setShowModal(false)}>×</button>
+                            <h2 style={{ marginBottom: '1.5rem', color: var(--error) }}>Incidencias de Hoy</h2>
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Recurso</th>
+                                        <th>Motivo</th>
+                                        <th>Hora</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {incidents.map((item, idx) => (
+                                        <tr key={idx}>
+                                            <td>{item.resource_id}</td>
+                                            <td style={{ fontSize: '0.8rem' }}>{item.reason}</td>
+                                            <td style={{ color: 'var(--text-muted)' }}>{new Date(item.started_at).toLocaleTimeString()}</td>
+                                        </tr>
+                                    ))}
+                                    {incidents.length === 0 && (
+                                        <tr><td colSpan="3" style={{ textAlign: 'center' }}>Sin incidencias pendientes</td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

@@ -51,3 +51,7 @@ class DashboardService:
     def list_queue_current(self, *, day: str | None, page: int, page_size: int) -> dict[str, Any]:
         day_value = (day or "").strip() or utc_today_iso()
         return self.queue_repo.list_current(day=day_value, page=page, page_size=page_size)
+
+    def get_queue_live(self, *, day: str | None) -> Optional[dict[str, Any]]:
+        day_value = (day or "").strip() or utc_today_iso()
+        return self.queue_repo.get_live(day=day_value)

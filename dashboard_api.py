@@ -1,11 +1,21 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 from dashboard import DashboardService
 
 app = FastAPI(title="Xaloc Realtime Dashboard", version="2.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 service = DashboardService()
 
 
@@ -185,3 +195,13 @@ async def api_queue_current(
     page_size: int = Query(200, ge=1, le=1000),
 ) -> dict:
     return service.list_queue_current(day=day, page=page, page_size=page_size)
+
+
+@app.get("/api/queue/live")
+async def api_queue_live(
+    day: str | None = Query(None),
+) -> dict:
+    item = service.get_queue_live(day=day)
+    if not item:
+        raise HTTPException(status_code=404, detail="No active tramite")
+    return item
