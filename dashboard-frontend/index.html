@@ -33,6 +33,7 @@
             const [loading, setLoading] = useState(true);
             const [historyPage, setHistoryPage] = useState(1);
             const [totalSuccesses, setTotalSuccesses] = useState(0);
+            const [totalIncidents, setTotalIncidents] = useState(0);
             const [apiError, setApiError] = useState(null);
 
             const fetchData = async () => {
@@ -62,6 +63,7 @@
                     if (incRes && incRes.ok) {
                         const iData = await incRes.json();
                         setIncidents(iData.items);
+                        setTotalIncidents(iData.total);
                     }
 
                     if (!liveRes && !queueRes && !histRes && !incRes) {
@@ -103,9 +105,9 @@
                     <section className="live-section">
                         <div className="live-card glass">
                             <div>
-                                <div className="live-tag">
-                                    <span className="live-dot"></span>
-                                    En Directo
+                                <div className={`live-tag ${liveItem ? 'pulse' : ''}`} style={{ animation: liveItem ? undefined : 'none' }}>
+                                    <span className="live-dot" style={{ background: liveItem ? 'var(--success)' : 'var(--text-muted)', boxShadow: liveItem ? undefined : 'none' }}></span>
+                                    {liveItem ? 'En Directo' : 'Sin Actividad'}
                                 </div>
                                 <h2 style={{ marginTop: '1rem', fontSize: '2rem' }}>
                                     {liveItem ? `Tramitando: ${liveItem.resource_id}` : 'Ningún trámite activo'}
@@ -195,8 +197,17 @@
                         </div>
                     </div>
 
-                    <button className="btn-incidencias" onClick={() => setShowModal(true)}>
-                        <span>⚠️</span> INCIDENCIAS PARPADEANDO
+                    <button
+                        className={`btn-incidencias ${totalIncidents > 0 ? 'flash' : ''}`}
+                        onClick={() => setShowModal(true)}
+                        style={{
+                            background: totalIncidents > 0 ? 'var(--error)' : 'var(--card-bg)',
+                            color: totalIncidents > 0 ? 'white' : 'var(--text-muted)',
+                            border: totalIncidents > 0 ? 'none' : '1px solid var(--glass-border)',
+                            boxShadow: totalIncidents > 0 ? undefined : 'none'
+                        }}
+                    >
+                        <span>⚠️</span> {totalIncidents} {totalIncidents === 1 ? 'INCIDENCIA' : 'INCIDENCIAS'}
                     </button>
 
                     <div className={`modal-overlay ${showModal ? 'active' : ''}`} onClick={() => setShowModal(false)}>

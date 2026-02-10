@@ -103,6 +103,9 @@ header {
     display: flex;
     align-items: center;
     gap: 0.5rem;
+}
+
+.pulse {
     animation: pulse 2s infinite;
 }
 
@@ -188,8 +191,11 @@ tr:last-child td {
     align-items: center;
     gap: 0.8rem;
     box-shadow: 0 0 20px rgba(239, 68, 68, 0.4);
-    animation: flash-red 1s infinite alternate;
     z-index: 100;
+}
+
+.flash {
+    animation: flash-red 1s infinite alternate;
 }
 
 @keyframes flash-red {

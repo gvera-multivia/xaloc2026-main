@@ -16,56 +16,7 @@ def utc_today_iso() -> str:
     return datetime.now(timezone.utc).date().isoformat()
 
 
-    def get_live(self, *, day: str) -> Optional[dict[str, Any]]:
-        conn = self._conn()
-        try:
-            if self.queue_backend == "redis":
-                row = conn.execute(
-                    """
-                    SELECT site_id, resource_id, job_id, protocol, state,
-                           COALESCE(queued_at, created_at) AS started_at,
-                           updated_at AS ended_at,
-                           payload_snapshot AS payload
-                    FROM job_runs
-                    WHERE state = 'processing'
-                      AND substr(COALESCE(queued_at, created_at), 1, 10) = ?
-                    ORDER BY started_at DESC
-                    LIMIT 1
-                    """,
-                    (day,),
-                ).fetchone()
-            else:
-                row = conn.execute(
-                    """
-                    SELECT site_id, resource_id, id, protocol, status AS state,
-                           created_at AS started_at, processed_at AS ended_at, payload
-                    FROM tramite_queue
-                    WHERE status = 'processing'
-                      AND substr(created_at, 1, 10) = ?
-                    ORDER BY created_at DESC
-                    LIMIT 1
-                    """,
-                    (day,),
-                ).fetchone()
 
-            if row:
-                return {
-                    "site_id": row["site_id"],
-                    "resource_id": row["resource_id"],
-                    "job_id": row["job_id"] if self.queue_backend == "redis" else row["id"],
-                    "protocol": row["protocol"],
-                    "state": row["state"],
-                    "day": str(row["started_at"] or "")[:10],
-                    "started_at": row["started_at"],
-                    "ended_at": row["ended_at"],
-                    "payload": row["payload"],
-                }
-            return None
-        except Exception as exc:
-            self.logger.warning("Error obteniendo tramite vivo en SQLite: %s", exc)
-            return None
-        finally:
-            conn.close()
 
 
 class PostgresHistoryRepository:
@@ -308,8 +259,54 @@ class SqliteQueueRepository:
                 for row in rows
             ]
             return {"items": items, "page": page, "page_size": page_size, "total": total}
+
+    def get_live(self, *, day: str) -> Optional[dict[str, Any]]:
+        conn = self._conn()
+        try:
+            if self.queue_backend == "redis":
+                row = conn.execute(
+                    """
+                    SELECT site_id, resource_id, job_id, protocol, state,
+                           COALESCE(queued_at, created_at) AS started_at,
+                           updated_at AS ended_at,
+                           payload_snapshot AS payload
+                    FROM job_runs
+                    WHERE state = 'processing'
+                      AND substr(COALESCE(queued_at, created_at), 1, 10) = ?
+                    ORDER BY started_at DESC
+                    LIMIT 1
+                    """,
+                    (day,),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT site_id, resource_id, id, protocol, status AS state,
+                           created_at AS started_at, processed_at AS ended_at, payload
+                    FROM tramite_queue
+                    WHERE status = 'processing'
+                      AND substr(created_at, 1, 10) = ?
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (day,),
+                ).fetchone()
+
+            if row:
+                return {
+                    "site_id": row["site_id"],
+                    "resource_id": row["resource_id"],
+                    "job_id": row["job_id"] if self.queue_backend == "redis" else row["id"],
+                    "protocol": row["protocol"],
+                    "state": row["state"],
+                    "day": str(row["started_at"] or "")[:10],
+                    "started_at": row["started_at"],
+                    "ended_at": row["ended_at"],
+                    "payload": row["payload"],
+                }
+            return None
         except Exception as exc:
-            self.logger.warning("Error listando cola actual en SQLite: %s", exc)
-            return {"items": [], "page": page, "page_size": page_size, "total": 0}
+            self.logger.warning("Error obteniendo tramite vivo en SQLite: %s", exc)
+            return None
         finally:
             conn.close()
