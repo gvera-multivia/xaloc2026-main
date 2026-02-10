@@ -54,7 +54,11 @@ def get_client_folder_name(client: ClientIdentity) -> str:
     elif client.is_company:
         return client.empresa.strip().rstrip("!.,?;:")
     else:
-        return f"{client.nombre} {client.apellido1.upper()} {client.apellido2.upper()}".strip()
+        nombre = (client.nombre or "").strip()
+        apellido1 = (client.apellido1 or "").strip().upper()
+        apellido2 = (client.apellido2 or "").strip().upper()
+        parts = [p for p in [nombre, apellido1, apellido2] if p]
+        return " ".join(parts).strip()
 
 
 def normalize_client_folder_name(value: str) -> str:

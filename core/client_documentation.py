@@ -64,9 +64,9 @@ def client_identity_from_payload(payload: dict) -> ClientIdentity:
     nombre = (payload.get("cliente_nombre") or payload.get("notif_name") or "").strip()
     ap1 = (payload.get("cliente_apellido1") or payload.get("apellido1") or payload.get("notif_surname1") or "").strip()
     ap2 = (payload.get("cliente_apellido2") or payload.get("apellido2") or payload.get("notif_surname2") or "").strip()
-    if nombre and ap1 and ap2:
+    if nombre and ap1:
         return ClientIdentity(is_company=False, sujeto_recurso=sujeto_recurso,
-                               nombre=nombre, apellido1=ap1, apellido2=ap2)
+                               nombre=nombre, apellido1=ap1, apellido2=ap2 or "")
 
     empresa = (payload.get("empresa") or payload.get("razon_social") or payload.get("notif_razon_social") or payload.get("cliente_razon_social") or "").strip()
     if empresa:
