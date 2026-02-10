@@ -80,7 +80,14 @@ class PostgresConfig:
         dsn = (os.getenv("REPORT_PG_DSN") or "").strip()
         if not dsn:
             return None
-        return cls(dsn=dsn)
+        lowered = dsn.lower()
+        # Defensive guard: env flags like "1"/"true" are common and are not valid DSN values.
+        if lowered in {"0", "1", "true", "false", "yes", "no", "on", "off", "enabled", "disabled"}:
+            return None
+        # Accept URL-style DSN (postgresql://...) or keyword DSN (host=... dbname=...).
+        if "://" in dsn or "=" in dsn:
+            return cls(dsn=dsn)
+        return None
 
 
 class PostgresRealtimeStore:
@@ -342,7 +349,7 @@ def build_realtime_store(logger: Optional[logging.Logger] = None):
     log = logger or logging.getLogger("realtime_store")
     cfg = PostgresConfig.from_env()
     if cfg is None:
-        log.info("Realtime store deshabilitado: falta REPORT_PG_DSN.")
+        log.info("Realtime store deshabilitado: falta o es invalido REPORT_PG_DSN.")
         return NullRealtimeStore()
     if psycopg is None:
         log.warning("Realtime store deshabilitado: falta dependencia psycopg.")
