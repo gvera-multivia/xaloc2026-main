@@ -9,3 +9,5 @@ openpyxl
 groq
 redis
 psycopg[binary]
+fastapi
+uvicorn
