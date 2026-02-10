@@ -69,3 +69,17 @@ def test_lock_site_by_priority() -> None:
     locked = db.get_locked_site_by_priority({"madrid": 0, "base_online": 1, "xaloc_girona": 2})
     assert locked == "madrid"
     db_path.unlink(missing_ok=True)
+
+
+def test_block_resource_is_persistent_and_idempotent() -> None:
+    db_path = _make_db_path()
+    db = SQLiteDatabase(str(db_path))
+
+    assert db.is_resource_blocked(site_id="madrid", resource_id=777) is False
+    db.block_resource(site_id="madrid", resource_id=777, reason="final failure", source="worker")
+    assert db.is_resource_blocked(site_id="madrid", resource_id=777) is True
+
+    # Re-aplicar no debe duplicar ni fallar
+    db.block_resource(site_id="madrid", resource_id=777, reason="updated", source="worker")
+    assert db.is_resource_blocked(site_id="madrid", resource_id=777) is True
+    db_path.unlink(missing_ok=True)

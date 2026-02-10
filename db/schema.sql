@@ -60,3 +60,20 @@ CREATE TABLE IF NOT EXISTS incidencias (
 
 CREATE INDEX IF NOT EXISTS ix_incidencias_site_tipo_time
 ON incidencias(site_id, tipo_incidencia, timestamp);
+
+-- Recursos bloqueados para evitar re-claim en siguientes ticks del brain
+CREATE TABLE IF NOT EXISTS blocked_resources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    site_id TEXT NOT NULL,
+    resource_id INTEGER NOT NULL,
+    reason TEXT,
+    source TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_blocked_resources_site_resource
+ON blocked_resources(site_id, resource_id);
+
+CREATE INDEX IF NOT EXISTS ix_blocked_resources_site_time
+ON blocked_resources(site_id, created_at);

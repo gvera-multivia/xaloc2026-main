@@ -189,6 +189,13 @@ class BrainOrchestrator:
             payload=payload,
         )
 
+    def _is_resource_blocked(self, *, site_id: str, resource_id: Any) -> bool:
+        try:
+            rid = int(resource_id)
+        except Exception:
+            return False
+        return self.db.is_resource_blocked(site_id=site_id, resource_id=rid)
+
 
         
     # -------------------------------------------------------------------------
@@ -857,6 +864,7 @@ class BrainOrchestrator:
 
                 filtered_candidates: list[dict] = []
                 skipped_duplicates = 0
+                skipped_blocked = 0
                 for cand in candidates:
                     rid = cand.get("idRecurso")
                     try:
@@ -865,11 +873,16 @@ class BrainOrchestrator:
                         rid_int = None
 
                     if rid_int is not None:
+                        if self._is_resource_blocked(site_id=site_id, resource_id=rid_int):
+                            skipped_blocked += 1
+                            continue
                         # Si ya existe en la cola local, saltar (Esto se verifica dentro de enqueue_locally o por duplicidad)
                         filtered_candidates.append(cand)
                 
                 if skipped_duplicates > 0:
                     self.logger.info(f"[{site_id}] {skipped_duplicates} duplicados omitidos ya presentes en la cola.")
+                if skipped_blocked > 0:
+                    self.logger.info(f"[{site_id}] {skipped_blocked} recursos bloqueados omitidos (retry agotado previo).")
                 
                 if not filtered_candidates:
                     continue
@@ -991,6 +1004,17 @@ class BrainOrchestrator:
                 limit=fetch_limit,
                 on_discard=_on_discard,
             )
+            filtered_candidates = []
+            skipped_blocked = 0
+            for cand in candidates:
+                rid = cand.get("idRecurso")
+                if self._is_resource_blocked(site_id=site_to_refill, resource_id=rid):
+                    skipped_blocked += 1
+                    continue
+                filtered_candidates.append(cand)
+            if skipped_blocked > 0:
+                self.logger.info(f"[{site_to_refill}] {skipped_blocked} recursos bloqueados omitidos (retry agotado previo).")
+            candidates = filtered_candidates
             
             if not candidates:
                 self.logger.info(f"No hay recursos adicionales para {site_to_refill}")

@@ -181,6 +181,31 @@ class SQLiteDatabase:
             ON incidencias(site_id, tipo_incidencia, timestamp)
             """
         )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS blocked_resources (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                site_id TEXT NOT NULL,
+                resource_id INTEGER NOT NULL,
+                reason TEXT,
+                source TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_blocked_resources_site_resource
+            ON blocked_resources(site_id, resource_id)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS ix_blocked_resources_site_time
+            ON blocked_resources(site_id, created_at)
+            """
+        )
 
     def get_pending_task(self) -> Optional[Tuple[int, str, str, Dict[str, Any]]]:
         """
@@ -662,6 +687,62 @@ class SQLiteDatabase:
                 params,
             )
             return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    # ==========================================================================
+    # METODOS PARA RECURSOS BLOQUEADOS
+    # ==========================================================================
+
+    def block_resource(
+        self,
+        *,
+        site_id: str,
+        resource_id: int,
+        reason: Optional[str] = None,
+        source: Optional[str] = None,
+    ) -> None:
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            now = datetime.now().isoformat()
+            cursor.execute(
+                """
+                INSERT INTO blocked_resources (site_id, resource_id, reason, source, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(site_id, resource_id) DO UPDATE SET
+                    reason = excluded.reason,
+                    source = excluded.source,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    str(site_id),
+                    int(resource_id),
+                    (reason or "").strip() or None,
+                    (source or "").strip() or None,
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def is_resource_blocked(self, *, site_id: str, resource_id: int) -> bool:
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT 1
+                FROM blocked_resources
+                WHERE site_id = ?
+                  AND resource_id = ?
+                LIMIT 1
+                """,
+                (str(site_id), int(resource_id)),
+            )
+            return cursor.fetchone() is not None
         finally:
             conn.close()
 

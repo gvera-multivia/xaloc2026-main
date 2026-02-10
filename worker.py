@@ -466,6 +466,12 @@ async def worker_loop():
                                     else " No se pudo liberar recurso en XVIA."
                                 )
                                 base_error = outcome.error or "unknown_error"
+                                db.block_resource(
+                                    site_id=job.site_id,
+                                    resource_id=int(job.resource_id),
+                                    reason=f"Final failure tras reintentos agotados. {base_error}",
+                                    source="worker_retry_exhausted",
+                                )
                                 realtime_store.record_task_failed_final(
                                     site_id=job.site_id,
                                     resource_id=job.resource_id,
