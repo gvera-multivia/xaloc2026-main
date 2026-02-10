@@ -1,8 +1,10 @@
 import json
 import logging
 import os
+import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 try:
@@ -345,19 +347,276 @@ class PostgresRealtimeStore:
             conn.commit()
 
 
+class SqliteRealtimeStore:
+    enabled = True
+
+    def __init__(self, sqlite_db_path: str, logger: Optional[logging.Logger] = None):
+        self.sqlite_db_path = Path(sqlite_db_path)
+        self.logger = logger or logging.getLogger("realtime_store")
+
+    def _conn(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.sqlite_db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def ensure_schema(self) -> None:
+        self.sqlite_db_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._conn() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS realtime_task_results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    dedupe_key TEXT NOT NULL UNIQUE,
+                    site_id TEXT NOT NULL,
+                    resource_id INTEGER,
+                    job_id TEXT,
+                    protocol TEXT,
+                    status TEXT NOT NULL CHECK (status IN ('success', 'failed')),
+                    day TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    ended_at TEXT NOT NULL,
+                    payload TEXT,
+                    result TEXT,
+                    error TEXT,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS ix_realtime_task_results_day_site
+                ON realtime_task_results(day, site_id, status)
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS realtime_incidents (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    dedupe_key TEXT NOT NULL UNIQUE,
+                    site_id TEXT NOT NULL,
+                    resource_id INTEGER,
+                    expediente TEXT,
+                    incident_type TEXT NOT NULL,
+                    reason TEXT,
+                    day TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    ended_at TEXT NOT NULL,
+                    payload TEXT,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS ix_realtime_incidents_day_site
+                ON realtime_incidents(day, site_id, incident_type)
+                """
+            )
+            conn.commit()
+
+    def _task_dedupe_key(self, *, site_id: str, status: str, resource_id: Optional[int], job_id: Optional[str]) -> str:
+        if resource_id is not None:
+            return f"task:{site_id}:{status}:rid:{int(resource_id)}"
+        return f"task:{site_id}:{status}:job:{job_id or 'unknown'}"
+
+    def _incident_dedupe_key(
+        self,
+        *,
+        site_id: str,
+        incident_type: str,
+        resource_id: Optional[int],
+        expediente: Optional[str],
+    ) -> str:
+        if resource_id is not None:
+            return f"incident:{site_id}:{incident_type}:rid:{int(resource_id)}"
+        return f"incident:{site_id}:{incident_type}:exp:{(expediente or '').strip().upper()}"
+
+    def record_task_success(
+        self,
+        *,
+        site_id: str,
+        resource_id: Optional[int],
+        job_id: Optional[str],
+        protocol: Optional[str],
+        payload: Optional[dict[str, Any]],
+        result: Optional[dict[str, Any]],
+        started_at: datetime,
+        ended_at: datetime,
+    ) -> None:
+        dedupe_key = self._task_dedupe_key(
+            site_id=site_id,
+            status="success",
+            resource_id=resource_id,
+            job_id=job_id,
+        )
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO realtime_task_results (
+                    dedupe_key, site_id, resource_id, job_id, protocol, status,
+                    day, started_at, ended_at, payload, result, error, updated_at
+                ) VALUES (
+                    ?, ?, ?, ?, ?, 'success',
+                    ?, ?, ?, ?, ?, NULL, CURRENT_TIMESTAMP
+                )
+                ON CONFLICT(dedupe_key) DO UPDATE SET
+                    job_id = excluded.job_id,
+                    protocol = excluded.protocol,
+                    day = excluded.day,
+                    started_at = excluded.started_at,
+                    ended_at = excluded.ended_at,
+                    payload = excluded.payload,
+                    result = excluded.result,
+                    error = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    dedupe_key,
+                    site_id,
+                    resource_id,
+                    job_id,
+                    protocol,
+                    started_at.date().isoformat(),
+                    started_at.isoformat(),
+                    ended_at.isoformat(),
+                    _to_jsonb(payload),
+                    _to_jsonb(result),
+                ),
+            )
+            conn.commit()
+
+    def record_task_failed_final(
+        self,
+        *,
+        site_id: str,
+        resource_id: Optional[int],
+        job_id: Optional[str],
+        protocol: Optional[str],
+        payload: Optional[dict[str, Any]],
+        error_message: str,
+        started_at: datetime,
+        ended_at: datetime,
+        extra: Optional[dict[str, Any]] = None,
+    ) -> None:
+        dedupe_key = self._task_dedupe_key(
+            site_id=site_id,
+            status="failed",
+            resource_id=resource_id,
+            job_id=job_id,
+        )
+        error_body = {"message": error_message}
+        if extra:
+            error_body["extra"] = extra
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO realtime_task_results (
+                    dedupe_key, site_id, resource_id, job_id, protocol, status,
+                    day, started_at, ended_at, payload, result, error, updated_at
+                ) VALUES (
+                    ?, ?, ?, ?, ?, 'failed',
+                    ?, ?, ?, ?, NULL, ?, CURRENT_TIMESTAMP
+                )
+                ON CONFLICT(dedupe_key) DO UPDATE SET
+                    job_id = excluded.job_id,
+                    protocol = excluded.protocol,
+                    day = excluded.day,
+                    started_at = excluded.started_at,
+                    ended_at = excluded.ended_at,
+                    payload = excluded.payload,
+                    result = NULL,
+                    error = excluded.error,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    dedupe_key,
+                    site_id,
+                    resource_id,
+                    job_id,
+                    protocol,
+                    started_at.date().isoformat(),
+                    started_at.isoformat(),
+                    ended_at.isoformat(),
+                    _to_jsonb(payload),
+                    _to_jsonb(error_body),
+                ),
+            )
+            conn.commit()
+
+    def record_incident_once(
+        self,
+        *,
+        site_id: str,
+        incident_type: str,
+        reason: str,
+        resource_id: Optional[int],
+        expediente: Optional[str],
+        payload: Optional[dict[str, Any]],
+        started_at: Optional[datetime] = None,
+        ended_at: Optional[datetime] = None,
+    ) -> None:
+        ts_start = started_at or _utc_now()
+        ts_end = ended_at or ts_start
+        dedupe_key = self._incident_dedupe_key(
+            site_id=site_id,
+            incident_type=incident_type,
+            resource_id=resource_id,
+            expediente=expediente,
+        )
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO realtime_incidents (
+                    dedupe_key, site_id, resource_id, expediente, incident_type, reason,
+                    day, started_at, ended_at, payload, updated_at
+                ) VALUES (
+                    ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, CURRENT_TIMESTAMP
+                )
+                ON CONFLICT(dedupe_key) DO UPDATE SET
+                    reason = excluded.reason,
+                    day = excluded.day,
+                    started_at = excluded.started_at,
+                    ended_at = excluded.ended_at,
+                    payload = excluded.payload,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    dedupe_key,
+                    site_id,
+                    resource_id,
+                    expediente,
+                    incident_type,
+                    reason,
+                    ts_start.date().isoformat(),
+                    ts_start.isoformat(),
+                    ts_end.isoformat(),
+                    _to_jsonb(payload),
+                ),
+            )
+            conn.commit()
+
+
 def build_realtime_store(logger: Optional[logging.Logger] = None):
     log = logger or logging.getLogger("realtime_store")
     cfg = PostgresConfig.from_env()
-    if cfg is None:
-        log.info("Realtime store deshabilitado: falta o es invalido REPORT_PG_DSN.")
-        return NullRealtimeStore()
-    if psycopg is None:
-        log.warning("Realtime store deshabilitado: falta dependencia psycopg.")
-        return NullRealtimeStore()
-    store = PostgresRealtimeStore(cfg, logger=log)
+    if cfg is not None and psycopg is not None:
+        store = PostgresRealtimeStore(cfg, logger=log)
+        try:
+            store.ensure_schema()
+            log.info("Realtime store activo en PostgreSQL.")
+            return store
+        except Exception as exc:
+            log.error("No se pudo inicializar esquema PostgreSQL realtime: %s", exc)
+
+    sqlite_db_path = (os.getenv("SQLITE_DB_PATH") or "db/xaloc_database.db").strip() or "db/xaloc_database.db"
+    sqlite_store = SqliteRealtimeStore(sqlite_db_path=sqlite_db_path, logger=log)
     try:
-        store.ensure_schema()
+        sqlite_store.ensure_schema()
+        log.info("Realtime store activo en SQLite: %s", sqlite_db_path)
+        return sqlite_store
     except Exception as exc:
-        log.error("No se pudo inicializar esquema PostgreSQL realtime: %s", exc)
+        log.error("No se pudo inicializar esquema SQLite realtime: %s", exc)
         return NullRealtimeStore()
-    return store

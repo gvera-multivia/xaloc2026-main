@@ -6,7 +6,7 @@ Este documento explica como arrancar y usar el dashboard del sistema en local y 
 
 - Python con dependencias instaladas (`requirements.txt`).
 - Base SQLite accesible (por defecto: `db/xaloc_database.db`).
-- PostgreSQL accesible para historico (si quieres ver incidencias/exitos), usando `REPORT_PG_DSN`.
+- PostgreSQL opcional para historico (`REPORT_PG_DSN`). Si no se define, el historico realtime se guarda/lee en SQLite.
 
 Instalacion:
 
@@ -17,7 +17,7 @@ pip install -r requirements.txt
 ## 2. Que muestra cada pantalla
 
 - `http://<host>:<port>/historico`
-  - Lee de PostgreSQL:
+  - Lee de PostgreSQL (si `REPORT_PG_DSN` valido) o SQLite fallback:
     - `realtime_incidents` (incidencias)
     - `realtime_task_results` con `status='success'` (exitos)
 - `http://<host>:<port>/colas`
@@ -40,6 +40,24 @@ Ejemplo PowerShell:
 $env:SQLITE_DB_PATH="db/xaloc_database.db"
 $env:REPORT_PG_DSN="postgresql://usuario:password@localhost:5432/xaloc"
 $env:QUEUE_BACKEND="sqlite"
+```
+
+Valores concretos recomendados (local):
+
+```powershell
+$env:REPORT_PG_HOST="127.0.0.1"
+$env:REPORT_PG_PORT="5432"
+$env:REPORT_PG_DB="xaloc_realtime"
+$env:REPORT_PG_USER="xaloc_app"
+$env:REPORT_PG_PASSWORD="xaloc_app_2026"
+$env:REPORT_PG_DSN="postgresql://xaloc_app:xaloc_app_2026@127.0.0.1:5432/xaloc_realtime"
+```
+
+Opcional para crear automaticamente usuario y base (con permisos admin):
+
+```powershell
+$env:REPORT_PG_ADMIN_DSN="postgresql://postgres:postgres@127.0.0.1:5432/postgres"
+python scripts/bootstrap_realtime_postgres.py
 ```
 
 ## 4. Arrancar en localhost (solo tu PC)
@@ -105,6 +123,7 @@ Parametros comunes:
   - `QUEUE_BACKEND` no coincide con tu backend real.
 - Error al arrancar:
   - Dependencias faltantes (`fastapi`, `uvicorn`, `psycopg[binary]`).
+  - Si `worker` muestra `Realtime store deshabilitado: falta o es invalido REPORT_PG_DSN`, define `REPORT_PG_DSN` valido o ejecuta `python scripts/bootstrap_realtime_postgres.py`.
 
 ## 9. Comprobacion rapida
 

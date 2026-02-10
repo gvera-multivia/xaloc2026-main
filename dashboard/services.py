@@ -4,7 +4,7 @@ import logging
 import os
 from typing import Any
 
-from .repositories import PostgresHistoryRepository, SqliteQueueRepository, utc_today_iso
+from .repositories import PostgresHistoryRepository, SqliteHistoryRepository, SqliteQueueRepository, utc_today_iso
 
 
 class DashboardService:
@@ -16,12 +16,26 @@ class DashboardService:
         pg_dsn: str | None = None,
     ):
         self.logger = logging.getLogger("dashboard.service")
-        self.history_repo = PostgresHistoryRepository(
-            pg_dsn=pg_dsn or os.getenv("REPORT_PG_DSN"),
-            logger=self.logger,
+        sqlite_path = sqlite_db_path or os.getenv("SQLITE_DB_PATH", "db/xaloc_database.db")
+        pg_dsn_value = (pg_dsn or os.getenv("REPORT_PG_DSN") or "").strip()
+        lowered = pg_dsn_value.lower()
+        has_valid_pg_dsn = bool(
+            pg_dsn_value
+            and lowered not in {"0", "1", "true", "false", "yes", "no", "on", "off", "enabled", "disabled"}
+            and ("://" in pg_dsn_value or "=" in pg_dsn_value)
         )
+        if has_valid_pg_dsn:
+            self.history_repo = PostgresHistoryRepository(
+                pg_dsn=pg_dsn_value,
+                logger=self.logger,
+            )
+        else:
+            self.history_repo = SqliteHistoryRepository(
+                sqlite_db_path=sqlite_path,
+                logger=self.logger,
+            )
         self.queue_repo = SqliteQueueRepository(
-            sqlite_db_path=sqlite_db_path or os.getenv("SQLITE_DB_PATH", "db/xaloc_database.db"),
+            sqlite_db_path=sqlite_path,
             queue_backend=queue_backend or os.getenv("QUEUE_BACKEND", "sqlite"),
             logger=self.logger,
         )

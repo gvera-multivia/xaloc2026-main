@@ -1,9 +1,17 @@
 import os
 import sys
+import uuid
+from pathlib import Path
 
 sys.path.append(os.getcwd())
 
-from core.realtime_store import NullRealtimeStore, PostgresConfig, PostgresRealtimeStore, build_realtime_store
+from core.realtime_store import PostgresConfig, PostgresRealtimeStore, SqliteRealtimeStore, build_realtime_store
+
+
+def _tmp_sqlite_path() -> str:
+    root = Path("tmp") / "pytest-realtime"
+    root.mkdir(parents=True, exist_ok=True)
+    return str(root / f"realtime-{uuid.uuid4().hex}.db")
 
 
 def test_postgres_config_from_env_absent() -> None:
@@ -42,24 +50,40 @@ def test_realtime_store_dedupe_keys() -> None:
     assert inc_key == "incident:madrid:SITE_RULE_DISCARDED:rid:123"
 
 
-def test_build_realtime_store_without_env_returns_null() -> None:
-    previous = os.environ.pop("REPORT_PG_DSN", None)
+def test_build_realtime_store_without_env_falls_back_to_sqlite() -> None:
+    previous_dsn = os.environ.pop("REPORT_PG_DSN", None)
+    previous_sqlite = os.environ.get("SQLITE_DB_PATH")
+    sqlite_path = _tmp_sqlite_path()
+    os.environ["SQLITE_DB_PATH"] = sqlite_path
     try:
         store = build_realtime_store()
-        assert isinstance(store, NullRealtimeStore)
+        assert isinstance(store, SqliteRealtimeStore)
+        assert Path(sqlite_path).exists()
     finally:
-        if previous is not None:
-            os.environ["REPORT_PG_DSN"] = previous
+        if previous_dsn is not None:
+            os.environ["REPORT_PG_DSN"] = previous_dsn
+        if previous_sqlite is None:
+            os.environ.pop("SQLITE_DB_PATH", None)
+        else:
+            os.environ["SQLITE_DB_PATH"] = previous_sqlite
 
 
-def test_build_realtime_store_with_invalid_flag_env_returns_null() -> None:
-    previous = os.environ.get("REPORT_PG_DSN")
+def test_build_realtime_store_with_invalid_flag_env_falls_back_to_sqlite() -> None:
+    previous_dsn = os.environ.get("REPORT_PG_DSN")
+    previous_sqlite = os.environ.get("SQLITE_DB_PATH")
+    sqlite_path = _tmp_sqlite_path()
     os.environ["REPORT_PG_DSN"] = "1"
+    os.environ["SQLITE_DB_PATH"] = sqlite_path
     try:
         store = build_realtime_store()
-        assert isinstance(store, NullRealtimeStore)
+        assert isinstance(store, SqliteRealtimeStore)
+        assert Path(sqlite_path).exists()
     finally:
-        if previous is None:
+        if previous_dsn is None:
             os.environ.pop("REPORT_PG_DSN", None)
         else:
-            os.environ["REPORT_PG_DSN"] = previous
+            os.environ["REPORT_PG_DSN"] = previous_dsn
+        if previous_sqlite is None:
+            os.environ.pop("SQLITE_DB_PATH", None)
+        else:
+            os.environ["SQLITE_DB_PATH"] = previous_sqlite
