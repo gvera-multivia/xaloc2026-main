@@ -522,6 +522,30 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
                     break
                 except PlaywrightTimeoutError:
                     if time.monotonic() > deadline:
+                        # ── Diagnóstico headless: capturar estado de la página ──
+                        logger.error(f"  ! Diagnóstico: URL actual = {page.url}")
+                        try:
+                            # Guardar screenshot
+                            diag_path = config.dir_screenshots / "diag_certificado_fail.png"
+                            await page.screenshot(path=str(diag_path), full_page=True)
+                            logger.error(f"  ! Diagnóstico: screenshot guardada en {diag_path}")
+                        except Exception as e:
+                            logger.error(f"  ! Diagnóstico: no se pudo guardar screenshot: {e}")
+                        try:
+                            # Volcar HTML (primeros 2000 chars)
+                            html = await page.content()
+                            logger.error(f"  ! Diagnóstico: HTML length={len(html)}")
+                            logger.error(f"  ! Diagnóstico: HTML (primeros 2000 chars):\n{html[:2000]}")
+                        except Exception as e:
+                            logger.error(f"  ! Diagnóstico: no se pudo obtener HTML: {e}")
+                        try:
+                            # Comprobar iframes
+                            frames = page.frames
+                            logger.error(f"  ! Diagnóstico: {len(frames)} frame(s) detectado(s)")
+                            for i, frame in enumerate(frames):
+                                logger.error(f"  ! Diagnóstico: frame[{i}] url={frame.url} name={frame.name}")
+                        except Exception as e:
+                            logger.error(f"  ! Diagnóstico: no se pudo inspeccionar frames: {e}")
                         raise
 
             if await _esta_en_servcla(page, config) or await _btn_continuar_post_auth_visible(page, config):
