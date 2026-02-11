@@ -206,6 +206,24 @@ class SQLiteDatabase:
             ON blocked_resources(site_id, created_at)
             """
         )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS site_processing_pauses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                site_id TEXT NOT NULL UNIQUE,
+                reason TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS ix_site_processing_pauses_expires
+            ON site_processing_pauses(expires_at)
+            """
+        )
 
     def get_pending_task(self) -> Optional[Tuple[int, str, str, Dict[str, Any]]]:
         """
@@ -220,13 +238,23 @@ class SQLiteDatabase:
             # Transacción inmediata para evitar condiciones de carrera
             cursor.execute("BEGIN IMMEDIATE")
 
-            cursor.execute("""
+            now_iso = datetime.now().isoformat()
+            cursor.execute(
+                """
                 SELECT id, site_id, protocol, payload
                 FROM tramite_queue
                 WHERE status = 'pending'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM site_processing_pauses spp
+                      WHERE spp.site_id = tramite_queue.site_id
+                        AND (spp.expires_at IS NULL OR spp.expires_at > ?)
+                  )
                 ORDER BY created_at ASC
                 LIMIT 1
-            """)
+                """,
+                (now_iso,),
+            )
             row = cursor.fetchone()
 
             if row:
@@ -749,6 +777,101 @@ class SQLiteDatabase:
     # ==========================================================================
     # MÉTODOS PARA ORGANISMO_CONFIG
     # ==========================================================================
+
+    def set_site_processing_pause(
+        self,
+        *,
+        site_id: str,
+        reason: Optional[str] = None,
+        expires_at: Optional[str] = None,
+    ) -> None:
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            now = datetime.now().isoformat()
+            cursor.execute(
+                """
+                INSERT INTO site_processing_pauses (site_id, reason, created_at, updated_at, expires_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(site_id) DO UPDATE SET
+                    reason = excluded.reason,
+                    updated_at = excluded.updated_at,
+                    expires_at = excluded.expires_at
+                """,
+                (
+                    str(site_id),
+                    (reason or "").strip() or None,
+                    now,
+                    now,
+                    (expires_at or "").strip() or None,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def clear_site_processing_pause(self, *, site_id: str) -> bool:
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                DELETE FROM site_processing_pauses
+                WHERE site_id = ?
+                """,
+                (str(site_id),),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def is_site_processing_paused(self, *, site_id: str) -> bool:
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            now = datetime.now().isoformat()
+            cursor.execute(
+                """
+                SELECT 1
+                FROM site_processing_pauses
+                WHERE site_id = ?
+                  AND (expires_at IS NULL OR expires_at > ?)
+                LIMIT 1
+                """,
+                (str(site_id), now),
+            )
+            return cursor.fetchone() is not None
+        finally:
+            conn.close()
+
+    def list_site_processing_pauses(self, *, active_only: bool = True) -> list[Dict[str, Any]]:
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            now = datetime.now().isoformat()
+            if active_only:
+                cursor.execute(
+                    """
+                    SELECT site_id, reason, created_at, updated_at, expires_at
+                    FROM site_processing_pauses
+                    WHERE expires_at IS NULL OR expires_at > ?
+                    ORDER BY site_id ASC
+                    """,
+                    (now,),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT site_id, reason, created_at, updated_at, expires_at
+                    FROM site_processing_pauses
+                    ORDER BY site_id ASC
+                    """
+                )
+            return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
 
     def get_active_organismo_configs(self) -> list[Dict[str, Any]]:
         """

@@ -93,3 +93,31 @@ async def api_queue_completion_marker(
     day: str | None = Query(None),
 ) -> dict:
     return service.get_queue_completion_marker(day=day)
+
+
+@app.get("/api/queue/pauses")
+async def api_queue_pauses(
+    active_only: bool = Query(True),
+) -> dict:
+    items = service.list_processing_pauses(active_only=active_only)
+    return {"items": items, "total": len(items)}
+
+
+@app.post("/api/queue/pauses/{site_id}")
+async def api_pause_site_processing(
+    site_id: str,
+    minutes: int | None = Query(None, ge=1),
+    reason: str | None = Query(None),
+) -> dict:
+    try:
+        return service.pause_site_processing(site_id=site_id, reason=reason, minutes=minutes)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/queue/pauses/{site_id}")
+async def api_unpause_site_processing(site_id: str) -> dict:
+    try:
+        return service.unpause_site_processing(site_id=site_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

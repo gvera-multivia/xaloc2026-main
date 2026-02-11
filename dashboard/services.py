@@ -3,10 +3,12 @@ from __future__ import annotations
 import logging
 import os
 import re
+from datetime import datetime, timedelta
 from typing import Any, Optional
 
 import requests
 
+from core.sqlite_db import SQLiteDatabase
 from core.sqlserver_utils import build_sqlserver_connection_string
 from core.xvia_auth import LOGIN_URL, extract_csrf_token
 from .repositories import (
@@ -136,6 +138,7 @@ class DashboardService:
             queue_backend=queue_backend or os.getenv("QUEUE_BACKEND", "sqlite"),
             logger=self.logger,
         )
+        self.db = SQLiteDatabase(db_path=sqlite_path)
 
     @staticmethod
     def _paginate(items: list[Any], page: int, page_size: int) -> dict[str, Any]:
@@ -180,3 +183,42 @@ class DashboardService:
     def get_queue_completion_marker(self, *, day: str | None) -> dict[str, Any]:
         day_value = (day or "").strip() or utc_today_iso()
         return self.queue_repo.get_completion_marker(day=day_value)
+
+    def list_processing_pauses(self, *, active_only: bool = True) -> list[dict[str, Any]]:
+        return self.db.list_site_processing_pauses(active_only=active_only)
+
+    def pause_site_processing(
+        self,
+        *,
+        site_id: str,
+        reason: str | None = None,
+        minutes: int | None = None,
+    ) -> dict[str, Any]:
+        site = (site_id or "").strip()
+        if not site:
+            raise ValueError("site_id es obligatorio.")
+
+        expires_at: str | None = None
+        if minutes is not None:
+            if minutes <= 0:
+                raise ValueError("minutes debe ser > 0.")
+            expires_at = (datetime.now() + timedelta(minutes=int(minutes))).isoformat()
+
+        self.db.set_site_processing_pause(
+            site_id=site,
+            reason=(reason or "").strip() or None,
+            expires_at=expires_at,
+        )
+        return {
+            "site_id": site,
+            "paused": True,
+            "reason": (reason or "").strip() or None,
+            "expires_at": expires_at,
+        }
+
+    def unpause_site_processing(self, *, site_id: str) -> dict[str, Any]:
+        site = (site_id or "").strip()
+        if not site:
+            raise ValueError("site_id es obligatorio.")
+        removed = self.db.clear_site_processing_pause(site_id=site)
+        return {"site_id": site, "paused": False, "removed": bool(removed)}

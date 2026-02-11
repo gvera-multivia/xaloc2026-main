@@ -77,3 +77,18 @@ ON blocked_resources(site_id, resource_id);
 
 CREATE INDEX IF NOT EXISTS ix_blocked_resources_site_time
 ON blocked_resources(site_id, created_at);
+
+-- Pausas temporales de procesamiento por site.
+-- Si un site esta pausado, sus tareas pendientes se mantienen en cola
+-- pero el worker no las reserva para ejecutar.
+CREATE TABLE IF NOT EXISTS site_processing_pauses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    site_id TEXT NOT NULL UNIQUE,
+    reason TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS ix_site_processing_pauses_expires
+ON site_processing_pauses(expires_at);
