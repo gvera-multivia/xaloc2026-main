@@ -12,6 +12,11 @@ try:
 except Exception:  # pragma: no cover
     psycopg = None
 
+try:
+    import pyodbc
+except Exception:  # pragma: no cover
+    pyodbc = None
+
 
 def utc_today_iso() -> str:
     return datetime.now(timezone.utc).date().isoformat()
@@ -257,6 +262,140 @@ class PostgresHistoryRepository:
                 return {"items": items, "page": page, "page_size": page_size, "total": total}
         except Exception as exc:
             self.logger.warning("Error listando exitos en PG: %s", exc)
+            return {"items": [], "page": page, "page_size": page_size, "total": 0}
+        finally:
+            conn.close()
+
+
+class SQLServerHistoryRepository:
+    def __init__(
+        self,
+        *,
+        conn_str: Optional[str],
+        assigned_user: Optional[str],
+        logger: Optional[logging.Logger] = None,
+    ):
+        self.conn_str = (conn_str or "").strip() or None
+        self.assigned_user = (assigned_user or "").strip() or None
+        self.logger = logger or logging.getLogger("dashboard.sqlserver_repo")
+
+    def _conn(self):
+        if not self.conn_str or pyodbc is None:
+            return None
+        return pyodbc.connect(self.conn_str)
+
+    @staticmethod
+    def _date_expr() -> str:
+        return "CAST(COALESCE(rs.freal, rs.fecpres, rs.FAlta) AS date)"
+
+    @staticmethod
+    def _protocol_from_texp(texp_value: Any) -> Optional[str]:
+        try:
+            texp = int(texp_value)
+        except Exception:
+            return None
+        if texp == 2:
+            return "P2"
+        if texp == 3:
+            return "P3"
+        if texp == 1:
+            return "CLAIMED"
+        return f"TEXP-{texp}"
+
+    def _build_where(self) -> tuple[str, list[Any]]:
+        clauses = ["rs.Estado NOT IN (0, 1)", f"{self._date_expr()} IS NOT NULL"]
+        params: list[Any] = []
+        if self.assigned_user:
+            clauses.append("UPPER(LTRIM(RTRIM(rs.UsuarioAsignado))) = UPPER(?)")
+            params.append(self.assigned_user)
+        return " AND ".join(clauses), params
+
+    def list_days(self, *, source: str) -> list[str]:
+        source_norm = source.lower().strip()
+        if source_norm not in {"all", "success"}:
+            return []
+        conn = self._conn()
+        if conn is None:
+            return []
+        where_sql, params = self._build_where()
+        query = f"""
+            SELECT DISTINCT CONVERT(varchar(10), {self._date_expr()}, 23) AS day
+            FROM Recursos.RecursosExp rs
+            WHERE {where_sql}
+            ORDER BY day DESC
+        """
+        try:
+            cur = conn.cursor()
+            cur.execute(query, params)
+            rows = cur.fetchall()
+            return [str(row[0]) for row in rows if row and row[0]]
+        except Exception as exc:
+            self.logger.warning("Error listando dias de historico en SQL Server: %s", exc)
+            return []
+        finally:
+            conn.close()
+
+    def list_successes(self, *, day: str, page: int, page_size: int) -> dict[str, Any]:
+        conn = self._conn()
+        if conn is None:
+            return {"items": [], "page": page, "page_size": page_size, "total": 0}
+        offset = max(0, (page - 1) * page_size)
+        where_sql, params = self._build_where()
+        where_with_day = f"{where_sql} AND {self._date_expr()} = ?"
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"""
+                SELECT COUNT(*)
+                FROM Recursos.RecursosExp rs
+                WHERE {where_with_day}
+                """,
+                [*params, day],
+            )
+            total_row = cur.fetchone()
+            total = int(total_row[0] if total_row else 0)
+
+            cur.execute(
+                f"""
+                SELECT rs.idRecurso, rs.idExp, rs.Expedient, rs.Organisme, rs.TExp,
+                       rs.UsuarioAsignado, rs.Estado,
+                       CONVERT(varchar(10), {self._date_expr()}, 23) AS day,
+                       rs.freal, rs.fecpres, rs.FAlta
+                FROM Recursos.RecursosExp rs
+                WHERE {where_with_day}
+                ORDER BY COALESCE(rs.freal, rs.fecpres, rs.FAlta) DESC, rs.idRecurso DESC
+                OFFSET ? ROWS FETCH NEXT ? ROWS ONLY
+                """,
+                [*params, day, offset, page_size],
+            )
+            rows = cur.fetchall()
+            items = [
+                {
+                    "site_id": str(row[3] or ""),
+                    "resource_id": int(row[0]) if row[0] is not None else None,
+                    "job_id": str(row[1]) if row[1] is not None else None,
+                    "protocol": self._protocol_from_texp(row[4]),
+                    "day": str(row[7] or ""),
+                    "started_at": (
+                        row[8].isoformat()
+                        if row[8] is not None
+                        else (row[9].isoformat() if row[9] is not None else (row[10].isoformat() if row[10] is not None else None))
+                    ),
+                    "ended_at": row[8].isoformat() if row[8] is not None else None,
+                    "payload": {
+                        "expediente": row[2],
+                        "organisme": row[3],
+                        "texp": row[4],
+                        "usuario_asignado": row[5],
+                        "estado": row[6],
+                    },
+                    "result": {"source": "sqlserver"},
+                }
+                for row in rows
+            ]
+            return {"items": items, "page": page, "page_size": page_size, "total": total}
+        except Exception as exc:
+            self.logger.warning("Error listando historico de exitos en SQL Server: %s", exc)
             return {"items": [], "page": page, "page_size": page_size, "total": 0}
         finally:
             conn.close()
