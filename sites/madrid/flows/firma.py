@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-import base64
+import re
 import shutil
 import unicodedata
 from pathlib import Path
@@ -19,31 +19,36 @@ from core.client_documentation import (
 
 logger = logging.getLogger(__name__)
 
+CARPETA_URL = "https://servcla.madrid.es/RGAYT_FTCARPETA/#/"
+ANOTACION_TIMEOUT_MS = 60000
+TABLA_TIMEOUT_MS = 90000
+DOWNLOAD_TIMEOUT_MS = 90000
+
+
 class MadridFirmaNonFatalError(RuntimeError):
     """
-    Error no fatal: el trámite pudo haberse enviado, pero falló un paso post-envío
-    (p.ej. mover el justificante a la carpeta final).
+    Error no fatal: el tramite pudo haberse enviado, pero fallo un paso post-envio
+    (por ejemplo mover el justificante a la carpeta final).
     """
 
-# --- Helper Functions (Copied from xaloc_girona/flows/descarga_justificante.py) ---
-# Copied to implement path logic specifically, NOT download logic
 
 def _normalize_text(text: str) -> str:
     if not text:
         return ""
     text = str(text).strip().lower()
     text = "".join(
-        c for c in unicodedata.normalize("NFD", text) 
+        c for c in unicodedata.normalize("NFD", text)
         if unicodedata.category(c) != "Mn"
     )
     return text
 
+
 def _get_folder_name_from_fase(fase_raw: Any) -> str:
-    MOTIVO_TO_FOLDER = {
+    motivo_to_folder = {
         "identificacion": "IDENTIFICACIONES",
         "denuncia": "ALEGACIONES",
         "propuesta de resolucion": "ALEGACIONES",
-        "extraordinario de revision": "EXTRAORDINARIOS DE REVISIÓN",
+        "extraordinario de revision": "EXTRAORDINARIOS DE REVISION",
         "subsanacion": "SUBSANACIONES",
         "reclamaciones": "RECLAMACIONES",
         "requerimiento embargo": "EMBARGOS",
@@ -51,29 +56,34 @@ def _get_folder_name_from_fase(fase_raw: Any) -> str:
         "apremio": "APREMIOS",
         "embargo": "EMBARGOS",
     }
-    
+
     fase_norm = _normalize_text(fase_raw)
-    for motivo_key, folder_name in MOTIVO_TO_FOLDER.items():
+    for motivo_key, folder_name in motivo_to_folder.items():
         if motivo_key in fase_norm:
             return folder_name
-    
-    logger.warning(f"No match for phase '{fase_raw}', defaulting to base folder.")
-    return "" 
+
+    logger.warning("No match for phase '%s', defaulting to base folder.", fase_raw)
+    return ""
+
 
 def _folder_matches(folder_name: str, target_name: str) -> bool:
     folder_norm = _normalize_text(folder_name)
     target_norm = _normalize_text(target_name)
-    if folder_norm == target_norm: return True
-    
+    if folder_norm == target_norm:
+        return True
+
     target_words = set(target_norm.split())
     folder_words = set(folder_norm.split())
-    if target_words.issubset(folder_words): return True
-    
-    target_singular = {w.rstrip('s') for w in target_words}
-    folder_singular = {w.rstrip('s') for w in folder_words}
-    if target_singular == folder_singular: return True
-    
+    if target_words.issubset(folder_words):
+        return True
+
+    target_singular = {w.rstrip("s") for w in target_words}
+    folder_singular = {w.rstrip("s") for w in folder_words}
+    if target_singular == folder_singular:
+        return True
+
     return False
+
 
 def _find_or_create_subfolder(base_path: Path, folder_name: str) -> Path:
     if not folder_name:
@@ -83,35 +93,36 @@ def _find_or_create_subfolder(base_path: Path, folder_name: str) -> Path:
         for item in base_path.iterdir():
             if item.is_dir() and _folder_matches(item.name, folder_name):
                 return item
-    
+
     new_folder = base_path / folder_name
     new_folder.mkdir(parents=True, exist_ok=True)
     return new_folder
+
 
 def _construir_ruta_recursos_telematicos(payload: dict, fase_procedimiento: Any = None) -> Path:
     client = client_identity_from_payload(payload)
     base_path = r"\\SERVER-DOC\clientes"
     ruta_cliente_base = get_ruta_cliente_documentacion(client, base_path=base_path)
-    
-    # Usar búsqueda flexible para evitar duplicados "TELEMÁTICOS" vs "TELEMATICOS"
+
     ruta_recursos = _find_or_create_subfolder(ruta_cliente_base, "RECURSOS TELEMATICOS")
-    
+
     if fase_procedimiento:
         folder_name = _get_folder_name_from_fase(fase_procedimiento)
         if folder_name:
             return _find_or_create_subfolder(ruta_recursos, folder_name)
-            
+
     return ruta_recursos
+
 
 def _justificante_filename(num_expediente: str) -> str:
     clean_exp = str(num_expediente).replace("/", "-").replace(".", "_")
     return f"JUSTIFICANTE - {clean_exp}.pdf"
 
 
-def _guardar_justificante_temporal(pdf_bytes: bytes, *, num_expediente: str, tmp_dir: Path) -> Path:
+async def _guardar_justificante_temporal(download: Any, *, num_expediente: str, tmp_dir: Path) -> Path:
     tmp_dir.mkdir(parents=True, exist_ok=True)
     tmp_path = tmp_dir / _justificante_filename(num_expediente)
-    tmp_path.write_bytes(pdf_bytes)
+    await download.save_as(tmp_path)
     logger.info("Justificante guardado temporalmente en: %s", tmp_path)
     return tmp_path
 
@@ -125,130 +136,199 @@ def _mover_justificante_a_destino(tmp_path: Path, *, destino_dir: Path) -> Path:
     logger.info("Justificante movido a: %s", destino_path)
     return destino_path
 
-# --- Main Flow ---
+
+def _normalizar_anotacion(value: str) -> str:
+    return re.sub(r"\D+", "", str(value or ""))
+
+
+async def _extraer_anotacion_desde_exito(page: Page) -> str:
+    await page.wait_for_function(
+        r"""() => {
+            const body = document.body;
+            if (!body) return false;
+            return /N\w*mero\s+de\s+anotaci\w*n\s*:/i.test(body.innerText || "");
+        }""",
+        timeout=ANOTACION_TIMEOUT_MS,
+    )
+
+    texto = await page.locator("body").inner_text()
+    match = re.search(r"N\w*mero\s+de\s+anotaci\w*n\s*:\s*([0-9/]+)", texto, flags=re.IGNORECASE)
+    if not match:
+        raise RuntimeError("No se pudo extraer el numero de anotacion del mensaje de exito.")
+
+    anotacion = _normalizar_anotacion(match.group(1))
+    if not anotacion:
+        raise RuntimeError("El numero de anotacion extraido esta vacio.")
+
+    logger.info("Anotacion detectada en exito: %s", anotacion)
+    return anotacion
+
+
+async def _abrir_fila_por_anotacion(page: Page, anotacion_objetivo: str) -> None:
+    await page.goto(CARPETA_URL, wait_until="domcontentloaded", timeout=TABLA_TIMEOUT_MS)
+    await page.wait_for_selector("table.iam-b-table tbody tr", state="attached", timeout=TABLA_TIMEOUT_MS)
+
+    await page.wait_for_function(
+        r"""(anotacionObjetivo) => {
+            const rows = Array.from(document.querySelectorAll("table.iam-b-table tbody tr"));
+            const normalize = (s) => (s || "").toString().replace(/\D+/g, "");
+            const target = normalize(anotacionObjetivo);
+            return rows.some((row) => {
+                const firstCell = row.querySelector("td:first-child div, td:first-child");
+                const value = normalize(firstCell ? firstCell.textContent : "");
+                return value && value === target;
+            });
+        }""",
+        anotacion_objetivo,
+        timeout=TABLA_TIMEOUT_MS,
+    )
+
+    found = await page.evaluate(
+        r"""(anotacionObjetivo) => {
+            const rows = Array.from(document.querySelectorAll("table.iam-b-table tbody tr"));
+            const normalize = (s) => (s || "").toString().replace(/\D+/g, "");
+            const target = normalize(anotacionObjetivo);
+
+            for (const row of rows) {
+                const firstCell = row.querySelector("td:first-child div, td:first-child");
+                const value = normalize(firstCell ? firstCell.textContent : "");
+                if (value && value === target) {
+                    row.click();
+                    return true;
+                }
+            }
+            return false;
+        }""",
+        anotacion_objetivo,
+    )
+
+    if not found:
+        raise RuntimeError(f"No se encontro en carpeta la fila con anotacion {anotacion_objetivo}.")
+
+    logger.info("Fila de carpeta seleccionada para anotacion: %s", anotacion_objetivo)
+
+
+async def _descargar_justificante_desde_carpeta(
+    page: Page,
+    *,
+    anotacion: str,
+    tmp_dir: Path,
+) -> Path:
+    await _abrir_fila_por_anotacion(page, anotacion)
+
+    label = page.locator("label", has_text=re.compile(r"Justificante\s+de\s+registro", re.IGNORECASE)).first
+    await label.wait_for(state="visible", timeout=TABLA_TIMEOUT_MS)
+
+    try:
+        async with page.expect_download(timeout=DOWNLOAD_TIMEOUT_MS) as download_info:
+            await label.click()
+        download = await download_info.value
+    except TimeoutError as e:
+        raise RuntimeError("No se detecto descarga al pulsar 'Justificante de registro'.") from e
+
+    return await _guardar_justificante_temporal(
+        download,
+        num_expediente=anotacion,
+        tmp_dir=tmp_dir,
+    )
+
 
 async def ejecutar_firma_madrid(
-    page: Page, 
-    config: "MadridConfig", 
-    destino_descarga: Path, 
-    payload: dict
+    page: Page,
+    config: "MadridConfig",
+    destino_descarga: Path,
+    payload: dict,
 ) -> Page:
     """
-    Descarga el PDF (verificar) en carpeta temporal y solo si está OK
-    confirma el envío (checkbox + botón). Si el envío se confirma, mueve el PDF
-    a la carpeta "RECURSOS TELEMATICOS" correspondiente del cliente.
+    Firma y envia en Madrid sin descargar en SIGNA.
+
+    Tras exito:
+    1) Extrae numero de anotacion.
+    2) Navega a carpeta de tramites.
+    3) Busca la fila por anotacion (normalizando sin '/').
+    4) Descarga "Justificante de registro" y lo mueve a carpeta final.
     """
     logger.info("=" * 80)
     logger.info("FIRMA MADRID - EXPEDIENTE: %s", destino_descarga.stem)
     logger.info("=" * 80)
 
-    raw_exp = payload.get("expediente") or payload.get("expediente_num") or "UNKNOWN"
+    _ = destino_descarga
     fase = payload.get("fase_procedimiento")
     id_recurso = payload.get("idRecurso") or destino_descarga.stem
     tmp_dir = Path("tmp") / "madrid" / "justificantes" / str(id_recurso)
 
-    # ====================================================================
-    # 1. Ir a pantalla de firma (SIGNA) si no lo estamos ya
-    # ====================================================================
+    # 1. Ir a pantalla de firma (SIGNA) si no estamos ya.
     if config.url_signa_firma_contains.lower() not in (page.url or "").lower():
         await page.wait_for_selector(
-            config.firma_registrar_selector, state="visible", timeout=config.default_timeout
+            config.firma_registrar_selector,
+            state="visible",
+            timeout=config.default_timeout,
         )
         logger.info("Pantalla pre-firma detectada. Entrando en SIGNA (Firma y registrar)...")
         try:
             async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
                 await page.click(config.firma_registrar_selector)
         except TimeoutError:
-            logger.warning("No se detectó navegación tras 'Firma y registrar'; continuando igualmente.")
+            logger.warning("No se detecto navegacion tras 'Firma y registrar'; continuando.")
 
-    # ====================================================================
-    # 2. Descargar justificante (verificar) a carpeta temporal
-    # ====================================================================
+    # 2. Confirmar envio (checkbox + boton final).
     await page.wait_for_selector(
-        config.verificar_documento_selector, state="attached", timeout=config.firma_navigation_timeout
+        config.verificar_documento_selector,
+        state="attached",
+        timeout=config.firma_navigation_timeout,
     )
-    logger.info("Pantalla SIGNA detectada (verificar disponible).")
+    logger.info("Pantalla SIGNA detectada.")
 
-    logger.info("Descargando justificante vía fetch (verificar)...")
-    
-    script_extraccion = """
-    async () => {
-        const btn = document.querySelector('button[name="verificar"]');
-        if (!btn) throw new Error("Botón 'verificar' no encontrado en pantalla de firma.");
-        const formData = new FormData(btn.form);
-        formData.append('verificar', '1');
-
-        const response = await fetch(btn.form.action, {
-            method: 'POST',
-            body: new URLSearchParams(formData)
-        });
-
-        if (!response.ok) throw new Error("Servidor Madrid falló: " + response.status);
-
-        const buffer = await response.arrayBuffer();
-        // Convertimos el buffer a Base64 para pasarlo de JS a Python sin pérdidas
-        return btoa(String.fromCharCode(...new Uint8Array(buffer)));
-    }
-    """
-
-    base64_pdf = await page.evaluate(script_extraccion)
-    pdf_bytes = base64.b64decode(base64_pdf)
-
-    if not pdf_bytes.startswith(b"%PDF"):
-        raise RuntimeError("Los datos recibidos no tienen formato PDF.")
-    if len(pdf_bytes) < 10_000:
-        raise RuntimeError(f"PDF sospechosamente pequeño: {len(pdf_bytes)} bytes")
-
-    tmp_pdf_path = _guardar_justificante_temporal(
-        pdf_bytes, num_expediente=str(raw_exp), tmp_dir=tmp_dir
-    )
-
-    # ====================================================================
-    # 3. Confirmar envío (checkbox + botón final)
-    # ====================================================================
-    logger.info("Confirmando envío del trámite (checkbox + botón)...")
+    logger.info("Confirmando envio del tramite (checkbox + boton)...")
     checkbox = page.locator("#consentimiento")
     if await checkbox.count() > 0:
         await checkbox.check()
 
     firmar_btn = page.locator('input.button.button4[name="btnFirmar"]')
     if await firmar_btn.count() == 0:
-        raise RuntimeError("Botón final de firma/envío no encontrado (btnFirmar).")
+        raise RuntimeError("Boton final de firma/envio no encontrado (btnFirmar).")
 
     prev_url = page.url or ""
     try:
-        # Madrid va lenta: esperar un poco antes de enviar el formulario
         await page.wait_for_timeout(2000)
         async with page.expect_navigation(
-            wait_until="domcontentloaded", timeout=config.firma_navigation_timeout
+            wait_until="domcontentloaded",
+            timeout=config.firma_navigation_timeout,
         ):
             await firmar_btn.click()
     except TimeoutError:
-        # A veces no hay navegación clásica (refresh parcial). El click ya se ejecutó.
-        logger.warning("No se detectó navegación tras el envío; continuando con espera blanda.")
+        logger.warning("No se detecto navegacion tras el envio; continuando con espera blanda.")
 
     try:
         await page.wait_for_function(
-            "prev => window.location.href !== prev", arg=prev_url, timeout=15000
+            "prev => window.location.href !== prev",
+            arg=prev_url,
+            timeout=15000,
         )
     except Exception:
         pass
+
     await page.wait_for_timeout(1200)
 
-    # ====================================================================
-    # 4. Mover justificante a carpeta final (solo tras confirmar envío)
-    # ====================================================================
+    # 3. Extraer anotacion y descargar justificante desde carpeta.
+    anotacion = await _extraer_anotacion_desde_exito(page)
+
+    tmp_pdf_path = await _descargar_justificante_desde_carpeta(
+        page=page,
+        anotacion=anotacion,
+        tmp_dir=tmp_dir,
+    )
+
+    # 4. Mover justificante a carpeta final.
     ruta_recursos = _construir_ruta_recursos_telematicos(payload, fase)
     try:
         _mover_justificante_a_destino(tmp_pdf_path, destino_dir=ruta_recursos)
     except Exception as e:
         raise MadridFirmaNonFatalError(
-            f"Trámite enviado, pero no se pudo mover el justificante a la carpeta final: {e}"
+            f"Tramite enviado, pero no se pudo mover el justificante a la carpeta final: {e}"
         ) from e
 
-    # 5. FINALIZACIÓN
     logger.info("=" * 80)
-    logger.info("PROCESO DE FIRMA Y ENVÍO COMPLETADO CON ÉXITO")
+    logger.info("PROCESO DE FIRMA Y ENVIO COMPLETADO CON EXITO")
     logger.info("=" * 80)
-    
     return page
