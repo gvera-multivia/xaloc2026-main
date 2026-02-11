@@ -49,6 +49,7 @@ class ProcessOutcome:
 
 
 def _extraer_n_expediente(payload: dict) -> str:
+    # 1) Claves directas (varios sites)
     keys = (
         "expediente",
         "expediente_num",
@@ -61,6 +62,21 @@ def _extraer_n_expediente(payload: dict) -> str:
         value = payload.get(key)
         if value is not None and str(value).strip():
             return str(value).strip()
+
+    # 2) Madrid opcion 1: nnn/eeeeeeeee.d
+    exp_nnn = str(payload.get("exp_nnn") or payload.get("expediente_nnn") or "").strip()
+    exp_eeeeeeeee = str(payload.get("exp_eeeeeeeee") or payload.get("expediente_eeeeeeeee") or "").strip()
+    exp_d = str(payload.get("exp_d") or payload.get("expediente_d") or "").strip()
+    if exp_nnn and exp_eeeeeeeee and exp_d:
+        return f"{exp_nnn}/{exp_eeeeeeeee}.{exp_d}"
+
+    # 3) Madrid opcion 2: lll/aaaa/exp_num
+    exp_lll = str(payload.get("exp_lll") or payload.get("expediente_lll") or "").strip()
+    exp_aaaa = str(payload.get("exp_aaaa") or payload.get("expediente_aaaa") or "").strip()
+    exp_exp_num = str(payload.get("exp_exp_num") or payload.get("expediente_exp_num") or "").strip()
+    if exp_lll and exp_aaaa and exp_exp_num:
+        return f"{exp_lll}/{exp_aaaa}/{exp_exp_num}"
+
     return "UNKNOWN"
 
 
@@ -120,8 +136,9 @@ async def _download_document_and_attachments(
     logger.info(f"Iniciando descarga autenticada desde: {target_url}")
 
     n_expediente = _sanitize_filename_component(_extraer_n_expediente(payload))
-    local_pdf_path = DOWNLOAD_DIR / f"RECURSO - {n_expediente}.pdf"
+    local_pdf_path = DOWNLOAD_DIR / f"EXPEDIENTE - {n_expediente}.pdf"
     DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    logger.info("Nombre documento principal (subida): %s", local_pdf_path.name)
 
     async with auth_session.get(target_url) as resp:
         if resp.status != 200:
