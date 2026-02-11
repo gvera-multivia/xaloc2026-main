@@ -7,6 +7,7 @@ import traceback
 import os
 import time
 import uuid
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -45,6 +46,31 @@ class ProcessOutcome:
     success: bool
     error: Optional[str] = None
     screenshot: Optional[str] = None
+
+
+def _extraer_n_expediente(payload: dict) -> str:
+    keys = (
+        "expediente",
+        "expediente_num",
+        "denuncia_num",
+        "Expedient",
+        "nExp",
+        "numero_expediente",
+    )
+    for key in keys:
+        value = payload.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return "UNKNOWN"
+
+
+def _sanitize_filename_component(value: str) -> str:
+    text = str(value or "").strip()
+    text = text.replace("/", "-").replace("\\", "-")
+    text = re.sub(r'[<>:"|?*\x00-\x1F]', "_", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    text = text.rstrip(". ")
+    return text or "UNKNOWN"
 
 def _call_with_supported_kwargs(fn, **kwargs):
     """Llama a fn solo con los argumentos que acepta."""
@@ -93,7 +119,8 @@ async def _download_document_and_attachments(
     target_url = DOCUMENT_URL_TEMPLATE.format(idRecurso=id_recurso)
     logger.info(f"Iniciando descarga autenticada desde: {target_url}")
 
-    local_pdf_path = DOWNLOAD_DIR / f"{id_recurso}.pdf"
+    n_expediente = _sanitize_filename_component(_extraer_n_expediente(payload))
+    local_pdf_path = DOWNLOAD_DIR / f"RECURSO - {n_expediente}.pdf"
     DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
     async with auth_session.get(target_url) as resp:

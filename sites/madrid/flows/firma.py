@@ -223,49 +223,54 @@ async def _abrir_fila_por_anotacion(page: Page, anotacion_objetivo: str) -> None
     await page.goto(CARPETA_URL, wait_until="domcontentloaded", timeout=TABLA_TIMEOUT_MS)
     await page.wait_for_selector("table.iam-b-table tbody tr", state="attached", timeout=TABLA_TIMEOUT_MS)
 
-    try:
-        await page.wait_for_function(
-            r"""(anotacionObjetivo) => {
-                const rows = Array.from(document.querySelectorAll("table.iam-b-table tbody tr"));
-                const normalize = (s) => (s || "").toString().replace(/\D+/g, "");
-                const target = normalize(anotacionObjetivo);
-                return rows.some((row) => {
-                    const firstCell = row.querySelector("td:first-child div, td:first-child");
-                    const value = normalize(firstCell ? firstCell.textContent : "");
-                    return value && value === target;
-                });
-            }""",
-            arg=anotacion_objetivo,
-            timeout=TABLA_TIMEOUT_MS,
-        )
-    except TimeoutError as e:
-        raise RuntimeError(
-            f"No aparecio en tabla la anotacion {anotacion_objetivo} dentro del timeout en {page.url}"
-        ) from e
+    target = _normalizar_anotacion(anotacion_objetivo)
+    deadline_ms = TABLA_TIMEOUT_MS
+    poll_ms = 700
+    elapsed = 0
 
-    found = await page.evaluate(
-        r"""(anotacionObjetivo) => {
-            const rows = Array.from(document.querySelectorAll("table.iam-b-table tbody tr"));
-            const normalize = (s) => (s || "").toString().replace(/\D+/g, "");
-            const target = normalize(anotacionObjetivo);
+    while elapsed <= deadline_ms:
+        celdas = page.locator("table.iam-b-table tbody tr td:first-child div")
+        count = await celdas.count()
+        for idx in range(count):
+            celda = celdas.nth(idx)
+            text = (await celda.inner_text()).strip()
+            if _normalizar_anotacion(text) != target:
+                continue
 
-            for (const row of rows) {
-                const firstCell = row.querySelector("td:first-child div, td:first-child");
-                const value = normalize(firstCell ? firstCell.textContent : "");
-                if (value && value === target) {
-                    row.click();
-                    return true;
-                }
-            }
-            return false;
-        }""",
-        anotacion_objetivo,
-    )
+            logger.info("Anotacion localizada en tabla: %s (texto celda: %s)", anotacion_objetivo, text)
+            try:
+                await celda.scroll_into_view_if_needed()
+            except Exception:
+                pass
 
-    if not found:
-        raise RuntimeError(f"No se encontro en carpeta la fila con anotacion {anotacion_objetivo}.")
+            click_ok = False
+            for click_mode in ("normal", "force", "dom"):
+                try:
+                    if click_mode == "normal":
+                        await celda.click(timeout=5000)
+                    elif click_mode == "force":
+                        await celda.click(timeout=5000, force=True)
+                    else:
+                        await celda.evaluate("el => el.click()")
+                    click_ok = True
+                    logger.info("Click en celda de anotacion realizado (%s).", click_mode)
+                    break
+                except Exception:
+                    continue
 
-    logger.info("Fila de carpeta seleccionada para anotacion: %s", anotacion_objetivo)
+            if not click_ok:
+                raise RuntimeError(
+                    f"Se encontro la anotacion {anotacion_objetivo}, pero no se pudo clickar su celda."
+                )
+
+            await page.wait_for_timeout(500)
+            logger.info("Fila de carpeta seleccionada para anotacion: %s", anotacion_objetivo)
+            return
+
+        await page.wait_for_timeout(poll_ms)
+        elapsed += poll_ms
+
+    raise RuntimeError(f"No se encontro en carpeta la fila con anotacion {anotacion_objetivo}.")
 
 
 async def _descargar_justificante_desde_carpeta(
