@@ -254,7 +254,7 @@ async def process_task(
         except Exception as e:
             raise ValueError(f"No se encontró controlador/automator para {site_id}: {e}")
 
-        headless = 0 # Cambiar a 1 para ocultar el navegador
+        headless = 1 if os.getenv("XALOC_HEADLESS") == "1" else 0
         config = _call_with_supported_kwargs(
             controller.create_config,
             headless=headless,
