@@ -35,8 +35,9 @@
             const [totalSuccesses, setTotalSuccesses] = useState(0);
             const [totalIncidents, setTotalIncidents] = useState(0);
             const [apiError, setApiError] = useState(null);
+            const [historyLoading, setHistoryLoading] = useState(true);
 
-            const fetchData = async () => {
+            const fetchRealtimeData = async () => {
                 try {
                     // Fetch Live
                     const liveRes = await fetch(`${API_BASE}/queue/live?day=${selectedDay}`).catch(() => null);
@@ -50,14 +51,6 @@
                         setQueue(qData.items);
                     }
 
-                    // Fetch History (Successes Today)
-                    const histRes = await fetch(`${API_BASE}/history/successes?day=${selectedDay}&page=${historyPage}&page_size=5`).catch(() => null);
-                    if (histRes && histRes.ok) {
-                        const hData = await histRes.json();
-                        setSuccesses(hData.items);
-                        setTotalSuccesses(hData.total);
-                    }
-
                     // Fetch Incidents (Today)
                     const incRes = await fetch(`${API_BASE}/history/incidents?day=${selectedDay}&page=1&page_size=100`).catch(() => null);
                     if (incRes && incRes.ok) {
@@ -66,7 +59,7 @@
                         setTotalIncidents(iData.total);
                     }
 
-                    if (!liveRes && !queueRes && !histRes && !incRes) {
+                    if (!liveRes && !queueRes && !incRes) {
                         setApiError("No se pudo conectar con el backend (API)");
                     } else {
                         setApiError(null);
@@ -79,10 +72,30 @@
                 }
             };
 
+            const fetchHistorySuccesses = async () => {
+                try {
+                    setHistoryLoading(true);
+                    const histRes = await fetch(`${API_BASE}/history/successes?day=${selectedDay}&page=${historyPage}&page_size=5`).catch(() => null);
+                    if (histRes && histRes.ok) {
+                        const hData = await histRes.json();
+                        setSuccesses(hData.items);
+                        setTotalSuccesses(hData.total);
+                    }
+                } catch (err) {
+                    console.error("Error fetching history:", err);
+                } finally {
+                    setHistoryLoading(false);
+                }
+            };
+
             useEffect(() => {
-                fetchData();
-                const interval = setInterval(fetchData, 5000);
+                fetchRealtimeData();
+                const interval = setInterval(fetchRealtimeData, 5000);
                 return () => clearInterval(interval);
+            }, [selectedDay]);
+
+            useEffect(() => {
+                fetchHistorySuccesses();
             }, [selectedDay, historyPage]);
 
             return (
@@ -97,7 +110,10 @@
                             <input
                                 type="date"
                                 value={selectedDay}
-                                onChange={(e) => setSelectedDay(e.target.value)}
+                                onChange={(e) => {
+                                    setSelectedDay(e.target.value);
+                                    setHistoryPage(1);
+                                }}
                             />
                         </div>
                     </header>
@@ -126,9 +142,14 @@
                         <div className="glass table-container">
                             <div className="table-header">
                                 <h3>Historial de Hoy</h3>
-                                <span className="live-tag" style={{ animation: 'none', background: 'rgba(99, 102, 241, 0.2)', color: 'var(--primary)' }}>
-                                    {totalSuccesses} Procesados
-                                </span>
+                                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                                    <span className="live-tag" style={{ animation: 'none', background: 'rgba(99, 102, 241, 0.2)', color: 'var(--primary)' }}>
+                                        {totalSuccesses} Procesados
+                                    </span>
+                                    <button className="page-btn" onClick={fetchHistorySuccesses} disabled={historyLoading}>
+                                        {historyLoading ? 'Actualizando...' : 'Actualizar'}
+                                    </button>
+                                </div>
                             </div>
                             <table>
                                 <thead>
@@ -148,10 +169,10 @@
                                             <td><span style={{ color: 'var(--success)' }}>✓ Completado</span></td>
                                         </tr>
                                     ))}
-                                    {successes.length === 0 && !loading && (
+                                    {successes.length === 0 && !historyLoading && (
                                         <tr><td colSpan="4" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>Sin trámites realizados hoy</td></tr>
                                     )}
-                                    {loading && (
+                                    {historyLoading && (
                                         <tr><td colSpan="4" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>Cargando datos...</td></tr>
                                     )}
                                 </tbody>

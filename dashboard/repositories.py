@@ -303,7 +303,7 @@ class SQLServerHistoryRepository:
         return f"TEXP-{texp}"
 
     def _build_where(self) -> tuple[str, list[Any]]:
-        clauses = ["rs.Estado NOT IN (0, 1)", f"{self._date_expr()} IS NOT NULL"]
+        clauses = [f"{self._date_expr()} IS NOT NULL"]
         params: list[Any] = []
         if self.assigned_user:
             clauses.append("UPPER(LTRIM(RTRIM(rs.UsuarioAsignado))) = UPPER(?)")

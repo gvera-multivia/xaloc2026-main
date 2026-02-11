@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
-from typing import Any
+import re
+from typing import Any, Optional
+
+import aiohttp
 
 from core.sqlserver_utils import build_sqlserver_connection_string
+from core.xvia_auth import create_authenticated_session_in_place
 from .repositories import (
     PostgresHistoryRepository,
     SQLServerHistoryRepository,
@@ -12,6 +17,63 @@ from .repositories import (
     SqliteQueueRepository,
     utc_today_iso,
 )
+
+
+XVIA_HOME_URL = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/home"
+USER_RE = re.compile(r'<i class="fa fa-user-circle"[^>]*></i>\s*([^<]+)')
+
+
+async def _fetch_xvia_assigned_user(email: str, password: str, logger: logging.Logger) -> Optional[str]:
+    cookie_jar = aiohttp.CookieJar(unsafe=True)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "es-ES,es;q=0.9",
+        "Origin": "http://www.xvia-grupoeuropa.net",
+        "Connection": "keep-alive",
+    }
+    async with aiohttp.ClientSession(headers=headers, cookie_jar=cookie_jar) as session:
+        try:
+            await create_authenticated_session_in_place(session, email, password)
+            async with session.get(XVIA_HOME_URL) as resp:
+                html = await resp.text()
+                match = USER_RE.search(html)
+                if not match:
+                    logger.warning("No se pudo extraer el nombre de usuario XVIA desde /home.")
+                    return None
+                user_name = (match.group(1) or "").strip()
+                return user_name or None
+        except Exception as exc:
+            logger.warning("No se pudo resolver UsuarioAsignado en XVIA: %s", exc)
+            return None
+
+
+def _run_coro_sync(coro):
+    try:
+        return asyncio.run(coro)
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+
+
+def resolve_dashboard_assigned_user(logger: logging.Logger) -> Optional[str]:
+    explicit_user = (os.getenv("DASHBOARD_ASSIGNED_USER") or os.getenv("XVIA_ASSIGNED_USER") or "").strip()
+    if explicit_user:
+        return explicit_user
+
+    email = (os.getenv("XVIA_EMAIL") or "").strip()
+    password = (os.getenv("XVIA_PASSWORD") or "").strip()
+    if not email or not password:
+        logger.warning(
+            "Sin DASHBOARD_ASSIGNED_USER/XVIA_ASSIGNED_USER ni credenciales XVIA; "
+            "el historico SQL Server no filtrara por UsuarioAsignado."
+        )
+        return None
+
+    return _run_coro_sync(_fetch_xvia_assigned_user(email, password, logger))
 
 
 class DashboardService:
@@ -24,12 +86,9 @@ class DashboardService:
     ):
         self.logger = logging.getLogger("dashboard.service")
         sqlite_path = sqlite_db_path or os.getenv("SQLITE_DB_PATH", "db/xaloc_database.db")
-        sqlserver_assigned_user = (
-            os.getenv("DASHBOARD_ASSIGNED_USER")
-            or os.getenv("XVIA_ASSIGNED_USER")
-            or os.getenv("XVIA_EMAIL")
-            or ""
-        ).strip()
+        sqlserver_assigned_user = resolve_dashboard_assigned_user(self.logger) or ""
+        if sqlserver_assigned_user:
+            self.logger.info("Filtro de historico SQL Server por UsuarioAsignado=%s", sqlserver_assigned_user)
 
         sqlserver_conn_str = ""
         try:
