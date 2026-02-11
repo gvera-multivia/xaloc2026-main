@@ -286,7 +286,7 @@ class SQLServerHistoryRepository:
 
     @staticmethod
     def _date_expr() -> str:
-        return "CAST(COALESCE(rs.freal, rs.fecpres, rs.FAlta) AS date)"
+        return "CAST(rs.fecpres AS date)"
 
     @staticmethod
     def _protocol_from_texp(texp_value: Any) -> Optional[str]:
@@ -360,10 +360,10 @@ class SQLServerHistoryRepository:
                 SELECT rs.idRecurso, rs.idExp, rs.Expedient, rs.Organisme, rs.TExp,
                        rs.UsuarioAsignado, rs.Estado,
                        CONVERT(varchar(10), {self._date_expr()}, 23) AS day,
-                       rs.freal, rs.fecpres, rs.FAlta
+                       rs.fecpres
                 FROM Recursos.RecursosExp rs
                 WHERE {where_with_day}
-                ORDER BY COALESCE(rs.freal, rs.fecpres, rs.FAlta) DESC, rs.idRecurso DESC
+                ORDER BY rs.fecpres DESC, rs.idRecurso DESC
                 OFFSET ? ROWS FETCH NEXT ? ROWS ONLY
                 """,
                 [*params, day, offset, page_size],
@@ -376,11 +376,7 @@ class SQLServerHistoryRepository:
                     "job_id": str(row[1]) if row[1] is not None else None,
                     "protocol": self._protocol_from_texp(row[4]),
                     "day": str(row[7] or ""),
-                    "started_at": (
-                        row[8].isoformat()
-                        if row[8] is not None
-                        else (row[9].isoformat() if row[9] is not None else (row[10].isoformat() if row[10] is not None else None))
-                    ),
+                    "started_at": row[8].isoformat() if row[8] is not None else None,
                     "ended_at": row[8].isoformat() if row[8] is not None else None,
                     "payload": {
                         "expediente": row[2],
