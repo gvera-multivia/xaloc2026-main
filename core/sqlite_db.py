@@ -224,6 +224,31 @@ class SQLiteDatabase:
             ON site_processing_pauses(expires_at)
             """
         )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS resource_processing_pauses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                site_id TEXT NOT NULL,
+                resource_id INTEGER NOT NULL,
+                reason TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_resource_processing_pauses_site_resource
+            ON resource_processing_pauses(site_id, resource_id)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS ix_resource_processing_pauses_expires
+            ON resource_processing_pauses(expires_at)
+            """
+        )
 
     def get_pending_task(self) -> Optional[Tuple[int, str, str, Dict[str, Any]]]:
         """
@@ -250,10 +275,17 @@ class SQLiteDatabase:
                       WHERE spp.site_id = tramite_queue.site_id
                         AND (spp.expires_at IS NULL OR spp.expires_at > ?)
                   )
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM resource_processing_pauses rpp
+                      WHERE rpp.site_id = tramite_queue.site_id
+                        AND rpp.resource_id = tramite_queue.resource_id
+                        AND (rpp.expires_at IS NULL OR rpp.expires_at > ?)
+                  )
                 ORDER BY created_at ASC
                 LIMIT 1
                 """,
-                (now_iso,),
+                (now_iso, now_iso),
             )
             row = cursor.fetchone()
 
@@ -870,6 +902,150 @@ class SQLiteDatabase:
                     """
                 )
             return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def set_resource_processing_pause(
+        self,
+        *,
+        site_id: str,
+        resource_id: int,
+        reason: Optional[str] = None,
+        expires_at: Optional[str] = None,
+    ) -> None:
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            now = datetime.now().isoformat()
+            cursor.execute(
+                """
+                INSERT INTO resource_processing_pauses (site_id, resource_id, reason, created_at, updated_at, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(site_id, resource_id) DO UPDATE SET
+                    reason = excluded.reason,
+                    updated_at = excluded.updated_at,
+                    expires_at = excluded.expires_at
+                """,
+                (
+                    str(site_id),
+                    int(resource_id),
+                    (reason or "").strip() or None,
+                    now,
+                    now,
+                    (expires_at or "").strip() or None,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def clear_resource_processing_pause(self, *, site_id: str, resource_id: int) -> bool:
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                DELETE FROM resource_processing_pauses
+                WHERE site_id = ?
+                  AND resource_id = ?
+                """,
+                (str(site_id), int(resource_id)),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def is_resource_processing_paused(self, *, site_id: str, resource_id: int) -> bool:
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            now = datetime.now().isoformat()
+            cursor.execute(
+                """
+                SELECT 1
+                FROM resource_processing_pauses
+                WHERE site_id = ?
+                  AND resource_id = ?
+                  AND (expires_at IS NULL OR expires_at > ?)
+                LIMIT 1
+                """,
+                (str(site_id), int(resource_id), now),
+            )
+            return cursor.fetchone() is not None
+        finally:
+            conn.close()
+
+    def list_resource_processing_pauses(self, *, active_only: bool = True) -> list[Dict[str, Any]]:
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            now = datetime.now().isoformat()
+            if active_only:
+                cursor.execute(
+                    """
+                    SELECT site_id, resource_id, reason, created_at, updated_at, expires_at
+                    FROM resource_processing_pauses
+                    WHERE expires_at IS NULL OR expires_at > ?
+                    ORDER BY site_id ASC, resource_id ASC
+                    """,
+                    (now,),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT site_id, resource_id, reason, created_at, updated_at, expires_at
+                    FROM resource_processing_pauses
+                    ORDER BY site_id ASC, resource_id ASC
+                    """
+                )
+            return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def remove_pending_queue_item(self, *, site_id: str, resource_id: int) -> Dict[str, Any]:
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            cursor.execute("BEGIN IMMEDIATE")
+            cursor.execute(
+                """
+                SELECT id, status, payload
+                FROM tramite_queue
+                WHERE site_id = ?
+                  AND resource_id = ?
+                  AND status IN ('pending', 'processing')
+                ORDER BY created_at ASC
+                LIMIT 1
+                """,
+                (str(site_id), int(resource_id)),
+            )
+            row = cursor.fetchone()
+            if not row:
+                conn.commit()
+                return {"removed": False, "reason": "not_found"}
+
+            status = str(row["status"])
+            if status != "pending":
+                conn.commit()
+                return {"removed": False, "reason": f"status_{status}"}
+
+            queue_ref = int(row["id"])
+            payload_raw = row["payload"] or "{}"
+            try:
+                payload_obj = json.loads(payload_raw)
+            except Exception:
+                payload_obj = {}
+            job_id = str(payload_obj.get("job_id") or f"sqlite-task-{queue_ref}")
+
+            cursor.execute("DELETE FROM tramite_queue WHERE id = ?", (queue_ref,))
+            conn.commit()
+            return {"removed": True, "queue_ref": queue_ref, "job_id": job_id}
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             conn.close()
 

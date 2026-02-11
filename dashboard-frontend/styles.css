@@ -346,6 +346,11 @@ input[type="date"] {
     flex-wrap: wrap;
 }
 
+.danger-btn {
+    border-color: rgba(239, 68, 68, 0.6);
+    color: #fecaca;
+}
+
 @media (max-width: 1100px) {
     .dashboard-grid {
         grid-template-columns: 1fr;

@@ -138,6 +138,7 @@ class DashboardService:
             queue_backend=queue_backend or os.getenv("QUEUE_BACKEND", "sqlite"),
             logger=self.logger,
         )
+        self.queue_backend = (queue_backend or os.getenv("QUEUE_BACKEND", "sqlite")).strip().lower()
         self.db = SQLiteDatabase(db_path=sqlite_path)
 
     @staticmethod
@@ -222,3 +223,79 @@ class DashboardService:
             raise ValueError("site_id es obligatorio.")
         removed = self.db.clear_site_processing_pause(site_id=site)
         return {"site_id": site, "paused": False, "removed": bool(removed)}
+
+    def list_item_processing_pauses(self, *, active_only: bool = True) -> list[dict[str, Any]]:
+        return self.db.list_resource_processing_pauses(active_only=active_only)
+
+    def pause_queue_item_processing(
+        self,
+        *,
+        site_id: str,
+        resource_id: int,
+        reason: str | None = None,
+        minutes: int | None = None,
+    ) -> dict[str, Any]:
+        site = (site_id or "").strip()
+        if not site:
+            raise ValueError("site_id es obligatorio.")
+        try:
+            rid = int(resource_id)
+        except Exception as exc:
+            raise ValueError("resource_id debe ser entero.") from exc
+
+        expires_at: str | None = None
+        if minutes is not None:
+            if minutes <= 0:
+                raise ValueError("minutes debe ser > 0.")
+            expires_at = (datetime.now() + timedelta(minutes=int(minutes))).isoformat()
+
+        self.db.set_resource_processing_pause(
+            site_id=site,
+            resource_id=rid,
+            reason=(reason or "").strip() or None,
+            expires_at=expires_at,
+        )
+        return {
+            "site_id": site,
+            "resource_id": rid,
+            "paused": True,
+            "reason": (reason or "").strip() or None,
+            "expires_at": expires_at,
+        }
+
+    def unpause_queue_item_processing(self, *, site_id: str, resource_id: int) -> dict[str, Any]:
+        site = (site_id or "").strip()
+        if not site:
+            raise ValueError("site_id es obligatorio.")
+        try:
+            rid = int(resource_id)
+        except Exception as exc:
+            raise ValueError("resource_id debe ser entero.") from exc
+
+        removed = self.db.clear_resource_processing_pause(site_id=site, resource_id=rid)
+        return {"site_id": site, "resource_id": rid, "paused": False, "removed": bool(removed)}
+
+    def remove_queue_item(self, *, site_id: str, resource_id: int) -> dict[str, Any]:
+        site = (site_id or "").strip()
+        if not site:
+            raise ValueError("site_id es obligatorio.")
+        try:
+            rid = int(resource_id)
+        except Exception as exc:
+            raise ValueError("resource_id debe ser entero.") from exc
+
+        if self.queue_backend != "sqlite":
+            raise ValueError("Eliminar elementos de cola solo esta soportado en QUEUE_BACKEND=sqlite.")
+
+        result = self.db.remove_pending_queue_item(site_id=site, resource_id=rid)
+        if result.get("removed"):
+            self.db.clear_resource_processing_pause(site_id=site, resource_id=rid)
+            job_id = result.get("job_id")
+            if job_id:
+                self.db.update_job_run_state(
+                    str(job_id),
+                    "cancelled",
+                    finished=True,
+                    error_message="Cancelado manualmente desde dashboard.",
+                )
+        return result

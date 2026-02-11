@@ -92,3 +92,20 @@ CREATE TABLE IF NOT EXISTS site_processing_pauses (
 
 CREATE INDEX IF NOT EXISTS ix_site_processing_pauses_expires
 ON site_processing_pauses(expires_at);
+
+-- Pausas temporales de procesamiento por recurso concreto (site + resource_id).
+CREATE TABLE IF NOT EXISTS resource_processing_pauses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    site_id TEXT NOT NULL,
+    resource_id INTEGER NOT NULL,
+    reason TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_resource_processing_pauses_site_resource
+ON resource_processing_pauses(site_id, resource_id);
+
+CREATE INDEX IF NOT EXISTS ix_resource_processing_pauses_expires
+ON resource_processing_pauses(expires_at);

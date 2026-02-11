@@ -281,9 +281,11 @@
             const [selectedDay, setSelectedDay] = useState(new Date().toISOString().split('T')[0]);
             const [queueItems, setQueueItems] = useState([]);
             const [pauses, setPauses] = useState([]);
+            const [itemPauses, setItemPauses] = useState([]);
             const [globalReason, setGlobalReason] = useState('');
             const [globalMinutes, setGlobalMinutes] = useState('120');
             const [busySite, setBusySite] = useState(null);
+            const [busyItem, setBusyItem] = useState(null);
             const [bulkBusy, setBulkBusy] = useState(false);
             const [error, setError] = useState(null);
             const [loading, setLoading] = useState(true);
@@ -291,9 +293,10 @@
             const fetchData = async () => {
                 try {
                     setLoading(true);
-                    const [queueRes, pausesRes] = await Promise.all([
+                    const [queueRes, pausesRes, itemPausesRes] = await Promise.all([
                         fetch(`${API_BASE}/queue/current?day=${selectedDay}&page=1&page_size=1000`).catch(() => null),
                         fetch(`${API_BASE}/queue/pauses?active_only=true`).catch(() => null),
+                        fetch(`${API_BASE}/queue/item-pauses?active_only=true`).catch(() => null),
                     ]);
 
                     if (queueRes && queueRes.ok) {
@@ -310,7 +313,14 @@
                         setPauses([]);
                     }
 
-                    if ((!queueRes || !queueRes.ok) && (!pausesRes || !pausesRes.ok)) {
+                    if (itemPausesRes && itemPausesRes.ok) {
+                        const data = await itemPausesRes.json();
+                        setItemPauses(data.items || []);
+                    } else {
+                        setItemPauses([]);
+                    }
+
+                    if ((!queueRes || !queueRes.ok) && (!pausesRes || !pausesRes.ok) && (!itemPausesRes || !itemPausesRes.ok)) {
                         setError('No se pudo cargar datos de colas/pausas');
                     } else {
                         setError(null);
@@ -333,6 +343,12 @@
                 for (const p of pauses) map[p.site_id] = p;
                 return map;
             }, [pauses]);
+
+            const itemPauseMap = useMemo(() => {
+                const map = {};
+                for (const p of itemPauses) map[`${p.site_id}::${p.resource_id}`] = p;
+                return map;
+            }, [itemPauses]);
 
             const sites = useMemo(() => {
                 const setSites = new Set(KNOWN_SITES);
@@ -399,6 +415,61 @@
                     await fetchData();
                 } finally {
                     setBulkBusy(false);
+                }
+            };
+
+            const callPauseItem = async (siteId, resourceId, minutesValue) => {
+                const key = `${siteId}::${resourceId}`;
+                setBusyItem(key);
+                try {
+                    const params = new URLSearchParams();
+                    const minutesNum = Number(minutesValue);
+                    if (Number.isFinite(minutesNum) && minutesNum > 0) params.set('minutes', String(minutesNum));
+                    if (globalReason.trim()) params.set('reason', globalReason.trim());
+                    const resp = await fetch(`${API_BASE}/queue/items/${encodeURIComponent(siteId)}/${resourceId}/pause?${params.toString()}`, { method: 'POST' });
+                    if (!resp.ok) throw new Error('Error pausando item');
+                    await fetchData();
+                } catch (e) {
+                    setError(`No se pudo pausar ${siteId}/${resourceId}`);
+                } finally {
+                    setBusyItem(null);
+                }
+            };
+
+            const callUnpauseItem = async (siteId, resourceId) => {
+                const key = `${siteId}::${resourceId}`;
+                setBusyItem(key);
+                try {
+                    const resp = await fetch(`${API_BASE}/queue/items/${encodeURIComponent(siteId)}/${resourceId}/pause`, { method: 'DELETE' });
+                    if (!resp.ok) throw new Error('Error reanudando item');
+                    await fetchData();
+                } catch (e) {
+                    setError(`No se pudo reanudar ${siteId}/${resourceId}`);
+                } finally {
+                    setBusyItem(null);
+                }
+            };
+
+            const callDeleteItem = async (siteId, resourceId) => {
+                const key = `${siteId}::${resourceId}`;
+                setBusyItem(key);
+                try {
+                    const resp = await fetch(`${API_BASE}/queue/items/${encodeURIComponent(siteId)}/${resourceId}`, { method: 'DELETE' });
+                    if (!resp.ok) {
+                        const txt = await resp.text();
+                        throw new Error(txt || 'Error eliminando item');
+                    }
+                    const data = await resp.json();
+                    if (!data.xvia_deselected) {
+                        setError(`Eliminado de cola ${siteId}/${resourceId}, pero no se pudo deseleccionar en XVIA.`);
+                    } else {
+                        setError(null);
+                    }
+                    await fetchData();
+                } catch (e) {
+                    setError(`No se pudo eliminar ${siteId}/${resourceId}`);
+                } finally {
+                    setBusyItem(null);
                 }
             };
 
@@ -520,6 +591,53 @@
                                 )}
                                 {loading && (
                                     <tr><td colSpan="6" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>Cargando panel...</td></tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div className="glass table-container" style={{ marginTop: '1.5rem' }}>
+                        <div className="table-header">
+                            <h3>Control por Elemento de Cola</h3>
+                            <span className="live-tag" style={{ animation: 'none' }}>{queueItems.length} items</span>
+                        </div>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Site</th>
+                                    <th>Recurso</th>
+                                    <th>Estado</th>
+                                    <th>Pausa item</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {queueItems.map((item) => {
+                                    const key = `${item.site_id}::${item.resource_id}`;
+                                    const pausedItem = itemPauseMap[key];
+                                    const isBusy = busyItem === key;
+                                    return (
+                                        <tr key={`${key}::${item.state || 'x'}`}>
+                                            <td>{item.site_id}</td>
+                                            <td style={{ fontWeight: '700' }}>{item.resource_id}</td>
+                                            <td>{item.state}</td>
+                                            <td>
+                                                {pausedItem
+                                                    ? (pausedItem.expires_at ? `Hasta ${new Date(pausedItem.expires_at).toLocaleString()}` : 'Sin limite')
+                                                    : '-'}
+                                            </td>
+                                            <td>
+                                                <div className="queue-actions">
+                                                    <button className="page-btn" disabled={isBusy} onClick={() => callPauseItem(item.site_id, item.resource_id, globalMinutes)}>Pausar item</button>
+                                                    <button className="page-btn" disabled={isBusy} onClick={() => callUnpauseItem(item.site_id, item.resource_id)}>Reanudar item</button>
+                                                    <button className="page-btn danger-btn" disabled={isBusy} onClick={() => callDeleteItem(item.site_id, item.resource_id)}>Eliminar y deseleccionar</button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                                {queueItems.length === 0 && !loading && (
+                                    <tr><td colSpan="5" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>Sin elementos en cola para este dia</td></tr>
                                 )}
                             </tbody>
                         </table>

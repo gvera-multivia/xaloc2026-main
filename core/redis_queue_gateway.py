@@ -135,6 +135,14 @@ class RedisQueueGateway(QueueGateway):
                 resource_id = int(resource_value) if resource_value else None
             except Exception:
                 resource_id = None
+            if site_id and resource_id is not None and self.db.is_resource_processing_paused(site_id=site_id, resource_id=resource_id):
+                await self._redis.zrem(self.inflight_key, job_id)
+                await self._redis.rpush(self.ready_key, job_id)
+                paused_seen += 1
+                if paused_seen >= 10 or time.time() >= deadline:
+                    await asyncio.sleep(0.2)
+                    return None
+                continue
 
             attempt = int(raw.get("attempt") or 0)
             max_attempts = int(raw.get("max_attempts") or self.max_attempts_default)

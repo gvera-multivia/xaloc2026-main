@@ -376,6 +376,7 @@ async def firmar_presentar_y_descargar_justificante(page: Page, *, payload: dict
 
     logger.info("[BASE] Abriendo popup de firma...")
     await _abrir_modal_firma(page, trigger)
+    await page.wait_for_timeout(3000)
     popup_frame = page.frame_locator("#contingut_signatura").first
 
     logger.info("[BASE] Confirmando checkbox en popup...")
@@ -385,16 +386,19 @@ async def firmar_presentar_y_descargar_justificante(page: Page, *, payload: dict
         await checkbox.check()
     except Exception:
         await checkbox.click()
+    await page.wait_for_timeout(3000)
 
     logger.info("[BASE] Click en 'Signar' dentro del popup...")
     sig_button = popup_frame.locator("#form_0\\:sig_button").first
     await sig_button.wait_for(state="visible", timeout=POPUP_TIMEOUT_MS)
     await sig_button.click()
+    await page.wait_for_timeout(3000)
 
     logger.info("[BASE] Cerrando popup (Continuar)...")
     close_button = popup_frame.locator("#form_0\\:close_button").first
     await close_button.wait_for(state="visible", timeout=POPUP_TIMEOUT_MS)
     await close_button.click()
+    await page.wait_for_timeout(3000)
 
     # Esperar a que el modal se cierre en la página principal.
     try:
