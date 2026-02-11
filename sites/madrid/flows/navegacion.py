@@ -460,7 +460,37 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
         # PASO 3: Click primer "Continuar"
         # ========================================================================
         logger.info("PASO 3: Clickando primer botón 'Continuar'")
-        await page.wait_for_selector(config.selectors_navegacion.continuar_1, state="visible", timeout=config.default_timeout)
+        try:
+            await page.wait_for_selector(config.selectors_navegacion.continuar_1, state="visible", timeout=config.default_timeout)
+        except PlaywrightTimeoutError:
+            # ── Diagnóstico: capturar estado de la página ──
+            logger.error(f"  ! Diagnóstico PASO 3: URL actual = {page.url}")
+            try:
+                diag_path = config.dir_screenshots / "diag_paso3_fail.png"
+                await page.screenshot(path=str(diag_path), full_page=True)
+                logger.error(f"  ! Diagnóstico PASO 3: screenshot en {diag_path}")
+            except Exception as e:
+                logger.error(f"  ! Diagnóstico PASO 3: screenshot falló: {e}")
+            try:
+                html = await page.content()
+                logger.error(f"  ! Diagnóstico PASO 3: HTML length={len(html)}")
+                logger.error(f"  ! Diagnóstico PASO 3: HTML[:3000]:\n{html[:3000]}")
+            except Exception as e:
+                logger.error(f"  ! Diagnóstico PASO 3: HTML falló: {e}")
+            try:
+                frames = page.frames
+                logger.error(f"  ! Diagnóstico PASO 3: {len(frames)} frame(s)")
+                for i, frame in enumerate(frames):
+                    logger.error(f"  ! Diagnóstico PASO 3: frame[{i}] url={frame.url} name={frame.name}")
+                    if frame != page.main_frame:
+                        try:
+                            frame_html = await frame.content()
+                            logger.error(f"  ! Diagnóstico PASO 3: frame[{i}] HTML[:1000]:\n{frame_html[:1000]}")
+                        except Exception:
+                            pass
+            except Exception as e:
+                logger.error(f"  ! Diagnóstico PASO 3: frames falló: {e}")
+            raise
         
         async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
             await page.click(config.selectors_navegacion.continuar_1)
