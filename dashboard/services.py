@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import re
 from typing import Any, Optional
 
-import aiohttp
+import requests
 
 from core.sqlserver_utils import build_sqlserver_connection_string
-from core.xvia_auth import create_authenticated_session_in_place
+from core.xvia_auth import LOGIN_URL, extract_csrf_token
 from .repositories import (
     PostgresHistoryRepository,
     SQLServerHistoryRepository,
@@ -23,8 +22,7 @@ XVIA_HOME_URL = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/publi
 USER_RE = re.compile(r'<i class="fa fa-user-circle"[^>]*></i>\s*([^<]+)')
 
 
-async def _fetch_xvia_assigned_user(email: str, password: str, logger: logging.Logger) -> Optional[str]:
-    cookie_jar = aiohttp.CookieJar(unsafe=True)
+def _fetch_xvia_assigned_user(email: str, password: str, logger: logging.Logger) -> Optional[str]:
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -32,31 +30,40 @@ async def _fetch_xvia_assigned_user(email: str, password: str, logger: logging.L
         "Origin": "http://www.xvia-grupoeuropa.net",
         "Connection": "keep-alive",
     }
-    async with aiohttp.ClientSession(headers=headers, cookie_jar=cookie_jar) as session:
-        try:
-            await create_authenticated_session_in_place(session, email, password)
-            async with session.get(XVIA_HOME_URL) as resp:
-                html = await resp.text()
-                match = USER_RE.search(html)
-                if not match:
-                    logger.warning("No se pudo extraer el nombre de usuario XVIA desde /home.")
-                    return None
-                user_name = (match.group(1) or "").strip()
-                return user_name or None
-        except Exception as exc:
-            logger.warning("No se pudo resolver UsuarioAsignado en XVIA: %s", exc)
-            return None
-
-
-def _run_coro_sync(coro):
     try:
-        return asyncio.run(coro)
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        try:
-            return loop.run_until_complete(coro)
-        finally:
-            loop.close()
+        with requests.Session() as session:
+            session.headers.update(headers)
+            resp_login = session.get(LOGIN_URL, timeout=30)
+            token = extract_csrf_token(resp_login.text)
+            if not token:
+                logger.warning("No se pudo extraer token CSRF en login XVIA para resolver UsuarioAsignado.")
+                return None
+
+            data = {
+                "_token": token,
+                "email": email.strip(),
+                "password": password.strip(),
+                "remember": "on",
+            }
+            session.post(LOGIN_URL, data=data, allow_redirects=True, timeout=30)
+            resp_home = session.get(XVIA_HOME_URL, timeout=30)
+            match = USER_RE.search(resp_home.text)
+            if not match:
+                logger.warning("No se pudo extraer el nombre de usuario XVIA desde /home.")
+                return None
+            user_name = (match.group(1) or "").strip()
+            return user_name or None
+    except Exception as exc:
+        logger.warning("No se pudo resolver UsuarioAsignado en XVIA: %s", exc)
+        return None
+
+
+def _run_fetch_user_sync(email: str, password: str, logger: logging.Logger) -> Optional[str]:
+    try:
+        return _fetch_xvia_assigned_user(email, password, logger)
+    except Exception as exc:
+        logger.warning("Error resolviendo UsuarioAsignado de XVIA: %s", exc)
+        return None
 
 
 def resolve_dashboard_assigned_user(logger: logging.Logger) -> Optional[str]:
@@ -73,7 +80,7 @@ def resolve_dashboard_assigned_user(logger: logging.Logger) -> Optional[str]:
         )
         return None
 
-    return _run_coro_sync(_fetch_xvia_assigned_user(email, password, logger))
+    return _run_fetch_user_sync(email, password, logger)
 
 
 class DashboardService:
