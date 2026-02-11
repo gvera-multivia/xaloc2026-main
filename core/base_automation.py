@@ -53,6 +53,11 @@ class BaseAutomation:
     def _build_browser_args(self) -> list[str]:
         args = list(self.config.navegador.args)
 
+        # En modo headless, --start-maximized no tiene efecto; usar --window-size explícito.
+        if self.config.navegador.headless:
+            args = [a for a in args if a != "--start-maximized"]
+            args.append("--window-size=1920,1080")
+
         if self.config.auto_select_certificate:
             policy = f'{{"pattern":"{self.config.auto_select_certificate_pattern}","filter":{{}}}}'
             args.append(f"--auto-select-certificate-for-urls=[{policy}]")
@@ -84,6 +89,13 @@ class BaseAutomation:
     async def _start_browser(self) -> None:
         user_data_dir = str(self.config.navegador.perfil_path.absolute())
         args = self._build_browser_args()
+
+        # Viewport: en headless, forzar 1920x1080; en headed, dejar que siga el tamaño de ventana.
+        if self.config.navegador.headless:
+            viewport_kwargs = {"viewport": {"width": 1920, "height": 1080}}
+        else:
+            viewport_kwargs = {"no_viewport": True}
+
         fingerprint = (user_data_dir, self.config.navegador.canal, self.config.navegador.headless, tuple(args))
 
         keep_open = os.getenv("XALOC_KEEP_BROWSER_OPEN") == "1"
@@ -150,6 +162,7 @@ class BaseAutomation:
                     args=args,
                     ignore_https_errors=True,
                     accept_downloads=True,
+                    **viewport_kwargs,
                 )
 
                 BaseAutomation._shared_playwright = self.playwright
@@ -192,6 +205,7 @@ class BaseAutomation:
             args=args,
             ignore_https_errors=True,
             accept_downloads=True,
+            **viewport_kwargs,
         )
 
         if self.config.stealth_disable_webdriver:
