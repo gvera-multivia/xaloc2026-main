@@ -136,7 +136,7 @@ async def _download_document_and_attachments(
     logger.info(f"Iniciando descarga autenticada desde: {target_url}")
 
     n_expediente = _sanitize_filename_component(_extraer_n_expediente(payload))
-    local_pdf_path = DOWNLOAD_DIR / f"EXPEDIENTE - {n_expediente}.pdf"
+    local_pdf_path = DOWNLOAD_DIR / f"RECURSO exp - {n_expediente}.pdf"
     DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
     logger.info("Nombre documento principal (subida): %s", local_pdf_path.name)
 
