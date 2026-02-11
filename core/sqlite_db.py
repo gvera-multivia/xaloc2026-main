@@ -452,6 +452,28 @@ class SQLiteDatabase:
         finally:
             conn.close()
 
+    def release_task_to_pending(self, task_id: int, error: Optional[str] = None) -> None:
+        """
+        Devuelve una tarea a pending sin incrementar intentos.
+        Uso principal: parada manual (Ctrl+C) para no penalizar el job.
+        """
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE tramite_queue
+                SET status = 'pending',
+                    processed_at = NULL,
+                    error_log = ?
+                WHERE id = ?
+                """,
+                ((error or "").strip() or None, task_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def has_active_task_for_resource(
         self,
         site_id: str,

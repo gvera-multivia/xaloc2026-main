@@ -38,6 +38,14 @@ class QueueGateway(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    async def release(self, job: QueueJob, *, reason: str = "") -> None:
+        """
+        Devuelve un job reservado a pendiente/lista sin penalizar intentos.
+        Pensado para interrupciones manuales (Ctrl+C).
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     def count_ready(self, site_id: str) -> int:
         raise NotImplementedError
 
@@ -128,6 +136,16 @@ class SQLiteQueueGateway(QueueGateway):
             attempt=next_attempt,
             finished=True,
             error_message=error,
+        )
+
+    async def release(self, job: QueueJob, *, reason: str = "") -> None:
+        if job.queue_ref is not None:
+            self.db.release_task_to_pending(job.queue_ref, error=reason or "worker_interrupted_ctrl_c")
+        self.db.update_job_run_state(
+            job.job_id,
+            "queued",
+            attempt=int(job.attempt),
+            error_message=(reason or "worker_interrupted_ctrl_c"),
         )
 
     def count_ready(self, site_id: str) -> int:

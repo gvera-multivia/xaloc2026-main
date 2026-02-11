@@ -415,9 +415,11 @@ async def worker_loop():
 
             # Bucle principal de procesamiento
             while True:
+                current_job = None
                 try:
                     job = await queue_gateway.reserve(timeout_seconds=10)
                     if job:
+                        current_job = job
                         processed_jobs += 1
                         logger.info(
                             "Procesando job %s (intento %s/%s) site=%s resource=%s",
@@ -489,6 +491,7 @@ async def worker_loop():
                                 error=outcome.error or "unknown_error",
                                 retryable=True,
                             )
+                        current_job = None
                         # Pausa fija entre jobs para no encadenar acciones en la sede/web
                         await asyncio.sleep(10)
                     else:
@@ -496,6 +499,22 @@ async def worker_loop():
                         await asyncio.sleep(10)
 
                 except KeyboardInterrupt:
+                    if current_job is not None:
+                        try:
+                            await queue_gateway.release(
+                                current_job,
+                                reason="Interrumpido por operador (Ctrl+C). Devuelto a pendiente.",
+                            )
+                            logger.info(
+                                "Job %s devuelto a pendiente tras Ctrl+C.",
+                                current_job.job_id,
+                            )
+                        except Exception as release_exc:
+                            logger.error(
+                                "No se pudo devolver el job %s a pendiente tras Ctrl+C: %s",
+                                current_job.job_id,
+                                release_exc,
+                            )
                     logger.info("Deteniendo worker por interrupción de teclado (Ctrl+C)...")
                     break
                 except Exception as e:

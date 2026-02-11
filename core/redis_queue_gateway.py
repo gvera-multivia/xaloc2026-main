@@ -218,6 +218,23 @@ class RedisQueueGateway(QueueGateway):
             error_message=error,
         )
 
+    async def release(self, job: QueueJob, *, reason: str = "") -> None:
+        await self._redis.zrem(self.inflight_key, job.job_id)
+        await self._redis.hset(
+            self._job_key(job.job_id),
+            mapping={
+                "state": "queued",
+                "last_error": (reason or "worker_interrupted_ctrl_c"),
+            },
+        )
+        await self._redis.rpush(self.ready_key, job.job_id)
+        self.db.update_job_run_state(
+            job.job_id,
+            "queued",
+            attempt=int(job.attempt),
+            error_message=(reason or "worker_interrupted_ctrl_c"),
+        )
+
     def count_ready(self, site_id: str) -> int:
         # Lightweight approximation from ledger for scheduler depth control.
         return self.db.count_job_runs(site_id, states=("queued", "processing"))
