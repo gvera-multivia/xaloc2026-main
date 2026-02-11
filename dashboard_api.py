@@ -86,3 +86,10 @@ async def api_queue_live(
     if not item:
         raise HTTPException(status_code=404, detail="No active tramite")
     return item
+
+
+@app.get("/api/queue/completion-marker")
+async def api_queue_completion_marker(
+    day: str | None = Query(None),
+) -> dict:
+    return service.get_queue_completion_marker(day=day)

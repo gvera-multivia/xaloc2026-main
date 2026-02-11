@@ -19,7 +19,7 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useRef } = React;
 
         const API_BASE = '/api'; // Adjusted to use relative path
 
@@ -36,6 +36,8 @@
             const [totalIncidents, setTotalIncidents] = useState(0);
             const [apiError, setApiError] = useState(null);
             const [historyLoading, setHistoryLoading] = useState(true);
+            const [completionMarker, setCompletionMarker] = useState(null);
+            const completionMarkerRef = useRef(null);
 
             const fetchRealtimeData = async () => {
                 try {
@@ -57,6 +59,18 @@
                         const iData = await incRes.json();
                         setIncidents(iData.items);
                         setTotalIncidents(iData.total);
+                    }
+
+                    // Trigger history refresh only when a job completion changes.
+                    const markerRes = await fetch(`${API_BASE}/queue/completion-marker?day=${selectedDay}`).catch(() => null);
+                    if (markerRes && markerRes.ok) {
+                        const markerData = await markerRes.json();
+                        const nextMarker = markerData.marker || null;
+                        if (completionMarkerRef.current !== null && nextMarker && completionMarkerRef.current !== nextMarker) {
+                            fetchHistorySuccesses();
+                        }
+                        completionMarkerRef.current = nextMarker;
+                        setCompletionMarker(nextMarker);
                     }
 
                     if (!liveRes && !queueRes && !incRes) {
@@ -97,6 +111,10 @@
             useEffect(() => {
                 fetchHistorySuccesses();
             }, [selectedDay, historyPage]);
+
+            useEffect(() => {
+                completionMarkerRef.current = completionMarker;
+            }, [completionMarker]);
 
             return (
                 <div className="dashboard-container">

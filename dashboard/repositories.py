@@ -562,3 +562,44 @@ class SqliteQueueRepository:
             return None
         finally:
             conn.close()
+
+    def get_completion_marker(self, *, day: str) -> dict[str, Any]:
+        conn = self._conn()
+        try:
+            if self.queue_backend == "redis":
+                row = conn.execute(
+                    """
+                    SELECT COUNT(*) AS completed_count,
+                           MAX(finished_at) AS last_completed_at
+                    FROM job_runs
+                    WHERE state = 'succeeded'
+                      AND substr(COALESCE(finished_at, updated_at, created_at), 1, 10) = ?
+                    """,
+                    (day,),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT COUNT(*) AS completed_count,
+                           MAX(processed_at) AS last_completed_at
+                    FROM tramite_queue
+                    WHERE status = 'completed'
+                      AND substr(COALESCE(processed_at, created_at), 1, 10) = ?
+                    """,
+                    (day,),
+                ).fetchone()
+
+            completed_count = int(row["completed_count"] if row and row["completed_count"] is not None else 0)
+            last_completed_at = row["last_completed_at"] if row else None
+            marker = f"{completed_count}|{last_completed_at or ''}"
+            return {
+                "day": day,
+                "completed_count": completed_count,
+                "last_completed_at": last_completed_at,
+                "marker": marker,
+            }
+        except Exception as exc:
+            self.logger.warning("Error obteniendo completion marker en SQLite: %s", exc)
+            return {"day": day, "completed_count": 0, "last_completed_at": None, "marker": "0|"}
+        finally:
+            conn.close()

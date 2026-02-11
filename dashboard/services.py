@@ -176,3 +176,7 @@ class DashboardService:
     def get_queue_live(self, *, day: str | None) -> Optional[dict[str, Any]]:
         day_value = (day or "").strip() or utc_today_iso()
         return self.queue_repo.get_live(day=day_value)
+
+    def get_queue_completion_marker(self, *, day: str | None) -> dict[str, Any]:
+        day_value = (day or "").strip() or utc_today_iso()
+        return self.queue_repo.get_completion_marker(day=day_value)

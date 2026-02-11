@@ -141,24 +141,79 @@ def _normalizar_anotacion(value: str) -> str:
     return re.sub(r"\D+", "", str(value or ""))
 
 
+def _extraer_anotacion_de_texto(texto: str) -> str:
+    if not texto:
+        return ""
+
+    # Caso esperado: "Numero de anotacion: 20260215781"
+    m = re.search(
+        r"numero\s+de\s+anotaci\w*n\s*:\s*([0-9/]{8,20})",
+        texto,
+        flags=re.IGNORECASE,
+    )
+    if m:
+        return _normalizar_anotacion(m.group(1))
+
+    # Fallback: cualquier numero largo con formato de anotacion.
+    m = re.search(r"\b(20\d{2}/?\d{6,10})\b", texto)
+    if m:
+        return _normalizar_anotacion(m.group(1))
+
+    return ""
+
+
 async def _extraer_anotacion_desde_exito(page: Page) -> str:
+    # Esperar a que exista contenido de "acuse de recibo / datos de registro".
     await page.wait_for_function(
         r"""() => {
-            const body = document.body;
-            if (!body) return false;
-            return /N\w*mero\s+de\s+anotaci\w*n\s*:/i.test(body.innerText || "");
+            const root = document.querySelector("form") || document.body;
+            if (!root) return false;
+            const normalize = (s) =>
+              (s || "")
+                .toString()
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .toLowerCase();
+            const txt = normalize(root.innerText || "");
+            return txt.includes("datos de registro") || txt.includes("numero de anotacion");
         }""",
         timeout=ANOTACION_TIMEOUT_MS,
     )
 
-    texto = await page.locator("body").inner_text()
-    match = re.search(r"N\w*mero\s+de\s+anotaci\w*n\s*:\s*([0-9/]+)", texto, flags=re.IGNORECASE)
-    if not match:
-        raise RuntimeError("No se pudo extraer el numero de anotacion del mensaje de exito.")
+    # 1) Intento estructural: form > div/ul/li (como comentas).
+    texto_form = await page.evaluate(
+        r"""() => {
+            const root = document.querySelector("form") || document.body;
+            if (!root) return "";
+            const nodes = root.querySelectorAll("ul, li, div, p, span, strong, b");
+            let out = "";
+            for (const n of nodes) {
+                const t = (n.textContent || "").trim();
+                if (t) out += t + "\n";
+            }
+            return out;
+        }"""
+    )
 
-    anotacion = _normalizar_anotacion(match.group(1))
+    texto_form_norm = "".join(
+        c for c in unicodedata.normalize("NFD", texto_form.lower())
+        if unicodedata.category(c) != "Mn"
+    )
+    logger.info("Longitud texto form para extraer anotacion: %s", len(texto_form_norm))
+    anotacion = _extraer_anotacion_de_texto(texto_form_norm)
+
+    # 2) Fallback: body completo.
     if not anotacion:
-        raise RuntimeError("El numero de anotacion extraido esta vacio.")
+        texto_body = await page.locator("body").inner_text()
+        texto_body_norm = "".join(
+            c for c in unicodedata.normalize("NFD", texto_body.lower())
+            if unicodedata.category(c) != "Mn"
+        )
+        logger.info("Longitud texto body para extraer anotacion: %s", len(texto_body_norm))
+        anotacion = _extraer_anotacion_de_texto(texto_body_norm)
+
+    if not anotacion:
+        raise RuntimeError("No se pudo extraer el numero de anotacion del mensaje de exito.")
 
     logger.info("Anotacion detectada en exito: %s", anotacion)
     return anotacion
