@@ -115,7 +115,10 @@ def _construir_ruta_recursos_telematicos(payload: dict, fase_procedimiento: Any 
 
 
 def _justificante_filename(num_expediente: str) -> str:
-    clean_exp = str(num_expediente).replace("/", "-").replace(".", "_")
+    clean_exp = str(num_expediente).replace("/", "-").replace("\\", "-")
+    clean_exp = re.sub(r'[<>:"|?*\x00-\x1F]', "_", clean_exp).strip().rstrip(". ")
+    if not clean_exp:
+        clean_exp = "UNKNOWN"
     return f"JUSTIFICANTE - {clean_exp}.pdf"
 
 
@@ -139,6 +142,22 @@ def _mover_justificante_a_destino(tmp_path: Path, *, destino_dir: Path) -> Path:
 
 def _normalizar_anotacion(value: str) -> str:
     return re.sub(r"\D+", "", str(value or ""))
+
+
+def _extraer_n_expediente(payload: dict) -> str:
+    keys = (
+        "expediente",
+        "expediente_num",
+        "denuncia_num",
+        "Expedient",
+        "nExp",
+        "numero_expediente",
+    )
+    for key in keys:
+        value = payload.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return "UNKNOWN"
 
 
 def _extraer_anotacion_de_texto(texto: str) -> str:
@@ -277,6 +296,7 @@ async def _descargar_justificante_desde_carpeta(
     page: Page,
     *,
     anotacion: str,
+    expediente_nombre: str,
     tmp_dir: Path,
 ) -> Path:
     await _abrir_fila_por_anotacion(page, anotacion)
@@ -306,7 +326,7 @@ async def _descargar_justificante_desde_carpeta(
 
     return await _guardar_justificante_temporal(
         download,
-        num_expediente=anotacion,
+        num_expediente=expediente_nombre,
         tmp_dir=tmp_dir,
     )
 
@@ -390,10 +410,12 @@ async def ejecutar_firma_madrid(
 
     # 3. Extraer anotacion y descargar justificante desde carpeta.
     anotacion = await _extraer_anotacion_desde_exito(page)
+    expediente_nombre = _extraer_n_expediente(payload)
 
     tmp_pdf_path = await _descargar_justificante_desde_carpeta(
         page=page,
         anotacion=anotacion,
+        expediente_nombre=expediente_nombre,
         tmp_dir=tmp_dir,
     )
 
