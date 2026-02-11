@@ -5,6 +5,7 @@ import re
 
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
+from sites.base_online.config import BaseOnlineConfig
 from sites.base_online.data_models import BaseOnlineAddressData, BaseOnlineP1Data
 from sites.base_online.flows.common import rellenar_contacto
 from sites.base_online.flows.upload import subir_archivos_por_modal
@@ -82,12 +83,12 @@ def _formatear_adreca(detall: BaseOnlineAddressData) -> str:
     return f"{calle_line}\n{linea_cp}\n{linea_prov}"
 
 
-def _address_from_p1_data(data: BaseOnlineP1Data) -> dict[str, str]:
+def _address_from_p1_data(data: BaseOnlineP1Data, config: BaseOnlineConfig) -> dict[str, str]:
     info = data.identificacio
     if info.adreca_detall:
         d = info.adreca_detall
         return {
-            "pais": _norm_spaces(d.pais or "ESP"),
+            "pais": _norm_spaces(d.pais or config.defaults.country),
             "provincia": _norm_spaces(d.provincia),
             "municipio": _norm_spaces(d.municipio or d.ampliacion_municipio),
             "cp": _norm_spaces(d.codigo_postal),
@@ -117,11 +118,11 @@ def _address_from_p1_data(data: BaseOnlineP1Data) -> dict[str, str]:
     cp_match = re.search(r"(\d{5})", cp_line)
 
     return {
-        "pais": "ESP",
+        "pais": config.defaults.country,
         "provincia": _norm_spaces(prov_line),
         "municipio": _norm_spaces(re.sub(r"\b\d{5}\b", "", cp_line)),
         "cp": cp_match.group(1) if cp_match else "",
-        "sigla": (m_calle.group("sigla") if m_calle else "CL"),
+        "sigla": (m_calle.group("sigla") if m_calle else config.defaults.street_type),
         "calle": _norm_spaces(m_calle.group("calle") if m_calle else calle_line),
         "numero": _norm_spaces(m_calle.group("num") if m_calle else ""),
         "piso": "",
@@ -192,8 +193,8 @@ async def _wait_ajax_idle(page: Page, timeout_ms: int = 12000, quiet_ms: int = 3
     )
 
 
-async def _wait_step2_popup_loaded(page: Page) -> None:
-    await page.wait_for_selector("#form_0\\:llistaMunicipis", state="visible", timeout=12000)
+async def _wait_step2_popup_loaded(page: Page, config: BaseOnlineConfig) -> None:
+    await page.wait_for_selector(config.selectors.p1_popup_municipi, state="visible", timeout=config.flow_timeouts.popup_load)
     await page.wait_for_function(
         """
         () => {
@@ -201,7 +202,7 @@ async def _wait_step2_popup_loaded(page: Page) -> None:
           return !!m && m.options && m.options.length > 1;
         }
         """,
-        timeout=12000,
+        timeout=config.flow_timeouts.popup_load,
     )
 
 
@@ -311,8 +312,8 @@ async def _is_step3_after_continue(page: Page) -> bool:
     return await page.locator("input[type='button'][value='Signar i Presentar']").count() > 0
 
 
-async def _click_continue_main_step2(page: Page) -> None:
-    btn = page.locator("input[type='submit'][name='form:j_id24'][value='Continuar']").first
+async def _click_continue_main_step2(page: Page, config: BaseOnlineConfig) -> None:
+    btn = page.locator(config.selectors.p1_btn_step2_continuar).first
     await btn.click()
     await _wait_ajax_idle(page)
     await page.wait_for_load_state("domcontentloaded")
@@ -359,7 +360,7 @@ async def _set_address_hidden_fields_strategy_a(page: Page, address: dict[str, s
     await _wait_ajax_idle(page)
 
 
-async def _open_address_popup(page: Page) -> bool:
+async def _open_address_popup(page: Page, config: BaseOnlineConfig) -> bool:
     selectors = [
         "a[onclick*='popup'][onclick*='adre']",
         "a[onclick*='obr'][onclick*='adre']",
@@ -375,7 +376,11 @@ async def _open_address_popup(page: Page) -> bool:
         try:
             await loc.click()
             await _wait_ajax_idle(page)
-            await page.wait_for_selector("#form_0\\:llistaMunicipis, #form_0\\:llistaPais, #form_0\\:llistaProvincia", state="visible", timeout=5000)
+            await page.wait_for_selector(
+                config.selectors.popup_step1_ready,
+                state="visible",
+                timeout=config.flow_timeouts.selector_default,
+            )
             return True
         except Exception:
             continue
@@ -385,23 +390,27 @@ async def _open_address_popup(page: Page) -> bool:
         if await by_txt.count() > 0:
             await by_txt.click()
             await _wait_ajax_idle(page)
-            await page.wait_for_selector("#form_0\\:llistaMunicipis, #form_0\\:llistaPais, #form_0\\:llistaProvincia", state="visible", timeout=5000)
+            await page.wait_for_selector(
+                config.selectors.popup_step1_ready,
+                state="visible",
+                timeout=config.flow_timeouts.selector_default,
+            )
             return True
     except Exception:
         return False
     return False
 
 
-async def _fill_address_popup_step1(page: Page, address: dict[str, str]) -> None:
-    pais = address.get("pais") or "ESP"
+async def _fill_address_popup_step1(page: Page, address: dict[str, str], config: BaseOnlineConfig) -> None:
+    pais = address.get("pais") or config.defaults.country
     provincia = address.get("provincia") or ""
 
-    _ = await _select_option_fuzzy(page, "#form_0\\:llistaPais", pais)
-    _ = await _select_option_fuzzy(page, "#form_0\\:llistaProvincia", provincia)
+    _ = await _select_option_fuzzy(page, config.selectors.p1_popup_pais, pais)
+    _ = await _select_option_fuzzy(page, config.selectors.p1_popup_provincia, provincia)
 
     continuar_candidates = [
         page.get_by_role("button", name=re.compile("continuar", re.IGNORECASE)).first,
-        page.locator("input[type='submit'][value*='Continuar' i]").first,
+        page.locator(config.selectors.popup_continue).first,
     ]
     for btn in continuar_candidates:
         if await btn.count() == 0:
@@ -410,41 +419,33 @@ async def _fill_address_popup_step1(page: Page, address: dict[str, str]) -> None
         await _wait_ajax_idle(page)
         break
 
-    await _wait_step2_popup_loaded(page)
+    await _wait_step2_popup_loaded(page, config)
 
 
-async def _fill_address_popup_step2(page: Page, address: dict[str, str]) -> None:
+async def _fill_address_popup_step2(page: Page, address: dict[str, str], config: BaseOnlineConfig) -> None:
     municipio = address.get("municipio") or ""
     cp = address.get("cp") or ""
-    sigla = address.get("sigla") or "CL"
+    sigla = address.get("sigla") or config.defaults.street_type
 
-    if not await _select_option_fuzzy(page, "#form_0\\:llistaMunicipis", municipio):
+    if not await _select_option_fuzzy(page, config.selectors.p1_popup_municipi, municipio):
         raise ValueError(f"No se pudo seleccionar municipio en popup: {municipio}")
 
-    await page.wait_for_function(
-        """
-        () => {
-          const cpSel = document.querySelector('#form_0\\:llistaCP');
-          return !!cpSel && cpSel.options && cpSel.options.length > 1;
-        }
-        """,
-        timeout=10000,
-    )
+    await page.wait_for_function(config.scripts.check_cp_loaded, timeout=config.flow_timeouts.popup_load)
 
-    if cp and not await _select_option_fuzzy(page, "#form_0\\:llistaCP", cp):
+    if cp and not await _select_option_fuzzy(page, config.selectors.p1_popup_cp, cp):
         raise ValueError(f"No se pudo seleccionar CP en popup: {cp}")
 
-    _ = await _select_option_fuzzy(page, "#form_0\\:llistaVies", sigla)
+    _ = await _select_option_fuzzy(page, config.selectors.p1_popup_vies, sigla)
 
-    street_loc = page.locator("#form_0\\:nom").first
+    street_loc = page.locator(config.selectors.p1_popup_nom).first
     if await street_loc.count() == 0:
         raise ValueError("No se encontro campo de calle en popup (#form_0:nom)")
     await street_loc.fill(address.get("calle") or "")
 
     for field_id, val in [
-        ("#form_0\\:numero", address.get("numero") or ""),
-        ("#form_0\\:pis", address.get("piso") or ""),
-        ("#form_0\\:porta", address.get("puerta") or ""),
+        (config.selectors.p1_popup_numero, address.get("numero") or ""),
+        (config.selectors.p1_popup_pis, address.get("piso") or ""),
+        (config.selectors.p1_popup_porta, address.get("puerta") or ""),
     ]:
         loc = page.locator(field_id).first
         if await loc.count() > 0:
@@ -467,14 +468,14 @@ async def _fill_address_popup_step2(page: Page, address: dict[str, str]) -> None
     await _wait_ajax_idle(page)
 
 
-async def _try_strategy_a(page: Page, address: dict[str, str], adreca_text: str) -> bool:
+async def _try_strategy_a(page: Page, address: dict[str, str], adreca_text: str, config: BaseOnlineConfig) -> bool:
     logging.info("[P1][ADDRESS] Estrategia A: set directo de hidden fields")
     await _set_address_hidden_fields_strategy_a(page, address, adreca_text)
 
     hidden_before = await _dump_hidden_address_values(page)
     logging.info("[P1][ADDRESS][A] Hidden antes de continuar: %s", hidden_before)
 
-    await _click_continue_main_step2(page)
+    await _click_continue_main_step2(page, config)
 
     if await _is_step3_after_continue(page):
         hidden_after = await _dump_hidden_address_values(page)
@@ -487,16 +488,16 @@ async def _try_strategy_a(page: Page, address: dict[str, str], adreca_text: str)
     return False
 
 
-async def _try_strategy_b(page: Page, address: dict[str, str], adreca_text: str) -> bool:
+async def _try_strategy_b(page: Page, address: dict[str, str], adreca_text: str, config: BaseOnlineConfig) -> bool:
     logging.info("[P1][ADDRESS] Estrategia B: popup asistente de direccion")
 
-    opened = await _open_address_popup(page)
+    opened = await _open_address_popup(page, config)
     if not opened:
         logging.warning("[P1][ADDRESS][B] No se pudo abrir popup")
         return False
 
-    await _fill_address_popup_step1(page, address)
-    await _fill_address_popup_step2(page, address)
+    await _fill_address_popup_step1(page, address, config)
+    await _fill_address_popup_step2(page, address, config)
 
     # Visual sync del textarea (solo visual)
     await page.evaluate(
@@ -520,7 +521,7 @@ async def _try_strategy_b(page: Page, address: dict[str, str], adreca_text: str)
     if not _is_address_hidden_valid(hidden):
         logging.warning("[P1][ADDRESS][B] Hidden incompletos tras popup")
 
-    await _click_continue_main_step2(page)
+    await _click_continue_main_step2(page, config)
 
     if await _is_step3_after_continue(page):
         hidden_after = await _dump_hidden_address_values(page)
@@ -532,7 +533,7 @@ async def _try_strategy_b(page: Page, address: dict[str, str], adreca_text: str)
     return False
 
 
-async def fillAddressProtocol1BaseTarragona(page: Page, address: dict[str, str]) -> None:
+async def fillAddressProtocol1BaseTarragona(page: Page, address: dict[str, str], config: BaseOnlineConfig) -> None:
     """
     Rellena direccion P1 en BASE Tarragona con estrategia A/B:
     - A: set directo de hidden fields + continuar.
@@ -542,53 +543,53 @@ async def fillAddressProtocol1BaseTarragona(page: Page, address: dict[str, str])
 
     addr = {k: _norm_spaces(v) for k, v in (address or {}).items()}
     if not addr.get("numero"):
-        addr["numero"] = "S/N"
+        addr["numero"] = config.defaults.street_number
 
     adreca_text = ""
     if all(addr.get(k) for k in ("sigla", "calle", "numero", "cp", "municipio", "provincia")):
         adreca_text = f"{addr['sigla']} {addr['calle']}, {addr['numero']}\n{addr['cp']} {addr['municipio']}\n{addr['provincia']}"
 
     try:
-        ok_a = await _try_strategy_a(page, addr, adreca_text)
+        ok_a = await _try_strategy_a(page, addr, adreca_text, config)
         if ok_a:
             return
     except Exception as e:
         logging.warning("[P1][ADDRESS][A] Error: %s", e)
 
-    ok_b = await _try_strategy_b(page, addr, adreca_text)
+    ok_b = await _try_strategy_b(page, addr, adreca_text, config)
     if not ok_b:
         raise ValueError("P1: no se pudo establecer una direccion valida con estrategias A/B")
 
 
-async def _rellenar_contacto(page: Page, data: BaseOnlineP1Data) -> None:
+async def _rellenar_contacto(page: Page, data: BaseOnlineP1Data, config: BaseOnlineConfig) -> None:
     await rellenar_contacto(page, data.contacte)
 
-    await page.locator("input[type='submit'][name='form:j_id20'][value='Continuar']").first.click()
+    await page.locator(config.selectors.p1_btn_contacte_continuar).first.click()
     await _wait_ajax_idle(page)
     await page.wait_for_load_state("domcontentloaded")
 
 
-async def _rellenar_identificacion_conductor(page: Page, data: BaseOnlineP1Data) -> None:
+async def _rellenar_identificacion_conductor(page: Page, data: BaseOnlineP1Data, config: BaseOnlineConfig) -> None:
     info = data.identificacio
 
-    await page.locator("#form\\:clau_expedient_id_ens").first.fill(info.expedient_id_ens)
-    await page.locator("#form\\:clau_expedient_any_exp").first.fill(info.expedient_any)
-    await page.locator("#form\\:clau_expedient_num_exp").first.fill(info.expedient_num)
+    await page.locator(config.selectors.p1_expedient_id_ens).first.fill(info.expedient_id_ens)
+    await page.locator(config.selectors.p1_expedient_any).first.fill(info.expedient_any)
+    await page.locator(config.selectors.p1_expedient_num).first.fill(info.expedient_num)
 
     await page.evaluate(
         "typeof actualitzarClauExpedientclau_expedient === 'function' && actualitzarClauExpedientclau_expedient()"
     )
     await _wait_ajax_idle(page)
 
-    await page.locator("#form\\:num_butlleti").first.fill(info.num_butlleti)
-    await page.locator("#form\\:data_denuncia").first.fill(info.data_denuncia)
-    await page.locator("#form\\:matricula").first.fill(info.matricula)
-    await page.locator("#form\\:identificacio").first.fill(info.identificacio)
-    await page.locator("#form\\:llicencia_conduccio").first.fill(info.llicencia_conduccio)
-    await page.locator("#form\\:nom_complet").first.fill(info.nom_complet)
+    await page.locator(config.selectors.p1_num_butlleti).first.fill(info.num_butlleti)
+    await page.locator(config.selectors.p1_data_denuncia).first.fill(info.data_denuncia)
+    await page.locator(config.selectors.p1_matricula).first.fill(info.matricula)
+    await page.locator(config.selectors.p1_identificacio).first.fill(info.identificacio)
+    await page.locator(config.selectors.p1_llicencia_conduccio).first.fill(info.llicencia_conduccio)
+    await page.locator(config.selectors.p1_nom_complet).first.fill(info.nom_complet)
 
-    address = _address_from_p1_data(data)
-    await fillAddressProtocol1BaseTarragona(page, address)
+    address = _address_from_p1_data(data, config)
+    await fillAddressProtocol1BaseTarragona(page, address, config)
 
     # Si estamos aqui, ya estamos en el paso 3
     archivos = list(data.archivos_adjuntos or [])
@@ -596,21 +597,22 @@ async def _rellenar_identificacion_conductor(page: Page, data: BaseOnlineP1Data)
         raise ValueError("P1: falta 'archivos_adjuntos' (al menos 1 archivo).")
     await subir_archivos_por_modal(page, archivos)
 
-    await page.locator("input[type='submit'][name='form:j_id29'][value='Continuar']").first.click()
+    await page.locator(config.selectors.p1_btn_step3_continuar).first.click()
     await _wait_ajax_idle(page)
     await page.wait_for_load_state("domcontentloaded")
 
-    boton_firma = page.locator("input[type='button'][value='Signar i Presentar']").first
+    boton_firma = page.locator(config.selectors.p1_btn_signar_presentar).first
     if await boton_firma.count() > 0:
         logging.info("[P1] Pantalla 'Signar i Presentar' detectada (no se pulsa en modo demo).")
 
 
-async def ejecutar_p1(page: Page, data: BaseOnlineP1Data) -> None:
+async def ejecutar_p1(page: Page, data: BaseOnlineP1Data, config: BaseOnlineConfig | None = None) -> None:
+    cfg = config or BaseOnlineConfig()
     logging.info("[P1] Rellenando pantalla 1 (contacto)...")
-    await _rellenar_contacto(page, data)
+    await _rellenar_contacto(page, data, cfg)
     logging.info("[P1] Rellenando pantalla 2 (identificacion conductor + direccion robusta)...")
     try:
-        await _rellenar_identificacion_conductor(page, data)
+        await _rellenar_identificacion_conductor(page, data, cfg)
     except PlaywrightTimeoutError as e:
         raise ValueError(f"P1 timeout en flujo de direccion/continuar: {e}") from e
 

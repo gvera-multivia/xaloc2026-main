@@ -5,14 +5,45 @@ Basado en explore-html/madrid-guide.md y explore-html/llenar formulario-madrid.m
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from core.base_config import BaseConfig
 
 
 @dataclass
+class MadridSelectorsLogin:
+    iniciar_tramitacion: str = "#btnConAuth"
+    certificado_login: str = "a.login-sede-opt-link:has-text('DNIe / Certificado')"
+    continuar_post_auth: str = "#btnContinuar"
+
+
+@dataclass
+class MadridSelectorsNavegacion:
+    boton_tramitar: str = "#tramitarClick"
+    bloque_tramitar: str = "#verTodas"
+    registro_electronico: str = "a[href^='https://servpub.madrid.es/WFORS_WBWFORS/servlet']"
+    continuar_1: str = "input#btn1[type='submit'][value='Continuar']"
+    radio_nuevo_tramite: str = "#checkboxNuevoTramite"
+    radio_interesado: str = "#checkboxInteresado"
+    continuar_interesado: str = "input#btn1[type='button'][value='Continuar']"
+    boton_nuevo_tramite_condicional: str = "#btnNuevoTramite"
+    formulario_llegada: str = "form"
+
+
+@dataclass
+class MadridFlowTimeouts:
+    auth_wait: int = 15000
+    dom_stable: int = 2000
+    short_delay: int = 500
+    short_interaction: int = 6000
+
+
+@dataclass
 class MadridConfig(BaseConfig):
     site_id: str = "madrid"
+    selectors_login: MadridSelectorsLogin = field(default_factory=MadridSelectorsLogin)
+    selectors_navegacion: MadridSelectorsNavegacion = field(default_factory=MadridSelectorsNavegacion)
+    flow_timeouts: MadridFlowTimeouts = field(default_factory=MadridFlowTimeouts)
     
     # URL base del trámite (Multas de circulación)
     url_base: str = "https://sede.madrid.es/portal/site/tramites/menuitem.62876cb64654a55e2dbd7003a8a409a0/?vgnextoid=dd7f048aad32e210VgnVCM1000000b205a0aRCRD&vgnextchannel=3838a38813180210VgnVCM100000c90da8c0RCRD&vgnextfmt=default"
