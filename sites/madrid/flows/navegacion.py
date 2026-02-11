@@ -56,11 +56,10 @@ async def _esperar_auth_o_servcla(page: Page, config: "MadridConfig", *, timeout
 
 async def _detectar_tramite_en_curso(page: Page) -> bool:
     locator = page.locator(
-        "div.modal-alert.modal-warning span.bold",
-        has_text=re.compile(r"ya\\s+est[aá]\\s+realizando\\s+un\\s+tr[aá]mite", re.IGNORECASE),
+        "div.modal-alert.modal-warning",
     )
     try:
-        return await locator.first.is_visible(timeout=500)
+        return await locator.count() > 0
     except Exception:
         return False
 
@@ -463,33 +462,12 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
         try:
             await page.wait_for_selector(config.selectors_navegacion.continuar_1, state="visible", timeout=config.default_timeout)
         except PlaywrightTimeoutError:
-            # ── Diagnóstico: capturar estado de la página ──
-            logger.error(f"  ! Diagnóstico PASO 3: URL actual = {page.url}")
-            try:
-                diag_path = config.dir_screenshots / "diag_paso3_fail.png"
-                await page.screenshot(path=str(diag_path), full_page=True)
-                logger.error(f"  ! Diagnóstico PASO 3: screenshot en {diag_path}")
-            except Exception as e:
-                logger.error(f"  ! Diagnóstico PASO 3: screenshot falló: {e}")
-            try:
-                html = await page.content()
-                logger.error(f"  ! Diagnóstico PASO 3: HTML length={len(html)}")
-                logger.error(f"  ! Diagnóstico PASO 3: HTML[:3000]:\n{html[:3000]}")
-            except Exception as e:
-                logger.error(f"  ! Diagnóstico PASO 3: HTML falló: {e}")
-            try:
-                frames = page.frames
-                logger.error(f"  ! Diagnóstico PASO 3: {len(frames)} frame(s)")
-                for i, frame in enumerate(frames):
-                    logger.error(f"  ! Diagnóstico PASO 3: frame[{i}] url={frame.url} name={frame.name}")
-                    if frame != page.main_frame:
-                        try:
-                            frame_html = await frame.content()
-                            logger.error(f"  ! Diagnóstico PASO 3: frame[{i}] HTML[:1000]:\n{frame_html[:1000]}")
-                        except Exception:
-                            pass
-            except Exception as e:
-                logger.error(f"  ! Diagnóstico PASO 3: frames falló: {e}")
+            # Comprobar si es la pantalla de "trámite en curso" → reinicio del navegador
+            if await _detectar_tramite_en_curso(page):
+                logger.warning("  ! Detectada pantalla 'trámite en curso' en PASO 3")
+                raise RestartRequiredError(
+                    "Pantalla 'trámite en curso' detectada en PASO 3; cerrar navegador y reiniciar."
+                )
             raise
         
         async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
@@ -552,30 +530,6 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
                     break
                 except PlaywrightTimeoutError:
                     if time.monotonic() > deadline:
-                        # ── Diagnóstico headless: capturar estado de la página ──
-                        logger.error(f"  ! Diagnóstico: URL actual = {page.url}")
-                        try:
-                            # Guardar screenshot
-                            diag_path = config.dir_screenshots / "diag_certificado_fail.png"
-                            await page.screenshot(path=str(diag_path), full_page=True)
-                            logger.error(f"  ! Diagnóstico: screenshot guardada en {diag_path}")
-                        except Exception as e:
-                            logger.error(f"  ! Diagnóstico: no se pudo guardar screenshot: {e}")
-                        try:
-                            # Volcar HTML (primeros 2000 chars)
-                            html = await page.content()
-                            logger.error(f"  ! Diagnóstico: HTML length={len(html)}")
-                            logger.error(f"  ! Diagnóstico: HTML (primeros 2000 chars):\n{html[:2000]}")
-                        except Exception as e:
-                            logger.error(f"  ! Diagnóstico: no se pudo obtener HTML: {e}")
-                        try:
-                            # Comprobar iframes
-                            frames = page.frames
-                            logger.error(f"  ! Diagnóstico: {len(frames)} frame(s) detectado(s)")
-                            for i, frame in enumerate(frames):
-                                logger.error(f"  ! Diagnóstico: frame[{i}] url={frame.url} name={frame.name}")
-                        except Exception as e:
-                            logger.error(f"  ! Diagnóstico: no se pudo inspeccionar frames: {e}")
                         raise
 
             if await _esta_en_servcla(page, config) or await _btn_continuar_post_auth_visible(page, config):
