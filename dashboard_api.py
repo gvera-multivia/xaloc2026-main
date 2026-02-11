@@ -24,6 +24,11 @@ service = DashboardService()
 async def home():
     return FileResponse("dashboard-frontend/index.html")
 
+@app.get("/queues")
+@app.get("/queues/")
+async def queues():
+    return FileResponse("dashboard-frontend/index.html")
+
 
 @app.get("/styles.css")
 async def styles():

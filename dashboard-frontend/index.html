@@ -9,7 +9,6 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
-    <!-- React and Babel for single file development -->
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -19,11 +18,12 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useRef } = React;
+        const { useState, useEffect, useRef, useMemo } = React;
 
-        const API_BASE = '/api'; // Adjusted to use relative path
+        const API_BASE = '/api';
+        const KNOWN_SITES = ['madrid', 'xaloc_girona', 'base_online'];
 
-        function App() {
+        function MainDashboard() {
             const [liveItem, setLiveItem] = useState(null);
             const [queue, setQueue] = useState([]);
             const [successes, setSuccesses] = useState([]);
@@ -41,27 +41,23 @@
 
             const fetchRealtimeData = async () => {
                 try {
-                    // Fetch Live
                     const liveRes = await fetch(`${API_BASE}/queue/live?day=${selectedDay}`).catch(() => null);
                     if (liveRes && liveRes.ok) setLiveItem(await liveRes.json());
                     else setLiveItem(null);
 
-                    // Fetch Queue
                     const queueRes = await fetch(`${API_BASE}/queue/current?day=${selectedDay}&page=1&page_size=10`).catch(() => null);
                     if (queueRes && queueRes.ok) {
                         const qData = await queueRes.json();
-                        setQueue(qData.items);
+                        setQueue(qData.items || []);
                     }
 
-                    // Fetch Incidents (Today)
                     const incRes = await fetch(`${API_BASE}/history/incidents?day=${selectedDay}&page=1&page_size=100`).catch(() => null);
                     if (incRes && incRes.ok) {
                         const iData = await incRes.json();
-                        setIncidents(iData.items);
-                        setTotalIncidents(iData.total);
+                        setIncidents(iData.items || []);
+                        setTotalIncidents(iData.total || 0);
                     }
 
-                    // Trigger history refresh only when a job completion changes.
                     const markerRes = await fetch(`${API_BASE}/queue/completion-marker?day=${selectedDay}`).catch(() => null);
                     if (markerRes && markerRes.ok) {
                         const markerData = await markerRes.json();
@@ -74,14 +70,14 @@
                     }
 
                     if (!liveRes && !queueRes && !incRes) {
-                        setApiError("No se pudo conectar con el backend (API)");
+                        setApiError('No se pudo conectar con el backend (API)');
                     } else {
                         setApiError(null);
                     }
 
                     setLoading(false);
                 } catch (err) {
-                    console.error("Error fetching data:", err);
+                    console.error('Error fetching data:', err);
                     setLoading(false);
                 }
             };
@@ -92,11 +88,11 @@
                     const histRes = await fetch(`${API_BASE}/history/successes?day=${selectedDay}&page=${historyPage}&page_size=5`).catch(() => null);
                     if (histRes && histRes.ok) {
                         const hData = await histRes.json();
-                        setSuccesses(hData.items);
-                        setTotalSuccesses(hData.total);
+                        setSuccesses(hData.items || []);
+                        setTotalSuccesses(hData.total || 0);
                     }
                 } catch (err) {
-                    console.error("Error fetching history:", err);
+                    console.error('Error fetching history:', err);
                 } finally {
                     setHistoryLoading(false);
                 }
@@ -124,7 +120,8 @@
                             <p style={{ color: 'var(--text-muted)' }}>Real-time monitoring system</p>
                         </div>
                         <div className="filters">
-                            {apiError && <span style={{ color: '#ef4444', marginRight: '1rem', fontWeight: '800' }}>⚠️ {apiError}</span>}
+                            <a className="queue-link" href="/queues">Panel de colas</a>
+                            {apiError && <span style={{ color: '#ef4444', marginRight: '1rem', fontWeight: '800' }}>Aviso: {apiError}</span>}
                             <input
                                 type="date"
                                 value={selectedDay}
@@ -144,14 +141,14 @@
                                     {liveItem ? 'En Directo' : 'Sin Actividad'}
                                 </div>
                                 <h2 style={{ marginTop: '1rem', fontSize: '2rem' }}>
-                                    {liveItem ? `Tramitando: ${liveItem.resource_id}` : 'Ningún trámite activo'}
+                                    {liveItem ? `Tramitando: ${liveItem.resource_id}` : 'Ningun tramite activo'}
                                 </h2>
                                 <p style={{ color: 'var(--text-muted)', marginTop: '0.5rem' }}>
                                     {liveItem ? `Site: ${liveItem.site_id} | Protocolo: ${liveItem.protocol}` : 'Esperando nuevos recursos...'}
                                 </p>
                             </div>
                             <div style={{ textAlign: 'right' }}>
-                                <span style={{ fontSize: '3rem' }}>⚡</span>
+                                <span style={{ fontSize: '3rem' }}>Inicio</span>
                             </div>
                         </div>
                     </section>
@@ -184,11 +181,11 @@
                                             <td style={{ fontWeight: '600' }}>{item.resource_id}</td>
                                             <td>{item.site_id}</td>
                                             <td>{item.protocol}</td>
-                                            <td><span style={{ color: 'var(--success)' }}>✓ Completado</span></td>
+                                            <td><span style={{ color: 'var(--success)' }}>Completado</span></td>
                                         </tr>
                                     ))}
                                     {successes.length === 0 && !historyLoading && (
-                                        <tr><td colSpan="4" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>Sin trámites realizados hoy</td></tr>
+                                        <tr><td colSpan="4" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>Sin tramites realizados hoy</td></tr>
                                     )}
                                     {historyLoading && (
                                         <tr><td colSpan="4" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>Cargando datos...</td></tr>
@@ -229,7 +226,7 @@
                                         </tr>
                                     ))}
                                     {queue.length === 0 && !loading && (
-                                        <tr><td colSpan="2" style={{ textAlign: 'center' }}>Cola vacía</td></tr>
+                                        <tr><td colSpan="2" style={{ textAlign: 'center' }}>Cola vacia</td></tr>
                                     )}
                                 </tbody>
                             </table>
@@ -246,12 +243,12 @@
                             boxShadow: totalIncidents > 0 ? undefined : 'none'
                         }}
                     >
-                        <span>⚠️</span> {totalIncidents} {totalIncidents === 1 ? 'INCIDENCIA' : 'INCIDENCIAS'}
+                        <span>Aviso</span> {totalIncidents} {totalIncidents === 1 ? 'INCIDENCIA' : 'INCIDENCIAS'}
                     </button>
 
                     <div className={`modal-overlay ${showModal ? 'active' : ''}`} onClick={() => setShowModal(false)}>
                         <div className="glass modal" onClick={e => e.stopPropagation()}>
-                            <button className="modal-close" onClick={() => setShowModal(false)}>×</button>
+                            <button className="modal-close" onClick={() => setShowModal(false)}>X</button>
                             <h2 style={{ marginBottom: '1.5rem', color: 'var(--error)' }}>Incidencias de Hoy</h2>
                             <table>
                                 <thead>
@@ -266,7 +263,7 @@
                                         <tr key={idx}>
                                             <td>{item.resource_id}</td>
                                             <td style={{ fontSize: '0.8rem' }}>{item.reason}</td>
-                                            <td style={{ color: 'var(--text-muted)' }}>{new Date(item.started_at).toLocaleTimeString()}</td>
+                                            <td style={{ color: 'var(--text-muted)' }}>{item.started_at ? new Date(item.started_at).toLocaleTimeString() : '-'}</td>
                                         </tr>
                                     ))}
                                     {incidents.length === 0 && (
@@ -280,8 +277,267 @@
             );
         }
 
+        function QueueControlPanel() {
+            const [selectedDay, setSelectedDay] = useState(new Date().toISOString().split('T')[0]);
+            const [queueItems, setQueueItems] = useState([]);
+            const [pauses, setPauses] = useState([]);
+            const [globalReason, setGlobalReason] = useState('');
+            const [globalMinutes, setGlobalMinutes] = useState('120');
+            const [busySite, setBusySite] = useState(null);
+            const [bulkBusy, setBulkBusy] = useState(false);
+            const [error, setError] = useState(null);
+            const [loading, setLoading] = useState(true);
+
+            const fetchData = async () => {
+                try {
+                    setLoading(true);
+                    const [queueRes, pausesRes] = await Promise.all([
+                        fetch(`${API_BASE}/queue/current?day=${selectedDay}&page=1&page_size=1000`).catch(() => null),
+                        fetch(`${API_BASE}/queue/pauses?active_only=true`).catch(() => null),
+                    ]);
+
+                    if (queueRes && queueRes.ok) {
+                        const data = await queueRes.json();
+                        setQueueItems(data.items || []);
+                    } else {
+                        setQueueItems([]);
+                    }
+
+                    if (pausesRes && pausesRes.ok) {
+                        const data = await pausesRes.json();
+                        setPauses(data.items || []);
+                    } else {
+                        setPauses([]);
+                    }
+
+                    if ((!queueRes || !queueRes.ok) && (!pausesRes || !pausesRes.ok)) {
+                        setError('No se pudo cargar datos de colas/pausas');
+                    } else {
+                        setError(null);
+                    }
+                } catch (e) {
+                    setError('Error consultando API');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            useEffect(() => {
+                fetchData();
+                const interval = setInterval(fetchData, 5000);
+                return () => clearInterval(interval);
+            }, [selectedDay]);
+
+            const pauseMap = useMemo(() => {
+                const map = {};
+                for (const p of pauses) map[p.site_id] = p;
+                return map;
+            }, [pauses]);
+
+            const sites = useMemo(() => {
+                const setSites = new Set(KNOWN_SITES);
+                queueItems.forEach((it) => setSites.add(it.site_id));
+                pauses.forEach((p) => setSites.add(p.site_id));
+                return Array.from(setSites).filter(Boolean).sort();
+            }, [queueItems, pauses]);
+
+            const queueBySite = useMemo(() => {
+                const out = {};
+                for (const s of sites) out[s] = { total: 0, pending: 0, processing: 0 };
+                for (const item of queueItems) {
+                    const site = item.site_id;
+                    if (!out[site]) out[site] = { total: 0, pending: 0, processing: 0 };
+                    out[site].total += 1;
+                    if ((item.state || '').toLowerCase() === 'processing') out[site].processing += 1;
+                    else out[site].pending += 1;
+                }
+                return out;
+            }, [queueItems, sites]);
+
+            const callPause = async (siteId, minutesValue) => {
+                setBusySite(siteId);
+                try {
+                    const params = new URLSearchParams();
+                    const minutesNum = Number(minutesValue);
+                    if (Number.isFinite(minutesNum) && minutesNum > 0) params.set('minutes', String(minutesNum));
+                    if (globalReason.trim()) params.set('reason', globalReason.trim());
+                    const resp = await fetch(`${API_BASE}/queue/pauses/${encodeURIComponent(siteId)}?${params.toString()}`, { method: 'POST' });
+                    if (!resp.ok) {
+                        const detail = await resp.text();
+                        throw new Error(detail || 'Error pausando site');
+                    }
+                    await fetchData();
+                } catch (e) {
+                    setError(`No se pudo pausar ${siteId}`);
+                } finally {
+                    setBusySite(null);
+                }
+            };
+
+            const callUnpause = async (siteId) => {
+                setBusySite(siteId);
+                try {
+                    const resp = await fetch(`${API_BASE}/queue/pauses/${encodeURIComponent(siteId)}`, { method: 'DELETE' });
+                    if (!resp.ok) {
+                        const detail = await resp.text();
+                        throw new Error(detail || 'Error reanudando site');
+                    }
+                    await fetchData();
+                } catch (e) {
+                    setError(`No se pudo reanudar ${siteId}`);
+                } finally {
+                    setBusySite(null);
+                }
+            };
+
+            const pauseAllVisibleSites = async () => {
+                setBulkBusy(true);
+                try {
+                    for (const site of sites) {
+                        await callPause(site, globalMinutes);
+                    }
+                    await fetchData();
+                } finally {
+                    setBulkBusy(false);
+                }
+            };
+
+            return (
+                <div className="dashboard-container">
+                    <header>
+                        <div className="title-group">
+                            <h1>Panel de Colas</h1>
+                            <p style={{ color: 'var(--text-muted)' }}>Pausar y reanudar procesamiento por site</p>
+                        </div>
+                        <div className="filters">
+                            <a className="queue-link" href="/">Volver al dashboard</a>
+                            <input type="date" value={selectedDay} onChange={(e) => setSelectedDay(e.target.value)} />
+                            <button className="page-btn" onClick={fetchData}>Actualizar</button>
+                        </div>
+                    </header>
+
+                    <section className="queue-control-grid">
+                        <div className="glass table-container">
+                            <div className="table-header">
+                                <h3>Pausa Global Rapida</h3>
+                            </div>
+                            <div className="queue-form-row">
+                                <input
+                                    className="queue-input"
+                                    type="number"
+                                    min="1"
+                                    value={globalMinutes}
+                                    onChange={(e) => setGlobalMinutes(e.target.value)}
+                                    placeholder="Minutos"
+                                />
+                                <input
+                                    className="queue-input"
+                                    value={globalReason}
+                                    onChange={(e) => setGlobalReason(e.target.value)}
+                                    placeholder="Motivo (opcional)"
+                                />
+                                <button className="page-btn" disabled={bulkBusy || sites.length === 0} onClick={pauseAllVisibleSites}>
+                                    {bulkBusy ? 'Pausando...' : 'Pausar todos los sites visibles'}
+                                </button>
+                            </div>
+                            <p style={{ color: 'var(--text-muted)', marginTop: '0.8rem', fontSize: '0.9rem' }}>
+                                Si un site esta pausado, sus pendientes se quedan en cola pero el worker no los procesa.
+                            </p>
+                        </div>
+
+                        <div className="glass table-container">
+                            <div className="table-header">
+                                <h3>Estado de Pausas</h3>
+                                <span className="live-tag" style={{ animation: 'none' }}>{pauses.length} activas</span>
+                            </div>
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Site</th>
+                                        <th>Hasta</th>
+                                        <th>Motivo</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {pauses.map((p) => (
+                                        <tr key={p.site_id}>
+                                            <td style={{ fontWeight: '700' }}>{p.site_id}</td>
+                                            <td>{p.expires_at ? new Date(p.expires_at).toLocaleString() : 'Sin limite'}</td>
+                                            <td style={{ color: 'var(--text-muted)' }}>{p.reason || '-'}</td>
+                                        </tr>
+                                    ))}
+                                    {pauses.length === 0 && (
+                                        <tr><td colSpan="3" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No hay pausas activas</td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+
+                    <div className="glass table-container" style={{ marginTop: '1.5rem' }}>
+                        <div className="table-header">
+                            <h3>Control por Site</h3>
+                            {error && <span style={{ color: 'var(--error)' }}>{error}</span>}
+                        </div>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Site</th>
+                                    <th>Total cola</th>
+                                    <th>Pending</th>
+                                    <th>Processing</th>
+                                    <th>Estado</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {sites.map((site) => {
+                                    const paused = !!pauseMap[site];
+                                    const counts = queueBySite[site] || { total: 0, pending: 0, processing: 0 };
+                                    return (
+                                        <tr key={site}>
+                                            <td style={{ fontWeight: '700' }}>{site}</td>
+                                            <td>{counts.total}</td>
+                                            <td>{counts.pending}</td>
+                                            <td>{counts.processing}</td>
+                                            <td>
+                                                <span className={paused ? 'status-chip paused' : 'status-chip active'}>
+                                                    {paused ? 'Pausado' : 'Activo'}
+                                                </span>
+                                            </td>
+                                            <td>
+                                                <div className="queue-actions">
+                                                    <button className="page-btn" disabled={busySite === site} onClick={() => callPause(site, globalMinutes)}>Pausar</button>
+                                                    <button className="page-btn" disabled={busySite === site} onClick={() => callPause(site, null)}>Pausa sin limite</button>
+                                                    <button className="page-btn" disabled={busySite === site} onClick={() => callUnpause(site)}>Reanudar</button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                                {sites.length === 0 && !loading && (
+                                    <tr><td colSpan="6" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>Sin sites detectados</td></tr>
+                                )}
+                                {loading && (
+                                    <tr><td colSpan="6" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>Cargando panel...</td></tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            );
+        }
+
+        function AppRouter() {
+            const path = (window.location.pathname || '/').toLowerCase();
+            if (path === '/queues' || path.startsWith('/queues/')) {
+                return <QueueControlPanel />;
+            }
+            return <MainDashboard />;
+        }
+
         const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
+        root.render(<AppRouter />);
     </script>
 </body>
 

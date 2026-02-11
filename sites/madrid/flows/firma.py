@@ -223,20 +223,25 @@ async def _abrir_fila_por_anotacion(page: Page, anotacion_objetivo: str) -> None
     await page.goto(CARPETA_URL, wait_until="domcontentloaded", timeout=TABLA_TIMEOUT_MS)
     await page.wait_for_selector("table.iam-b-table tbody tr", state="attached", timeout=TABLA_TIMEOUT_MS)
 
-    await page.wait_for_function(
-        r"""(anotacionObjetivo) => {
-            const rows = Array.from(document.querySelectorAll("table.iam-b-table tbody tr"));
-            const normalize = (s) => (s || "").toString().replace(/\D+/g, "");
-            const target = normalize(anotacionObjetivo);
-            return rows.some((row) => {
-                const firstCell = row.querySelector("td:first-child div, td:first-child");
-                const value = normalize(firstCell ? firstCell.textContent : "");
-                return value && value === target;
-            });
-        }""",
-        anotacion_objetivo,
-        timeout=TABLA_TIMEOUT_MS,
-    )
+    try:
+        await page.wait_for_function(
+            r"""(anotacionObjetivo) => {
+                const rows = Array.from(document.querySelectorAll("table.iam-b-table tbody tr"));
+                const normalize = (s) => (s || "").toString().replace(/\D+/g, "");
+                const target = normalize(anotacionObjetivo);
+                return rows.some((row) => {
+                    const firstCell = row.querySelector("td:first-child div, td:first-child");
+                    const value = normalize(firstCell ? firstCell.textContent : "");
+                    return value && value === target;
+                });
+            }""",
+            arg=anotacion_objetivo,
+            timeout=TABLA_TIMEOUT_MS,
+        )
+    except TimeoutError as e:
+        raise RuntimeError(
+            f"No aparecio en tabla la anotacion {anotacion_objetivo} dentro del timeout en {page.url}"
+        ) from e
 
     found = await page.evaluate(
         r"""(anotacionObjetivo) => {
@@ -274,12 +279,25 @@ async def _descargar_justificante_desde_carpeta(
     label = page.locator("label", has_text=re.compile(r"Justificante\s+de\s+registro", re.IGNORECASE)).first
     await label.wait_for(state="visible", timeout=TABLA_TIMEOUT_MS)
 
-    try:
-        async with page.expect_download(timeout=DOWNLOAD_TIMEOUT_MS) as download_info:
-            await label.click()
-        download = await download_info.value
-    except TimeoutError as e:
-        raise RuntimeError("No se detecto descarga al pulsar 'Justificante de registro'.") from e
+    download = None
+    click_attempts = (
+        lambda: label.click(),
+        lambda: label.click(force=True),
+        lambda: label.evaluate("el => el.click()"),
+    )
+    for click_action in click_attempts:
+        try:
+            async with page.expect_download(timeout=30000) as download_info:
+                await click_action()
+            download = await download_info.value
+            break
+        except TimeoutError:
+            continue
+
+    if download is None:
+        raise RuntimeError(
+            "No se detecto descarga al pulsar 'Justificante de registro' tras varios intentos."
+        )
 
     return await _guardar_justificante_temporal(
         download,
