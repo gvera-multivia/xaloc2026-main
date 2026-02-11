@@ -4,7 +4,7 @@ import os
 
 import aiohttp
 from fastapi import FastAPI, Query, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -31,7 +31,18 @@ async def home():
 
 @app.get("/queues")
 @app.get("/queues/")
+@app.get("/admin")
+@app.get("/admin/")
+@app.get("/colas")
+@app.get("/colas/")
 async def queues():
+    return FileResponse("dashboard-frontend/index.html")
+
+@app.get("/history")
+@app.get("/history/")
+@app.get("/historico")
+@app.get("/historico/")
+async def history():
     return FileResponse("dashboard-frontend/index.html")
 
 
