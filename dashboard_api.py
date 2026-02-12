@@ -8,6 +8,9 @@ from fastapi import FastAPI, Query, HTTPException, Body
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from dashboard import DashboardService
 from dashboard.process_manager import ProcessManager

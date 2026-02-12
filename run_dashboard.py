@@ -4,6 +4,7 @@ import os
 import socket
 
 import uvicorn
+from dotenv import load_dotenv
 
 
 def find_free_port(host: str = "127.0.0.1", start_port: int = 8787, end_port: int = 8999) -> int:
@@ -21,6 +22,7 @@ def find_free_port(host: str = "127.0.0.1", start_port: int = 8787, end_port: in
 
 
 if __name__ == "__main__":
+    load_dotenv()
     host = os.getenv("DASHBOARD_HOST", "127.0.0.1")
     start_port = int(os.getenv("DASHBOARD_PORT_START", "8787"))
     end_port = int(os.getenv("DASHBOARD_PORT_END", "8999"))
