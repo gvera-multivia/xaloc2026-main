@@ -39,6 +39,18 @@ function fmtTime(value) {
   return d.toLocaleTimeString('es-ES');
 }
 
+function toFileUrl(pathValue) {
+  const raw = String(pathValue || '').trim();
+  if (!raw) return '';
+  if (/^file:\/\//i.test(raw)) return raw;
+  if (raw.startsWith('\\\\')) {
+    const unc = raw.replace(/\\/g, '/').replace(/^\/+/, '');
+    return `file:////${unc}`;
+  }
+  const normalized = raw.replace(/\\/g, '/');
+  return `file:///${normalized}`;
+}
+
 function elapsedFrom(startedAt, nowTs) {
   if (!startedAt) return '--:--';
   const start = new Date(startedAt).getTime();
@@ -852,7 +864,7 @@ function ControlPanelView({ setWorkerOnline, setWorkerLabel }) {
             else if (p.level === 'ERROR') lineClass += ' terminal-line-error';
             else if (p.level === 'WARNING' || p.level === 'WARN') lineClass += ' terminal-line-warn';
             else if (p.level === 'INFO') lineClass += ' terminal-line-info';
-            else if (p.msg && (p.msg.includes('OK') || p.msg.includes('√'))) lineClass += ' terminal-line-success';
+            else if (p.msg && p.msg.includes('OK')) lineClass += ' terminal-line-success';
 
             return (
               <code key={`${name}-line-${idx}`} className={lineClass}>
@@ -1281,19 +1293,30 @@ function HistoryView({ selectedDay, setSelectedDay, sharedSearch, setWorkerOnlin
                   const res = await apiFetch('/client-folder', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(selectedRow.row.payload || {}),
+                    body: JSON.stringify({
+                      ...(selectedRow.row.payload || {}),
+                      open_on_server: false,
+                    }),
                   });
-                  if (res.opened) {
-                    setError('');
-                  } else if (!res.exists) {
+                  if (!res.exists) {
                     setError('La carpeta del cliente no existe: ' + (res.path || ''));
+                    return;
+                  }
+                  const fileUrl = toFileUrl(res.path);
+                  if (!fileUrl) {
+                    setError('No se pudo resolver una ruta valida para abrir la carpeta.');
+                    return;
+                  }
+                  const openedClient = window.open(fileUrl, '_blank');
+                  if (openedClient) {
+                    setError('');
                   } else {
-                    setError('No se pudo abrir la carpeta: ' + (res.open_error || 'error desconocido'));
+                    setError(`No se pudo abrir automaticamente. Usa esta ruta: ${res.path || ''}`);
                   }
                 } catch (e) {
                   setError('Error al intentar abrir la carpeta del cliente.');
                 }
-              }}>📁 Abrir carpeta del cliente</button>
+              }}>Abrir carpeta del cliente</button>
             </div>
 
             <h4>Payload</h4>
@@ -1389,3 +1412,4 @@ function AppRouter() {
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(<AppRouter />);
+

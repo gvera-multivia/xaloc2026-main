@@ -433,14 +433,19 @@ async def api_pending_auth_reject(
 
 @app.post("/api/client-folder")
 async def api_client_folder(payload: dict[str, Any] = Body(...)) -> dict:
-    """Calcula la ruta de la carpeta del cliente y la abre en Windows Explorer."""
+    """Calcula la ruta de la carpeta del cliente.
+
+    Por defecto devuelve la ruta para que el frontend intente abrirla en el cliente.
+    Si `open_on_server=true`, también intenta abrirla en el servidor.
+    """
     try:
         result = service.resolve_client_folder(payload=payload)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Error resolviendo carpeta: {exc}") from exc
 
+    open_on_server = bool(payload.get("open_on_server", False))
     folder_path = result.get("path", "")
-    if result.get("exists") and folder_path:
+    if open_on_server and result.get("exists") and folder_path:
         try:
             os.startfile(folder_path)
             result["opened"] = True
