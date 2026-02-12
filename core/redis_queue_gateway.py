@@ -97,7 +97,7 @@ class RedisQueueGateway(QueueGateway):
         )
         return True, job_id
 
-    async def reserve(self, *, timeout_seconds: int = 10) -> Optional[QueueJob]:
+    async def reserve(self, *, timeout_seconds: int = 10, worker_id: Optional[str] = None) -> Optional[QueueJob]:
         await self._reap_expired_inflight()
 
         deadline = time.time() + max(1, int(timeout_seconds))
@@ -146,7 +146,13 @@ class RedisQueueGateway(QueueGateway):
 
             attempt = int(raw.get("attempt") or 0)
             max_attempts = int(raw.get("max_attempts") or self.max_attempts_default)
-            self.db.update_job_run_state(job_id, "processing", started=True, attempt=attempt)
+            self.db.update_job_run_state(
+                job_id,
+                "processing",
+                started=True,
+                attempt=attempt,
+                worker_id=(str(worker_id).strip() if worker_id else None),
+            )
             return QueueJob(
                 job_id=job_id,
                 site_id=site_id,

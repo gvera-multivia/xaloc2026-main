@@ -7,7 +7,7 @@ import logging
 import decimal
 import asyncio
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
 
@@ -160,6 +160,32 @@ class SQLiteDatabase:
             """
             CREATE INDEX IF NOT EXISTS ix_job_runs_site_state
             ON job_runs(site_id, state)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS worker_runtime (
+                worker_id TEXT PRIMARY KEY,
+                run_id TEXT,
+                pid INTEGER,
+                status TEXT NOT NULL DEFAULT 'online',
+                current_job_id TEXT,
+                heartbeat_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS ix_worker_runtime_heartbeat
+            ON worker_runtime(heartbeat_at)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS ix_worker_runtime_status
+            ON worker_runtime(status)
             """
         )
         cursor.execute(
@@ -705,6 +731,221 @@ class SQLiteDatabase:
         finally:
             conn.close()
 
+    def upsert_worker_runtime(
+        self,
+        *,
+        worker_id: str,
+        run_id: Optional[str] = None,
+        pid: Optional[int] = None,
+        status: str = "online",
+        current_job_id: Optional[str] = None,
+    ) -> None:
+        wid = (worker_id or "").strip()
+        if not wid:
+            return
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            now = datetime.now().isoformat()
+            cursor.execute(
+                """
+                INSERT INTO worker_runtime (
+                    worker_id, run_id, pid, status, current_job_id, heartbeat_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(worker_id) DO UPDATE SET
+                    run_id = COALESCE(excluded.run_id, worker_runtime.run_id),
+                    pid = COALESCE(excluded.pid, worker_runtime.pid),
+                    status = excluded.status,
+                    current_job_id = excluded.current_job_id,
+                    heartbeat_at = excluded.heartbeat_at,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    wid,
+                    (run_id or "").strip() or None,
+                    int(pid) if pid is not None else None,
+                    (status or "").strip() or "online",
+                    (current_job_id or "").strip() or None,
+                    now,
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def mark_worker_runtime_offline(self, *, worker_id: str, status: str = "offline") -> None:
+        wid = (worker_id or "").strip()
+        if not wid:
+            return
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE worker_runtime
+                SET status = ?,
+                    current_job_id = NULL,
+                    updated_at = ?
+                WHERE worker_id = ?
+                """,
+                ((status or "").strip() or "offline", datetime.now().isoformat(), wid),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def list_alive_worker_ids(self, *, heartbeat_timeout_seconds: int = 90) -> set[str]:
+        timeout = max(1, int(heartbeat_timeout_seconds))
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT worker_id, heartbeat_at
+                FROM worker_runtime
+                WHERE status = 'online'
+                """
+            )
+            now_dt = datetime.now()
+            alive: set[str] = set()
+            for row in cursor.fetchall():
+                hb = self._parse_iso_datetime(row["heartbeat_at"])
+                if hb is None:
+                    continue
+                current_now = datetime.now(hb.tzinfo) if hb.tzinfo is not None else now_dt
+                age_seconds = max(0, int((current_now - hb).total_seconds()))
+                if age_seconds <= timeout:
+                    alive.add(str(row["worker_id"]))
+            return alive
+        finally:
+            conn.close()
+
+    def reconcile_processing_with_worker_runtime(
+        self,
+        *,
+        heartbeat_timeout_seconds: int = 90,
+        limit: int = 200,
+        site_id: Optional[str] = None,
+        resource_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        timeout = max(1, int(heartbeat_timeout_seconds))
+        scan_limit = max(1, int(limit))
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            cursor.execute("BEGIN IMMEDIATE")
+            cursor.execute(
+                """
+                SELECT worker_id, heartbeat_at
+                FROM worker_runtime
+                WHERE status = 'online'
+                """
+            )
+            now_dt = datetime.now()
+            alive_worker_ids: set[str] = set()
+            for wr in cursor.fetchall():
+                hb = self._parse_iso_datetime(wr["heartbeat_at"])
+                if hb is None:
+                    continue
+                current_now = datetime.now(hb.tzinfo) if hb.tzinfo is not None else now_dt
+                age_seconds = max(0, int((current_now - hb).total_seconds()))
+                if age_seconds <= timeout:
+                    alive_worker_ids.add(str(wr["worker_id"]))
+
+            clauses = ["status = 'processing'"]
+            params: list[Any] = []
+            if site_id:
+                clauses.append("site_id = ?")
+                params.append(str(site_id))
+            if resource_id is not None:
+                clauses.append("resource_id = ?")
+                params.append(int(resource_id))
+            where_sql = " AND ".join(clauses)
+            cursor.execute(
+                f"""
+                SELECT id, site_id, resource_id, payload
+                FROM tramite_queue
+                WHERE {where_sql}
+                ORDER BY COALESCE(processed_at, created_at) ASC, id ASC
+                LIMIT ?
+                """,
+                (*params, scan_limit),
+            )
+            rows = cursor.fetchall()
+            recovered_items: list[Dict[str, Any]] = []
+            for row in rows:
+                queue_ref = int(row["id"])
+                payload_raw = row["payload"] or "{}"
+                try:
+                    payload_obj = json.loads(payload_raw)
+                except Exception:
+                    payload_obj = {}
+                job_id = str(payload_obj.get("job_id") or f"sqlite-task-{queue_ref}")
+                cursor.execute("SELECT worker_id FROM job_runs WHERE job_id = ?", (job_id,))
+                run = cursor.fetchone()
+                owner_worker_id = str(run["worker_id"]).strip() if (run and run["worker_id"]) else None
+                keep_processing = bool(owner_worker_id and owner_worker_id in alive_worker_ids)
+                if keep_processing:
+                    continue
+
+                reason = "missing_job_run_or_owner"
+                if owner_worker_id and owner_worker_id not in alive_worker_ids:
+                    reason = "owner_worker_offline_or_stale_heartbeat"
+                cursor.execute(
+                    """
+                    UPDATE tramite_queue
+                    SET status = 'pending',
+                        processed_at = NULL,
+                        error_log = ?
+                    WHERE id = ?
+                    """,
+                    (f"Recovered by UUID-runtime reconciliation: {reason}.", queue_ref),
+                )
+                if run is not None:
+                    cursor.execute(
+                        """
+                        UPDATE job_runs
+                        SET state = 'queued',
+                            queued_at = ?,
+                            error_message = ?,
+                            updated_at = ?
+                        WHERE job_id = ?
+                        """,
+                        (
+                            datetime.now().isoformat(),
+                            f"Recovered by UUID-runtime reconciliation: {reason}.",
+                            datetime.now().isoformat(),
+                            job_id,
+                        ),
+                    )
+                recovered_items.append(
+                    {
+                        "queue_ref": queue_ref,
+                        "job_id": job_id,
+                        "site_id": row["site_id"],
+                        "resource_id": row["resource_id"],
+                        "owner_worker_id": owner_worker_id,
+                        "reason": reason,
+                    }
+                )
+
+            conn.commit()
+            return {
+                "alive_workers": len(alive_worker_ids),
+                "scanned": len(rows),
+                "recovered": len(recovered_items),
+                "items": recovered_items,
+            }
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
     # ==========================================================================
     # METODOS PARA INCIDENCIAS
     # ==========================================================================
@@ -1112,6 +1353,18 @@ class SQLiteDatabase:
             raise
         finally:
             conn.close()
+
+    @staticmethod
+    def _parse_iso_datetime(value: Any) -> Optional[datetime]:
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        if raw.endswith("Z"):
+            raw = raw[:-1] + "+00:00"
+        try:
+            return datetime.fromisoformat(raw)
+        except Exception:
+            return None
 
     def get_active_organismo_configs(self) -> list[Dict[str, Any]]:
         """

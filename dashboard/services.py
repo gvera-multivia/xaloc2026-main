@@ -142,6 +142,14 @@ class DashboardService:
         self.db = SQLiteDatabase(db_path=sqlite_path)
 
     @staticmethod
+    def _worker_runtime_timeout_seconds() -> int:
+        raw = (os.getenv("WORKER_HEARTBEAT_TIMEOUT_SECONDS") or "90").strip()
+        try:
+            return max(5, int(raw))
+        except Exception:
+            return 90
+
+    @staticmethod
     def _paginate(items: list[Any], page: int, page_size: int) -> dict[str, Any]:
         start = max(0, (page - 1) * page_size)
         end = start + page_size
@@ -275,6 +283,60 @@ class DashboardService:
         removed = self.db.clear_resource_processing_pause(site_id=site, resource_id=rid)
         return {"site_id": site, "resource_id": rid, "paused": False, "removed": bool(removed)}
 
+    def recover_stuck_queue_items(
+        self,
+        *,
+        heartbeat_timeout_seconds: int | None = None,
+        limit: int = 100,
+        site_id: str | None = None,
+        resource_id: int | None = None,
+    ) -> dict[str, Any]:
+        timeout = int(heartbeat_timeout_seconds or self._worker_runtime_timeout_seconds())
+        result = self.db.reconcile_processing_with_worker_runtime(
+            heartbeat_timeout_seconds=timeout,
+            limit=max(1, int(limit)),
+            site_id=(site_id or "").strip() or None,
+            resource_id=resource_id,
+        )
+        result["heartbeat_timeout_seconds"] = timeout
+        return result
+
+    def recover_queue_item_processing(
+        self,
+        *,
+        site_id: str,
+        resource_id: int,
+        heartbeat_timeout_seconds: int | None = None,
+    ) -> dict[str, Any]:
+        site = (site_id or "").strip()
+        if not site:
+            raise ValueError("site_id es obligatorio.")
+        try:
+            rid = int(resource_id)
+        except Exception as exc:
+            raise ValueError("resource_id debe ser entero.") from exc
+
+        timeout = int(heartbeat_timeout_seconds or self._worker_runtime_timeout_seconds())
+        result = self.db.reconcile_processing_with_worker_runtime(
+            heartbeat_timeout_seconds=timeout,
+            limit=100,
+            site_id=site,
+            resource_id=rid,
+        )
+        released_item = next(
+            (it for it in (result.get("items") or []) if str(it.get("site_id")) == site and int(it.get("resource_id") or -1) == rid),
+            None,
+        )
+        return {
+            "site_id": site,
+            "resource_id": rid,
+            "released": released_item is not None,
+            "reason": (released_item or {}).get("reason") or "no_recovery_needed_or_owner_alive",
+            "job_id": (released_item or {}).get("job_id"),
+            "queue_ref": (released_item or {}).get("queue_ref"),
+            "heartbeat_timeout_seconds": timeout,
+        }
+
     def remove_queue_item(self, *, site_id: str, resource_id: int) -> dict[str, Any]:
         site = (site_id or "").strip()
         if not site:
@@ -288,6 +350,23 @@ class DashboardService:
             raise ValueError("Eliminar elementos de cola solo esta soportado en QUEUE_BACKEND=sqlite.")
 
         result = self.db.remove_pending_queue_item(site_id=site, resource_id=rid)
+        if not result.get("removed") and (result.get("reason") or "") == "status_processing":
+            recovered = self.recover_queue_item_processing(
+                site_id=site,
+                resource_id=rid,
+            )
+            if recovered.get("released"):
+                result = self.db.remove_pending_queue_item(site_id=site, resource_id=rid)
+                if result.get("removed"):
+                    result["recovered_processing"] = True
+                else:
+                    result["recovered_processing"] = True
+                    result["recovered_but_not_removed"] = True
+            else:
+                result["recovery_attempted"] = True
+                result["recovery_reason"] = recovered.get("reason")
+                result["recovery_heartbeat_timeout_seconds"] = recovered.get("heartbeat_timeout_seconds")
+
         if result.get("removed"):
             self.db.clear_resource_processing_pause(site_id=site, resource_id=rid)
             job_id = result.get("job_id")

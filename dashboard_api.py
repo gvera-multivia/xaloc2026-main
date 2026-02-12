@@ -253,6 +253,9 @@ async def api_delete_queue_item(site_id: str, resource_id: int) -> dict:
             "site_id": site_id,
             "resource_id": int(resource_id),
             "reason": result.get("reason") or "unknown",
+            "recovery_attempted": bool(result.get("recovery_attempted")),
+            "recovery_reason": result.get("recovery_reason"),
+            "recovery_heartbeat_timeout_seconds": result.get("recovery_heartbeat_timeout_seconds"),
             "xvia_deselected": False,
         }
 
@@ -281,7 +284,42 @@ async def api_delete_queue_item(site_id: str, resource_id: int) -> dict:
         "site_id": site_id,
         "resource_id": int(resource_id),
         "xvia_deselected": bool(deselected),
+        "recovered_processing": bool(result.get("recovered_processing")),
     }
+
+
+@app.post("/api/queue/items/{site_id}/{resource_id}/recover")
+async def api_recover_queue_item(
+    site_id: str,
+    resource_id: int,
+    heartbeat_timeout_seconds: int | None = Query(None, ge=1),
+) -> dict:
+    try:
+        return service.recover_queue_item_processing(
+            site_id=site_id,
+            resource_id=resource_id,
+            heartbeat_timeout_seconds=heartbeat_timeout_seconds,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/queue/recover-stuck")
+async def api_recover_stuck_queue_items(
+    heartbeat_timeout_seconds: int | None = Query(None, ge=1),
+    limit: int = Query(100, ge=1, le=2000),
+    site_id: str | None = Query(None),
+    resource_id: int | None = Query(None),
+) -> dict:
+    try:
+        return service.recover_stuck_queue_items(
+            heartbeat_timeout_seconds=heartbeat_timeout_seconds,
+            limit=limit,
+            site_id=site_id,
+            resource_id=resource_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/blacklist")

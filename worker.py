@@ -1,5 +1,6 @@
 ﻿import asyncio
 import argparse
+import contextlib
 import logging
 import sys
 import inspect
@@ -94,6 +95,16 @@ def _call_with_supported_kwargs(fn, **kwargs):
     sig = inspect.signature(fn)
     supported = {k: v for k, v in kwargs.items() if k in sig.parameters and v is not None}
     return fn(**supported)
+
+
+def _int_env(name: str, default: int, *, minimum: int = 1) -> int:
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return max(minimum, int(default))
+    try:
+        return max(minimum, int(raw))
+    except Exception:
+        return max(minimum, int(default))
 
 def apply_url_cert_config():
     if sys.platform != "win32":
@@ -442,6 +453,58 @@ async def worker_loop():
     logger.info("Iniciando Worker Loop. Esperando tareas...")
     logger.info("Run ID: %s", run_id)
     logger.info(f"Backend de cola activo: {queue_backend}")
+    worker_instance_id = f"worker-{uuid.uuid4().hex}"
+    worker_pid = os.getpid()
+    logger.info("Worker UUID runtime: %s (pid=%s)", worker_instance_id, worker_pid)
+
+    heartbeat_seconds = _int_env("WORKER_HEARTBEAT_SECONDS", 5, minimum=1)
+    heartbeat_timeout_seconds = _int_env("WORKER_HEARTBEAT_TIMEOUT_SECONDS", 90, minimum=5)
+    reconcile_interval_seconds = _int_env("WORKER_RECONCILE_INTERVAL_SECONDS", 20, minimum=5)
+    reconcile_batch_size = _int_env("WORKER_RECONCILE_BATCH_SIZE", 200, minimum=1)
+
+    runtime_state: dict[str, Optional[str]] = {"current_job_id": None}
+    stop_runtime_tasks = asyncio.Event()
+    heartbeat_task: Optional[asyncio.Task] = None
+    reconcile_task: Optional[asyncio.Task] = None
+
+    async def _runtime_heartbeat_loop() -> None:
+        while not stop_runtime_tasks.is_set():
+            db.upsert_worker_runtime(
+                worker_id=worker_instance_id,
+                run_id=run_id,
+                pid=worker_pid,
+                status="online",
+                current_job_id=runtime_state.get("current_job_id"),
+            )
+            await asyncio.sleep(heartbeat_seconds)
+
+    async def _runtime_reconcile_loop() -> None:
+        if queue_backend != "sqlite":
+            return
+        while not stop_runtime_tasks.is_set():
+            try:
+                result = db.reconcile_processing_with_worker_runtime(
+                    heartbeat_timeout_seconds=heartbeat_timeout_seconds,
+                    limit=reconcile_batch_size,
+                )
+                if result.get("recovered"):
+                    logger.warning(
+                        "UUID reconcile: %s processing recuperados (workers vivos=%s).",
+                        result.get("recovered"),
+                        result.get("alive_workers"),
+                    )
+            except Exception as exc:
+                logger.error("Fallo en UUID reconcile de processing: %s", exc)
+            await asyncio.sleep(reconcile_interval_seconds)
+    db.upsert_worker_runtime(
+        worker_id=worker_instance_id,
+        run_id=run_id,
+        pid=worker_pid,
+        status="online",
+        current_job_id=None,
+    )
+    heartbeat_task = asyncio.create_task(_runtime_heartbeat_loop())
+    reconcile_task = asyncio.create_task(_runtime_reconcile_loop())
 
     # Cargar credenciales
     load_dotenv()
@@ -485,9 +548,10 @@ async def worker_loop():
             while True:
                 current_job = None
                 try:
-                    job = await queue_gateway.reserve(timeout_seconds=10)
+                    job = await queue_gateway.reserve(timeout_seconds=10, worker_id=worker_instance_id)
                     if job:
                         current_job = job
+                        runtime_state["current_job_id"] = job.job_id
                         processed_jobs += 1
                         logger.info(
                             "Procesando job %s (intento %s/%s) site=%s resource=%s",
@@ -543,6 +607,7 @@ async def worker_loop():
                                     ended_at=ended_at,
                                 )
                                 current_job = None
+                                runtime_state["current_job_id"] = None
                                 await asyncio.sleep(10)
                                 continue
 
@@ -607,9 +672,11 @@ async def worker_loop():
                                 ended_at=ended_at,
                             )
                         current_job = None
+                        runtime_state["current_job_id"] = None
                         # Pausa fija entre jobs para no encadenar acciones en la sede/web
                         await asyncio.sleep(10)
                     else:
+                        runtime_state["current_job_id"] = None
                         # Sin tareas: esperar 10 segundos antes de volver a consultar la cola
                         await asyncio.sleep(10)
 
@@ -631,14 +698,24 @@ async def worker_loop():
                                 release_exc,
                             )
                     logger.info("Deteniendo worker por interrupción de teclado (Ctrl+C)...")
+                    runtime_state["current_job_id"] = None
                     break
                 except Exception as e:
                     error_type = type(e).__name__
                     logger.error(f"💥 Error inesperado en el bucle principal ({error_type}): {e}")
                     logger.error(traceback.format_exc())
                     logger.info("⚡ El worker continuará procesando tareas después de este error...")
+                    runtime_state["current_job_id"] = None
                     await asyncio.sleep(5)
     finally:
+        stop_runtime_tasks.set()
+        for task in (heartbeat_task, reconcile_task):
+            if task is None:
+                continue
+            task.cancel()
+            with contextlib.suppress(Exception):
+                await task
+        db.mark_worker_runtime_offline(worker_id=worker_instance_id)
         logger.info(
             "Resumen ejecución run=%s processed=%s success=%s failed=%s",
             run_id,

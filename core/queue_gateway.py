@@ -26,7 +26,7 @@ class QueueGateway(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def reserve(self, *, timeout_seconds: int = 10) -> Optional[QueueJob]:
+    async def reserve(self, *, timeout_seconds: int = 10, worker_id: Optional[str] = None) -> Optional[QueueJob]:
         raise NotImplementedError
 
     @abstractmethod
@@ -79,7 +79,7 @@ class SQLiteQueueGateway(QueueGateway):
         )
         return enqueued, job_id
 
-    async def reserve(self, *, timeout_seconds: int = 10) -> Optional[QueueJob]:
+    async def reserve(self, *, timeout_seconds: int = 10, worker_id: Optional[str] = None) -> Optional[QueueJob]:
         task = self.db.get_pending_task()
         if not task:
             return None
@@ -96,7 +96,13 @@ class SQLiteQueueGateway(QueueGateway):
         run = self.db.get_job_run(job_id)
         attempt = int((run or {}).get("attempt", 0))
         max_attempts = int((run or {}).get("max_attempts", 3))
-        self.db.update_job_run_state(job_id, "processing", started=True, attempt=attempt)
+        self.db.update_job_run_state(
+            job_id,
+            "processing",
+            started=True,
+            attempt=attempt,
+            worker_id=(str(worker_id).strip() if worker_id else None),
+        )
         return QueueJob(
             job_id=job_id,
             site_id=site_id,

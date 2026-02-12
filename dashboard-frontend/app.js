@@ -491,11 +491,46 @@ function AdminView({ selectedDay, setWorkerOnline, setWorkerLabel, sharedSearch 
     setBusyItem(key);
     try {
       const resp = await apiFetch(`/queue/items/${encodeURIComponent(siteId)}/${resourceId}`, { method: 'DELETE' });
-      if (!resp.xvia_deselected) setError(`Eliminado ${siteId}/${resourceId}, pero XVIA no se pudo deseleccionar.`);
-      else setError('');
+      if (!resp.removed) {
+        if (resp.reason === 'status_processing') {
+          setError(`No se elimino ${siteId}/${resourceId}: sigue marcado en processing.`);
+        } else if (resp.recovery_attempted) {
+          setError(`No se elimino ${siteId}/${resourceId}: el owner worker sigue vivo o no requiere recovery.`);
+        } else if (resp.reason === 'not_found') {
+          setError(`No se encontro ${siteId}/${resourceId} en cola activa.`);
+        } else {
+          setError(`No se pudo eliminar ${siteId}/${resourceId}. Motivo: ${resp.reason || 'desconocido'}.`);
+        }
+        await refresh();
+        return;
+      }
+      let nextError = '';
+      if (resp.recovered_processing) {
+        nextError = `Se recupero un processing atascado antes de eliminar ${siteId}/${resourceId}.`;
+      }
+      if (!resp.xvia_deselected) {
+        nextError = `Eliminado ${siteId}/${resourceId}, pero XVIA no se pudo deseleccionar.`;
+      }
+      setError(nextError);
       await refresh();
     } catch (e) {
       setError(`No se pudo eliminar ${siteId}/${resourceId}.`);
+    } finally {
+      setBusyItem('');
+    }
+  };
+
+  const callRecoverItem = async (siteId, resourceId) => {
+    const key = `${siteId}::${resourceId}`;
+    setBusyItem(key);
+    try {
+      const resp = await apiFetch(`/queue/items/${encodeURIComponent(siteId)}/${resourceId}/recover`, { method: 'POST' });
+      if (resp.released) setError('');
+      else if (resp.reason === 'no_recovery_needed_or_owner_alive') setError(`No recuperado ${siteId}/${resourceId}: worker owner activo o sin recovery necesario.`);
+      else setError(`No se pudo recuperar ${siteId}/${resourceId}.`);
+      await refresh();
+    } catch (e) {
+      setError(`No se pudo recuperar ${siteId}/${resourceId}.`);
     } finally {
       setBusyItem('');
     }
@@ -590,6 +625,7 @@ function AdminView({ selectedDay, setWorkerOnline, setWorkerLabel, sharedSearch 
                     <div className="action-wrap">
                       <button disabled={isBusy} onClick={() => callPauseItem(item.site_id, item.resource_id, globalMinutes)}>Pausar</button>
                       <button disabled={isBusy} onClick={() => callUnpauseItem(item.site_id, item.resource_id)}>Reanudar</button>
+                      <button className="warn" disabled={isBusy || (item.state || '').toLowerCase() !== 'processing'} onClick={() => callRecoverItem(item.site_id, item.resource_id)}>Recuperar</button>
                       <button className="danger" disabled={isBusy} onClick={() => callDeleteItem(item.site_id, item.resource_id)}>Eliminar</button>
                     </div>
                   </td>
@@ -677,6 +713,7 @@ function ControlPanelView({ setWorkerOnline, setWorkerLabel }) {
     const isRunning = current === 'running';
     const isError = current === 'error';
     const statusLabel = isRunning ? 'RUNNING' : (isError ? 'ERROR' : 'STOPPED');
+    const cardLogs = logs[name] || { stdout: [], stderr: [] };
     const combined = cardLogs.stdout || [];
     const logRef = name === 'worker' ? workerLogRef : brainLogRef;
 
