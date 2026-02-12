@@ -39,18 +39,6 @@ function fmtTime(value) {
   return d.toLocaleTimeString('es-ES');
 }
 
-function toFileUrl(pathValue) {
-  const raw = String(pathValue || '').trim();
-  if (!raw) return '';
-  if (/^file:\/\//i.test(raw)) return raw;
-  if (raw.startsWith('\\\\')) {
-    const unc = raw.replace(/\\/g, '/').replace(/^\/+/, '');
-    return `file:////${unc}`;
-  }
-  const normalized = raw.replace(/\\/g, '/');
-  return `file:///${normalized}`;
-}
-
 function elapsedFrom(startedAt, nowTs) {
   if (!startedAt) return '--:--';
   const start = new Date(startedAt).getTime();
@@ -1085,6 +1073,8 @@ function HistoryView({ selectedDay, setSelectedDay, sharedSearch, setWorkerOnlin
   const [total, setTotal] = useState(0);
   const [localSearch, setLocalSearch] = useState('');
   const [selectedRow, setSelectedRow] = useState(null);
+  const [selectedFolderPath, setSelectedFolderPath] = useState('');
+  const [folderMessage, setFolderMessage] = useState('');
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const completionMarkerRef = useRef(null);
   const completionReadyRef = useRef(false);
@@ -1226,7 +1216,11 @@ function HistoryView({ selectedDay, setSelectedDay, sharedSearch, setWorkerOnlin
               const key = `${row.site_id}::${row.resource_id}`;
               const hasIncident = !!(incidentMap[key] && incidentMap[key].length);
               return (
-                <tr key={`${key}-${idx}`} onClick={() => setSelectedRow({ row, incidents: incidentMap[key] || [] })} className="click-row">
+                <tr key={`${key}-${idx}`} onClick={() => {
+                  setSelectedRow({ row, incidents: incidentMap[key] || [] });
+                  setSelectedFolderPath('');
+                  setFolderMessage('');
+                }} className="click-row">
                   <td>#{row.resource_id}</td><td>{row.site_id}</td><td>{row.protocol || '-'}</td>
                   <td><span className={hasIncident ? 'chip paused' : 'chip active'}>{hasIncident ? 'Completado con incidencias' : 'Completado'}</span></td>
                   <td>{fmtDateTime(row.started_at)}</td><td>{fmtDateTime(row.ended_at)}</td>
@@ -1300,24 +1294,45 @@ function HistoryView({ selectedDay, setSelectedDay, sharedSearch, setWorkerOnlin
                   });
                   if (!res.exists) {
                     setError('La carpeta del cliente no existe: ' + (res.path || ''));
+                    setSelectedFolderPath('');
+                    setFolderMessage('');
                     return;
                   }
-                  const fileUrl = toFileUrl(res.path);
-                  if (!fileUrl) {
+                  if (!res.path) {
                     setError('No se pudo resolver una ruta valida para abrir la carpeta.');
+                    setSelectedFolderPath('');
+                    setFolderMessage('');
                     return;
                   }
-                  const openedClient = window.open(fileUrl, '_blank');
-                  if (openedClient) {
-                    setError('');
-                  } else {
-                    setError(`No se pudo abrir automaticamente. Usa esta ruta: ${res.path || ''}`);
-                  }
+                  setSelectedFolderPath(String(res.path));
+                  setFolderMessage('Copia esta ruta y pegala en el Explorador de archivos.');
+                  setError('');
                 } catch (e) {
                   setError('Error al intentar abrir la carpeta del cliente.');
+                  setSelectedFolderPath('');
+                  setFolderMessage('');
                 }
-              }}>Abrir carpeta del cliente</button>
+              }}>Obtener ruta de carpeta</button>
             </div>
+            {selectedFolderPath && (
+              <div className="action-wrap" style={{ marginBottom: '10px' }}>
+                <input
+                  type="text"
+                  readOnly
+                  value={selectedFolderPath}
+                  onFocus={(e) => e.target.select()}
+                />
+                <button onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(selectedFolderPath);
+                    setFolderMessage('Ruta copiada al portapapeles.');
+                  } catch (_) {
+                    setFolderMessage('No se pudo copiar automaticamente. Selecciona la ruta y copiala manualmente.');
+                  }
+                }}>Copiar ruta</button>
+              </div>
+            )}
+            {folderMessage && <p>{folderMessage}</p>}
 
             <h4>Payload</h4>
             <pre>{JSON.stringify(selectedRow.row.payload || {}, null, 2)}</pre>
