@@ -353,10 +353,10 @@ class SQLServerHistoryRepository:
                 SELECT rs.idRecurso, rs.idExp, rs.Expedient, rs.Organisme, rs.TExp,
                        rs.UsuarioAsignado, rs.Estado,
                        {self._date_expr()} AS day,
-                       rs.fecpres
+                       rs.FUsuarioCompletado
                 FROM Recursos.RecursosExp rs
                 WHERE {where_with_day}
-                ORDER BY rs.fecpres DESC, rs.idRecurso DESC
+                ORDER BY rs.FUsuarioCompletado DESC, rs.idRecurso DESC
                 OFFSET ? ROWS FETCH NEXT ? ROWS ONLY
                 """,
                 [*params, day, offset, page_size],
