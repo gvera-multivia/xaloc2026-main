@@ -298,7 +298,7 @@ async def process_task(
             except RestartRequiredError as e:
                 # Madrid (y otras sedes) pueden detectar "trámite en curso" y fallar al inicio.
                 # En ese caso: cerrar el navegador del todo, reabrir, y saltar a la siguiente tarea.
-                logger.warning(f"↻ Reinicio requerido (tarea {task_label}): {e}")
+                logger.warning(f"[RESTART] Reinicio requerido (tarea {task_label}): {e}")
                 screenshot_path = None
                 try:
                     screenshot_path = await bot.capture_error_screenshot("restart_required.png")

@@ -51,9 +51,7 @@ class ProcessManager:
                 raise FileNotFoundError(f"No existe el script: {script_path}")
 
             stdout_path = self.logs_dir / f"{process_name}_out.log"
-            stderr_path = self.logs_dir / f"{process_name}_err.log"
             stdout_handle = open(stdout_path, "a", encoding="utf-8")
-            stderr_handle = open(stderr_path, "a", encoding="utf-8")
 
             proc = await asyncio.create_subprocess_exec(
                 sys.executable,
@@ -61,7 +59,7 @@ class ProcessManager:
                 str(script_path),
                 cwd=str(self.base_dir),
                 stdout=stdout_handle,
-                stderr=stderr_handle,
+                stderr=asyncio.subprocess.STDOUT,
             )
 
             self._processes[process_name] = ManagedProcess(
@@ -69,9 +67,9 @@ class ProcessManager:
                 script=script,
                 process=proc,
                 stdout_path=stdout_path,
-                stderr_path=stderr_path,
+                stderr_path=stdout_path, # Ambas apuntan al mismo archivo ahora
                 stdout_handle=stdout_handle,
-                stderr_handle=stderr_handle,
+                stderr_handle=None, # Solo usamos un handle
             )
             return {"name": process_name, "status": "running", "started": True, "pid": proc.pid}
 
@@ -144,13 +142,12 @@ class ProcessManager:
             raise ValueError("process_name invalido. Usa 'worker' o 'brain'.")
         safe_lines = min(max(int(lines), 1), 2000)
         stdout_path = self.logs_dir / f"{process_name}_out.log"
-        stderr_path = self.logs_dir / f"{process_name}_err.log"
         return {
             "name": process_name,
             "status": self.get_status(process_name),
             "lines": safe_lines,
             "stdout": self._tail_file(stdout_path, safe_lines),
-            "stderr": self._tail_file(stderr_path, safe_lines),
+            "stderr": [], # Ya no hay archivo de error separado
         }
 
     @staticmethod
@@ -167,14 +164,9 @@ class ProcessManager:
     def _close_handles(self, current: ManagedProcess) -> None:
         try:
             current.stdout_handle.flush()
-            current.stderr_handle.flush()
         except Exception:
             pass
         try:
             current.stdout_handle.close()
-        except Exception:
-            pass
-        try:
-            current.stderr_handle.close()
         except Exception:
             pass

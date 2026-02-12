@@ -677,9 +677,31 @@ function ControlPanelView({ setWorkerOnline, setWorkerLabel }) {
     const isRunning = current === 'running';
     const isError = current === 'error';
     const statusLabel = isRunning ? 'RUNNING' : (isError ? 'ERROR' : 'STOPPED');
-    const cardLogs = logs[name] || { stdout: [], stderr: [] };
-    const combined = [...(cardLogs.stdout || []), ...(cardLogs.stderr || []).map((x) => `[ERR] ${x}`)].slice(-120);
+    const combined = cardLogs.stdout || [];
     const logRef = name === 'worker' ? workerLogRef : brainLogRef;
+
+    const parseLogLine = (line) => {
+      // Regex para: 2026-02-12 09:12:04,123 - [WORKER] - INFO - Mensaje
+      const logMatch = line.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[,\d]*)\s*-\s*\[[^\]]+\]\s*-\s*([A-Z]+)\s*-\s*(.*)$/);
+      if (logMatch) {
+        return {
+          ts: logMatch[1],
+          level: logMatch[2],
+          msg: logMatch[3],
+          type: 'log'
+        };
+      }
+
+      // Tracebacks: File "...", line 123
+      if (line.trim().startsWith('File "') || line.trim().startsWith('Traceback (most recent call last)')) {
+        return { msg: line, type: 'traceback' };
+      }
+
+      // Otras lineas de error o info generica
+      if (line.startsWith('[ERR]')) return { msg: line.replace('[ERR]', '').trim(), level: 'ERROR', type: 'log' };
+
+      return { msg: line, type: 'raw' };
+    };
 
     return (
       <article className="panel process-card" key={name}>
@@ -697,9 +719,23 @@ function ControlPanelView({ setWorkerOnline, setWorkerLabel }) {
 
         <div className="terminal process-logs" ref={logRef}>
           {combined.length === 0 && <code>Sin logs disponibles.</code>}
-          {combined.map((line, idx) => (
-            <code key={`${name}-line-${idx}`} className={line.startsWith('[ERR]') ? 'terminal-error' : 'terminal-info'}>{line}</code>
-          ))}
+          {combined.map((line, idx) => {
+            const p = parseLogLine(line);
+            let lineClass = 'terminal-line';
+            if (p.type === 'traceback') lineClass += ' terminal-line-traceback';
+            else if (p.level === 'ERROR') lineClass += ' terminal-line-error';
+            else if (p.level === 'WARNING' || p.level === 'WARN') lineClass += ' terminal-line-warn';
+            else if (p.level === 'INFO') lineClass += ' terminal-line-info';
+            else if (p.msg && (p.msg.includes('OK') || p.msg.includes('√'))) lineClass += ' terminal-line-success';
+
+            return (
+              <code key={`${name}-line-${idx}`} className={lineClass}>
+                {p.ts && <span className="terminal-timestamp">[{p.ts.split(' ')[1]}]</span>}
+                {p.level && <span className="terminal-level">{p.level}</span>}
+                {p.msg || line}
+              </code>
+            );
+          })}
         </div>
       </article>
     );
