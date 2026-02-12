@@ -34,6 +34,15 @@ process_manager = ProcessManager(base_dir=".", logs_dir="logs")
 update_manager = UpdateManager(base_dir=".", service=service, process_manager=process_manager)
 dashboard_restarter = DashboardRestarter(base_dir=".")
 
+# Ensure frontend directory exists to avoid crash on StaticFiles mount
+frontend_out = os.path.join("dashboard-frontend", "out")
+if not os.path.exists(frontend_out):
+    os.makedirs(frontend_out, exist_ok=True)
+    index_placeholder = os.path.join(frontend_out, "index.html")
+    if not os.path.exists(index_placeholder):
+        with open(index_placeholder, "w", encoding="utf-8") as f:
+            f.write("<html><body><h1>Dashboard is building...</h1><p>Please wait a few minutes and refresh.</p></body></html>")
+
 
 @app.get("/")
 async def home():
