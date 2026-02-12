@@ -37,7 +37,7 @@ dashboard_restarter = DashboardRestarter(base_dir=".")
 
 @app.get("/")
 async def home():
-    return FileResponse("dashboard-frontend/index.html")
+    return FileResponse("dashboard-frontend/out/index.html")
 
 @app.get("/queues")
 @app.get("/queues/")
@@ -46,7 +46,7 @@ async def home():
 @app.get("/colas")
 @app.get("/colas/")
 async def queues():
-    return FileResponse("dashboard-frontend/index.html")
+    return FileResponse("dashboard-frontend/out/index.html")
 
 @app.get("/history")
 @app.get("/history/")
@@ -56,17 +56,19 @@ async def queues():
 @app.get("/control/")
 @app.get("/blacklist")
 @app.get("/blacklist/")
+@app.get("/updates")
+@app.get("/updates/")
 async def history():
-    return FileResponse("dashboard-frontend/index.html")
+    return FileResponse("dashboard-frontend/out/index.html")
 
 
 @app.get("/styles.css")
 async def styles():
-    return FileResponse("dashboard-frontend/styles.css")
+    return FileResponse("dashboard-frontend/out/styles.css")
 
 
 # Mount the frontend directory for any other assets
-app.mount("/dashboard", StaticFiles(directory="dashboard-frontend"), name="dashboard")
+app.mount("/dashboard", StaticFiles(directory="dashboard-frontend/out"), name="dashboard")
 
 
 @app.on_event("startup")

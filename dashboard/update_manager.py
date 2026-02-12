@@ -111,6 +111,22 @@ class UpdateManager:
                         "git pull --ff-only fallo. Revisa git_pull.stdout/git_pull.stderr."
                     )
 
+                # BUILD FRONTEND
+                frontend_dir = self.base_dir / "dashboard-frontend"
+                if frontend_dir.exists():
+                    self.logger.info("Construyendo frontend...")
+                    npm_install = await self._run_cmd("cmd", "/c", "npm", "install", cwd=frontend_dir)
+                    result["npm_install"] = npm_install
+                    
+                    npm_build = await self._run_cmd("cmd", "/c", "npm", "run", "build", cwd=frontend_dir)
+                    result["npm_build"] = npm_build
+                    
+                    if int(npm_build.get("returncode", 1)) != 0:
+                        raise RuntimeError(
+                            "Fallo la compilacion del frontend (npm run build). "
+                            "Revisa npm_build.stderr."
+                        )
+
                 result["updated"] = True
                 result["up_to_date"] = False
                 result["requires_dashboard_restart"] = True
@@ -230,16 +246,19 @@ class UpdateManager:
         return ahead, behind
 
     async def _git_cmd(self, *args: str) -> dict[str, Any]:
+        return await self._run_cmd("git", *args)
+
+    async def _run_cmd(self, executable: str, *args: str, cwd: Path | str | None = None) -> dict[str, Any]:
         proc = await asyncio.create_subprocess_exec(
-            "git",
+            executable,
             *args,
-            cwd=str(self.base_dir),
+            cwd=str(cwd or self.base_dir),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         stdout_b, stderr_b = await proc.communicate()
         return {
-            "command": "git " + " ".join(args),
+            "command": executable + " " + " ".join(args),
             "returncode": int(proc.returncode or 0),
             "stdout": stdout_b.decode("utf-8", errors="replace"),
             "stderr": stderr_b.decode("utf-8", errors="replace"),
