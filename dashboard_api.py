@@ -44,42 +44,18 @@ if not os.path.exists(frontend_out):
             f.write("<html><body><h1>Dashboard is building...</h1><p>Please wait a few minutes and refresh.</p></body></html>")
 
 
-# Mounts for Next.js internal folders (must be defined BEFORE catch-all)
+# Static assets mounts (defined BEFORE catch-all, but can be here or at bottom)
 app.mount("/_next", StaticFiles(directory="dashboard-frontend/out/_next"), name="next")
-
 assets_path = os.path.join("dashboard-frontend", "out", "assets")
 if os.path.exists(assets_path):
     app.mount("/assets", StaticFiles(directory="dashboard-frontend/out/assets"), name="assets")
 
-# Favicon and root-level static files
 @app.get("/favicon.ico")
 async def favicon():
     fpath = os.path.join("dashboard-frontend", "out", "favicon.ico")
     if os.path.exists(fpath):
         return FileResponse(fpath)
     return Response(status_code=404)
-
-# CATCH-ALL for SPA Routing (Supports Next.js App Router)
-# This handles /, /admin, /history, /control, etc. and returns index.html
-@app.get("/{rest_of_path:path}")
-@app.head("/{rest_of_path:path}")
-async def catch_all(rest_of_path: str):
-    # 1. Check if the file exists in 'out/'
-    file_path = os.path.join("dashboard-frontend", "out", rest_of_path)
-    if os.path.isfile(file_path):
-        return FileResponse(file_path)
-    
-    # 2. Check if a .html version exists (Next.js static export pattern)
-    html_path = file_path + ".html"
-    if os.path.isfile(html_path):
-        return FileResponse(html_path)
-
-    # 3. Fallback to index.html for SPA routing
-    index_path = os.path.join("dashboard-frontend", "out", "index.html")
-    if os.path.exists(index_path):
-        return FileResponse(index_path)
-    
-    raise HTTPException(status_code=404, detail="Not Found")
 
 
 @app.on_event("startup")
@@ -535,3 +511,36 @@ async def api_client_folder(payload: dict[str, Any] = Body(...)) -> dict:
         result["opened"] = False
 
     return result
+
+
+# ==========================================================================
+# CATCH-ALL FOR NEXT.JS SPA ROUTING
+# ==========================================================================
+
+# This handles /, /admin, /history, /control, etc. and returns index.html
+# MUST be defined last so it doesn't shadow /api routes
+@app.get("/{rest_of_path:path}")
+@app.head("/{rest_of_path:path}")
+async def catch_all(rest_of_path: str):
+    # Skip if it starts with api/ (should have been caught above)
+    if rest_of_path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="API endpoint not found")
+
+    # 1. Try to serve the exact file from out/ (e.g. scripts, images, pre-rendered .txt)
+    file_path = os.path.join("dashboard-frontend", "out", rest_of_path)
+    if os.path.isfile(file_path):
+        return FileResponse(file_path)
+    
+    # 2. Try to serve as a pre-rendered HTML page (e.g. /admin -> /admin.html)
+    html_path = file_path.rstrip("/") + ".html"
+    if os.path.isfile(html_path):
+        return FileResponse(html_path)
+
+    # 3. Fallback to index.html for SPA client-side routing
+    # ONLY if it doesn't look like a file (no extension)
+    if "." not in rest_of_path:
+        index_path = os.path.join("dashboard-frontend", "out", "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+    
+    raise HTTPException(status_code=404, detail="Not Found")
