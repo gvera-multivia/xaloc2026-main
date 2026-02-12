@@ -76,7 +76,20 @@ async def styles():
     return FileResponse("dashboard-frontend/out/styles.css")
 
 
-# Mount the frontend directory for any other assets
+# Mount the _next directory specifically for Next.js assets
+app.mount("/_next", StaticFiles(directory="dashboard-frontend/out/_next"), name="next")
+
+# Mount the static directory for images/assets if they exist
+assets_path = os.path.join("dashboard-frontend", "out", "assets")
+if os.path.exists(assets_path):
+    app.mount("/assets", StaticFiles(directory="dashboard-frontend/out/assets"), name="assets")
+
+# Serve favicon
+@app.get("/favicon.ico")
+async def favicon():
+    return FileResponse("dashboard-frontend/out/favicon.ico")
+
+# Mount the frontend directory for any other assets (legacy compatibility or generic dashboard subpath)
 app.mount("/dashboard", StaticFiles(directory="dashboard-frontend/out"), name="dashboard")
 
 
