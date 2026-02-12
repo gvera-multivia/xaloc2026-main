@@ -278,6 +278,7 @@ class SQLServerHistoryRepository:
         self.conn_str = (conn_str or "").strip() or None
         self.assigned_user = (assigned_user or "").strip() or None
         self.logger = logger or logging.getLogger("dashboard.sqlserver_repo")
+        self._resource_columns_cache: Optional[set[str]] = None
 
     def _conn(self):
         if not self.conn_str or pyodbc is None:
@@ -304,6 +305,33 @@ class SQLServerHistoryRepository:
             params.append(self.assigned_user)
             
         return " AND ".join(clauses), params
+
+    def _resource_columns(self, conn) -> set[str]:
+        if self._resource_columns_cache is not None:
+            return self._resource_columns_cache
+
+        columns: set[str] = set()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT COLUMN_NAME
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = 'Recursos' AND TABLE_NAME = 'RecursosExp'
+                """
+            )
+            columns = {str(row[0]).strip().lower() for row in cur.fetchall() if row and row[0]}
+        except Exception as exc:
+            self.logger.warning("No se pudieron leer columnas de Recursos.RecursosExp: %s", exc)
+        self._resource_columns_cache = columns
+        return columns
+
+    @staticmethod
+    def _pick_column_expr(columns: set[str], candidates: list[str], alias: str) -> str:
+        for column_name in candidates:
+            if column_name.lower() in columns:
+                return f"rs.[{column_name}] AS [{alias}]"
+        return f"NULL AS [{alias}]"
 
     def list_days(self, *, source: str) -> list[str]:
         source_norm = source.lower().strip()
@@ -343,6 +371,28 @@ class SQLServerHistoryRepository:
         
         try:
             cur = conn.cursor()
+            available_columns = self._resource_columns(conn)
+            sujeto_expr = self._pick_column_expr(
+                available_columns,
+                ["SujetoRecurso"],
+                "sujeto_recurso",
+            )
+            tipocliente_expr = self._pick_column_expr(
+                available_columns,
+                ["TipDeCliente", "TipoDeCliente", "TipusDeClient", "TipoCliente"],
+                "tipodecliente",
+            )
+            empresa_expr = self._pick_column_expr(
+                available_columns,
+                ["NombreEmpresa", "Empresa"],
+                "empresa",
+            )
+            fase_expr = self._pick_column_expr(
+                available_columns,
+                ["FaseProcedimiento"],
+                "fase_procedimiento",
+            )
+
             # 1. Conteo para paginación
             cur.execute(f"SELECT COUNT(*) FROM Recursos.RecursosExp rs WHERE {where_with_day}", [*params, day])
             total = int(cur.fetchone()[0] or 0)
@@ -354,8 +404,10 @@ class SQLServerHistoryRepository:
                        rs.UsuarioAsignado, rs.Estado,
                        {self._date_expr()} AS day,
                        rs.FUsuarioCompletado,
-                       rs.SujetoRecurso, rs.TipDeCliente, rs.NombreEmpresa,
-                       rs.FaseProcedimiento
+                       {sujeto_expr},
+                       {tipocliente_expr},
+                       {empresa_expr},
+                       {fase_expr}
                 FROM Recursos.RecursosExp rs
                 WHERE {where_with_day}
                 ORDER BY rs.FUsuarioCompletado DESC, rs.idRecurso DESC
