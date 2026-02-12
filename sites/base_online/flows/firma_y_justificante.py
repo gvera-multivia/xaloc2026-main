@@ -212,25 +212,44 @@ async def _descargar_pdf_via_fetch(page: Page, url: str) -> bytes:
 
 
 async def _click_y_capturar_descarga_o_popup(page: Page, link_locator) -> tuple[Any | None, Page | None]:
-    popup_task = asyncio.create_task(page.wait_for_event("popup", timeout=15000))
-    download_task = asyncio.create_task(page.wait_for_event("download", timeout=15000))
+    # Aumentamos el timeout a 45s porque BASE puede tardar tras la firma.
+    event_timeout = 45000
+    popup_task = asyncio.create_task(page.wait_for_event("popup", timeout=event_timeout))
+    download_task = asyncio.create_task(page.wait_for_event("download", timeout=event_timeout))
+    
     try:
         try:
             await link_locator.scroll_into_view_if_needed(timeout=2000)
         except Exception:
             pass
 
+        # Pequeña pausa para asegurar estabilidad antes del click
+        await page.wait_for_timeout(2000)
+
+        # Intentar obtener info del elemento para logs
         try:
-            await link_locator.click(timeout=5000)
+            tag = await link_locator.evaluate("el => el.tagName")
+            text = await link_locator.inner_text()
+            logger.info(f"[BASE] Haciendo click en justificante ({tag}: '{text.strip()}')")
         except Exception:
-            # Fallback: dispara el click desde el DOM para esquivar overlays / pointer intercept.
+            logger.info("[BASE] Haciendo click en justificante (tag/texto no disponible)")
+
+        try:
+            await link_locator.click(timeout=10000)
+        except Exception:
+            # Fallback: dispara el click desde el DOM
             await link_locator.evaluate("(el) => el.click()")
     except Exception:
         popup_task.cancel()
         download_task.cancel()
         raise
 
-    done, pending = await asyncio.wait({popup_task, download_task}, return_when=asyncio.FIRST_COMPLETED)
+    done, pending = await asyncio.wait(
+        {popup_task, download_task}, 
+        return_when=asyncio.FIRST_COMPLETED,
+        timeout=event_timeout / 1000 + 5
+    )
+    
     for task in pending:
         task.cancel()
 
@@ -244,9 +263,12 @@ async def _click_y_capturar_descarga_o_popup(page: Page, link_locator) -> tuple[
         if result is None:
             continue
         if hasattr(result, "save_as"):
+            logger.info("[BASE] Evento DETECTADO: download")
             download = result
         else:
+            logger.info("[BASE] Evento DETECTADO: popup (nueva pestaña)")
             popup = result
+
     return download, popup
 
 
@@ -283,10 +305,13 @@ async def _find_justificante_action_locator(page: Page, *, timeout_ms: int = 600
                     frame.locator("button").filter(has_text=justificant_registre_re),
                     frame.locator("button[onclick*='justificant']"),
                 ]
-                for locator in candidates:
+                for i, locator in enumerate(candidates):
                     if await locator.count() > 0:
                         first = locator.first
                         try:
+                            # Loguear qué candidato ha funcionado para referencia futura
+                            text = await first.inner_text()
+                            logger.info(f"[BASE] Candidato justificante #{i+1} encontrado: '{text.strip()}'")
                             await first.wait_for(state="attached", timeout=2000)
                         except Exception:
                             pass
