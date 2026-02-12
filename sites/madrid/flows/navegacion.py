@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
-from core.errors import RestartRequiredError
+from core.errors import RestartWithProfileResetError
 
 if TYPE_CHECKING:
     from sites.madrid.config import MadridConfig
@@ -66,8 +66,8 @@ async def _detectar_tramite_en_curso(page: Page) -> bool:
 
 async def _asegurar_no_tramite_en_curso(page: Page) -> None:
     if await _detectar_tramite_en_curso(page):
-        raise RestartRequiredError(
-            "Se ha detectado que ya está realizando un trámite; cerrar navegador y reiniciar."
+        raise RestartWithProfileResetError(
+            "Se ha detectado que ya está realizando un trámite; reiniciar con perfil limpio."
         )
 
 async def _detectar_problema_autenticacion(page: Page) -> str | None:
@@ -465,8 +465,8 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
             # Comprobar si es la pantalla de "trámite en curso" → reinicio del navegador
             if await _detectar_tramite_en_curso(page):
                 logger.warning("  ! Detectada pantalla 'trámite en curso' en PASO 3")
-                raise RestartRequiredError(
-                    "Pantalla 'trámite en curso' detectada en PASO 3; cerrar navegador y reiniciar."
+                raise RestartWithProfileResetError(
+                    "Pantalla 'trámite en curso' detectada en PASO 3; reiniciar con perfil limpio."
                 )
             raise
         

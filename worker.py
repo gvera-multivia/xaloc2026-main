@@ -20,7 +20,7 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError, Error a
 
 from core.sqlite_db import SQLiteDatabase
 from core.queue_gateway import build_queue_gateway
-from core.errors import RestartRequiredError
+from core.errors import RestartRequiredError, RestartWithProfileResetError, RetryWithoutAttemptError
 from core.site_registry import get_site, get_site_controller
 from core.validation import ValidationEngine, DiscrepancyReporter, DocumentDownloader
 from core.attachments import AttachmentDownloader, AttachmentInfo
@@ -46,6 +46,7 @@ class ProcessOutcome:
     success: bool
     error: Optional[str] = None
     screenshot: Optional[str] = None
+    release_without_attempt: bool = False
 
 
 def _extraer_n_expediente(payload: dict) -> str:
@@ -305,8 +306,12 @@ async def process_task(
                     pass
 
                 try:
-                    await bot.restart_browser()
-                    logger.info("Navegador reiniciado correctamente; continuando con la siguiente tarea.")
+                    if isinstance(e, RestartWithProfileResetError):
+                        await bot.restart_browser_with_clean_profile()
+                        logger.info("Reinicio con perfil limpio completado; reencolando sin consumir intento.")
+                    else:
+                        await bot.restart_browser()
+                        logger.info("Navegador reiniciado correctamente; reencolando sin consumir intento.")
                 except Exception as restart_exc:
                     logger.error(f"Error reiniciando navegador tras RestartRequiredError: {restart_exc}")
 
@@ -314,6 +319,25 @@ async def process_task(
                     success=False,
                     error=f"RestartRequiredError: {e}",
                     screenshot=str(screenshot_path) if screenshot_path else None,
+                    release_without_attempt=True,
+                )
+            except RetryWithoutAttemptError as e:
+                screenshot_path = None
+                try:
+                    screenshot_path = await bot.capture_error_screenshot("retry_without_attempt.png")
+                except Exception:
+                    pass
+
+                try:
+                    await bot.restart_browser()
+                except Exception as restart_exc:
+                    logger.error("Error reiniciando navegador tras RetryWithoutAttemptError: %s", restart_exc)
+
+                return ProcessOutcome(
+                    success=False,
+                    error=str(e),
+                    screenshot=str(screenshot_path) if screenshot_path else None,
+                    release_without_attempt=True,
                 )
 
             logger.info(f"Tarea {task_id} completada. Screenshot: {screenshot_path}")
@@ -503,6 +527,25 @@ async def worker_loop():
                             )
                         else:
                             failed_jobs += 1
+                            if outcome.release_without_attempt:
+                                await queue_gateway.release(
+                                    job,
+                                    reason=outcome.error or "release_without_attempt",
+                                )
+                                realtime_store.record_incident_once(
+                                    site_id=job.site_id,
+                                    incident_type="RETRY_WITHOUT_ATTEMPT",
+                                    reason=outcome.error or "release_without_attempt",
+                                    resource_id=job.resource_id,
+                                    expediente=_extraer_n_expediente(job.payload),
+                                    payload=job.payload,
+                                    started_at=started_at,
+                                    ended_at=ended_at,
+                                )
+                                current_job = None
+                                await asyncio.sleep(10)
+                                continue
+
                             exhausted = (int(job.attempt) + 1) >= int(job.max_attempts)
                             if exhausted and job.resource_id is not None:
                                 deselected = await deselect_resource(auth_session, int(job.resource_id))
@@ -534,6 +577,34 @@ async def worker_loop():
                                 job,
                                 error=outcome.error or "unknown_error",
                                 retryable=True,
+                            )
+                        if outcome.success and job.site_id == "madrid" and job.payload.get("madrid_tramite_enviado") and not job.payload.get("madrid_justificante_descargado", True):
+                            anotacion = str(job.payload.get("madrid_numero_anotacion") or "").strip()
+                            refresh_count = job.payload.get("madrid_post_envio_refresh_count")
+                            motivo = (
+                                "Trámite enviado correctamente en Madrid, pero justificante no descargado. "
+                                f"Número de anotación: {anotacion or 'N/A'}. "
+                                f"Refrescos aplicados: {refresh_count if refresh_count is not None else 'N/A'}."
+                            )
+                            try:
+                                db.add_incident(
+                                    id_recurso=job.resource_id,
+                                    n_exp=_extraer_n_expediente(job.payload),
+                                    tipo="MADRID_TRAMITE_ENVIADO_SIN_JUSTIFICANTE",
+                                    motivo=motivo,
+                                    site_id=job.site_id,
+                                )
+                            except Exception as inc_db_exc:
+                                logger.error("No se pudo guardar incidencia Madrid sin justificante en SQLite: %s", inc_db_exc)
+                            realtime_store.record_incident_once(
+                                site_id=job.site_id,
+                                incident_type="MADRID_TRAMITE_ENVIADO_SIN_JUSTIFICANTE",
+                                reason=motivo,
+                                resource_id=job.resource_id,
+                                expediente=_extraer_n_expediente(job.payload),
+                                payload=job.payload,
+                                started_at=started_at,
+                                ended_at=ended_at,
                             )
                         current_job = None
                         # Pausa fija entre jobs para no encadenar acciones en la sede/web

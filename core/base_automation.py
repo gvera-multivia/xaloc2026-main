@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -287,6 +288,30 @@ class BaseAutomation:
                 os.environ.pop("XALOC_KEEP_BROWSER_OPEN", None)
             else:
                 os.environ["XALOC_KEEP_BROWSER_OPEN"] = prev
+        await self._start_browser()
+
+    async def restart_browser_with_clean_profile(self) -> None:
+        """
+        Reinicia el navegador eliminando antes el perfil persistente.
+        """
+        perfil_path = Path(self.config.navegador.perfil_path)
+        prev = os.getenv("XALOC_KEEP_BROWSER_OPEN")
+        try:
+            os.environ["XALOC_KEEP_BROWSER_OPEN"] = "0"
+            await self._stop_browser(success=False)
+        finally:
+            if prev is None:
+                os.environ.pop("XALOC_KEEP_BROWSER_OPEN", None)
+            else:
+                os.environ["XALOC_KEEP_BROWSER_OPEN"] = prev
+
+        try:
+            if perfil_path.exists():
+                shutil.rmtree(perfil_path, ignore_errors=True)
+            perfil_path.mkdir(parents=True, exist_ok=True)
+            self.logger.info("Perfil de navegador limpiado: %s", perfil_path)
+        except Exception as e:
+            self.logger.warning("No se pudo limpiar el perfil %s: %s", perfil_path, e)
         await self._start_browser()
 
     async def capture_error_screenshot(self, filename: str = "error.png") -> Optional[Path]:

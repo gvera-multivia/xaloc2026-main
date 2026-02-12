@@ -7,11 +7,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from core.base_automation import BaseAutomation
-from core.errors import RestartRequiredError
+from core.errors import RestartRequiredError, RestartWithProfileResetError
 from sites.madrid.config import MadridConfig
 from sites.madrid.data_models import MadridTarget
 from sites.madrid.flows import ejecutar_navegacion_madrid, ejecutar_formulario_madrid, ejecutar_upload_madrid, ejecutar_firma_madrid
-from sites.madrid.flows.firma import MadridFirmaNonFatalError
+from sites.madrid.flows.firma import MadridFirmaNonFatalError, MadridJustificantePostEnvioNoDisponible
 
 
 class MadridAutomation(BaseAutomation):
@@ -109,7 +109,8 @@ class MadridAutomation(BaseAutomation):
                     )
                 except MadridFirmaNonFatalError as e:
                     self.logger.warning("Firma/envío completado con incidencias no fatales: %s", e)
-                    self.mark_nonfatal_issue()
+                    if not isinstance(e, MadridJustificantePostEnvioNoDisponible):
+                        self.mark_nonfatal_issue()
                 
                 self.logger.info("\n" + "=" * 80)
                 self.logger.info("FIRMA Y VERIFICACIÓN COMPLETADA")
@@ -132,7 +133,10 @@ class MadridAutomation(BaseAutomation):
                 await self.capture_error_screenshot("madrid_restart_required.png")
                 if intento >= 1:
                     raise
-                await self.restart_browser()
+                if isinstance(e, RestartWithProfileResetError):
+                    await self.restart_browser_with_clean_profile()
+                else:
+                    await self.restart_browser()
                 if not self.page:
                     raise RuntimeError("No se pudo reiniciar el navegador (page es None).") from e
                 continue

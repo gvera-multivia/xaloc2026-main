@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Any
 
 from playwright.async_api import Page, TimeoutError
 
+from core.errors import RetryWithoutAttemptError
+
 if TYPE_CHECKING:
     from sites.madrid.config import MadridConfig
 
@@ -23,6 +25,8 @@ CARPETA_URL = "https://servcla.madrid.es/RGAYT_FTCARPETA/#/"
 ANOTACION_TIMEOUT_MS = 60000
 TABLA_TIMEOUT_MS = 90000
 DOWNLOAD_TIMEOUT_MS = 90000
+POST_SEND_REFRESH_ATTEMPTS = 3
+POST_SEND_REFRESH_WAIT_MS = 20000
 
 
 class MadridFirmaNonFatalError(RuntimeError):
@@ -30,6 +34,17 @@ class MadridFirmaNonFatalError(RuntimeError):
     Error no fatal: el tramite pudo haberse enviado, pero fallo un paso post-envio
     (por ejemplo mover el justificante a la carpeta final).
     """
+
+
+class MadridJustificantePostEnvioNoDisponible(MadridFirmaNonFatalError):
+    """
+    El trámite fue enviado (hay número de anotación) pero no se logró descargar
+    el justificante tras reintentos de recuperación.
+    """
+
+    def __init__(self, message: str, *, anotacion: str):
+        super().__init__(message)
+        self.anotacion = anotacion
 
 
 def _normalize_text(text: str) -> str:
@@ -331,6 +346,52 @@ async def _descargar_justificante_desde_carpeta(
     )
 
 
+async def _descargar_justificante_post_envio_con_recuperacion(
+    page: Page,
+    *,
+    anotacion: str,
+    expediente_nombre: str,
+    tmp_dir: Path,
+) -> Path:
+    last_error: Exception | None = None
+    total_intentos = 1 + POST_SEND_REFRESH_ATTEMPTS
+    for intento in range(total_intentos):
+        try:
+            return await _descargar_justificante_desde_carpeta(
+                page=page,
+                anotacion=anotacion,
+                expediente_nombre=expediente_nombre,
+                tmp_dir=tmp_dir,
+            )
+        except Exception as e:
+            last_error = e
+            refresh_num = intento + 1
+            if refresh_num > POST_SEND_REFRESH_ATTEMPTS:
+                break
+            logger.warning(
+                "Falló descarga de justificante para anotación %s (intento %s/%s). "
+                "Refrescando en %ss...",
+                anotacion,
+                refresh_num,
+                POST_SEND_REFRESH_ATTEMPTS,
+                int(POST_SEND_REFRESH_WAIT_MS / 1000),
+            )
+            await page.wait_for_timeout(POST_SEND_REFRESH_WAIT_MS)
+            try:
+                await page.reload(wait_until="domcontentloaded", timeout=TABLA_TIMEOUT_MS)
+            except Exception:
+                await page.goto(CARPETA_URL, wait_until="domcontentloaded", timeout=TABLA_TIMEOUT_MS)
+
+    raise MadridJustificantePostEnvioNoDisponible(
+        (
+            "Trámite enviado, pero no se pudo descargar el justificante tras "
+            f"{POST_SEND_REFRESH_ATTEMPTS} refrescos."
+            + (f" Último error: {last_error}" if last_error else "")
+        ),
+        anotacion=anotacion,
+    )
+
+
 async def ejecutar_firma_madrid(
     page: Page,
     config: "MadridConfig",
@@ -409,15 +470,31 @@ async def ejecutar_firma_madrid(
     await page.wait_for_timeout(1200)
 
     # 3. Extraer anotacion y descargar justificante desde carpeta.
-    anotacion = await _extraer_anotacion_desde_exito(page)
+    try:
+        anotacion = await _extraer_anotacion_desde_exito(page)
+    except Exception as e:
+        raise RetryWithoutAttemptError(
+            "Madrid: no se pudo obtener número de anotación tras firma/envío; "
+            "se asume trámite NO enviado por error de página."
+        ) from e
+
     expediente_nombre = _extraer_n_expediente(payload)
 
-    tmp_pdf_path = await _descargar_justificante_desde_carpeta(
-        page=page,
-        anotacion=anotacion,
-        expediente_nombre=expediente_nombre,
-        tmp_dir=tmp_dir,
-    )
+    try:
+        tmp_pdf_path = await _descargar_justificante_post_envio_con_recuperacion(
+            page=page,
+            anotacion=anotacion,
+            expediente_nombre=expediente_nombre,
+            tmp_dir=tmp_dir,
+        )
+    except MadridJustificantePostEnvioNoDisponible as e:
+        payload["madrid_tramite_enviado"] = True
+        payload["madrid_justificante_descargado"] = False
+        payload["madrid_numero_anotacion"] = e.anotacion
+        payload["madrid_post_envio_refresh_count"] = POST_SEND_REFRESH_ATTEMPTS
+        payload["madrid_post_envio_refresh_wait_seconds"] = int(POST_SEND_REFRESH_WAIT_MS / 1000)
+        payload["madrid_justificante_error"] = str(e)
+        raise
 
     # 4. Mover justificante a carpeta final.
     ruta_recursos = _construir_ruta_recursos_telematicos(payload, fase)
