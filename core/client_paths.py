@@ -65,9 +65,9 @@ def normalize_client_folder_name(value: str) -> str:
     """Normaliza el nombre para comparar rutas con diferencias menores."""
     if value is None:
         return ""
-    text = value.strip().upper().replace("_", " ")
+    text = value.strip().upper()
     text = strip_accents(text)
-    text = re.sub(r"[^\w\s]", " ", text)
+    text = re.sub(r"[^\w\s]", "", text)
     return re.sub(r"\s+", " ", text).strip()
 
 
