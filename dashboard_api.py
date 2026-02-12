@@ -134,6 +134,22 @@ async def api_queue_completion_marker(
     return service.get_queue_completion_marker(day=day)
 
 
+from pathlib import Path as _Path
+
+_LIVE_FRAME_PATH = _Path("screenshots/live_frame.jpg")
+
+
+@app.get("/api/queue/live-screenshot")
+async def api_queue_live_screenshot():
+    """Devuelve el último frame JPEG del screencast CDP del worker."""
+    if not _LIVE_FRAME_PATH.exists():
+        raise HTTPException(status_code=404, detail="No hay frame en vivo")
+    return FileResponse(
+        _LIVE_FRAME_PATH,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
+
 @app.get("/api/control/status")
 async def api_control_status() -> dict:
     return process_manager.get_all_status()

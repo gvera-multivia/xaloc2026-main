@@ -381,6 +381,54 @@ button:disabled {
   transition: stroke-dashoffset 0.6s ease;
 }
 
+/* ─── Live Stream Frame (CDP Screencast) ─── */
+.live-stream-frame {
+  margin: 0.5rem 0;
+  border-radius: 0.8rem;
+  border: 1px solid #7e9eb93d;
+  background: #091219;
+  overflow: hidden;
+}
+
+.live-stream-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+  transition: opacity 0.3s ease;
+}
+
+.live-stream-label {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 0.65rem;
+  color: #b6cad9;
+  font-size: 0.83rem;
+  font-weight: 600;
+  border-bottom: 1px solid #7e9eb81c;
+}
+
+.live-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--ok);
+  box-shadow: 0 0 6px var(--ok);
+  animation: live-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes live-pulse {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.35;
+  }
+}
+
 .terminal {
   border-radius: 0.8rem;
   border: 1px solid #7e9eb93d;

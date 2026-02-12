@@ -266,6 +266,21 @@ function MonitorView({ selectedDay, sharedSearch, setWorkerOnline, setWorkerLabe
             </div>
           </div>
 
+          {/* Visor en vivo del navegador Playwright (CDP Screencast) */}
+          {liveItem && (
+            <div className="live-stream-frame">
+              <div className="live-stream-label">
+                <span className="live-dot"></span> Vista en directo
+              </div>
+              <img
+                src={`/api/queue/live-screenshot?t=${nowTs}`}
+                alt="Navegador en vivo"
+                onError={(e) => { e.target.style.opacity = '0'; }}
+                onLoad={(e) => { e.target.style.opacity = '1'; }}
+              />
+            </div>
+          )}
+
           <div className="terminal">
             <div className="terminal-title">Consola de eventos</div>
             <ul>
@@ -977,28 +992,32 @@ function buildPageNumbers(current, totalPages) {
 function HistoryView({ selectedDay, setSelectedDay, sharedSearch, setWorkerOnline, setWorkerLabel }) {
   const [items, setItems] = useState([]);
   const [incidents, setIncidents] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [historyPage, setHistoryPage] = useState(1);
   const [historyPageSize, setHistoryPageSize] = useState(PAGE_SIZE_DEFAULT);
   const [total, setTotal] = useState(0);
   const [localSearch, setLocalSearch] = useState('');
   const [selectedRow, setSelectedRow] = useState(null);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+  const completionMarkerRef = useRef(null);
+  const completionReadyRef = useRef(false);
 
   useEffect(() => {
     setLocalSearch(sharedSearch || '');
   }, [sharedSearch]);
 
-  const refresh = async () => {
+  const refresh = async ({ day = selectedDay, page = historyPage, pageSize = historyPageSize, silent = false } = {}) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const [successRes, incidentsRes] = await Promise.all([
-        apiFetch(`/history/successes?day=${selectedDay}&page=${historyPage}&page_size=${historyPageSize}`),
-        apiFetch(`/history/incidents?day=${selectedDay}&page=1&page_size=300`),
+        apiFetch(`/history/successes?day=${day}&page=${page}&page_size=${pageSize}`),
+        apiFetch(`/history/incidents?day=${day}&page=1&page_size=300`),
       ]);
       setItems(successRes.items || []);
       setTotal(successRes.total || 0);
       setIncidents(incidentsRes.items || []);
+      setHasLoadedOnce(true);
       setError('');
       setWorkerOnline(true);
       setWorkerLabel('API conectada y auditoria disponible');
@@ -1007,12 +1026,35 @@ function HistoryView({ selectedDay, setSelectedDay, sharedSearch, setWorkerOnlin
       setWorkerOnline(false);
       setWorkerLabel('Sin conexion al backend');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
-    refresh();
+    completionMarkerRef.current = null;
+    completionReadyRef.current = false;
+
+    const checkCompletionMarker = async () => {
+      try {
+        const markerRes = await apiFetch(`/queue/completion-marker?day=${selectedDay}`);
+        const nextMarker = markerRes.marker || '0|';
+        if (!completionReadyRef.current) {
+          completionMarkerRef.current = nextMarker;
+          completionReadyRef.current = true;
+          return;
+        }
+        if (completionMarkerRef.current !== nextMarker) {
+          completionMarkerRef.current = nextMarker;
+          refresh({ silent: true });
+        }
+      } catch (_) {
+        // Si falla el marcador, no interrumpimos la vista de historial.
+      }
+    };
+
+    checkCompletionMarker();
+    const id = setInterval(checkCompletionMarker, 5000);
+    return () => clearInterval(id);
   }, [selectedDay, historyPage, historyPageSize]);
 
   const incidentMap = useMemo(() => {
@@ -1047,8 +1089,17 @@ function HistoryView({ selectedDay, setSelectedDay, sharedSearch, setWorkerOnlin
           <p>Analisis diario de procesos completados con trazabilidad de errores.</p>
         </div>
         <div className="meta-actions">
-          <input type="date" value={selectedDay} onChange={(e) => { setSelectedDay(e.target.value); setHistoryPage(1); }} />
-          <button onClick={refresh}>Refrescar</button>
+          <input
+            type="date"
+            value={selectedDay}
+            onChange={(e) => {
+              const nextDay = e.target.value;
+              setSelectedDay(nextDay);
+              setHistoryPage(1);
+              refresh({ day: nextDay, page: 1 });
+            }}
+          />
+          <button onClick={() => refresh()}>Refrescar</button>
         </div>
       </div>
 
@@ -1062,7 +1113,15 @@ function HistoryView({ selectedDay, setSelectedDay, sharedSearch, setWorkerOnlin
           <span className="chip active">{total} procesados</span>
           <label>
             Filas
-            <select value={historyPageSize} onChange={(e) => { setHistoryPageSize(Number(e.target.value)); setHistoryPage(1); }}>
+            <select
+              value={historyPageSize}
+              onChange={(e) => {
+                const nextSize = Number(e.target.value);
+                setHistoryPageSize(nextSize);
+                setHistoryPage(1);
+                refresh({ page: 1, pageSize: nextSize });
+              }}
+            >
               <option value="25">25</option>
               <option value="50">50</option>
               <option value="100">100</option>
@@ -1088,17 +1147,45 @@ function HistoryView({ selectedDay, setSelectedDay, sharedSearch, setWorkerOnlin
                 </tr>
               );
             })}
-            {!loading && filtered.length === 0 && <tr><td colSpan="6" className="empty">Sin resultados para este filtro.</td></tr>}
+            {!loading && !hasLoadedOnce && <tr><td colSpan="6" className="empty">Pulsa "Refrescar" para cargar historial.</td></tr>}
+            {!loading && hasLoadedOnce && filtered.length === 0 && <tr><td colSpan="6" className="empty">Sin resultados para este filtro.</td></tr>}
             {loading && <tr><td colSpan="6" className="empty">Cargando historial...</td></tr>}
           </tbody>
         </table>
 
         <div className="pagination-row">
-          <button disabled={historyPage <= 1} onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}>Anterior</button>
+          <button
+            disabled={historyPage <= 1}
+            onClick={() => {
+              const nextPage = Math.max(1, historyPage - 1);
+              setHistoryPage(nextPage);
+              refresh({ page: nextPage });
+            }}
+          >
+            Anterior
+          </button>
           {pageNumbers.map((p) => (
-            <button key={p} className={p === historyPage ? 'active' : ''} onClick={() => setHistoryPage(p)}>{p}</button>
+            <button
+              key={p}
+              className={p === historyPage ? 'active' : ''}
+              onClick={() => {
+                setHistoryPage(p);
+                refresh({ page: p });
+              }}
+            >
+              {p}
+            </button>
           ))}
-          <button disabled={historyPage >= totalPages} onClick={() => setHistoryPage((p) => Math.min(totalPages, p + 1))}>Siguiente</button>
+          <button
+            disabled={historyPage >= totalPages}
+            onClick={() => {
+              const nextPage = Math.min(totalPages, historyPage + 1);
+              setHistoryPage(nextPage);
+              refresh({ page: nextPage });
+            }}
+          >
+            Siguiente
+          </button>
         </div>
       </article>
 

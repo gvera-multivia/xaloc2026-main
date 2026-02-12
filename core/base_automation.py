@@ -5,15 +5,22 @@ BaseAutomation: orquestador reusable (Playwright + perfil persistente).
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import os
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Optional
 
 from playwright.async_api import async_playwright, BrowserContext, Page
 
 from core.base_config import BaseConfig
+
+
+# Ruta por defecto donde se escribe el frame en vivo del screencast.
+_LIVE_FRAME_DIR = Path("screenshots")
+_LIVE_FRAME_FILENAME = "live_frame.jpg"
 
 
 class BaseAutomation:
@@ -30,6 +37,9 @@ class BaseAutomation:
         self.page: Optional[Page] = None
         self.logger = self._create_logger()
         self._exit_has_nonfatal_issues: bool = False
+        self._cdp_session = None
+        self._screencast_active: bool = False
+        self._screencast_path: Path = _LIVE_FRAME_DIR / _LIVE_FRAME_FILENAME
 
     def _create_logger(self) -> logging.Logger:
         self.config.ensure_directories()
@@ -313,6 +323,106 @@ class BaseAutomation:
         except Exception as e:
             self.logger.warning("No se pudo limpiar el perfil %s: %s", perfil_path, e)
         await self._start_browser()
+
+    # ------------------------------------------------------------------ #
+    #  CDP Screencast – streaming en vivo del navegador                   #
+    # ------------------------------------------------------------------ #
+
+    async def start_screencast(self) -> None:
+        """Inicia el CDP Screencast: Chrome envía frames JPEG comprimidos
+        que se escriben atómicamente a *self._screencast_path* para que el
+        dashboard pueda servirlos."""
+        if self._screencast_active:
+            return
+        if not self.page or self.page.is_closed():
+            self.logger.warning("start_screencast: no hay página activa.")
+            return
+
+        try:
+            self._cdp_session = await self.context.new_cdp_session(self.page)
+        except Exception as exc:
+            self.logger.warning("No se pudo abrir CDP session para screencast: %s", exc)
+            return
+
+        _LIVE_FRAME_DIR.mkdir(parents=True, exist_ok=True)
+
+        quality = int(os.getenv("LIVE_STREAM_QUALITY", "40"))
+        max_width = int(os.getenv("LIVE_STREAM_WIDTH", "960"))
+        max_height = int(os.getenv("LIVE_STREAM_HEIGHT", "540"))
+
+        async def _on_frame(params: dict) -> None:
+            """Callback ejecutado por CDP en cada frame del screencast."""
+            try:
+                data = base64.b64decode(params["data"])
+                # Escritura atómica: tmp → rename para evitar lecturas parciales.
+                tmp_fd, tmp_path = tempfile.mkstemp(
+                    suffix=".jpg", dir=str(_LIVE_FRAME_DIR)
+                )
+                try:
+                    os.write(tmp_fd, data)
+                finally:
+                    os.close(tmp_fd)
+                os.replace(tmp_path, str(self._screencast_path))
+            except Exception:
+                pass  # No interrumpir la automatización por un frame fallido.
+
+            # ACK para que Chrome envíe el siguiente frame.
+            try:
+                if self._cdp_session:
+                    await self._cdp_session.send(
+                        "Page.screencastFrameAck",
+                        {"sessionId": params["sessionId"]},
+                    )
+            except Exception:
+                pass
+
+        self._cdp_session.on("Page.screencastFrame", _on_frame)
+
+        try:
+            await self._cdp_session.send(
+                "Page.startScreencast",
+                {
+                    "format": "jpeg",
+                    "quality": quality,
+                    "maxWidth": max_width,
+                    "maxHeight": max_height,
+                    "everyNthFrame": 2,
+                },
+            )
+            self._screencast_active = True
+            self.logger.info(
+                "Screencast en vivo iniciado (quality=%s, %sx%s).",
+                quality, max_width, max_height,
+            )
+        except Exception as exc:
+            self.logger.warning("No se pudo iniciar screencast CDP: %s", exc)
+            self._cdp_session = None
+
+    async def stop_screencast(self) -> None:
+        """Detiene el CDP Screencast y limpia el archivo de frame."""
+        if not self._screencast_active:
+            return
+        try:
+            if self._cdp_session:
+                await self._cdp_session.send("Page.stopScreencast")
+        except Exception:
+            pass
+        try:
+            if self._cdp_session:
+                await self._cdp_session.detach()
+        except Exception:
+            pass
+        self._cdp_session = None
+        self._screencast_active = False
+
+        # Eliminar el archivo de frame para que el dashboard no muestre un frame viejo.
+        try:
+            self._screencast_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        self.logger.info("Screencast en vivo detenido.")
+
+    # ------------------------------------------------------------------ #
 
     async def capture_error_screenshot(self, filename: str = "error.png") -> Optional[Path]:
         if not self.page:

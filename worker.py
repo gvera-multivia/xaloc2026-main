@@ -304,6 +304,12 @@ async def process_task(
             os.environ["XALOC_KEEP_TAB_OPEN"] = "1"
 
         async with AutomationCls(config) as bot:
+            # Iniciar screencast en vivo para el dashboard (CDP).
+            try:
+                await bot.start_screencast()
+            except Exception as sc_exc:
+                logger.warning("No se pudo iniciar screencast en vivo: %s", sc_exc)
+
             try:
                 screenshot_path = await bot.ejecutar_flujo_completo(datos)
             except RestartRequiredError as e:
@@ -350,31 +356,38 @@ async def process_task(
                     screenshot=str(screenshot_path) if screenshot_path else None,
                     release_without_attempt=True,
                 )
-
-            logger.info(f"Tarea {task_id} completada. Screenshot: {screenshot_path}")
-            
-            # --- NUEVO: MARCAR COMO COMPLETADO EN XVIA ---
-            # Solo si no hubo incidencias "non-fatal" Y si no se ha pedido saltar este paso
-            if not getattr(bot, "_exit_has_nonfatal_issues", False):
-                # Omitir marcado para Base Online P1 y P2 (en testing)
-                is_base_p1_p2 = site_id == "base_online" and protocol in ["P1", "P2"]
-                
-                if is_base_p1_p2:
-                    logger.info(f"⏭️  Saltando marcado autom. en XVIA para {site_id} {protocol} (Modo Testing).")
-                elif payload.get("idRecurso") and not payload.get("skip_auto_complete"):
-                    logger.info(f"Intentando marcar recurso {payload['idRecurso']} como completado en la web...")
-                    success_mark = await mark_resource_complete(auth_session, payload)
-                    if not success_mark:
-                        logger.warning("No se pudo marcar como completado en la web, pero el trámite fue enviado.")
-                elif payload.get("skip_auto_complete"):
-                     logger.info(f"⏭️  Salto 'Marcar como Completado' solicitado por payload.")
             else:
-                logger.warning("Tarea finalizada con incidencias no fatales. NO se marcará como completado en la web.")
+                # Éxito: flujo completo sin excepciones de reinicio.
+                logger.info(f"Tarea {task_id} completada. Screenshot: {screenshot_path}")
 
-            return ProcessOutcome(
-                success=True,
-                screenshot=str(screenshot_path) if screenshot_path else None,
-            )
+                # --- MARCAR COMO COMPLETADO EN XVIA ---
+                if not getattr(bot, "_exit_has_nonfatal_issues", False):
+                    is_base_p1_p2 = site_id == "base_online" and protocol in ["P1", "P2"]
+
+                    if is_base_p1_p2:
+                        logger.info(f"⏭️  Saltando marcado autom. en XVIA para {site_id} {protocol} (Modo Testing).")
+                    elif payload.get("idRecurso") and not payload.get("skip_auto_complete"):
+                        logger.info(f"Intentando marcar recurso {payload['idRecurso']} como completado en la web...")
+                        success_mark = await mark_resource_complete(auth_session, payload)
+                        if not success_mark:
+                            logger.warning("No se pudo marcar como completado en la web, pero el trámite fue enviado.")
+                    elif payload.get("skip_auto_complete"):
+                        logger.info(f"⏭️  Salto 'Marcar como Completado' solicitado por payload.")
+                else:
+                    logger.warning("Tarea finalizada con incidencias no fatales. NO se marcará como completado en la web.")
+
+                return ProcessOutcome(
+                    success=True,
+                    screenshot=str(screenshot_path) if screenshot_path else None,
+                )
+            finally:
+                # Detener screencast en vivo al terminar la tarea (éxito o fallo).
+                try:
+                    await bot.stop_screencast()
+                except Exception:
+                    pass
+
+
 
     except PlaywrightTimeoutError as e:
         error_msg = f"Timeout de Playwright: Elemento no encontrado o página no cargó a tiempo"
