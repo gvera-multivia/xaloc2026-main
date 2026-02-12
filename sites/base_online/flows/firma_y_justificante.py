@@ -363,6 +363,62 @@ async def _descargar_desde_popup_visor(popup_doc: Page, tmp_path: Path) -> bool:
     return False
 
 
+async def _descargar_desde_modal_visor_embebido(page: Page, tmp_path: Path) -> bool:
+    """
+    BASE puede abrir el visor en modal embebido (#visorGEA) con iframe
+    #contingut_modal_visorGEA, sin popup de ventana.
+    """
+    modal = page.locator("#visorGEA").first
+    iframe_node = page.locator("#contingut_modal_visorGEA").first
+
+    try:
+        await modal.wait_for(state="visible", timeout=15000)
+        await iframe_node.wait_for(state="attached", timeout=15000)
+        await page.wait_for_function(
+            """() => {
+              const f = document.getElementById('contingut_modal_visorGEA');
+              return !!f && !!f.getAttribute('src') && f.getAttribute('src') !== 'about:blank';
+            }""",
+            timeout=15000,
+        )
+    except Exception:
+        return False
+
+    frame = page.frame_locator("#contingut_modal_visorGEA").first
+
+    # Opcion 1: click directo en enlace CSV.
+    try:
+        csv_link = frame.locator("a[onclick*='descarrega(true)']").first
+        if await csv_link.count() > 0:
+            async with page.expect_download(timeout=20000) as dl_info:
+                await csv_link.click()
+            download = await dl_info.value
+            await download.save_as(tmp_path)
+            return True
+    except Exception:
+        pass
+
+    # Opcion 2: fallback JS dentro del iframe.
+    try:
+        async with page.expect_download(timeout=20000) as dl_info:
+            await frame.evaluate(
+                """() => {
+                  if (typeof descarrega === 'function') {
+                    descarrega(true);
+                    return true;
+                  }
+                  return false;
+                }"""
+            )
+        download = await dl_info.value
+        await download.save_as(tmp_path)
+        return True
+    except Exception:
+        pass
+
+    return False
+
+
 async def _find_signar_presentar_trigger(page: Page, *, timeout_ms: int = 30000):
     candidates = [
         page.locator("input[type='button'][value='Signar i Presentar']"),
@@ -468,31 +524,34 @@ async def firmar_presentar_y_descargar_justificante(page: Page, *, payload: dict
         await download.save_as(tmp_path)
     else:
         if popup_doc is None:
-            raise TimeoutError("No se detectó ni descarga ni popup del justificante.")
-        try:
-            await popup_doc.wait_for_load_state("domcontentloaded")
-        except Exception:
-            pass
+            ok_modal_download = await _descargar_desde_modal_visor_embebido(page, tmp_path)
+            if not ok_modal_download:
+                raise TimeoutError("No se detecto descarga, popup ni modal visor del justificante.")
+        else:
+            try:
+                await popup_doc.wait_for_load_state("domcontentloaded")
+            except Exception:
+                pass
 
-        try:
-            await popup_doc.wait_for_function(
-                "() => location.href && location.href !== 'about:blank'",
-                timeout=30000,
-            )
-        except Exception:
-            pass
+            try:
+                await popup_doc.wait_for_function(
+                    "() => location.href && location.href !== 'about:blank'",
+                    timeout=30000,
+                )
+            except Exception:
+                pass
 
-        ok_popup_download = await _descargar_desde_popup_visor(popup_doc, tmp_path)
-        if not ok_popup_download:
-            url = popup_doc.url or ""
-            if not url or url == "about:blank":
-                raise RuntimeError("Popup del justificante sin URL válida (about:blank).")
-            pdf_bytes = await _descargar_pdf_via_fetch(popup_doc, url)
-            tmp_path.write_bytes(pdf_bytes)
-        try:
-            await popup_doc.close()
-        except Exception:
-            pass
+            ok_popup_download = await _descargar_desde_popup_visor(popup_doc, tmp_path)
+            if not ok_popup_download:
+                url = popup_doc.url or ""
+                if not url or url == "about:blank":
+                    raise RuntimeError("Popup del justificante sin URL valida (about:blank).")
+                pdf_bytes = await _descargar_pdf_via_fetch(popup_doc, url)
+                tmp_path.write_bytes(pdf_bytes)
+            try:
+                await popup_doc.close()
+            except Exception:
+                pass
 
     pdf_bytes = tmp_path.read_bytes()
     if not pdf_bytes.startswith(b"%PDF"):
