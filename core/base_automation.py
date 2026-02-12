@@ -361,6 +361,10 @@ class BaseAutomation:
             if self._screencast_page is target_page and self._screencast_active and self._cdp_session:
                 return True
 
+            old_session = self._cdp_session
+            old_page = self._screencast_page
+            old_active = self._screencast_active
+
             try:
                 if not getattr(target_page, "_screencast_close_listener_attached", False):
                     def _on_close() -> None:
@@ -370,21 +374,13 @@ class BaseAutomation:
             except Exception:
                 pass
 
+            # IMPORTANTE: no desmontar la sesion anterior hasta confirmar que
+            # la nueva pestaña acepta CDP. Si la pestaña nueva se cierra rápido
+            # (ej. popup social bloqueado), mantenemos el stream previo vivo.
             try:
-                if self._cdp_session:
-                    await self._cdp_session.send("Page.stopScreencast")
-                    await self._cdp_session.detach()
-            except Exception:
-                pass
-            finally:
-                self._cdp_session = None
-                self._screencast_active = False
-
-            self._screencast_page = target_page
-            try:
-                self._cdp_session = await self.context.new_cdp_session(target_page)
+                new_session = await self.context.new_cdp_session(target_page)
             except Exception as exc:
-                self.logger.warning("No se pudo abrir CDP session para screencast: %s", exc)
+                self.logger.warning("No se pudo abrir CDP session para screencast (target volatile/cerrado): %s", exc)
                 return False
 
             _LIVE_FRAME_DIR.mkdir(parents=True, exist_ok=True)
@@ -394,7 +390,7 @@ class BaseAutomation:
             max_height = int(os.getenv("LIVE_STREAM_HEIGHT", "1080"))
             every_nth = int(os.getenv("LIVE_STREAM_EVERY_NTH", "2"))
 
-            async def _on_frame(params: dict) -> None:
+            async def _on_frame(params: dict, _session=new_session) -> None:
                 try:
                     data = base64.b64decode(params["data"])
                     tmp_fd, tmp_path = tempfile.mkstemp(suffix=".jpg", dir=str(_LIVE_FRAME_DIR))
@@ -432,18 +428,18 @@ class BaseAutomation:
                     pass
 
                 try:
-                    if self._cdp_session:
-                        await self._cdp_session.send(
+                    if _session:
+                        await _session.send(
                             "Page.screencastFrameAck",
                             {"sessionId": params["sessionId"]},
                         )
                 except Exception:
                     pass
 
-            self._cdp_session.on("Page.screencastFrame", _on_frame)
+            new_session.on("Page.screencastFrame", _on_frame)
 
             try:
-                await self._cdp_session.send(
+                await new_session.send(
                     "Page.startScreencast",
                     {
                         "format": "jpeg",
@@ -453,13 +449,33 @@ class BaseAutomation:
                         "everyNthFrame": every_nth,
                     },
                 )
+                # Ya tenemos nueva sesion funcionando: ahora desmontamos la anterior.
+                if old_session and old_session is not new_session:
+                    try:
+                        await old_session.send("Page.stopScreencast")
+                    except Exception:
+                        pass
+                    try:
+                        await old_session.detach()
+                    except Exception:
+                        pass
+
+                self._cdp_session = new_session
+                self._screencast_page = target_page
                 self._screencast_active = True
                 if not initial_start:
                     self.logger.info("Screencast reenganchado a la pestaña activa.")
                 return True
             except Exception as exc:
                 self.logger.warning("No se pudo iniciar screencast CDP: %s", exc)
-                self._cdp_session = None
+                try:
+                    await new_session.detach()
+                except Exception:
+                    pass
+                # Restaurar estado previo para no dejar el stream apagado por un popup efimero.
+                self._cdp_session = old_session
+                self._screencast_page = old_page
+                self._screencast_active = old_active
                 return False
 
     async def _page_looks_active(self, page: Page) -> bool:
@@ -524,10 +540,21 @@ class BaseAutomation:
         if not self._screencast_active:
             return
 
+        # Algunos popups (social/ads) nacen y mueren en milisegundos.
+        # Evitar cortar el stream por targets efimeros.
+        try:
+            await asyncio.sleep(0.15)
+        except Exception:
+            pass
+        if new_page.is_closed():
+            return
+
         self.logger.info("Nueva pestaña detectada; moviendo visor en vivo...")
         # No tocar self.page: es la pestaña de trabajo del flujo.
         try:
-            await self._move_screencast_to_page(new_page)
+            moved = await self._move_screencast_to_page(new_page)
+            if not moved:
+                self.logger.info("Screencast: ignorando pestaña nueva no enganchable; se mantiene target anterior.")
         except Exception as e:
             self.logger.warning("Error al mover screencast a nueva pestaña: %s", e)
 
