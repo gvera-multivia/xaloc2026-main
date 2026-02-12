@@ -67,7 +67,8 @@ def normalize_client_folder_name(value: str) -> str:
         return ""
     text = value.strip().upper()
     text = strip_accents(text)
-    text = re.sub(r"[^\w\s]", "", text)
+    # Tratamos los signos de puntuación como espacios para evitar unir palabras (ej: MIKEL,GOSHKA -> MIKEL GOSHKA)
+    text = re.sub(r"[^\w\s]", " ", text)
     return re.sub(r"\s+", " ", text).strip()
 
 

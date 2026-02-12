@@ -404,16 +404,27 @@ class BaseAutomation:
                         os.close(tmp_fd)
 
                     success = False
-                    for _ in range(3):
+                    # En Windows el endpoint del dashboard puede tener el archivo abierto
+                    # brevemente; damos margen extra para no congelar frames.
+                    for _ in range(25):
                         try:
                             os.replace(tmp_path, str(self._screencast_path))
                             success = True
                             break
                         except OSError:
-                            await asyncio.sleep(0.01)
+                            await asyncio.sleep(0.02)
 
                     if not success:
                         try:
+                            # Fallback best-effort: intentar sobrescritura directa.
+                            try:
+                                with open(self._screencast_path, "wb") as dst:
+                                    dst.write(data)
+                                success = True
+                            except Exception:
+                                pass
+                            if success:
+                                return
                             os.unlink(tmp_path)
                         except Exception:
                             pass

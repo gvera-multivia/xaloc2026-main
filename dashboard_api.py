@@ -5,7 +5,7 @@ from typing import Any
 
 import aiohttp
 from fastapi import FastAPI, Query, HTTPException, Body
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
@@ -13,7 +13,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from dashboard import DashboardService
+from dashboard.dashboard_restarter import DashboardRestarter
 from dashboard.process_manager import ProcessManager
+from dashboard.update_manager import UpdateManager
 from core.xvia_auth import create_authenticated_session_in_place
 from core.xvia_deselect import deselect_resource
 
@@ -29,6 +31,8 @@ app.add_middleware(
 
 service = DashboardService()
 process_manager = ProcessManager(base_dir=".", logs_dir="logs")
+update_manager = UpdateManager(base_dir=".", service=service, process_manager=process_manager)
+dashboard_restarter = DashboardRestarter(base_dir=".")
 
 
 @app.get("/")
@@ -144,18 +148,80 @@ _LIVE_FRAME_PATH = _Path(__file__).parent.absolute() / "screenshots" / "live_fra
 
 @app.get("/api/queue/live-screenshot")
 async def api_queue_live_screenshot():
-    """Devuelve el último frame JPEG del screencast CDP del worker."""
+    """Devuelve el ultimo frame JPEG del screencast CDP del worker."""
     if not _LIVE_FRAME_PATH.exists():
         raise HTTPException(status_code=404, detail="No hay frame en vivo")
-    return FileResponse(
-        _LIVE_FRAME_PATH,
-        media_type="image/jpeg",
-        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
-    )
+    try:
+        content = _LIVE_FRAME_PATH.read_bytes()
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="No hay frame en vivo")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Error leyendo frame en vivo: {exc}") from exc
 
+    return Response(
+        content=content,
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 @app.get("/api/control/status")
 async def api_control_status() -> dict:
     return process_manager.get_all_status()
+
+
+@app.get("/api/control/update/status")
+async def api_control_update_status() -> dict:
+    return update_manager.status()
+
+
+@app.get("/api/control/restart/status")
+async def api_control_restart_status() -> dict:
+    return dashboard_restarter.status()
+
+
+@app.get("/api/control/update/check")
+async def api_control_update_check() -> dict:
+    try:
+        return await update_manager.check_for_updates()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Error comprobando actualizaciones: {exc}") from exc
+
+
+@app.post("/api/control/update/run")
+async def api_control_update_run(
+    wait_timeout_seconds: int = Query(1800, ge=1, le=7200),
+    poll_seconds: float = Query(2.0, ge=0.2, le=10.0),
+) -> dict:
+    try:
+        return await update_manager.run_update(
+            wait_timeout_seconds=wait_timeout_seconds,
+            poll_seconds=poll_seconds,
+        )
+    except TimeoutError as exc:
+        raise HTTPException(status_code=408, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        detail = str(exc)
+        status_code = 409 if "en curso" in detail.lower() else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Error ejecutando actualizacion: {exc}") from exc
+
+
+@app.post("/api/control/restart-dashboard")
+async def api_control_restart_dashboard(
+    delay_seconds: float = Query(1.0, ge=0.2, le=10.0),
+) -> dict:
+    try:
+        return await dashboard_restarter.schedule_restart(delay_seconds=delay_seconds)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Error programando reinicio: {exc}") from exc
 
 
 @app.post("/api/control/{process_name}/start")
@@ -436,7 +502,7 @@ async def api_client_folder(payload: dict[str, Any] = Body(...)) -> dict:
     """Calcula la ruta de la carpeta del cliente.
 
     Por defecto devuelve la ruta para que el frontend intente abrirla en el cliente.
-    Si `open_on_server=true`, también intenta abrirla en el servidor.
+    Si `open_on_server=true`, tambien intenta abrirla en el servidor.
     """
     try:
         result = service.resolve_client_folder(payload=payload)
