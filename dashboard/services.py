@@ -481,18 +481,28 @@ class DashboardService:
     # ==========================================================================
 
     def resolve_client_folder(self, *, payload: dict[str, Any]) -> dict[str, Any]:
-        """Calcula la ruta a la carpeta RECURSOS TELEMATICOS del cliente."""
-        from pathlib import Path
-        from core.client_documentation import (
-            client_identity_from_payload,
-            get_ruta_cliente_documentacion,
+        """Calcula la ruta a la carpeta de justificantes del cliente (RECURSOS TELEMATICOS + subfase)."""
+        from sites.xaloc_girona.flows.descarga_justificante import (
+            _construir_ruta_recursos_telematicos,
         )
 
-        base_path = os.getenv("CLIENT_DOCS_BASE_PATH") or r"\\SERVER-DOC\clientes"
-        client = client_identity_from_payload(payload)
-        ruta_base = get_ruta_cliente_documentacion(client, base_path=base_path)
-        ruta_recursos = ruta_base / "RECURSOS TELEMATICOS"
+        fase_procedimiento = payload.get("fase_procedimiento")
+        try:
+            ruta = _construir_ruta_recursos_telematicos(payload, fase_procedimiento)
+        except Exception as exc:
+            self.logger.warning("Error construyendo ruta recursos telematicos: %s", exc)
+            # Fallback: usar solo RECURSOS TELEMATICOS sin subfase
+            from core.client_documentation import (
+                client_identity_from_payload,
+            )
+            from core.client_paths import get_ruta_cliente_documentacion
+
+            base_path = os.getenv("CLIENT_DOCS_BASE_PATH") or r"\\SERVER-DOC\clientes"
+            client = client_identity_from_payload(payload)
+            ruta_base = get_ruta_cliente_documentacion(client, base_path=base_path)
+            ruta = ruta_base / "RECURSOS TELEMATICOS"
+
         return {
-            "path": str(ruta_recursos),
-            "exists": ruta_recursos.exists(),
+            "path": str(ruta),
+            "exists": ruta.exists(),
         }

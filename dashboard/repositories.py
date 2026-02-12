@@ -353,7 +353,9 @@ class SQLServerHistoryRepository:
                 SELECT rs.idRecurso, rs.idExp, rs.Expedient, rs.Organisme, rs.TExp,
                        rs.UsuarioAsignado, rs.Estado,
                        {self._date_expr()} AS day,
-                       rs.FUsuarioCompletado
+                       rs.FUsuarioCompletado,
+                       rs.SujetoRecurso, rs.TipDeCliente, rs.NombreEmpresa,
+                       rs.FaseProcedimiento
                 FROM Recursos.RecursosExp rs
                 WHERE {where_with_day}
                 ORDER BY rs.FUsuarioCompletado DESC, rs.idRecurso DESC
@@ -372,7 +374,11 @@ class SQLServerHistoryRepository:
                 "payload": {
                     "expediente": row[2],
                     "usuario": row[5],
-                    "estado": row[6]
+                    "estado": row[6],
+                    "sujeto_recurso": (row[9] or "").strip() if row[9] else None,
+                    "tipodecliente": row[10],
+                    "empresa": (row[11] or "").strip() if row[11] else None,
+                    "fase_procedimiento": (row[12] or "").strip() if row[12] else None,
                 },
                 "result": {"source": "sqlserver_read_only"}
             } for row in cur.fetchall()]
