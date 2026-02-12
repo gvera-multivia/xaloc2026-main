@@ -40,11 +40,13 @@ class BaseAutomation:
         self._cdp_session = None
         self._screencast_active: bool = False
         self._screencast_path: Path = _LIVE_FRAME_DIR / _LIVE_FRAME_FILENAME
+        self._screencast_page: Optional[Page] = None
 
     def _create_logger(self) -> logging.Logger:
         self.config.ensure_directories()
         logger = logging.getLogger(f"xaloc_automation.{self.config.site_id}")
         logger.setLevel(logging.INFO)
+        logger.propagate = False
 
         if not logger.handlers:
             log_file = self.config.dir_logs / f"{self.config.site_id}.log"
@@ -328,7 +330,7 @@ class BaseAutomation:
     #  CDP Screencast – streaming en vivo del navegador                   #
     # ------------------------------------------------------------------ #
 
-    async def start_screencast(self) -> None:
+    async def start_screencast(self, target_page: Optional[Page] = None) -> None:
         """Inicia el CDP Screencast: Chrome envía frames JPEG comprimidos
         que se escriben atómicamente a *self._screencast_path* para que el
         dashboard pueda servirlos.
@@ -338,7 +340,8 @@ class BaseAutomation:
         """
         if self._screencast_active:
             return
-        if not self.page or self.page.is_closed():
+        effective_page = target_page or self.page
+        if not effective_page or effective_page.is_closed():
             self.logger.warning("start_screencast: no hay página activa.")
             return
 
@@ -347,8 +350,9 @@ class BaseAutomation:
             self.context.on("page", self._handle_new_page_screencast)
             self._on_page_listener_attached = True
 
+        self._screencast_page = effective_page
         try:
-            self._cdp_session = await self.context.new_cdp_session(self.page)
+            self._cdp_session = await self.context.new_cdp_session(effective_page)
         except Exception as exc:
             self.logger.warning("No se pudo abrir CDP session para screencast: %s", exc)
             return
@@ -413,8 +417,8 @@ class BaseAutomation:
             return
         
         self.logger.info("Nueva pestaña detectada; moviendo visor en vivo...")
-        # Cambiamos la página de referencia de la clase.
-        self.page = new_page
+        # No tocar self.page: es la pestaña de trabajo del flujo.
+        self._screencast_page = new_page
         
         # Reiniciamos el screencast sobre el nuevo target CDP.
         # stop_screencast detiene pero mantiene _screencast_active=False
@@ -427,8 +431,8 @@ class BaseAutomation:
                 self._cdp_session = None
             
             # Forzamos re-inicio en la nueva página.
-            self._screencast_active = False 
-            await self.start_screencast()
+            self._screencast_active = False
+            await self.start_screencast(target_page=new_page)
         except Exception as e:
             self.logger.warning("Error al mover screencast a nueva pestaña: %s", e)
 
@@ -448,6 +452,7 @@ class BaseAutomation:
             pass
         self._cdp_session = None
         self._screencast_active = False
+        self._screencast_page = None
 
         # Eliminar el archivo de frame para que el dashboard no muestre un frame viejo.
         try:
