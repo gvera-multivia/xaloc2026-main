@@ -140,6 +140,21 @@ async def _download_document_and_attachments(
     payload: dict,
     auth_session: aiohttp.ClientSession,
 ) -> list[Path]:
+    # Preservar archivos que ya vengan en payload (p.ej. docs de cliente precargados por adapters).
+    payload_file_keys = ("archivos", "archivos_adjuntos", "p1_archivos", "p2_archivos", "p3_archivos")
+    payload_files_raw: list[Path] = []
+    for key in payload_file_keys:
+        raw_val = payload.get(key)
+        if not raw_val:
+            continue
+        if isinstance(raw_val, (str, Path)):
+            payload_files_raw.append(Path(raw_val))
+            continue
+        if isinstance(raw_val, list):
+            for item in raw_val:
+                if isinstance(item, (str, Path)):
+                    payload_files_raw.append(Path(item))
+
     id_recurso = payload.get("idRecurso")
     if not id_recurso:
         raise ValueError("Falta 'idRecurso' en el payload para descargar el documento.")
@@ -193,7 +208,37 @@ async def _download_document_and_attachments(
             else:
                 logger.warning(f"No se pudo descargar el adjunto {result.filename}: {result.error}")
 
-    payload["archivos"] = [str(p) for p in archivos_para_subir if p]
+    # Merge final: recurso principal + adjuntos descargados + archivos ya presentes en payload.
+    merged: list[Path] = []
+    seen_keys: set[str] = set()
+
+    def _key(p: Path) -> str:
+        return os.path.normcase(os.path.normpath(str(p)))
+
+    for p in archivos_para_subir:
+        if not p:
+            continue
+        k = _key(p)
+        if k in seen_keys:
+            continue
+        seen_keys.add(k)
+        merged.append(p)
+
+    for p in payload_files_raw:
+        if not p:
+            continue
+        k = _key(p)
+        if k in seen_keys:
+            continue
+        if not p.exists():
+            logger.warning("Archivo del payload no encontrado, se omite: %s", p)
+            continue
+        seen_keys.add(k)
+        merged.append(p)
+
+    payload["archivos"] = [str(p) for p in merged if p]
+    archivos_para_subir = merged
+    logger.info("Archivos combinados para subida (descarga + payload): %s", len(archivos_para_subir))
     return archivos_para_subir
 
 async def process_task(

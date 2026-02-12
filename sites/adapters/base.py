@@ -486,7 +486,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 **notif_data,
                 **exp_parts,
                 "num_butlleti": expediente_raw,
-                "disable_gesdoc": True,
+                "disable_gesdoc": False,
                 "source": "brain_orchestrator",
                 "claimed_at": datetime.now().isoformat(),
             }
