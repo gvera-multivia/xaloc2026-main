@@ -430,3 +430,69 @@ class DashboardService:
             raise ValueError("No se actualizo configuracion: site no existe o payload vacio.")
         row = self.db.get_organismo_config(site)
         return {"updated": True, "item": row}
+
+    # ==========================================================================
+    # PENDING AUTHORIZATION QUEUE
+    # ==========================================================================
+
+    def list_pending_authorizations(
+        self, *, authorization_type: str | None = None
+    ) -> dict[str, Any]:
+        items = self.db.get_pending_authorizations(authorization_type=authorization_type)
+        return {"items": items, "total": len(items)}
+
+    def approve_pending_authorization(
+        self, *, pending_id: int, authorized_by: str = "dashboard"
+    ) -> dict[str, Any]:
+        new_task_id = self.db.authorize_and_move_to_queue(
+            pending_id=pending_id,
+            authorized_by=authorized_by,
+        )
+        if new_task_id is None:
+            raise ValueError(
+                f"No se pudo aprobar la tarea {pending_id}: no encontrada o ya procesada."
+            )
+        return {
+            "approved": True,
+            "pending_id": pending_id,
+            "new_task_id": new_task_id,
+        }
+
+    def reject_pending_authorization(
+        self,
+        *,
+        pending_id: int,
+        reason: str,
+        rejected_by: str = "dashboard",
+    ) -> dict[str, Any]:
+        ok = self.db.reject_pending_authorization(
+            pending_id=pending_id,
+            reason=reason,
+            rejected_by=rejected_by,
+        )
+        if not ok:
+            raise ValueError(
+                f"No se pudo rechazar la tarea {pending_id}: no encontrada o ya procesada."
+            )
+        return {"rejected": True, "pending_id": pending_id}
+
+    # ==========================================================================
+    # CLIENT FOLDER RESOLVER
+    # ==========================================================================
+
+    def resolve_client_folder(self, *, payload: dict[str, Any]) -> dict[str, Any]:
+        """Calcula la ruta a la carpeta RECURSOS TELEMATICOS del cliente."""
+        from pathlib import Path
+        from core.client_documentation import (
+            client_identity_from_payload,
+            get_ruta_cliente_documentacion,
+        )
+
+        base_path = os.getenv("CLIENT_DOCS_BASE_PATH") or r"\\SERVER-DOC\clientes"
+        client = client_identity_from_payload(payload)
+        ruta_base = get_ruta_cliente_documentacion(client, base_path=base_path)
+        ruta_recursos = ruta_base / "RECURSOS TELEMATICOS"
+        return {
+            "path": str(ruta_recursos),
+            "exists": ruta_recursos.exists(),
+        }

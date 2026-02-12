@@ -350,24 +350,28 @@ function AdminView({ selectedDay, setWorkerOnline, setWorkerLabel, sharedSearch 
   const [queueItems, setQueueItems] = useState([]);
   const [pauses, setPauses] = useState([]);
   const [itemPauses, setItemPauses] = useState([]);
+  const [pendingAuth, setPendingAuth] = useState([]);
   const [globalReason, setGlobalReason] = useState('');
   const [globalMinutes, setGlobalMinutes] = useState('120');
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [busySite, setBusySite] = useState('');
   const [busyItem, setBusyItem] = useState('');
+  const [busyAuth, setBusyAuth] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
   const refresh = async () => {
     try {
-      const [queueRes, pausesRes, itemPausesRes] = await Promise.all([
+      const [queueRes, pausesRes, itemPausesRes, authRes] = await Promise.all([
         apiFetch(`/queue/current?day=${selectedDay}&page=1&page_size=1000`),
         apiFetch('/queue/pauses?active_only=true'),
         apiFetch('/queue/item-pauses?active_only=true'),
+        apiFetch('/pending-auth'),
       ]);
       setQueueItems(queueRes.items || []);
       setPauses(pausesRes.items || []);
       setItemPauses(itemPausesRes.items || []);
+      setPendingAuth(authRes.items || []);
       setError('');
       setWorkerOnline(true);
       setWorkerLabel('API conectada y panel de control operativo');
@@ -377,6 +381,36 @@ function AdminView({ selectedDay, setWorkerOnline, setWorkerLabel, sharedSearch 
       setWorkerLabel('Fallo de conexion con API');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const callApproveAuth = async (pendingId) => {
+    setBusyAuth(`approve:${pendingId}`);
+    try {
+      await apiFetch(`/pending-auth/${pendingId}/approve`, { method: 'POST' });
+      await refresh();
+    } catch (e) {
+      setError(`No se pudo aprobar la autorizacion ${pendingId}.`);
+    } finally {
+      setBusyAuth('');
+    }
+  };
+
+  const callRejectAuth = async (pendingId) => {
+    const reason = prompt('Motivo del rechazo:');
+    if (!reason || !reason.trim()) return;
+    setBusyAuth(`reject:${pendingId}`);
+    try {
+      await apiFetch(`/pending-auth/${pendingId}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: reason.trim() }),
+      });
+      await refresh();
+    } catch (e) {
+      setError(`No se pudo rechazar la autorizacion ${pendingId}.`);
+    } finally {
+      setBusyAuth('');
     }
   };
 
@@ -565,6 +599,41 @@ function AdminView({ selectedDay, setWorkerOnline, setWorkerLabel, sharedSearch 
       </div>
 
       {error && <div className="alert error">{error}</div>}
+
+      <article className="panel">
+        <div className="panel-head">
+          <h2>Autorizaciones pendientes</h2>
+          <span className={`chip ${pendingAuth.length > 0 ? 'warn flash' : 'muted'}`}>{pendingAuth.length}</span>
+        </div>
+        <table>
+          <thead>
+            <tr><th>ID</th><th>Site</th><th>Recurso</th><th>Tipo</th><th>Motivo</th><th>Fecha</th><th>Acciones</th></tr>
+          </thead>
+          <tbody>
+            {pendingAuth.map((pa) => {
+              const resourceId = pa.resource_id || (pa.payload && pa.payload.idRecurso) || '-';
+              const isBusy = busyAuth.includes(String(pa.id));
+              return (
+                <tr key={pa.id}>
+                  <td>{pa.id}</td>
+                  <td>{pa.site_id}</td>
+                  <td>#{resourceId}</td>
+                  <td>{pa.authorization_type || '-'}</td>
+                  <td>{pa.reason || '-'}</td>
+                  <td>{fmtDateTime(pa.created_at)}</td>
+                  <td>
+                    <div className="action-wrap">
+                      <button disabled={isBusy} onClick={() => callApproveAuth(pa.id)}>Autorizar</button>
+                      <button className="danger" disabled={isBusy} onClick={() => callRejectAuth(pa.id)}>Rechazar</button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+            {pendingAuth.length === 0 && <tr><td colSpan="7" className="empty">No hay autorizaciones pendientes.</td></tr>}
+          </tbody>
+        </table>
+      </article>
 
       <div className="admin-row">
         <article className="panel">
@@ -1200,6 +1269,27 @@ function HistoryView({ selectedDay, setSelectedDay, sharedSearch, setWorkerOnlin
             <p><strong>Protocolo:</strong> {selectedRow.row.protocol || '-'}</p>
             <p><strong>Inicio:</strong> {fmtDateTime(selectedRow.row.started_at)}</p>
             <p><strong>Fin:</strong> {fmtDateTime(selectedRow.row.ended_at)}</p>
+
+            <div className="action-wrap" style={{ margin: '10px 0' }}>
+              <button onClick={async () => {
+                try {
+                  const res = await apiFetch('/client-folder', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(selectedRow.row.payload || {}),
+                  });
+                  if (res.opened) {
+                    setError('');
+                  } else if (!res.exists) {
+                    setError('La carpeta del cliente no existe: ' + (res.path || ''));
+                  } else {
+                    setError('No se pudo abrir la carpeta: ' + (res.open_error || 'error desconocido'));
+                  }
+                } catch (e) {
+                  setError('Error al intentar abrir la carpeta del cliente.');
+                }
+              }}>📁 Abrir carpeta del cliente</button>
+            </div>
 
             <h4>Payload</h4>
             <pre>{JSON.stringify(selectedRow.row.payload || {}, null, 2)}</pre>

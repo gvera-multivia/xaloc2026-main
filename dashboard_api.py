@@ -139,7 +139,7 @@ async def api_queue_completion_marker(
 
 from pathlib import Path as _Path
 
-_LIVE_FRAME_PATH = _Path("screenshots/live_frame.jpg")
+_LIVE_FRAME_PATH = _Path(__file__).parent.absolute() / "screenshots" / "live_frame.jpg"
 
 
 @app.get("/api/queue/live-screenshot")
@@ -387,3 +387,67 @@ async def api_config_update(site_id: str, payload: dict[str, Any] = Body(...)) -
         return service.update_organismo_config(site_id=site_id, updates=updates)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+# ==========================================================================
+# PENDING AUTHORIZATION QUEUE
+# ==========================================================================
+
+
+@app.get("/api/pending-auth")
+async def api_pending_auth_list(
+    authorization_type: str | None = Query(None),
+) -> dict:
+    return service.list_pending_authorizations(authorization_type=authorization_type)
+
+
+@app.post("/api/pending-auth/{pending_id}/approve")
+async def api_pending_auth_approve(pending_id: int) -> dict:
+    try:
+        return service.approve_pending_authorization(pending_id=pending_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/pending-auth/{pending_id}/reject")
+async def api_pending_auth_reject(
+    pending_id: int,
+    payload: dict[str, Any] = Body(...),
+) -> dict:
+    reason = str(payload.get("reason") or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="Se requiere un motivo de rechazo.")
+    try:
+        return service.reject_pending_authorization(
+            pending_id=pending_id,
+            reason=reason,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+# ==========================================================================
+# CLIENT FOLDER (open in Explorer)
+# ==========================================================================
+
+
+@app.post("/api/client-folder")
+async def api_client_folder(payload: dict[str, Any] = Body(...)) -> dict:
+    """Calcula la ruta de la carpeta del cliente y la abre en Windows Explorer."""
+    try:
+        result = service.resolve_client_folder(payload=payload)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Error resolviendo carpeta: {exc}") from exc
+
+    folder_path = result.get("path", "")
+    if result.get("exists") and folder_path:
+        try:
+            os.startfile(folder_path)
+            result["opened"] = True
+        except Exception as exc:
+            result["opened"] = False
+            result["open_error"] = str(exc)
+    else:
+        result["opened"] = False
+
+    return result

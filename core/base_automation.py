@@ -1,4 +1,4 @@
-"""
+﻿"""
 BaseAutomation: orquestador reusable (Playwright + perfil persistente).
 """
 
@@ -19,7 +19,7 @@ from core.base_config import BaseConfig
 
 
 # Ruta por defecto donde se escribe el frame en vivo del screencast.
-_LIVE_FRAME_DIR = Path("screenshots")
+_LIVE_FRAME_DIR = Path(__file__).parent.parent.absolute() / "screenshots"
 _LIVE_FRAME_FILENAME = "live_frame.jpg"
 
 
@@ -41,6 +41,8 @@ class BaseAutomation:
         self._screencast_active: bool = False
         self._screencast_path: Path = _LIVE_FRAME_DIR / _LIVE_FRAME_FILENAME
         self._screencast_page: Optional[Page] = None
+        self._screencast_watch_task: Optional[asyncio.Task] = None
+        self._screencast_switch_lock = asyncio.Lock()
 
     def _create_logger(self) -> logging.Logger:
         self.config.ensure_directories()
@@ -66,7 +68,7 @@ class BaseAutomation:
     def _build_browser_args(self) -> list[str]:
         args = list(self.config.navegador.args)
 
-        # En modo headless, --start-maximized no tiene efecto; usar --window-size explícito.
+        # En modo headless, --start-maximized no tiene efecto; usar --window-size explÃ­cito.
         if self.config.navegador.headless:
             args = [a for a in args if a != "--start-maximized"]
             args.append("--window-size=1920,1080")
@@ -93,7 +95,7 @@ class BaseAutomation:
 
     def mark_nonfatal_issue(self) -> None:
         """
-        Marca que la ejecución tuvo un problema no fatal (p.ej. fallo de descarga final),
+        Marca que la ejecuciÃ³n tuvo un problema no fatal (p.ej. fallo de descarga final),
         para que el cierre del navegador se comporte como un fallo cuando
         XALOC_KEEP_BROWSER_OPEN=1.
         """
@@ -103,7 +105,7 @@ class BaseAutomation:
         user_data_dir = str(self.config.navegador.perfil_path.absolute())
         args = self._build_browser_args()
 
-        # Viewport: en headless, forzar 1920x1080; en headed, dejar que siga el tamaño de ventana.
+        # Viewport: en headless, forzar 1920x1080; en headed, dejar que siga el tamaÃ±o de ventana.
         if self.config.navegador.headless:
             viewport_kwargs = {"viewport": {"width": 1920, "height": 1080}}
         else:
@@ -130,13 +132,13 @@ class BaseAutomation:
                 		elif BaseAutomation._shared_home_page.is_closed():
                 			BaseAutomation._shared_home_page = await self.context.new_page()
 
-                		# Reutilización de pestaña (XALOC_KEEP_TAB_OPEN=1)
+                		# ReutilizaciÃ³n de pestaÃ±a (XALOC_KEEP_TAB_OPEN=1)
                 		if os.getenv("XALOC_KEEP_TAB_OPEN") == "1":
                 			self.page = BaseAutomation._shared_home_page
-                			self.logger.info("Pestaña reutilizada de sesión compartida (XALOC_KEEP_TAB_OPEN=1)")
+                			self.logger.info("PestaÃ±a reutilizada de sesiÃ³n compartida (XALOC_KEEP_TAB_OPEN=1)")
                 		else:
                 			self.page = await self.context.new_page()
-                			self.logger.info("Contexto compartido, pero nueva pestaña creada")
+                			self.logger.info("Contexto compartido, pero nueva pestaÃ±a creada")
 
                 		self.page.set_default_timeout(self.config.timeouts.general)
                 		self.logger.info("Navegador reutilizado (XALOC_KEEP_BROWSER_OPEN=1)")
@@ -190,20 +192,20 @@ class BaseAutomation:
                     except Exception:
                         pass
 
-                # Mantener una pestaña "home" siempre abierta para que no se cierre la ventana.
+                # Mantener una pestaÃ±a "home" siempre abierta para que no se cierre la ventana.
                 if self.context.pages:
                     BaseAutomation._shared_home_page = self.context.pages[0]
                 else:
                     BaseAutomation._shared_home_page = await self.context.new_page()
 
-                # Reutilización de pestaña (XALOC_KEEP_TAB_OPEN=1)
+                # ReutilizaciÃ³n de pestaÃ±a (XALOC_KEEP_TAB_OPEN=1)
                 if os.getenv("XALOC_KEEP_TAB_OPEN") == "1":
-                    # Usar la pestaña home como la pestaña de trabajo
+                    # Usar la pestaÃ±a home como la pestaÃ±a de trabajo
                     self.page = BaseAutomation._shared_home_page
-                    self.logger.info("Pestaña reutilizada (XALOC_KEEP_TAB_OPEN=1)")
+                    self.logger.info("PestaÃ±a reutilizada (XALOC_KEEP_TAB_OPEN=1)")
                 else:
                     self.page = await self.context.new_page()
-                    self.logger.info("Nueva pestaña creada")
+                    self.logger.info("Nueva pestaÃ±a creada")
 
                 self.page.set_default_timeout(self.config.timeouts.general)
                 self.logger.info("Navegador listo (compartido)")
@@ -247,7 +249,7 @@ class BaseAutomation:
                 self.logger.info("Navegador NO cerrado (XALOC_KEEP_BROWSER_OPEN=1)")
                 return
 
-            # Éxito: cerrar solo la pestaña de trabajo. El contexto/playwright se
+            # Ã‰xito: cerrar solo la pestaÃ±a de trabajo. El contexto/playwright se
             # mantienen abiertos para reutilizar el navegador entre tareas.
             if self.page:
                 try:
@@ -260,7 +262,7 @@ class BaseAutomation:
             self.context = None
             self.playwright = None
             self._exit_has_nonfatal_issues = False
-            self.logger.info("Pestaña cerrada; navegador mantenido abierto (XALOC_KEEP_BROWSER_OPEN=1)")
+            self.logger.info("PestaÃ±a cerrada; navegador mantenido abierto (XALOC_KEEP_BROWSER_OPEN=1)")
             return
 
         if self.context:
@@ -327,125 +329,182 @@ class BaseAutomation:
         await self._start_browser()
 
     # ------------------------------------------------------------------ #
-    #  CDP Screencast – streaming en vivo del navegador                   #
+    #  CDP Screencast â€“ streaming en vivo del navegador                   #
     # ------------------------------------------------------------------ #
 
     async def start_screencast(self, target_page: Optional[Page] = None) -> None:
-        """Inicia el CDP Screencast: Chrome envía frames JPEG comprimidos
-        que se escriben atómicamente a *self._screencast_path* para que el
-        dashboard pueda servirlos.
-        
-        Si se abren nuevas pestañas en el contexto, el screencast se moverá
-        automáticamente a la última pestaña creada.
-        """
+        """Inicia el CDP Screencast y escribe frames JPEG para el dashboard en vivo."""
         if self._screencast_active:
             return
         effective_page = target_page or self.page
         if not effective_page or effective_page.is_closed():
-            self.logger.warning("start_screencast: no hay página activa.")
+            self.logger.warning("start_screencast: no hay pagina activa.")
             return
 
-        # Asegurar que escuchamos la apertura de nuevas pestañas para seguirlas.
+        # Escuchar apertura de nuevas pestañas para seguirlas.
         if not hasattr(self, "_on_page_listener_attached"):
             self.context.on("page", self._handle_new_page_screencast)
             self._on_page_listener_attached = True
 
-        self._screencast_page = effective_page
-        try:
-            self._cdp_session = await self.context.new_cdp_session(effective_page)
-        except Exception as exc:
-            self.logger.warning("No se pudo abrir CDP session para screencast: %s", exc)
+        ok = await self._move_screencast_to_page(effective_page, initial_start=True)
+        if not ok:
             return
 
-        _LIVE_FRAME_DIR.mkdir(parents=True, exist_ok=True)
+        if self._screencast_watch_task is None or self._screencast_watch_task.done():
+            self._screencast_watch_task = asyncio.create_task(self._screencast_watch_active_page_loop())
 
-        quality = int(os.getenv("LIVE_STREAM_QUALITY", "85"))
-        max_width = int(os.getenv("LIVE_STREAM_WIDTH", "1920"))
-        max_height = int(os.getenv("LIVE_STREAM_HEIGHT", "1080"))
-        every_nth = int(os.getenv("LIVE_STREAM_EVERY_NTH", "2"))
+    async def _move_screencast_to_page(self, target_page: Page, *, initial_start: bool = False) -> bool:
+        if not target_page or target_page.is_closed():
+            return False
 
-        async def _on_frame(params: dict) -> None:
-            """Callback ejecutado por CDP en cada frame del screencast."""
+        async with self._screencast_switch_lock:
+            if self._screencast_page is target_page and self._screencast_active and self._cdp_session:
+                return True
+
             try:
-                data = base64.b64decode(params["data"])
-                # Escritura atómica: tmp → rename para evitar lecturas parciales.
-                tmp_fd, tmp_path = tempfile.mkstemp(
-                    suffix=".jpg", dir=str(_LIVE_FRAME_DIR)
-                )
-                try:
-                    os.write(tmp_fd, data)
-                finally:
-                    os.close(tmp_fd)
-                os.replace(tmp_path, str(self._screencast_path))
-            except Exception:
-                pass  # No interrumpir la automatización por un frame fallido.
-
-            # ACK para que Chrome envíe el siguiente frame.
-            try:
-                if self._cdp_session:
-                    await self._cdp_session.send(
-                        "Page.screencastFrameAck",
-                        {"sessionId": params["sessionId"]},
-                    )
+                if not getattr(target_page, "_screencast_close_listener_attached", False):
+                    def _on_close() -> None:
+                        asyncio.create_task(self._handle_screencast_page_closed(target_page))
+                    target_page.on("close", _on_close)
+                    setattr(target_page, "_screencast_close_listener_attached", True)
             except Exception:
                 pass
 
-        self._cdp_session.on("Page.screencastFrame", _on_frame)
+            try:
+                if self._cdp_session:
+                    await self._cdp_session.send("Page.stopScreencast")
+                    await self._cdp_session.detach()
+            except Exception:
+                pass
+            finally:
+                self._cdp_session = None
+                self._screencast_active = False
 
+            self._screencast_page = target_page
+            try:
+                self._cdp_session = await self.context.new_cdp_session(target_page)
+            except Exception as exc:
+                self.logger.warning("No se pudo abrir CDP session para screencast: %s", exc)
+                return False
+
+            _LIVE_FRAME_DIR.mkdir(parents=True, exist_ok=True)
+
+            quality = int(os.getenv("LIVE_STREAM_QUALITY", "85"))
+            max_width = int(os.getenv("LIVE_STREAM_WIDTH", "1920"))
+            max_height = int(os.getenv("LIVE_STREAM_HEIGHT", "1080"))
+            every_nth = int(os.getenv("LIVE_STREAM_EVERY_NTH", "2"))
+
+            async def _on_frame(params: dict) -> None:
+                try:
+                    data = base64.b64decode(params["data"])
+                    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".jpg", dir=str(_LIVE_FRAME_DIR))
+                    try:
+                        os.write(tmp_fd, data)
+                    finally:
+                        os.close(tmp_fd)
+
+                    success = False
+                    for _ in range(3):
+                        try:
+                            os.replace(tmp_path, str(self._screencast_path))
+                            success = True
+                            break
+                        except OSError:
+                            await asyncio.sleep(0.01)
+
+                    if not success:
+                        try:
+                            os.unlink(tmp_path)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+                try:
+                    if self._cdp_session:
+                        await self._cdp_session.send(
+                            "Page.screencastFrameAck",
+                            {"sessionId": params["sessionId"]},
+                        )
+                except Exception:
+                    pass
+
+            self._cdp_session.on("Page.screencastFrame", _on_frame)
+
+            try:
+                await self._cdp_session.send(
+                    "Page.startScreencast",
+                    {
+                        "format": "jpeg",
+                        "quality": quality,
+                        "maxWidth": max_width,
+                        "maxHeight": max_height,
+                        "everyNthFrame": every_nth,
+                    },
+                )
+                self._screencast_active = True
+                if not initial_start:
+                    self.logger.info("Screencast reenganchado a la pestaña activa.")
+                return True
+            except Exception as exc:
+                self.logger.warning("No se pudo iniciar screencast CDP: %s", exc)
+                self._cdp_session = None
+                return False
+
+    async def _page_looks_active(self, page: Page) -> bool:
+        if not page or page.is_closed():
+            return False
         try:
-            await self._cdp_session.send(
-                "Page.startScreencast",
-                {
-                    "format": "jpeg",
-                    "quality": quality,
-                    "maxWidth": max_width,
-                    "maxHeight": max_height,
-                    "everyNthFrame": every_nth,
-                },
+            return bool(
+                await page.evaluate(
+                    "() => document.hasFocus() || document.visibilityState === 'visible'"
+                )
             )
-            self._screencast_active = True
-            # No logeamos cada re-attach para no ensuciar el log demasiado.
-            # Pero logeamos el primero o cambios significativos si es necesario.
-        except Exception as exc:
-            self.logger.warning("No se pudo iniciar screencast CDP: %s", exc)
-            self._cdp_session = None
+        except Exception:
+            return False
+
+    async def _pick_best_screencast_page(self) -> Optional[Page]:
+        if not self.context:
+            return None
+
+        candidates = [p for p in self.context.pages if not p.is_closed()]
+        if not candidates:
+            return None
+
+        for p in reversed(candidates):
+            if await self._page_looks_active(p):
+                return p
+
+        if self.page and not self.page.is_closed():
+            return self.page
+        if self._screencast_page and not self._screencast_page.is_closed():
+            return self._screencast_page
+        return candidates[-1]
+
+    async def _screencast_watch_active_page_loop(self) -> None:
+        while self._screencast_active:
+            try:
+                best_page = await self._pick_best_screencast_page()
+                if best_page and best_page is not self._screencast_page:
+                    await self._move_screencast_to_page(best_page)
+            except Exception:
+                pass
+            await asyncio.sleep(0.5)
 
     async def _handle_new_page_screencast(self, new_page: Page) -> None:
-        """Handler interno: si el screencast está activo y se abre otra pestaña,
-        saltamos a ella automáticamente."""
+        """Si se abre otra pestaña, mover el visor en vivo a esa pestaña."""
         if not self._screencast_active:
             return
-        try:
-            if not getattr(new_page, "_screencast_close_listener_attached", False):
-                def _on_close() -> None:
-                    asyncio.create_task(self._handle_screencast_page_closed(new_page))
-                new_page.on("close", _on_close)
-                setattr(new_page, "_screencast_close_listener_attached", True)
-        except Exception:
-            pass
-        
+
         self.logger.info("Nueva pestaña detectada; moviendo visor en vivo...")
         # No tocar self.page: es la pestaña de trabajo del flujo.
-        self._screencast_page = new_page
-        
-        # Reiniciamos el screencast sobre el nuevo target CDP.
-        # stop_screencast detiene pero mantiene _screencast_active=False
-        # así que guardamos el estado deseado.
         try:
-            # Detenemos la sesión CDP anterior sobre la pestaña vieja.
-            if self._cdp_session:
-                await self._cdp_session.send("Page.stopScreencast")
-                await self._cdp_session.detach()
-                self._cdp_session = None
-            
-            # Forzamos re-inicio en la nueva página.
-            self._screencast_active = False
-            await self.start_screencast(target_page=new_page)
+            await self._move_screencast_to_page(new_page)
         except Exception as e:
             self.logger.warning("Error al mover screencast a nueva pestaña: %s", e)
 
     async def _handle_screencast_page_closed(self, closed_page: Page) -> None:
-        """Si se cierra la pestaña actualmente streameada, volver a una pestaña viva."""
+        """Si se cierra la pestaña en stream, reenganchar a una pestaña viva."""
         if not self._screencast_active:
             return
         if closed_page is not self._screencast_page:
@@ -464,18 +523,8 @@ class BaseAutomation:
             self.logger.warning("Screencast: se cerró la pestaña activa y no hay fallback disponible.")
             return
 
-        self.logger.info("Screencast: pestana cerrada; reenganchando visor a pestana principal...")
-        try:
-            if self._cdp_session:
-                await self._cdp_session.send("Page.stopScreencast")
-                await self._cdp_session.detach()
-        except Exception:
-            pass
-        finally:
-            self._cdp_session = None
-            self._screencast_active = False
-
-        await self.start_screencast(target_page=fallback_page)
+        self.logger.info("Screencast: pestaña cerrada; reenganchando visor a pestaña principal...")
+        await self._move_screencast_to_page(fallback_page)
 
     async def stop_screencast(self) -> None:
         """Detiene el CDP Screencast y limpia el archivo de frame."""
@@ -494,12 +543,12 @@ class BaseAutomation:
         self._cdp_session = None
         self._screencast_active = False
         self._screencast_page = None
+        if self._screencast_watch_task and not self._screencast_watch_task.done():
+            self._screencast_watch_task.cancel()
+        self._screencast_watch_task = None
 
-        # Eliminar el archivo de frame para que el dashboard no muestre un frame viejo.
-        try:
-            self._screencast_path.unlink(missing_ok=True)
-        except Exception:
-            pass
+        # No eliminamos el frame para que el dashboard pueda mostrar la Ãºltima vista
+        # disponible mientras no haya un nuevo tramite activo.
         self.logger.info("Screencast en vivo detenido.")
 
     # ------------------------------------------------------------------ #
