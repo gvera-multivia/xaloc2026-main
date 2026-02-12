@@ -346,9 +346,9 @@ class BaseAutomation:
 
         _LIVE_FRAME_DIR.mkdir(parents=True, exist_ok=True)
 
-        quality = int(os.getenv("LIVE_STREAM_QUALITY", "40"))
-        max_width = int(os.getenv("LIVE_STREAM_WIDTH", "960"))
-        max_height = int(os.getenv("LIVE_STREAM_HEIGHT", "540"))
+        quality = int(os.getenv("LIVE_STREAM_QUALITY", "60"))
+        max_width = int(os.getenv("LIVE_STREAM_WIDTH", "1280"))
+        max_height = int(os.getenv("LIVE_STREAM_HEIGHT", "720"))
 
         async def _on_frame(params: dict) -> None:
             """Callback ejecutado por CDP en cada frame del screencast."""
