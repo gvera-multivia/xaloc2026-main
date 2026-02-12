@@ -471,15 +471,32 @@ class BaseAutomation:
         if not candidates:
             return None
 
+        # Priorizar la pagina de trabajo actual de la automatizacion.
+        # En algunos flujos Playwright sigue operando sobre una pestana
+        # que no queda en foco visual del navegador.
+        if self.page and not self.page.is_closed():
+            return self.page
+
         for p in reversed(candidates):
             if await self._page_looks_active(p):
                 return p
 
-        if self.page and not self.page.is_closed():
-            return self.page
         if self._screencast_page and not self._screencast_page.is_closed():
             return self._screencast_page
         return candidates[-1]
+
+    async def sync_screencast_with_page(self) -> None:
+        """Sincroniza el stream con self.page cuando esta cambia en el flujo."""
+        if not self._screencast_active:
+            return
+        if not self.page or self.page.is_closed():
+            return
+        if self.page is self._screencast_page:
+            return
+        try:
+            await self._move_screencast_to_page(self.page)
+        except Exception:
+            pass
 
     async def _screencast_watch_active_page_loop(self) -> None:
         while self._screencast_active:

@@ -53,6 +53,7 @@ class MadridAutomation(BaseAutomation):
                 self.logger.info("=" * 80)
 
                 self.page = await ejecutar_navegacion_madrid(self.page, self.config)
+                await self.sync_screencast_with_page()
 
                 self.logger.info("\n" + "=" * 80)
                 self.logger.info("NAVEGACIAN COMPLETADA - Formulario alcanzado")
@@ -71,6 +72,7 @@ class MadridAutomation(BaseAutomation):
                         self.config,
                         datos.form_data,
                     )
+                    await self.sync_screencast_with_page()
 
                     self.logger.info("\n" + "=" * 80)
                     self.logger.info("FORMULARIO COMPLETADO - Pantalla de adjuntos alcanzada")
@@ -86,6 +88,7 @@ class MadridAutomation(BaseAutomation):
                     self.logger.info("FASE 3: SUBIDA DE DOCUMENTOS")
                     self.logger.info("=" * 80)
                     self.page = await ejecutar_upload_madrid(self.page, self.config, datos.archivos_adjuntos)
+                    await self.sync_screencast_with_page()
                 else:
                     self.logger.info("\nsA Sin adjuntos, saltando FASE 3")
 
@@ -107,6 +110,7 @@ class MadridAutomation(BaseAutomation):
                         destino_verificacion,
                         datos.payload,
                     )
+                    await self.sync_screencast_with_page()
                 except MadridFirmaNonFatalError as e:
                     self.logger.warning("Firma/envAo completado con incidencias no fatales: %s", e)
                     if not isinstance(e, MadridJustificantePostEnvioNoDisponible):

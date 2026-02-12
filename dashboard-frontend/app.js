@@ -362,16 +362,14 @@ function AdminView({ selectedDay, setWorkerOnline, setWorkerLabel, sharedSearch 
 
   const refresh = async () => {
     try {
-      const [queueRes, pausesRes, itemPausesRes, authRes] = await Promise.all([
+      const [queueRes, pausesRes, itemPausesRes] = await Promise.all([
         apiFetch(`/queue/current?day=${selectedDay}&page=1&page_size=1000`),
         apiFetch('/queue/pauses?active_only=true'),
         apiFetch('/queue/item-pauses?active_only=true'),
-        apiFetch('/pending-auth'),
       ]);
       setQueueItems(queueRes.items || []);
       setPauses(pausesRes.items || []);
       setItemPauses(itemPausesRes.items || []);
-      setPendingAuth(authRes.items || []);
       setError('');
       setWorkerOnline(true);
       setWorkerLabel('API conectada y panel de control operativo');
@@ -381,6 +379,13 @@ function AdminView({ selectedDay, setWorkerOnline, setWorkerLabel, sharedSearch 
       setWorkerLabel('Fallo de conexion con API');
     } finally {
       setLoading(false);
+    }
+    // Fetch pending auth separately so failures don't break the main panel
+    try {
+      const authRes = await apiFetch('/pending-auth');
+      setPendingAuth(authRes.items || []);
+    } catch (_) {
+      // endpoint may not be available yet (server restart needed)
     }
   };
 

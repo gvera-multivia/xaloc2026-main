@@ -22,6 +22,7 @@ class BaseOnlineAutomation(BaseAutomation):
             self.logger.info("FASE 1: LOGIN + COMMON DESKTOP")
             self.logger.info("=" * 50)
             self.page = await ejecutar_login_base(self.page, self.config)
+            await self.sync_screencast_with_page()
 
             self.logger.info("\n" + "=" * 50)
             self.logger.info("FASE 2: RAMIFICACION (P1/P2/P3)")
