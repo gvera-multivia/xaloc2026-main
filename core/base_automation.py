@@ -415,6 +415,14 @@ class BaseAutomation:
         saltamos a ella automáticamente."""
         if not self._screencast_active:
             return
+        try:
+            if not getattr(new_page, "_screencast_close_listener_attached", False):
+                def _on_close() -> None:
+                    asyncio.create_task(self._handle_screencast_page_closed(new_page))
+                new_page.on("close", _on_close)
+                setattr(new_page, "_screencast_close_listener_attached", True)
+        except Exception:
+            pass
         
         self.logger.info("Nueva pestaña detectada; moviendo visor en vivo...")
         # No tocar self.page: es la pestaña de trabajo del flujo.
@@ -435,6 +443,39 @@ class BaseAutomation:
             await self.start_screencast(target_page=new_page)
         except Exception as e:
             self.logger.warning("Error al mover screencast a nueva pestaña: %s", e)
+
+    async def _handle_screencast_page_closed(self, closed_page: Page) -> None:
+        """Si se cierra la pestaña actualmente streameada, volver a una pestaña viva."""
+        if not self._screencast_active:
+            return
+        if closed_page is not self._screencast_page:
+            return
+
+        fallback_page: Optional[Page] = None
+        if self.page and not self.page.is_closed():
+            fallback_page = self.page
+        elif self.context:
+            for p in self.context.pages:
+                if not p.is_closed():
+                    fallback_page = p
+                    break
+
+        if not fallback_page:
+            self.logger.warning("Screencast: se cerró la pestaña activa y no hay fallback disponible.")
+            return
+
+        self.logger.info("Screencast: pestana cerrada; reenganchando visor a pestana principal...")
+        try:
+            if self._cdp_session:
+                await self._cdp_session.send("Page.stopScreencast")
+                await self._cdp_session.detach()
+        except Exception:
+            pass
+        finally:
+            self._cdp_session = None
+            self._screencast_active = False
+
+        await self.start_screencast(target_page=fallback_page)
 
     async def stop_screencast(self) -> None:
         """Detiene el CDP Screencast y limpia el archivo de frame."""
