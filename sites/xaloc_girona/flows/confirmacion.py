@@ -1,4 +1,4 @@
-"""
+﻿"""
 Flujo de confirmación final con pausa interactiva y envío real
 """
 
@@ -36,19 +36,19 @@ async def _wait_mask_hidden(page: Page, timeout_ms: int = 8000) -> None:
 
 
 async def _check_lopd(page: Page) -> None:
-    logging.info("¿? Iniciando proceso de marcado LOPD...")
+    logging.info("? Iniciando proceso de marcado LOPD...")
     
     await page.wait_for_selector("#lopdok", state="attached", timeout=60000)
     checkbox = page.locator("#lopdok").first
     
-    logging.info("¿? Esperando visibilidad del checkbox #lopdok...")
+    logging.info("? Esperando visibilidad del checkbox #lopdok...")
     await checkbox.wait_for(state="visible", timeout=30000)
     
-    logging.info("¿? Desplazando checkbox a la vista...")
+    logging.info("? Desplazando checkbox a la vista...")
     await checkbox.scroll_into_view_if_needed()
 
     # Primero intentar click directo (caso rápido sin overlay)
-    logging.info(">> Intento 1: Marcado directo (rápido)...")
+    logging.info(">> Intento 1: Marcado directo (rapido)...")
     try:
         await checkbox.check(timeout=1000)
         if await checkbox.is_checked():
@@ -84,7 +84,7 @@ async def _check_lopd(page: Page) -> None:
         logging.info(f"!! Intento 3 (forzado) fallado: {e}")
 
     # Último recurso: JavaScript
-    logging.info(">> Intento FINAL: Marcado vía JavaScript (eval)...")
+    logging.info(">> Intento FINAL: Marcado via JavaScript (eval)...")
     ok = await page.evaluate(
         """() => {
             console.log("Iniciando fallback JS para LOPD");
@@ -104,15 +104,15 @@ async def _check_lopd(page: Page) -> None:
         }"""
     )
     if ok:
-        logging.info("-> Marcado vía JavaScript EXITOSO")
+        logging.info("-> Marcado via JavaScript EXITOSO")
         await page.wait_for_timeout(DELAY_MS)
     else:
-        logging.error("!! ERROR CRÍTICO: No se pudo marcar el checkbox de ninguna forma")
+        logging.error("!! ERROR CRITICO: No se pudo marcar el checkbox de ninguna forma")
         raise TimeoutError("No se pudo marcar el checkbox LOPD (#lopdok)")
 
 
 async def _wait_boton_continuar(page: Page) -> None:
-    logging.info("-- Esperando a que el botón 'Continuar' sea visible...")
+    logging.info("-- Esperando a que el boton 'Continuar' sea visible...")
     await page.wait_for_function(
         """() => {
             const el = document.querySelector('#botoncontinuar');
@@ -123,7 +123,7 @@ async def _wait_boton_continuar(page: Page) -> None:
         }""",
         timeout=30000,
     )
-    logging.info("-> Botón 'Continuar' detectado y visible")
+    logging.info("-> Boton 'Continuar' detectado y visible")
 
 
 def _esperar_confirmacion_usuario() -> None:
@@ -136,26 +136,26 @@ def _esperar_confirmacion_usuario() -> None:
         return
 
     print("\n" + "="*80)
-    print("⚠️  PAUSA INTERACTIVA")
+    print("PAUSA INTERACTIVA")
     print("="*80)
     print("")
     print("El formulario está listo para enviar.")
     print("")
-    print("🔍 Por favor, revisa que todo esté correcto en el navegador.")
+    print("Por favor, revisa que todo este correcto en el navegador.")
     print("")
     print("IMPORTANTE: Una vez que presiones Enter, se enviará el formulario REALMENTE.")
     print("")
-    print("👉 Presiona Enter para CONFIRMAR el envío y continuar...")
+    print("Presiona Enter para CONFIRMAR el envio y continuar...")
     print("   (o presiona Ctrl+C para cancelar)")
     print("")
     print("="*80)
     
     try:
         input()
-        logging.info("✓ Usuario confirmó el envío. Procediendo...")
+        logging.info("Usuario confirmo el envio. Procediendo...")
     except KeyboardInterrupt:
-        logging.warning("⚠️  Usuario canceló el envío con Ctrl+C")
-        print("\n\n❌ Proceso cancelado por el usuario.")
+        logging.warning("Usuario cancelo el envio con Ctrl+C")
+        print("\n\nProceso cancelado por el usuario.")
         raise
 
 
@@ -163,7 +163,7 @@ async def _pulsar_boton_enviar(page: Page) -> None:
     """
     Pulsa el botón de enviar en la página TramitaSign.
     """
-    logging.info("🚀 Localizando botón de envío...")
+    logging.info("Localizando boton de envio...")
     
     # Intentar diferentes selectores para localizar el botón
     selectores = [
@@ -179,42 +179,42 @@ async def _pulsar_boton_enviar(page: Page) -> None:
             locator = page.locator(selector).first
             await locator.wait_for(state="visible", timeout=5000)
             boton_enviar = locator
-            logging.info(f"✓ Botón encontrado con selector: {selector}")
+            logging.info(f"Boton encontrado con selector: {selector}")
             break
         except TimeoutError:
-            logging.info(f"!! No se encontró el botón con selector: {selector}")
+            logging.info(f"!! No se encontro el boton con selector: {selector}")
             continue
     
     if not boton_enviar:
-        logging.error("❌ No se pudo localizar el botón de envío con ningún selector")
+        logging.error("No se pudo localizar el boton de envio con ningun selector")
         raise TimeoutError("No se encontró el botón de envío")
     
     await boton_enviar.scroll_into_view_if_needed()
-    logging.info("📤 Pulsando botón de ENVIAR...")
+    logging.info("Pulsando boton de ENVIAR...")
     
     try:
         # Usamos no_wait_after=True para que el click no intente esperar a la navegación,
         # delegando esa responsabilidad al expect_navigation con un timeout mayor.
         async with page.expect_navigation(wait_until="domcontentloaded", timeout=RECEIPT_WAIT_TIMEOUT_MS):
             await boton_enviar.click(no_wait_after=True)
-        logging.info("✓ Formulario enviado exitosamente")
+        logging.info("Formulario enviado exitosamente")
     except TimeoutError:
         # Si hay timeout, comprobamos si ya estamos en la página del justificante
         # Esto ocurre si la navegación se completó pero Playwright no lo detectó a tiempo
         if "TramitaJustif" in page.url:
-            logging.info("✓ Redirección detectada tras el click (aunque Playwright dio timeout). Continuando...")
+            logging.info("Redireccion detectada tras el click (aunque Playwright dio timeout). Continuando...")
             return
 
         # Si no estamos en la página del justificante, intentar click directo como fallback
-        logging.warning("Timeout esperando navegación y no se detecta la URL de destino. Intentando click directo...")
+        logging.warning("Timeout esperando navegacion y no se detecta la URL de destino. Intentando click directo...")
         try:
             await boton_enviar.click(timeout=10000)
             await page.wait_for_timeout(2000)
         except Exception as e:
-            logging.error(f"Fallo en el intento de click de recuperación: {e}")
+            logging.error(f"Fallo en el intento de click de recuperacion: {e}")
             # Si ya estamos en la URL de destino, ignoramos el error del click
             if "TramitaJustif" in page.url:
-                logging.info("✓ Confirmada URL de destino tras fallo del click de recuperación.")
+                logging.info("Confirmada URL de destino tras fallo del click de recuperacion.")
                 return
             raise
     
@@ -225,21 +225,21 @@ async def _esperar_pagina_justificante(page: Page, timeout_ms: int = RECEIPT_WAI
     """
     Espera a que la página redirija automáticamente a la página del justificante.
     """
-    logging.info("⏳ Esperando redirección automática a página del justificante...")
+    logging.info("Esperando redireccion automatica a pagina del justificante...")
     
     try:
         await page.wait_for_url("**/TramitaJustif**", timeout=timeout_ms)
-        logging.info("✓ Redirigido a página del justificante")
+        logging.info("Redirigido a pagina del justificante")
     except TimeoutError:
         current_url = page.url
-        logging.error(f"❌ Timeout esperando redirección. URL actual: {current_url}")
+        logging.error(f"Timeout esperando redireccion. URL actual: {current_url}")
         raise TimeoutError(
             f"No se redirigió a la página del justificante. URL actual: {current_url}"
         )
     
     # Esperar a que la página esté completamente cargada
     await page.wait_for_load_state("networkidle", timeout=30000)
-    logging.info("✓ Página del justificante cargada completamente")
+    logging.info("Pagina del justificante cargada completamente")
 
 
 async def confirmar_tramite(
@@ -260,7 +260,7 @@ async def confirmar_tramite(
         Ruta del screenshot de la página del justificante
     """
 
-    logging.info("Marcando aceptación LOPD")
+    logging.info("Marcando aceptacion LOPD")
     await _check_lopd(page)
 
     await _wait_boton_continuar(page)
@@ -285,9 +285,9 @@ async def confirmar_tramite(
     timestamp_pre = datetime.now().strftime("%Y%m%d_%H%M%S")
     screenshot_pre = screenshots_dir / f"xaloc_pre_envio_{timestamp_pre}.png"
     await page.screenshot(path=screenshot_pre, full_page=True)
-    logging.info(f"Screenshot pre-envío guardado: {screenshot_pre}")
+    logging.info(f"Screenshot pre-envio guardado: {screenshot_pre}")
 
-    # ⚠️ PAUSA INTERACTIVA ⚠️
+    # PAUSA INTERACTIVA
     _esperar_confirmacion_usuario()
 
     # Enviar formulario REALMENTE
@@ -295,7 +295,7 @@ async def confirmar_tramite(
     
     # Esperar tiempo configurable para que la página procese el envío
     if tiempo_espera_post_envio > 0:
-        logging.info(f"⏳ Esperando {tiempo_espera_post_envio}s para que la página se actualice...")
+        logging.info(f"Esperando {tiempo_espera_post_envio}s para que la pagina se actualice...")
         await page.wait_for_timeout(tiempo_espera_post_envio * 1000)
     
     # Esperar redirección automática a página del justificante
@@ -305,7 +305,7 @@ async def confirmar_tramite(
     timestamp_post = datetime.now().strftime("%Y%m%d_%H%M%S")
     screenshot_post = screenshots_dir / f"xaloc_justificante_{timestamp_post}.png"
     await page.screenshot(path=screenshot_post, full_page=True)
-    logging.info(f"✓ Screenshot del justificante guardado: {screenshot_post}")
+    logging.info(f"Screenshot del justificante guardado: {screenshot_post}")
 
     return str(screenshot_post)
 

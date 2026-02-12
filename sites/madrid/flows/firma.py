@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from playwright.async_api import Page, TimeoutError
 
-from core.errors import RetryWithoutAttemptError
+from core.errors import RestartWithProfileResetError, RetryWithoutAttemptError
 
 if TYPE_CHECKING:
     from sites.madrid.config import MadridConfig
@@ -56,6 +56,21 @@ def _normalize_text(text: str) -> str:
         if unicodedata.category(c) != "Mn"
     )
     return text
+
+
+async def _detectar_tramite_en_curso(page: Page) -> bool:
+    try:
+        raw_text = await page.locator("body").inner_text(timeout=1500)
+    except Exception:
+        raw_text = ""
+    text = _normalize_text(raw_text)
+    tokens = (
+        "ya esta realizando un tramite",
+        "ya esta realizando",
+        "tramite en curso",
+        "tramite abierto",
+    )
+    return any(t in text for t in tokens)
 
 
 def _get_folder_name_from_fase(fase_raw: Any) -> str:
@@ -415,6 +430,10 @@ async def ejecutar_firma_madrid(
     fase = payload.get("fase_procedimiento")
     id_recurso = payload.get("idRecurso") or destino_descarga.stem
     tmp_dir = Path("tmp") / "madrid" / "justificantes" / str(id_recurso)
+    if await _detectar_tramite_en_curso(page):
+        raise RestartWithProfileResetError(
+            "Madrid: pantalla de 'tramite en curso' detectada antes de iniciar firma."
+        )
 
     # 1. Ir a pantalla de firma (SIGNA) si no estamos ya.
     if config.url_signa_firma_contains.lower() not in (page.url or "").lower():
@@ -429,6 +448,10 @@ async def ejecutar_firma_madrid(
                 await page.click(config.firma_registrar_selector)
         except TimeoutError:
             logger.warning("No se detecto navegacion tras 'Firma y registrar'; continuando.")
+        if await _detectar_tramite_en_curso(page):
+            raise RestartWithProfileResetError(
+                "Madrid: pantalla de 'tramite en curso' detectada tras pulsar 'Firma y registrar'."
+            )
 
     # 2. Confirmar envio (checkbox + boton final).
     await page.wait_for_selector(
@@ -437,6 +460,10 @@ async def ejecutar_firma_madrid(
         timeout=config.firma_navigation_timeout,
     )
     logger.info("Pantalla SIGNA detectada.")
+    if await _detectar_tramite_en_curso(page):
+        raise RestartWithProfileResetError(
+            "Madrid: pantalla de 'tramite en curso' detectada en la fase de firma (SIGNA)."
+        )
 
     logger.info("Confirmando envio del tramite (checkbox + boton)...")
     checkbox = page.locator("#consentimiento")
@@ -468,11 +495,19 @@ async def ejecutar_firma_madrid(
         pass
 
     await page.wait_for_timeout(1200)
+    if await _detectar_tramite_en_curso(page):
+        raise RestartWithProfileResetError(
+            "Madrid: pantalla de 'tramite en curso' detectada justo despues del envio."
+        )
 
     # 3. Extraer anotacion y descargar justificante desde carpeta.
     try:
         anotacion = await _extraer_anotacion_desde_exito(page)
     except Exception as e:
+        if await _detectar_tramite_en_curso(page):
+            raise RestartWithProfileResetError(
+                "Madrid: no hay anotacion porque la sede devolvio pantalla de 'tramite en curso' tras envio."
+            ) from e
         raise RetryWithoutAttemptError(
             "Madrid: no se pudo obtener número de anotación tras firma/envío; "
             "se asume trámite NO enviado por error de página."

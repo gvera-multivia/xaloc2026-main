@@ -1,4 +1,4 @@
-"""
+﻿"""
 Flujo de navegaciÃ³n para Madrid Ayuntamiento.
 Implementa los 11 pasos documentados en explore-html/madrid-guide.md
 """
@@ -141,11 +141,11 @@ async def _recuperar_problema_autenticacion(page: Page, config: "MadridConfig", 
     - Si persiste, refresh.
     - Si tras refresh aparece "Confirmar reenvÃ­o de formulario", TAB->ENTER (PyAutoGUI).
     """
-    logger.warning(f"RecuperaciÃ³n auth: detectado problema '{problema}' (URL: {page.url})")
+    logger.warning(f"RecuperaciAn auth: detectado problema '{problema}' (URL: {page.url})")
 
     await page.wait_for_timeout(3000)
     if await _detectar_problema_autenticacion(page) is None:
-        logger.info("RecuperaciÃ³n auth: el problema desapareciÃ³ tras espera pasiva")
+        logger.info("RecuperaciAn auth: el problema desapareciA tras espera pasiva")
         return True
 
     try:
@@ -196,7 +196,7 @@ async def _manejar_pantalla_servcla_inicial(page: Page, config: "MadridConfig") 
         return False
 
     logger.info("PASO 8: Pantalla 'Acceso al formulario' (servcla) detectada")
-    logger.info(f"  â†’ URL: {page.url}")
+    logger.info(f"  a URL: {page.url}")
 
     # 1) Seleccionar "Tramitar una nueva solicitud" (checkboxNuevoTramite)
     # Esto dispara cargarOpciones() y el DOM se actualiza.
@@ -220,7 +220,7 @@ async def _manejar_pantalla_servcla_inicial(page: Page, config: "MadridConfig") 
     async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
         await page.click(config.selectors_navegacion.continuar_interesado)
 
-    logger.info(f"  â†’ Navegado a: {page.url}")
+    logger.info(f"  a Navegado a: {page.url}")
     return True
 
 
@@ -247,7 +247,7 @@ async def _aceptar_cookies_si_aparece(page: Page) -> None:
             boton = page.get_by_role("button", name=re.compile(patron, re.IGNORECASE))
             if await boton.count() > 0:
                 await boton.first.click(timeout=1500)
-                logger.info(f"  â†’ Cookies aceptadas (botÃ³n: {patron})")
+                logger.info(f"  a Cookies aceptadas (botAn: {patron})")
                 await page.wait_for_timeout(500)
                 return
         except Exception:
@@ -259,13 +259,13 @@ async def _aceptar_cookies_si_aparece(page: Page) -> None:
             enlace = page.get_by_role("link", name=re.compile(patron, re.IGNORECASE))
             if await enlace.count() > 0:
                 await enlace.first.click(timeout=1500)
-                logger.info(f"  â†’ Cookies aceptadas (enlace: {patron})")
+                logger.info(f"  a Cookies aceptadas (enlace: {patron})")
                 await page.wait_for_timeout(500)
                 return
         except Exception:
             continue
     
-    logger.debug("  â†’ No se detectÃ³ banner de cookies o ya estaba aceptado")
+    logger.debug("  a No se detectA banner de cookies o ya estaba aceptado")
 
 
 async def _esperar_dom_estable(page: Page, timeout_ms: int = 2000) -> None:
@@ -298,15 +298,15 @@ async def _cerrar_pestanas_extra(page: Page) -> None:
     pages = context.pages
     
     if len(pages) > 1:
-        logger.info(f"  â†’ Detectadas {len(pages)} pestaÃ±as, cerrando las extras...")
+        logger.info(f"  a Detectadas {len(pages)} pestaAas, cerrando las extras...")
         for p in pages:
             if p != page:
                 try:
                     url = p.url
                     await p.close()
-                    logger.info(f"  â†’ PestaÃ±a cerrada: {url[:50]}...")
+                    logger.info(f"  a PestaAa cerrada: {url[:50]}...")
                 except Exception as e:
-                    logger.warning(f"  â†’ Error al cerrar pestaÃ±a: {e}")
+                    logger.warning(f"  a Error al cerrar pestaAa: {e}")
 
 
 def _configurar_bloqueo_popups(page: Page) -> None:
@@ -338,7 +338,7 @@ def _configurar_bloqueo_popups(page: Page) -> None:
                 # Verificar si es un popup de redes sociales
                 for dominio in dominios_bloqueados:
                     if dominio in url:
-                        logger.info(f"  â†’ Bloqueando popup de {dominio}: {url[:50]}...")
+                        logger.info(f"  a Bloqueando popup de {dominio}: {url[:50]}...")
                         await new_page.close()
                         return
                 
@@ -348,20 +348,20 @@ def _configurar_bloqueo_popups(page: Page) -> None:
                     url = new_page.url
                     for dominio in dominios_bloqueados:
                         if dominio in url:
-                            logger.info(f"  â†’ Bloqueando popup de {dominio}: {url[:50]}...")
+                            logger.info(f"  a Bloqueando popup de {dominio}: {url[:50]}...")
                             await new_page.close()
                             return
                 
-                logger.warning(f"  â†’ Popup inesperado abierto: {url[:80]}")
+                logger.warning(f"  a Popup inesperado abierto: {url[:80]}")
             except Exception as e:
-                logger.debug(f"  â†’ Error procesando popup: {e}")
+                logger.debug(f"  a Error procesando popup: {e}")
         
         # Ejecutar el cierre de forma asÃ­ncrona
         asyncio.create_task(cerrar_popup())
     
     # Registrar el handler
     context.on("page", on_page_opened)
-    logger.debug("  â†’ Handler de bloqueo de popups configurado")
+    logger.debug("  a Handler de bloqueo de popups configurado")
 
 
 async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
@@ -397,7 +397,7 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
     # ========================================================================
     # Configurar handler para cerrar automÃ¡ticamente popups de Facebook, etc.
     _configurar_bloqueo_popups(page)
-    logger.info("  â†’ Bloqueo de popups de redes sociales activado")
+    logger.info("  a Bloqueo de popups de redes sociales activado")
     
     # Cerrar cualquier pestaÃ±a extra que pueda haber quedado de ejecuciones anteriores
     await _cerrar_pestanas_extra(page)
@@ -407,7 +407,7 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
     # ========================================================================
     url_actual = page.url or ""
     if config.url_servcla_inicial_contains in url_actual or config.url_servcla_formulario_contains in url_actual:
-        logger.info("  â†’ SesiÃ³n ya activa detectada por URL. Saltando a selecciÃ³n de formulario.")
+        logger.info("  a SesiAn ya activa detectada por URL. Saltando a selecciAn de formulario.")
         goto_servcla = True
     else:
         # Verificar si por algÃºn motivo ya estamos autenticados aunque no estemos en la URL final
@@ -415,7 +415,7 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
         boton_continuar = page.locator(config.selectors_login.continuar_post_auth)
         try:
             if await boton_continuar.is_visible(timeout=2000):
-                logger.info("  â†’ Detectado botÃ³n post-auth. SesiÃ³n probablemente activa.")
+                logger.info("  a Detectado botAn post-auth. SesiAn probablemente activa.")
                 goto_servcla = True
             else:
                 goto_servcla = False
@@ -426,10 +426,10 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
         # ========================================================================
         # PASO 1: Navegar a URL base y click "Tramitar en lÃ­nea"
         # ========================================================================
-        logger.info("PASO 1: Navegando a pÃ¡gina base y clickando 'Tramitar en lÃ­nea'")
+        logger.info("PASO 1: Navegando a pAgina base y clickando 'Tramitar en lAnea'")
         await page.goto(config.url_base, wait_until="domcontentloaded", timeout=config.navigation_timeout)
         await _asegurar_no_tramite_en_curso(page)
-        logger.info(f"  â†’ URL cargada: {page.url}")
+        logger.info(f"  a URL cargada: {page.url}")
         
         # Esperar estabilizaciÃ³n del DOM (mÃ¡s tiempo)
         await _esperar_dom_estable(page, timeout_ms=config.flow_timeouts.dom_stable)
@@ -443,11 +443,11 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
         # Esperar y clickar el botÃ³n "Tramitar en lÃ­nea"
         await page.wait_for_selector(config.selectors_navegacion.boton_tramitar, state="visible", timeout=config.default_timeout)
         await page.click(config.selectors_navegacion.boton_tramitar)
-        logger.info(f"  â†’ Click en botÃ³n 'Tramitar en lÃ­nea' ({config.selectors_navegacion.boton_tramitar})")
+        logger.info(f"  a Click en botAn 'Tramitar en lAnea' ({config.selectors_navegacion.boton_tramitar})")
         
         # Esperar a que aparezca el bloque #verTodas
         await page.wait_for_selector(config.selectors_navegacion.bloque_tramitar, state="visible", timeout=config.default_timeout)
-        logger.info(f"  â†’ Bloque de tramitaciÃ³n visible ({config.selectors_navegacion.bloque_tramitar})")
+        logger.info(f"  a Bloque de tramitaciAn visible ({config.selectors_navegacion.bloque_tramitar})")
         
         # Delay antes del siguiente paso
         await page.wait_for_timeout(DELAY_ENTRE_PASOS)
@@ -455,7 +455,7 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
         # ========================================================================
         # PASO 2: Click "Registro ElectrÃ³nico"
         # ========================================================================
-        logger.info("PASO 2: Clickando 'Registro ElectrÃ³nico'")
+        logger.info("PASO 2: Clickando 'Registro ElectrAnico'")
         await page.wait_for_selector(config.selectors_navegacion.registro_electronico, state="visible", timeout=config.default_timeout)
         
         # Click y esperar navegaciÃ³n a servpub.madrid.es
@@ -463,7 +463,7 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
             await page.click(config.selectors_navegacion.registro_electronico)
         await _asegurar_no_tramite_en_curso(page)
         
-        logger.info(f"  â†’ Navegado a: {page.url}")
+        logger.info(f"  a Navegado a: {page.url}")
         
         # Esperar estabilizaciÃ³n despuÃ©s de cambio de dominio
         await _esperar_dom_estable(page, timeout_ms=config.flow_timeouts.dom_stable)
@@ -477,13 +477,13 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
         # ========================================================================
         # PASO 3: Click primer "Continuar"
         # ========================================================================
-        logger.info("PASO 3: Clickando primer botÃ³n 'Continuar'")
+        logger.info("PASO 3: Clickando primer botAn 'Continuar'")
         try:
             await page.wait_for_selector(config.selectors_navegacion.continuar_1, state="visible", timeout=config.default_timeout)
         except PlaywrightTimeoutError:
             # Comprobar si es la pantalla de "trÃ¡mite en curso" â†’ reinicio del navegador
             if await _detectar_tramite_en_curso(page):
-                logger.warning("  ! Detectada pantalla 'trÃ¡mite en curso' en PASO 3")
+                logger.warning("  ! Detectada pantalla 'trAmite en curso' en PASO 3")
                 raise RestartWithProfileResetError(
                     "Pantalla 'trÃ¡mite en curso' detectada en PASO 3; reiniciar con perfil limpio."
                 )
@@ -496,7 +496,7 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
             await _asegurar_no_tramite_en_curso(page, por_timeout=True, paso="PASO 3")
             raise
         
-        logger.info(f"  â†’ Navegado a: {page.url}")
+        logger.info(f"  a Navegado a: {page.url}")
         
         # Esperar estabilizaciÃ³n
         await _esperar_dom_estable(page, timeout_ms=config.flow_timeouts.dom_stable)
@@ -507,7 +507,7 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
         # ========================================================================
         # PASO 4: Click "Iniciar tramitaciÃ³n"
         # ========================================================================
-        logger.info("PASO 4: Clickando 'Iniciar tramitaciÃ³n'")
+        logger.info("PASO 4: Clickando 'Iniciar tramitaciAn'")
         await page.wait_for_selector(config.selectors_login.iniciar_tramitacion, state="visible", timeout=config.default_timeout)
         
         # Delay antes de la acciÃ³n que llevarÃ¡ a la pasarela de certificados
@@ -517,7 +517,7 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
             await page.click(config.selectors_login.iniciar_tramitacion)
         await _asegurar_no_tramite_en_curso(page)
         
-        logger.info(f"  â†’ Navegado a pantalla de login: {page.url}")
+        logger.info(f"  a Navegado a pantalla de login: {page.url}")
         
         # Esperar estabilizaciÃ³n despuÃ©s de llegar a la pasarela
         await _esperar_dom_estable(page, timeout_ms=config.flow_timeouts.dom_stable)
@@ -531,13 +531,13 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
         # ========================================================================
         # PASO 5: Click "DNIe / Certificado"
         # ========================================================================
-        logger.info("PASO 5: Seleccionando mÃ©todo de acceso 'DNIe / Certificado'")
+        logger.info("PASO 5: Seleccionando mAtodo de acceso 'DNIe / Certificado'")
         # Nota: cuando la sesiÃ³n ya estÃ¡ guardada (trÃ¡mite anterior), Madrid puede saltarse
         # la pantalla de DNIe/certificado y navegar directo a servcla. Evitamos timeouts.
         if await _esta_en_servcla(page, config):
-            logger.info("  â†’ SesiÃ³n activa: ya estamos en servcla; saltando DNIe/certificado")
+            logger.info("  a SesiAn activa: ya estamos en servcla; saltando DNIe/certificado")
         elif await _btn_continuar_post_auth_visible(page, config):
-            logger.info("  â†’ SesiÃ³n activa: botÃ³n 'Continuar' post-auth ya visible; saltando DNIe/certificado")
+            logger.info("  a SesiAn activa: botAn 'Continuar' post-auth ya visible; saltando DNIe/certificado")
         else:
             # Puede ocurrir que Madrid navegue automÃ¡ticamente a servcla (sesiÃ³n guardada)
             # y el selector de certificado nunca llegue a aparecer. Esperamos de forma
@@ -545,7 +545,7 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
             deadline = time.monotonic() + (config.default_timeout / 1000.0)
             while True:
                 if await _esta_en_servcla(page, config) or await _btn_continuar_post_auth_visible(page, config):
-                    logger.info("  â†’ SesiÃ³n activa detectada durante la espera; saltando click certificado")
+                    logger.info("  a SesiAn activa detectada durante la espera; saltando click certificado")
                     break
                 try:
                     await page.wait_for_selector(config.selectors_login.certificado_login, state="attached", timeout=500)
@@ -578,7 +578,7 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
                 except PlaywrightTimeoutError:
                     if getattr(config.navegador, "headless", False):
                         raise RuntimeError("Madrid: timeout esperando autenticaciÃ³n post-certificado.")
-                    logger.warning("  ! Timeout de automatizaciÃ³n (15s). Esperando intervenciÃ³n manual...")
+                    logger.warning("  ! Timeout de automatizaciAn (15s). Esperando intervenciAn manual...")
                     await _esperar_auth_o_servcla(page, config, timeout_ms=0)
 
                 problema = await _detectar_problema_autenticacion(page)
@@ -588,9 +588,9 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
         # ========================================================================
         # PASO 7: Click "Continuar" post-autenticaciÃ³n
         # ========================================================================
-        logger.info("PASO 7: Clickando 'Continuar' tras autenticaciÃ³n")
+        logger.info("PASO 7: Clickando 'Continuar' tras autenticaciAn")
         if await _esta_en_servcla(page, config):
-            logger.info("  â†’ Ya estamos en servcla; no existe 'Continuar' post-auth. Saltando PASO 7.")
+            logger.info("  a Ya estamos en servcla; no existe 'Continuar' post-auth. Saltando PASO 7.")
         else:
             await page.wait_for_timeout(DELAY_ENTRE_PASOS)
 
@@ -601,13 +601,13 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
                 await _asegurar_no_tramite_en_curso(page, por_timeout=True, paso="PASO 7")
                 raise
 
-            logger.info(f"  â†’ Navegado a: {page.url}")
+            logger.info(f"  a Navegado a: {page.url}")
     
     # ========================================================================
     # PASO 8-9: Acceso al formulario (pantalla intermedia servcla o flujo antiguo)
     # ========================================================================
     if config.url_servcla_formulario_contains in page.url:
-        logger.info("PASO 8-9: Ya estamos en el formulario (action=opcion), saltando selecciÃ³n de acceso")
+        logger.info("PASO 8-9: Ya estamos en el formulario (action=opcion), saltando selecciAn de acceso")
     else:
     # Si estamos en la pantalla action=inicial, gestionarla por texto (mÃ¡s robusto).
         handled = await _manejar_pantalla_servcla_inicial(page, config)
@@ -619,18 +619,18 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
             # Delay
             await page.wait_for_timeout(DELAY_ENTRE_PASOS)
             await page.click(config.selectors_navegacion.radio_nuevo_tramite)
-            logger.info(f"  â†’ Radio seleccionado ({config.selectors_navegacion.radio_nuevo_tramite})")
+            logger.info(f"  a Radio seleccionado ({config.selectors_navegacion.radio_nuevo_tramite})")
             
             # Esperar a que cargarOpciones() actualice el DOM
             await page.wait_for_selector(config.selectors_navegacion.radio_interesado, state="visible", timeout=config.default_timeout)
-            logger.info("  â†’ DOM actualizado, opciones cargadas")
+            logger.info("  a DOM actualizado, opciones cargadas")
             
             logger.info("PASO 9: Seleccionando 'Persona o Entidad interesada'")
             
             # Delay
             await page.wait_for_timeout(DELAY_ENTRE_PASOS)
             await page.click(config.selectors_navegacion.radio_interesado)
-            logger.info(f"  â†’ Radio seleccionado ({config.selectors_navegacion.radio_interesado})")
+            logger.info(f"  a Radio seleccionado ({config.selectors_navegacion.radio_interesado})")
             
             await page.wait_for_selector(config.selectors_navegacion.continuar_interesado, state="visible", timeout=config.default_timeout)
             
@@ -642,12 +642,12 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
             except PlaywrightTimeoutError:
                 await _asegurar_no_tramite_en_curso(page, por_timeout=True, paso="PASO 9")
                 raise
-            logger.info(f"  â†’ Navegado a: {page.url}")
+            logger.info(f"  a Navegado a: {page.url}")
     
     # ========================================================================
     # PASO 10: Condicional - Manejar "Nuevo trÃ¡mite" si existe
     # ========================================================================
-    logger.info("PASO 10: Verificando si existe trÃ¡mite a medias...")
+    logger.info("PASO 10: Verificando si existe trAmite a medias...")
     
     try:
         # Intentar encontrar el botÃ³n "Nuevo trÃ¡mite" (timeout corto)
@@ -657,7 +657,7 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
             timeout=config.flow_timeouts.short_interaction
         )
         
-        logger.info("  â†’ Detectado trÃ¡mite a medias, clickando 'Nuevo trÃ¡mite'")
+        logger.info("  a Detectado trAmite a medias, clickando 'Nuevo trAmite'")
         
         # Delay
         await page.wait_for_timeout(DELAY_ENTRE_PASOS)
@@ -669,10 +669,10 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
             await _asegurar_no_tramite_en_curso(page, por_timeout=True, paso="PASO 10")
             raise
         
-        logger.info(f"  â†’ Navegado a nuevo trÃ¡mite: {page.url}")
+        logger.info(f"  a Navegado a nuevo trAmite: {page.url}")
         
     except PlaywrightTimeoutError:
-        logger.info("  â†’ No hay trÃ¡mite a medias, continuando normalmente")
+        logger.info("  a No hay trAmite a medias, continuando normalmente")
     
     # ========================================================================
     # PASO 11: Verificar llegada al formulario
@@ -680,15 +680,15 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
     logger.info("PASO 11: Verificando llegada al formulario")
     
     if config.url_servcla_formulario_contains not in page.url:
-        logger.info(f"  â†’ Aviso: URL no contiene action=opcion todavÃ­a: {page.url}")
+        logger.info(f"  a Aviso: URL no contiene action=opcion todavAa: {page.url}")
     
     # Esperar a que exista un formulario (criterio genÃ©rico por ahora)
     await page.wait_for_selector(config.selectors_navegacion.formulario_llegada, state="attached", timeout=config.default_timeout)
     
-    logger.info("  âœ“ Formulario detectado")
-    logger.info(f"  âœ“ URL final: {page.url}")
+    logger.info("  a Formulario detectado")
+    logger.info(f"  a URL final: {page.url}")
     logger.info("=" * 80)
-    logger.info("NAVEGACIÃ“N COMPLETADA EXITOSAMENTE")
+    logger.info("NAVEGACIAN COMPLETADA EXITOSAMENTE")
     logger.info("=" * 80)
     
     return page

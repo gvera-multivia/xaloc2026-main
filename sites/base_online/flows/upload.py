@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 import re
@@ -63,11 +63,11 @@ async def subir_archivos_por_modal(
 
         boton_carregar = frame.locator("#penjar_fitxers").first
         if await boton_carregar.count() > 0:
-            logging.info("Click en botón 'Penjar' / 'Carregar'...")
+            logging.info("Click en boton 'Penjar' / 'Carregar'...")
             await boton_carregar.click()
             await page.wait_for_timeout(DELAY_MS)
 
-        logging.info("Esperando que aparezca el mensaje de éxito (#textSuccess)...")
+        logging.info("Esperando que aparezca el mensaje de exito (#textSuccess)...")
         success_text = frame.locator("#textSuccess").first
         
         # Esperar específicamente a que el texto contenga el nombre del archivo actual
@@ -76,7 +76,7 @@ async def subir_archivos_por_modal(
             # Intentamos esperar a que el texto del archivo aparezca
             await frame.locator("#textSuccess", has_text=archivo.name).wait_for(state="visible", timeout=30000)
         except Exception:
-            logging.warning(f"No se detectó el nombre '{archivo.name}' en #textSuccess, esperando visibilidad genérica.")
+            logging.warning(f"No se detecto el nombre '{archivo.name}' en #textSuccess, esperando visibilidad generica.")
             await success_text.wait_for(state="visible", timeout=15000)
 
         texto = (await success_text.inner_text()).strip()

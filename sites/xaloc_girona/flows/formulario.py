@@ -1,4 +1,4 @@
-"""
+﻿"""
 Flujo de rellenado del formulario STA
 """
 
@@ -77,7 +77,7 @@ async def _rellenar_input_mayusculas(page: Page, selector: str, valor: str) -> N
     """
     valor_clean = (valor or "").strip().upper()
     if not valor_clean:
-        logging.warning(f"Campo {selector} vacío, saltando...")
+        logging.warning(f"Campo {selector} vacio, saltando...")
         return
     
     locator = page.locator(selector)
@@ -120,7 +120,7 @@ async def _seleccionar_modo_notificacion_email(page: Page) -> None:
     try:
         await page.wait_for_selector("#contact22", state="visible", timeout=5000)
     except Exception:
-        logging.warning("Campo #contact22 no apareció tras 5s. Re-clicando modo de notificación electrónica...")
+        logging.warning("Campo #contact22 no aparecio tras 5s. Re-clicando modo de notificacion electronica...")
         await radio.click()
         await page.wait_for_timeout(1000)
         # Una espera final para asegurar que ahora sí esté
@@ -128,7 +128,7 @@ async def _seleccionar_modo_notificacion_email(page: Page) -> None:
 
 
 async def _rellenar_persona_juridica(page: Page, m: DatosMandatario) -> None:
-    logging.info("Tipo de persona: JURÍDICA")
+    logging.info("Tipo de persona: JURIDICA")
     
     # 1. Selector específico sin usar el ID '#' para evitar duplicados
     selector_rj = "input[name='tipoPersonaRepresented'][value='RJ']"
@@ -146,7 +146,7 @@ async def _rellenar_persona_juridica(page: Page, m: DatosMandatario) -> None:
 
 
 async def _rellenar_persona_fisica(page: Page, m: DatosMandatario) -> None:
-    logging.info("Tipo de persona: FÍSICA")
+    logging.info("Tipo de persona: FISICA")
     
     # 1. Selector específico sin usar el ID '#' 
     selector_rf = "input[name='tipoPersonaRepresented'][value='RF']"
@@ -171,7 +171,7 @@ async def _rellenar_persona_fisica(page: Page, m: DatosMandatario) -> None:
 
 
 async def _rellenar_mandatario(page: Page, mandatario: DatosMandatario) -> None:
-    logging.info("Rellenando sección de mandatario...")
+    logging.info("Rellenando seccion de mandatario...")
     
     # CORRECCIÓN: Buscamos el radio 'RT' de forma única
     selector_rt = "input[name='tipoActuacion'][value='RT']"
@@ -201,7 +201,7 @@ async def rellenar_formulario(page: Page, datos: DatosMulta) -> None:
         # Esto es crítico porque el formulario puede tener validaciones JS que ocultan
         # el botón de adjuntar documentos hasta que los campos de mandatario estén completos
         if datos.mandatario:
-            logging.info("Rellenando sección de mandatario PRIMERO...")
+            logging.info("Rellenando seccion de mandatario PRIMERO...")
             await _rellenar_mandatario(page, datos.mandatario)
             
             # CRÍTICO: Después de seleccionar "Representant de Tercers", el formulario
@@ -223,7 +223,7 @@ async def rellenar_formulario(page: Page, datos: DatosMulta) -> None:
             await page.wait_for_timeout(1500)
 
         # Ahora rellenamos el resto de campos
-        logging.info("Seleccionando modo de notificación por Email...")
+        logging.info("Seleccionando modo de notificacion por Email...")
         await _seleccionar_modo_notificacion_email(page)
 
         logging.info(f"Email: {datos.email}")
@@ -232,7 +232,7 @@ async def rellenar_formulario(page: Page, datos: DatosMulta) -> None:
         logging.info(f"Denuncia: {datos.num_denuncia}")
         await _rellenar_input(page, "#DinVarNUMDEN", str(datos.num_denuncia))
 
-        logging.info(f"Matrícula: {datos.matricula}")
+        logging.info(f"Matricula: {datos.matricula}")
         await _rellenar_input(page, "#DinVarMATRICULA", str(datos.matricula))
 
         logging.info(f"Expediente: {datos.num_expediente}")
@@ -244,7 +244,7 @@ async def rellenar_formulario(page: Page, datos: DatosMulta) -> None:
         # CRÍTICO: Después de rellenar todos los campos, el botón "Adjuntar i signar"
         # puede estar visible pero NO clicable debido a la recarga AJAX del mandatario.
         # Debemos esperar a que el formulario se estabilice completamente.
-        logging.info("Esperando estabilización final del formulario...")
+        logging.info("Esperando estabilizacion final del formulario...")
         
         # 1. Esperar a que desaparezca cualquier overlay de carga si existe
         try:
@@ -269,7 +269,7 @@ async def rellenar_formulario(page: Page, datos: DatosMulta) -> None:
         # NOTA: La subida de archivos se hace en una fase separada después de rellenar el formulario.
         # Esto evita problemas de sincronización con el navegador.
 
-        logging.info("Formulario completado con éxito")
+        logging.info("Formulario completado con exito")
 
     except Exception as e:
         logging.error(f"Error durante el rellenado: {e}")

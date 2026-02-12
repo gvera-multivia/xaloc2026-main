@@ -48,3 +48,10 @@ class XalocConfig(BaseConfig):
 
     # Configuracion de tiempos de espera
     tiempo_espera_post_envio: int = 10  # Segundos a esperar tras enviar antes de descargar justificante
+
+    def __post_init__(self) -> None:
+        # Backward compatibility: if legacy fields are overridden, reflect them in nested config.
+        if self.cert_button_selector and self.cert_button_selector != self.selectors.cert_button:
+            self.selectors.cert_button = self.cert_button_selector
+        if self.tramite_link_pattern and self.tramite_link_pattern != self.selectors.tramite_link_regex:
+            self.selectors.tramite_link_regex = self.tramite_link_pattern

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 import os
@@ -134,7 +134,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
             try:
                 regex = re.compile(regex_pattern)
             except re.error:
-                logger.warning(f"[madrid] Regex inválido en config.regex_expediente: {regex_pattern!r}. Usando fallback.")
+                logger.warning(f"[madrid] Regex invalido en config.regex_expediente: {regex_pattern!r}. Usando fallback.")
                 regex = self._regex_expediente_fallback
             self._regex_expediente_cache[regex_pattern] = regex
 
@@ -531,7 +531,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
             try:
                 batch_mapping = await classify_addresses_batch_with_ai(items)
             except Exception as e:
-                logger.warning("[MADRID][IA] Falló batch LLM, usando fallback local: %s", e)
+                logger.warning("[MADRID][IA] Fallo batch LLM, usando fallback local: %s", e)
                 batch_mapping = {}
 
         payloads: list[dict] = []
@@ -558,7 +558,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 nif = nif_individual
 
             if not nif:
-                logger.warning("[MADRID] Recurso %s sin NIF válido. Saltando.", r.get("idRecurso"))
+                logger.warning("[MADRID] Recurso %s sin NIF valido. Saltando.", r.get("idRecurso"))
                 continue
 
             nif = self._normalize_document_id(nif)

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 import re
@@ -416,7 +416,7 @@ async def firmar_presentar_y_descargar_justificante(page: Page, *, payload: dict
     except Exception:
         pass
 
-    logger.info("[BASE] Esperando mensaje de éxito tras cerrar popup...")
+    logger.info("[BASE] Esperando mensaje de exito tras cerrar popup...")
     success = page.locator("div.success").first
     await success.wait_for(state="visible", timeout=SUCCESS_TIMEOUT_MS)
     success_text = (await success.inner_text()).strip()

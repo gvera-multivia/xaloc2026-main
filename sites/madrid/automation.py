@@ -1,4 +1,4 @@
-"""
+﻿"""
 AutomatizaciÃ³n principal para Madrid Ayuntamiento.
 """
 
@@ -49,13 +49,13 @@ class MadridAutomation(BaseAutomation):
                 # FASE 1: NAVEGACIÃ“N HASTA EL FORMULARIO
                 # ================================================================
                 self.logger.info("\n" + "=" * 80)
-                self.logger.info("FASE 1: NAVEGACIÃ“N HASTA EL FORMULARIO")
+                self.logger.info("FASE 1: NAVEGACIAN HASTA EL FORMULARIO")
                 self.logger.info("=" * 80)
 
                 self.page = await ejecutar_navegacion_madrid(self.page, self.config)
 
                 self.logger.info("\n" + "=" * 80)
-                self.logger.info("NAVEGACIÃ“N COMPLETADA - Formulario alcanzado")
+                self.logger.info("NAVEGACIAN COMPLETADA - Formulario alcanzado")
                 self.logger.info("=" * 80)
 
                 # ================================================================
@@ -76,7 +76,7 @@ class MadridAutomation(BaseAutomation):
                     self.logger.info("FORMULARIO COMPLETADO - Pantalla de adjuntos alcanzada")
                     self.logger.info("=" * 80)
                 else:
-                    self.logger.info("\nâš  Sin datos de formulario, saltando FASE 2")
+                    self.logger.info("\nas Sin datos de formulario, saltando FASE 2")
 
                 # ================================================================
                 # FASE 3: SUBIDA DE DOCUMENTOS (adjuntos)
@@ -87,13 +87,13 @@ class MadridAutomation(BaseAutomation):
                     self.logger.info("=" * 80)
                     self.page = await ejecutar_upload_madrid(self.page, self.config, datos.archivos_adjuntos)
                 else:
-                    self.logger.info("\nÆ’sÃ¿ Sin adjuntos, saltando FASE 3")
+                    self.logger.info("\nsA Sin adjuntos, saltando FASE 3")
 
                 # ================================================================
                 # FASE 4: FIRMA Y VERIFICACIÃ“N DE DOCUMENTO
                 # ================================================================
                 self.logger.info("\n" + "=" * 80)
-                self.logger.info("FASE 4: FIRMA Y VERIFICACIÃ“N DE DOCUMENTO")
+                self.logger.info("FASE 4: FIRMA Y VERIFICACIAN DE DOCUMENTO")
                 self.logger.info("=" * 80)
                 
                 # Construir ruta de destino para el documento verificado
@@ -108,12 +108,12 @@ class MadridAutomation(BaseAutomation):
                         datos.payload,
                     )
                 except MadridFirmaNonFatalError as e:
-                    self.logger.warning("Firma/envÃ­o completado con incidencias no fatales: %s", e)
+                    self.logger.warning("Firma/envAo completado con incidencias no fatales: %s", e)
                     if not isinstance(e, MadridJustificantePostEnvioNoDisponible):
                         self.mark_nonfatal_issue()
                 
                 self.logger.info("\n" + "=" * 80)
-                self.logger.info("FIRMA Y VERIFICACIÃ“N COMPLETADA")
+                self.logger.info("FIRMA Y VERIFICACIAN COMPLETADA")
                 self.logger.info("=" * 80)
 
                 # ================================================================

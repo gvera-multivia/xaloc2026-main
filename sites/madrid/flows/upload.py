@@ -1,20 +1,22 @@
 """
 Flujo de subida de documentos (adjuntos) para Madrid Ayuntamiento.
 
-Reglas del trámite:
-- Máximo 13 documentos.
-- Máximo 15 MB en total.
-- Máximo 10 MB por documento.
-- Extensiones permitidas según el formulario.
+Reglas del tramite:
+- Maximo 13 documentos.
+- Maximo 15 MB en total.
+- Maximo 10 MB por documento.
+- Extensiones permitidas segun el formulario.
 """
 
 from __future__ import annotations
 
 import logging
+import unicodedata
 from pathlib import Path
 
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
+from core.errors import RestartWithProfileResetError
 from sites.madrid.config import MadridConfig
 
 logger = logging.getLogger(__name__)
@@ -94,12 +96,39 @@ def _normalizar_extension(path: Path) -> str:
     return path.suffix.lower().lstrip(".")
 
 
+def _normalizar_texto(texto: str) -> str:
+    if not texto:
+        return ""
+    texto = str(texto).strip().lower()
+    texto = "".join(
+        c for c in unicodedata.normalize("NFD", texto)
+        if unicodedata.category(c) != "Mn"
+    )
+    return " ".join(texto.split())
+
+
+async def _detectar_tramite_en_curso(page: Page) -> bool:
+    try:
+        body_text = await page.locator("body").inner_text(timeout=1500)
+    except Exception:
+        body_text = ""
+
+    text = _normalizar_texto(body_text)
+    tokens = (
+        "ya esta realizando un tramite",
+        "ya esta realizando",
+        "tramite en curso",
+        "tramite abierto",
+    )
+    return any(t in text for t in tokens)
+
+
 def _validar_archivos(archivos: list[Path]) -> None:
     if not archivos:
         return
 
     if len(archivos) > MAX_DOCUMENTOS:
-        raise ValueError(f"Demasiados documentos: {len(archivos)} (máx {MAX_DOCUMENTOS}).")
+        raise ValueError(f"Demasiados documentos: {len(archivos)} (max {MAX_DOCUMENTOS}).")
 
     total = 0
     for archivo in archivos:
@@ -108,7 +137,7 @@ def _validar_archivos(archivos: list[Path]) -> None:
 
         ext = _normalizar_extension(archivo)
         if ext not in EXTENSIONES_PERMITIDAS:
-            raise ValueError(f"Extensión no permitida: .{ext} ({archivo.name})")
+            raise ValueError(f"Extension no permitida: .{ext} ({archivo.name})")
 
         size = archivo.stat().st_size
         if size > MAX_POR_DOC_BYTES:
@@ -117,7 +146,7 @@ def _validar_archivos(archivos: list[Path]) -> None:
         total += size
 
     if total > MAX_TOTAL_BYTES:
-        raise ValueError(f"Tamaño total demasiado grande (>15MB): {total} bytes")
+        raise ValueError(f"Tamano total demasiado grande (>15MB): {total} bytes")
 
 
 async def ejecutar_upload_madrid(page: Page, config: MadridConfig, archivos: list[Path]) -> Page:
@@ -126,15 +155,15 @@ async def ejecutar_upload_madrid(page: Page, config: MadridConfig, archivos: lis
 
     - Para cada archivo i:
       - set_input_files() sobre el input con name que incluye `_id28:i:...:_id679`
-      - click en el botón "más" (`duplica_repetir`) para crear el siguiente input (excepto el último)
-    - Finalmente, pulsar "Continuar" para avanzar a la pantalla de firma (que NO se ejecuta).
+      - click en el boton "mas" para crear el siguiente input (excepto el ultimo)
+    - Finalmente, pulsar "Continuar" para avanzar a la pantalla de firma.
     """
     _validar_archivos(archivos)
     if not archivos:
         logger.info("Sin adjuntos, saltando subida de documentos")
         return page
 
-    logger.info(f"ADJUNTOS: subiendo {len(archivos)} documento(s)")
+    logger.info("ADJUNTOS: subiendo %s documento(s)", len(archivos))
 
     await page.wait_for_selector(_selector_input_archivo(0), state="attached", timeout=config.default_timeout)
 
@@ -143,7 +172,7 @@ async def ejecutar_upload_madrid(page: Page, config: MadridConfig, archivos: lis
         await page.wait_for_selector(selector_input, state="visible", timeout=config.default_timeout)
 
         await page.set_input_files(selector_input, str(archivo))
-        logger.info(f"  Adjuntado [{idx + 1}/{len(archivos)}]: {archivo.name}")
+        logger.info("  Adjuntado [%s/%s]: %s", idx + 1, len(archivos), archivo.name)
 
         if idx < len(archivos) - 1:
             selector_mas = _selector_boton_mas(idx)
@@ -162,11 +191,26 @@ async def ejecutar_upload_madrid(page: Page, config: MadridConfig, archivos: lis
             )
 
     await page.wait_for_selector(config.adjuntos_continuar_selector, state="visible", timeout=config.default_timeout)
-    # Madrid va lenta: dejar margen antes de continuar tras subir archivos
     await page.wait_for_timeout(2000)
     async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
         await page.click(config.adjuntos_continuar_selector)
 
-    logger.info("Adjuntos subidos; pantalla de firma alcanzada (no se ejecuta la firma en modo demo)")
-    return page
+    if await _detectar_tramite_en_curso(page):
+        raise RestartWithProfileResetError(
+            "Madrid: detectada pantalla de 'tramite en curso' tras subir adjuntos; reiniciar con perfil limpio."
+        )
+
+    url_actual = (page.url or "").lower()
+    if config.url_signa_firma_contains.lower() in url_actual:
+        logger.info("Adjuntos subidos; pantalla SIGNA alcanzada.")
+        return page
+
+    if await page.locator(config.firma_registrar_selector).count() > 0:
+        logger.info("Adjuntos subidos; pantalla pre-firma alcanzada (lista para 'Firma y registrar').")
+        return page
+
+    raise RuntimeError(
+        "Madrid: tras subir adjuntos no se alcanzo una pantalla valida de firma "
+        f"(URL actual: {page.url})."
+    )
 

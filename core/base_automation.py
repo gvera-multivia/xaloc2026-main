@@ -331,12 +331,21 @@ class BaseAutomation:
     async def start_screencast(self) -> None:
         """Inicia el CDP Screencast: Chrome envía frames JPEG comprimidos
         que se escriben atómicamente a *self._screencast_path* para que el
-        dashboard pueda servirlos."""
+        dashboard pueda servirlos.
+        
+        Si se abren nuevas pestañas en el contexto, el screencast se moverá
+        automáticamente a la última pestaña creada.
+        """
         if self._screencast_active:
             return
         if not self.page or self.page.is_closed():
             self.logger.warning("start_screencast: no hay página activa.")
             return
+
+        # Asegurar que escuchamos la apertura de nuevas pestañas para seguirlas.
+        if not hasattr(self, "_on_page_listener_attached"):
+            self.context.on("page", self._handle_new_page_screencast)
+            self._on_page_listener_attached = True
 
         try:
             self._cdp_session = await self.context.new_cdp_session(self.page)
@@ -346,9 +355,10 @@ class BaseAutomation:
 
         _LIVE_FRAME_DIR.mkdir(parents=True, exist_ok=True)
 
-        quality = int(os.getenv("LIVE_STREAM_QUALITY", "60"))
-        max_width = int(os.getenv("LIVE_STREAM_WIDTH", "1280"))
-        max_height = int(os.getenv("LIVE_STREAM_HEIGHT", "720"))
+        quality = int(os.getenv("LIVE_STREAM_QUALITY", "85"))
+        max_width = int(os.getenv("LIVE_STREAM_WIDTH", "1920"))
+        max_height = int(os.getenv("LIVE_STREAM_HEIGHT", "1080"))
+        every_nth = int(os.getenv("LIVE_STREAM_EVERY_NTH", "2"))
 
         async def _on_frame(params: dict) -> None:
             """Callback ejecutado por CDP en cada frame del screencast."""
@@ -386,17 +396,41 @@ class BaseAutomation:
                     "quality": quality,
                     "maxWidth": max_width,
                     "maxHeight": max_height,
-                    "everyNthFrame": 2,
+                    "everyNthFrame": every_nth,
                 },
             )
             self._screencast_active = True
-            self.logger.info(
-                "Screencast en vivo iniciado (quality=%s, %sx%s).",
-                quality, max_width, max_height,
-            )
+            # No logeamos cada re-attach para no ensuciar el log demasiado.
+            # Pero logeamos el primero o cambios significativos si es necesario.
         except Exception as exc:
             self.logger.warning("No se pudo iniciar screencast CDP: %s", exc)
             self._cdp_session = None
+
+    async def _handle_new_page_screencast(self, new_page: Page) -> None:
+        """Handler interno: si el screencast está activo y se abre otra pestaña,
+        saltamos a ella automáticamente."""
+        if not self._screencast_active:
+            return
+        
+        self.logger.info("Nueva pestaña detectada; moviendo visor en vivo...")
+        # Cambiamos la página de referencia de la clase.
+        self.page = new_page
+        
+        # Reiniciamos el screencast sobre el nuevo target CDP.
+        # stop_screencast detiene pero mantiene _screencast_active=False
+        # así que guardamos el estado deseado.
+        try:
+            # Detenemos la sesión CDP anterior sobre la pestaña vieja.
+            if self._cdp_session:
+                await self._cdp_session.send("Page.stopScreencast")
+                await self._cdp_session.detach()
+                self._cdp_session = None
+            
+            # Forzamos re-inicio en la nueva página.
+            self._screencast_active = False 
+            await self.start_screencast()
+        except Exception as e:
+            self.logger.warning("Error al mover screencast a nueva pestaña: %s", e)
 
     async def stop_screencast(self) -> None:
         """Detiene el CDP Screencast y limpia el archivo de frame."""
@@ -429,6 +463,8 @@ class BaseAutomation:
             return None
         path = self.config.dir_screenshots / filename
         try:
+            # Si hay screencast activo, esto puede fallar o interferir,
+            # pero Playwright suele manejarlo bien.
             await self.page.screenshot(path=path, full_page=True)
         except Exception:
             return None

@@ -15,6 +15,15 @@ def setup_worker_logging(run_id: str) -> logging.Logger:
 
     root.setLevel(logging.DEBUG)
 
+    # Evita UnicodeEncodeError en consolas Windows cp1252 cuando se loguean
+    # caracteres no representables (p. ej. flechas, emojis, etc.).
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if hasattr(stream, "reconfigure"):
+                stream.reconfigure(errors="backslashreplace")
+        except Exception:
+            pass
+
     stream_handler = logging.StreamHandler(sys.stdout)
     stream_handler.setLevel(logging.INFO)
     stream_handler.setFormatter(

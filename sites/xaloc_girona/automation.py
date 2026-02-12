@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from core.base_automation import BaseAutomation
 from sites.xaloc_girona.config import XalocConfig
@@ -64,7 +64,7 @@ class XalocGironaAutomation(BaseAutomation):
                 ruta_justificante = await descargar_y_guardar_justificante(
                     self.page, payload_descarga
                 )
-                self.logger.info(f"✓ Justificante guardado en: {ruta_justificante}")
+                self.logger.info(f"OK Justificante guardado en: {ruta_justificante}")
             except Exception as e:
                 self.logger.error(f"Error descargando justificante: {e}")
                 self.mark_nonfatal_issue()
