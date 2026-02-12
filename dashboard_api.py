@@ -44,53 +44,42 @@ if not os.path.exists(frontend_out):
             f.write("<html><body><h1>Dashboard is building...</h1><p>Please wait a few minutes and refresh.</p></body></html>")
 
 
-@app.get("/")
-async def home():
-    return FileResponse("dashboard-frontend/out/index.html")
-
-@app.get("/queues")
-@app.get("/queues/")
-@app.get("/admin")
-@app.get("/admin/")
-@app.get("/colas")
-@app.get("/colas/")
-async def queues():
-    return FileResponse("dashboard-frontend/out/index.html")
-
-@app.get("/history")
-@app.get("/history/")
-@app.get("/historico")
-@app.get("/historico/")
-@app.get("/control")
-@app.get("/control/")
-@app.get("/blacklist")
-@app.get("/blacklist/")
-@app.get("/updates")
-@app.get("/updates/")
-async def history():
-    return FileResponse("dashboard-frontend/out/index.html")
-
-
-@app.get("/styles.css")
-async def styles():
-    return FileResponse("dashboard-frontend/out/styles.css")
-
-
-# Mount the _next directory specifically for Next.js assets
+# Mounts for Next.js internal folders (must be defined BEFORE catch-all)
 app.mount("/_next", StaticFiles(directory="dashboard-frontend/out/_next"), name="next")
 
-# Mount the static directory for images/assets if they exist
 assets_path = os.path.join("dashboard-frontend", "out", "assets")
 if os.path.exists(assets_path):
     app.mount("/assets", StaticFiles(directory="dashboard-frontend/out/assets"), name="assets")
 
-# Serve favicon
+# Favicon and root-level static files
 @app.get("/favicon.ico")
 async def favicon():
-    return FileResponse("dashboard-frontend/out/favicon.ico")
+    fpath = os.path.join("dashboard-frontend", "out", "favicon.ico")
+    if os.path.exists(fpath):
+        return FileResponse(fpath)
+    return Response(status_code=404)
 
-# Mount the frontend directory for any other assets (legacy compatibility or generic dashboard subpath)
-app.mount("/dashboard", StaticFiles(directory="dashboard-frontend/out"), name="dashboard")
+# CATCH-ALL for SPA Routing (Supports Next.js App Router)
+# This handles /, /admin, /history, /control, etc. and returns index.html
+@app.get("/{rest_of_path:path}")
+@app.head("/{rest_of_path:path}")
+async def catch_all(rest_of_path: str):
+    # 1. Check if the file exists in 'out/'
+    file_path = os.path.join("dashboard-frontend", "out", rest_of_path)
+    if os.path.isfile(file_path):
+        return FileResponse(file_path)
+    
+    # 2. Check if a .html version exists (Next.js static export pattern)
+    html_path = file_path + ".html"
+    if os.path.isfile(html_path):
+        return FileResponse(html_path)
+
+    # 3. Fallback to index.html for SPA routing
+    index_path = os.path.join("dashboard-frontend", "out", "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    
+    raise HTTPException(status_code=404, detail="Not Found")
 
 
 @app.on_event("startup")
