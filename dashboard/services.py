@@ -299,3 +299,55 @@ class DashboardService:
                     error_message="Cancelado manualmente desde dashboard.",
                 )
         return result
+
+    def list_blacklist(self, *, site_id: str | None = None) -> list[dict[str, Any]]:
+        return self.db.list_blocked_resources(site_id=site_id)
+
+    def block_blacklist(
+        self,
+        *,
+        site_id: str,
+        resource_id: int,
+        reason: str | None = None,
+        source: str | None = "manual",
+    ) -> dict[str, Any]:
+        site = (site_id or "").strip()
+        if not site:
+            raise ValueError("site_id es obligatorio.")
+        try:
+            rid = int(resource_id)
+        except Exception as exc:
+            raise ValueError("resource_id debe ser entero.") from exc
+        self.db.block_resource(
+            site_id=site,
+            resource_id=rid,
+            reason=(reason or "").strip() or None,
+            source=(source or "").strip() or "manual",
+        )
+        return {"site_id": site, "resource_id": rid, "blocked": True}
+
+    def unblock_blacklist(self, *, site_id: str, resource_id: int) -> dict[str, Any]:
+        site = (site_id or "").strip()
+        if not site:
+            raise ValueError("site_id es obligatorio.")
+        try:
+            rid = int(resource_id)
+        except Exception as exc:
+            raise ValueError("resource_id debe ser entero.") from exc
+        removed = self.db.unblock_resource(site_id=site, resource_id=rid)
+        return {"site_id": site, "resource_id": rid, "unblocked": bool(removed)}
+
+    def list_organismo_configs(self) -> list[dict[str, Any]]:
+        return self.db.list_organismo_configs()
+
+    def update_organismo_config(self, *, site_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+        site = (site_id or "").strip()
+        if not site:
+            raise ValueError("site_id es obligatorio.")
+        if "active" in updates:
+            updates["active"] = 1 if bool(updates["active"]) else 0
+        updated = self.db.update_organismo_config(site_id=site, updates=updates)
+        if not updated:
+            raise ValueError("No se actualizo configuracion: site no existe o payload vacio.")
+        row = self.db.get_organismo_config(site)
+        return {"updated": True, "item": row}

@@ -5,8 +5,10 @@ const API_BASE = '/api';
 const PAGE_SIZE_DEFAULT = 25;
 const KNOWN_SITES = ['madrid', 'xaloc_girona', 'base_online'];
 const ROUTE_META = {
-  '/': { label: 'Dashboard' },
-  '/admin': { label: 'Administracion' },
+  '/': { label: 'Estado General' },
+  '/control': { label: 'Panel de Control' },
+  '/blacklist': { label: 'Listas Negras' },
+  '/admin': { label: 'Colas' },
   '/history': { label: 'Historial' },
 };
 
@@ -16,6 +18,8 @@ function toIsoDay(date = new Date()) {
 
 function normalizePath(pathname) {
   const p = (pathname || '/').toLowerCase();
+  if (p === '/control' || p === '/control/') return '/control';
+  if (p === '/blacklist' || p === '/blacklist/') return '/blacklist';
   if (p === '/queues' || p === '/queues/' || p === '/colas' || p === '/colas/' || p === '/admin' || p === '/admin/') return '/admin';
   if (p === '/history' || p === '/history/' || p === '/historico' || p === '/historico/') return '/history';
   return '/';
@@ -86,8 +90,10 @@ function TopNav({ path, onNavigate, workerOnline, workerLabel, quickSearch, setQ
         </button>
 
         <div className="nav-links">
-          <button className={path === '/' ? 'nav-link active' : 'nav-link'} onClick={() => onNavigate('/')}>Dashboard</button>
-          <button className={path === '/admin' ? 'nav-link active' : 'nav-link'} onClick={() => onNavigate('/admin')}>Administracion</button>
+          <button className={path === '/' ? 'nav-link active' : 'nav-link'} onClick={() => onNavigate('/')}>Estado</button>
+          <button className={path === '/control' ? 'nav-link active' : 'nav-link'} onClick={() => onNavigate('/control')}>Control</button>
+          <button className={path === '/blacklist' ? 'nav-link active' : 'nav-link'} onClick={() => onNavigate('/blacklist')}>Bloqueos</button>
+          <button className={path === '/admin' ? 'nav-link active' : 'nav-link'} onClick={() => onNavigate('/admin')}>Colas</button>
           <button className={path === '/history' ? 'nav-link active' : 'nav-link'} onClick={() => onNavigate('/history')}>Historial</button>
         </div>
 
@@ -611,6 +617,283 @@ function AdminView({ selectedDay, setWorkerOnline, setWorkerLabel, sharedSearch 
   );
 }
 
+function ControlPanelView({ setWorkerOnline, setWorkerLabel }) {
+  const [status, setStatus] = useState({ worker: 'stopped', brain: 'stopped' });
+  const [logs, setLogs] = useState({ worker: { stdout: [], stderr: [] }, brain: { stdout: [], stderr: [] } });
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  const [autoScroll, setAutoScroll] = useState(true);
+  const workerLogRef = useRef(null);
+  const brainLogRef = useRef(null);
+
+  const refresh = async () => {
+    try {
+      const [statusRes, workerLogs, brainLogs] = await Promise.all([
+        apiFetch('/control/status'),
+        apiFetch('/logs/worker?lines=100'),
+        apiFetch('/logs/brain?lines=100'),
+      ]);
+      setStatus(statusRes || {});
+      setLogs({
+        worker: workerLogs || { stdout: [], stderr: [] },
+        brain: brainLogs || { stdout: [], stderr: [] },
+      });
+      setError('');
+      setWorkerOnline(true);
+      setWorkerLabel(`Worker: ${(statusRes.worker || 'stopped').toUpperCase()} | Brain: ${(statusRes.brain || 'stopped').toUpperCase()}`);
+    } catch (e) {
+      setError('No se pudo cargar estado/logs de procesos.');
+      setWorkerOnline(false);
+      setWorkerLabel('Sin conexion con API de control');
+    }
+  };
+
+  useEffect(() => {
+    refresh();
+    const id = setInterval(refresh, 4000);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    if (!autoScroll) return;
+    if (workerLogRef.current) workerLogRef.current.scrollTop = workerLogRef.current.scrollHeight;
+    if (brainLogRef.current) brainLogRef.current.scrollTop = brainLogRef.current.scrollHeight;
+  }, [logs, autoScroll]);
+
+  const callControl = async (name, action) => {
+    setBusy(`${name}:${action}`);
+    try {
+      await apiFetch(`/control/${name}/${action}`, { method: 'POST' });
+      await refresh();
+    } catch (e) {
+      setError(`No se pudo ${action} ${name}.`);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const renderProcessCard = (name) => {
+    const current = (status[name] || 'stopped').toLowerCase();
+    const isRunning = current === 'running';
+    const isError = current === 'error';
+    const statusLabel = isRunning ? 'RUNNING' : (isError ? 'ERROR' : 'STOPPED');
+    const cardLogs = logs[name] || { stdout: [], stderr: [] };
+    const combined = [...(cardLogs.stdout || []), ...(cardLogs.stderr || []).map((x) => `[ERR] ${x}`)].slice(-120);
+    const logRef = name === 'worker' ? workerLogRef : brainLogRef;
+
+    return (
+      <article className="panel process-card" key={name}>
+        <div className="panel-head">
+          <h2>{name.toUpperCase()}</h2>
+          <span className={`chip ${isRunning ? 'active' : (isError ? 'warn' : 'paused')}`}>{statusLabel}</span>
+        </div>
+
+        <div className="action-wrap">
+          <button disabled={isRunning || busy === `${name}:start`} onClick={() => callControl(name, 'start')}>INICIAR</button>
+          <button className="danger" disabled={!isRunning || busy === `${name}:stop`} onClick={() => callControl(name, 'stop')}>DETENER</button>
+          <button className="warn" disabled={!isRunning || busy === `${name}:restart`} onClick={() => callControl(name, 'restart')}>REINICIAR</button>
+          <button onClick={refresh}>REFRESCAR LOGS</button>
+        </div>
+
+        <div className="terminal process-logs" ref={logRef}>
+          {combined.length === 0 && <code>Sin logs disponibles.</code>}
+          {combined.map((line, idx) => (
+            <code key={`${name}-line-${idx}`} className={line.startsWith('[ERR]') ? 'terminal-error' : 'terminal-info'}>{line}</code>
+          ))}
+        </div>
+      </article>
+    );
+  };
+
+  return (
+    <section className="page-stack">
+      <div className="page-title-row">
+        <div>
+          <h1>Panel de control de procesos</h1>
+          <p>Gestion de worker.py y brain.py sin usar terminal.</p>
+        </div>
+        <div className="meta-actions">
+          <label className="inline-check">
+            <input type="checkbox" checked={autoScroll} onChange={(e) => setAutoScroll(e.target.checked)} />
+            Auto-scroll logs
+          </label>
+          <button onClick={refresh}>Actualizar</button>
+        </div>
+      </div>
+      {error && <div className="alert error">{error}</div>}
+      <div className="control-grid">
+        {renderProcessCard('worker')}
+        {renderProcessCard('brain')}
+      </div>
+    </section>
+  );
+}
+
+function BlacklistView({ setWorkerOnline, setWorkerLabel }) {
+  const [items, setItems] = useState([]);
+  const [configs, setConfigs] = useState([]);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState('');
+  const [form, setForm] = useState({ site_id: '', resource_id: '', reason: '' });
+
+  const refresh = async () => {
+    try {
+      const [blRes, cfgRes] = await Promise.all([
+        apiFetch('/blacklist'),
+        apiFetch('/config'),
+      ]);
+      setItems(blRes.items || []);
+      setConfigs(cfgRes.items || []);
+      setError('');
+      setWorkerOnline(true);
+      setWorkerLabel('Blacklist y configuracion cargadas');
+    } catch (e) {
+      setError('No se pudieron cargar bloqueos/configuracion.');
+      setWorkerOnline(false);
+      setWorkerLabel('Error en API de blacklist/config');
+    }
+  };
+
+  useEffect(() => {
+    refresh();
+    const id = setInterval(refresh, 6000);
+    return () => clearInterval(id);
+  }, []);
+
+  const unblock = async (siteId, resourceId) => {
+    setBusy(`unblock:${siteId}:${resourceId}`);
+    try {
+      await apiFetch(`/blacklist/${encodeURIComponent(siteId)}/${resourceId}`, { method: 'DELETE' });
+      await refresh();
+    } catch (e) {
+      setError(`No se pudo desbloquear ${siteId}/${resourceId}.`);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const blockManual = async (e) => {
+    e.preventDefault();
+    try {
+      const payload = {
+        site_id: (form.site_id || '').trim(),
+        resource_id: Number(form.resource_id),
+        reason: (form.reason || '').trim() || null,
+        source: 'manual',
+      };
+      await apiFetch('/blacklist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      setForm({ site_id: '', resource_id: '', reason: '' });
+      await refresh();
+    } catch (err) {
+      setError('No se pudo bloquear manualmente el recurso.');
+    }
+  };
+
+  const toggleConfigActive = async (siteId, currentActive) => {
+    setBusy(`cfg:${siteId}`);
+    try {
+      await apiFetch(`/config/${encodeURIComponent(siteId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: !Boolean(currentActive) }),
+      });
+      await refresh();
+    } catch (e) {
+      setError(`No se pudo actualizar configuracion para ${siteId}.`);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  return (
+    <section className="page-stack">
+      <div className="page-title-row">
+        <div>
+          <h1>Listas negras y bloqueos</h1>
+          <p>Gestion de recursos bloqueados y estado de organismos.</p>
+        </div>
+        <div className="meta-actions">
+          <button onClick={refresh}>Actualizar</button>
+        </div>
+      </div>
+
+      {error && <div className="alert error">{error}</div>}
+
+      <article className="panel">
+        <div className="panel-head">
+          <h2>Bloqueo manual</h2>
+        </div>
+        <form className="form-inline long" onSubmit={blockManual}>
+          <input value={form.site_id} onChange={(e) => setForm((x) => ({ ...x, site_id: e.target.value }))} placeholder="Site ID" required />
+          <input value={form.resource_id} onChange={(e) => setForm((x) => ({ ...x, resource_id: e.target.value }))} placeholder="ID Recurso" type="number" min="1" required />
+          <input value={form.reason} onChange={(e) => setForm((x) => ({ ...x, reason: e.target.value }))} placeholder="Motivo" />
+          <button type="submit">Bloquear recurso</button>
+        </form>
+      </article>
+
+      <article className="panel">
+        <div className="panel-head">
+          <h2>Recursos bloqueados</h2>
+          <span className="chip warn">{items.length}</span>
+        </div>
+        <table>
+          <thead>
+            <tr><th>ID Recurso</th><th>Site</th><th>Motivo</th><th>Origen</th><th>Fecha</th><th>Acciones</th></tr>
+          </thead>
+          <tbody>
+            {items.map((it) => {
+              const key = `${it.site_id}:${it.resource_id}`;
+              const isBusy = busy === `unblock:${it.site_id}:${it.resource_id}`;
+              return (
+                <tr key={key}>
+                  <td>{it.resource_id}</td>
+                  <td>{it.site_id}</td>
+                  <td>{it.reason || '-'}</td>
+                  <td>{it.source || '-'}</td>
+                  <td>{fmtDateTime(it.created_at)}</td>
+                  <td><button disabled={isBusy} onClick={() => unblock(it.site_id, it.resource_id)}>Desbloquear</button></td>
+                </tr>
+              );
+            })}
+            {items.length === 0 && <tr><td colSpan="6" className="empty">No hay recursos bloqueados.</td></tr>}
+          </tbody>
+        </table>
+      </article>
+
+      <article className="panel">
+        <div className="panel-head">
+          <h2>Configuracion de organismos</h2>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Site</th><th>Activo</th><th>Login URL</th><th>Regex expediente</th><th>Filtro TExp</th><th>Acciones</th></tr>
+          </thead>
+          <tbody>
+            {configs.map((cfg) => {
+              const isBusy = busy === `cfg:${cfg.site_id}`;
+              return (
+                <tr key={cfg.site_id}>
+                  <td>{cfg.site_id}</td>
+                  <td><span className={Number(cfg.active) ? 'chip active' : 'chip paused'}>{Number(cfg.active) ? 'ON' : 'OFF'}</span></td>
+                  <td>{cfg.login_url || '-'}</td>
+                  <td>{cfg.regex_expediente || '-'}</td>
+                  <td>{cfg.filtro_texp || '-'}</td>
+                  <td><button disabled={isBusy} onClick={() => toggleConfigActive(cfg.site_id, cfg.active)}>{Number(cfg.active) ? 'Desactivar' : 'Activar'}</button></td>
+                </tr>
+              );
+            })}
+            {configs.length === 0 && <tr><td colSpan="6" className="empty">No hay configuraciones disponibles.</td></tr>}
+          </tbody>
+        </table>
+      </article>
+    </section>
+  );
+}
+
 function buildPageNumbers(current, totalPages) {
   const pages = [];
   const start = Math.max(1, current - 2);
@@ -809,6 +1092,20 @@ function AppRouter() {
             setWorkerOnline={setWorkerOnline}
             setWorkerLabel={setWorkerLabel}
             sharedSearch={sharedSearch}
+          />
+        )}
+
+        {path === '/control' && (
+          <ControlPanelView
+            setWorkerOnline={setWorkerOnline}
+            setWorkerLabel={setWorkerLabel}
+          />
+        )}
+
+        {path === '/blacklist' && (
+          <BlacklistView
+            setWorkerOnline={setWorkerOnline}
+            setWorkerLabel={setWorkerLabel}
           />
         )}
 

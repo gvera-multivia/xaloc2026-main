@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import os
+from typing import Any
 
 import aiohttp
-from fastapi import FastAPI, Query, HTTPException
+from fastapi import FastAPI, Query, HTTPException, Body
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from dashboard import DashboardService
+from dashboard.process_manager import ProcessManager
 from core.xvia_auth import create_authenticated_session_in_place
 from core.xvia_deselect import deselect_resource
 
@@ -23,6 +25,7 @@ app.add_middleware(
 )
 
 service = DashboardService()
+process_manager = ProcessManager(base_dir=".", logs_dir="logs")
 
 
 @app.get("/")
@@ -42,6 +45,10 @@ async def queues():
 @app.get("/history/")
 @app.get("/historico")
 @app.get("/historico/")
+@app.get("/control")
+@app.get("/control/")
+@app.get("/blacklist")
+@app.get("/blacklist/")
 async def history():
     return FileResponse("dashboard-frontend/index.html")
 
@@ -53,6 +60,17 @@ async def styles():
 
 # Mount the frontend directory for any other assets
 app.mount("/dashboard", StaticFiles(directory="dashboard-frontend"), name="dashboard")
+
+
+@app.on_event("startup")
+async def app_startup() -> None:
+    # No se inicia worker/brain automaticamente; control explicito desde frontend.
+    return None
+
+
+@app.on_event("shutdown")
+async def app_shutdown() -> None:
+    await process_manager.stop_all()
 
 
 @app.get("/api/history/days")
@@ -114,6 +132,50 @@ async def api_queue_completion_marker(
     day: str | None = Query(None),
 ) -> dict:
     return service.get_queue_completion_marker(day=day)
+
+
+@app.get("/api/control/status")
+async def api_control_status() -> dict:
+    return process_manager.get_all_status()
+
+
+@app.post("/api/control/{process_name}/start")
+async def api_control_start(process_name: str) -> dict:
+    try:
+        return await process_manager.start_process(process_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/control/{process_name}/stop")
+async def api_control_stop(process_name: str) -> dict:
+    try:
+        return await process_manager.stop_process(process_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/control/{process_name}/restart")
+async def api_control_restart(process_name: str) -> dict:
+    try:
+        return await process_manager.restart_process(process_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/logs/{process_name}")
+async def api_logs_process(
+    process_name: str,
+    lines: int = Query(100, ge=1, le=2000),
+) -> dict:
+    try:
+        return process_manager.get_logs(process_name, lines=lines)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/queue/pauses")
@@ -220,3 +282,51 @@ async def api_delete_queue_item(site_id: str, resource_id: int) -> dict:
         "resource_id": int(resource_id),
         "xvia_deselected": bool(deselected),
     }
+
+
+@app.get("/api/blacklist")
+async def api_blacklist(site_id: str | None = Query(None)) -> dict:
+    items = service.list_blacklist(site_id=site_id)
+    return {"items": items, "total": len(items)}
+
+
+@app.post("/api/blacklist")
+async def api_blacklist_block(payload: dict[str, Any] = Body(...)) -> dict:
+    try:
+        site_id = str(payload.get("site_id") or "").strip()
+        resource_id = int(payload.get("resource_id"))
+        reason = payload.get("reason")
+        source = payload.get("source") or "manual"
+        return service.block_blacklist(
+            site_id=site_id,
+            resource_id=resource_id,
+            reason=reason,
+            source=source,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Payload invalido: {exc}") from exc
+
+
+@app.delete("/api/blacklist/{site_id}/{resource_id}")
+async def api_blacklist_unblock(site_id: str, resource_id: int) -> dict:
+    try:
+        return service.unblock_blacklist(site_id=site_id, resource_id=resource_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/config")
+async def api_config_list() -> dict:
+    items = service.list_organismo_configs()
+    return {"items": items, "total": len(items)}
+
+
+@app.put("/api/config/{site_id}")
+async def api_config_update(site_id: str, payload: dict[str, Any] = Body(...)) -> dict:
+    try:
+        updates = dict(payload or {})
+        return service.update_organismo_config(site_id=site_id, updates=updates)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

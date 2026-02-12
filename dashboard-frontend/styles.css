@@ -236,6 +236,14 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
   align-items: center;
 }
 
+.inline-check {
+  display: inline-flex;
+  gap: 0.45rem;
+  align-items: center;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
 .panel {
   background: var(--panel);
   border: 1px solid var(--panel-border);
@@ -416,6 +424,28 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .help { color: var(--muted); margin-top: 0.55rem; font-size: 0.85rem; }
 
+.control-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.process-card .action-wrap {
+  margin-bottom: 0.7rem;
+}
+
+.process-logs {
+  min-height: 260px;
+  max-height: 420px;
+  overflow: auto;
+  display: grid;
+  gap: 0.28rem;
+}
+
+.form-inline.long {
+  grid-template-columns: 180px 160px 1fr auto;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -562,6 +592,7 @@ tr:last-child td { border-bottom: none; }
   }
 
   .monitor-grid,
+  .control-grid,
   .admin-row,
   .incident-list {
     grid-template-columns: 1fr;
@@ -580,6 +611,10 @@ tr:last-child td { border-bottom: none; }
   }
 
   .form-inline {
+    grid-template-columns: 1fr;
+  }
+
+  .form-inline.long {
     grid-template-columns: 1fr;
   }
 

@@ -828,6 +828,48 @@ class SQLiteDatabase:
         finally:
             conn.close()
 
+    def list_blocked_resources(self, site_id: Optional[str] = None) -> list[Dict[str, Any]]:
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            clauses = []
+            params: list[Any] = []
+            site = (site_id or "").strip()
+            if site:
+                clauses.append("site_id = ?")
+                params.append(site)
+            where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+            cursor.execute(
+                f"""
+                SELECT id, site_id, resource_id, reason, source, created_at, updated_at
+                FROM blocked_resources
+                {where_sql}
+                ORDER BY created_at DESC, id DESC
+                """,
+                params,
+            )
+            return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def unblock_resource(self, site_id: str, resource_id: int) -> bool:
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                DELETE FROM blocked_resources
+                WHERE site_id = ?
+                  AND resource_id = ?
+                """,
+                (str(site_id), int(resource_id)),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
     # ==========================================================================
     # MÉTODOS PARA ORGANISMO_CONFIG
     # ==========================================================================
@@ -1093,6 +1135,82 @@ class SQLiteDatabase:
         finally:
             conn.close()
     
+    def get_organismo_config(self, site_id: str) -> Optional[Dict[str, Any]]:
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, site_id, query_organisme, filtro_texp, regex_expediente,
+                       login_url, recursos_url, active, last_sync_at, created_at, updated_at
+                FROM organismo_config
+                WHERE site_id = ?
+                LIMIT 1
+                """,
+                (str(site_id),),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def list_organismo_configs(self) -> list[Dict[str, Any]]:
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, site_id, query_organisme, filtro_texp, regex_expediente,
+                       login_url, recursos_url, active, last_sync_at, created_at, updated_at
+                FROM organismo_config
+                ORDER BY site_id ASC
+                """
+            )
+            return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def update_organismo_config(self, site_id: str, updates: Dict[str, Any]) -> bool:
+        allowed_fields = {
+            "query_organisme",
+            "filtro_texp",
+            "regex_expediente",
+            "login_url",
+            "recursos_url",
+            "active",
+            "last_sync_at",
+        }
+        clean_updates = {k: v for k, v in updates.items() if k in allowed_fields}
+        if not clean_updates:
+            return False
+
+        set_parts = []
+        params: list[Any] = []
+        for key, value in clean_updates.items():
+            set_parts.append(f"{key} = ?")
+            params.append(value)
+
+        set_parts.append("updated_at = ?")
+        params.append(datetime.now().isoformat())
+        params.append(str(site_id))
+
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"UPDATE organismo_config SET {', '.join(set_parts)} WHERE site_id = ?",
+                params,
+            )
+            conn.commit()
+            if cursor.rowcount > 0:
+                return True
+            cursor.execute("SELECT 1 FROM organismo_config WHERE site_id = ? LIMIT 1", (str(site_id),))
+            return cursor.fetchone() is not None
+        finally:
+            conn.close()
+
     def update_last_sync(self, site_id: str) -> None:
         """Actualiza el timestamp de última sincronización."""
         conn = self.get_connection()
