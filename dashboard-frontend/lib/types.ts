@@ -1,4 +1,4 @@
-export type SiteID = 'madrid' | 'xaloc_girona' | 'base_online' | string;
+export type SiteID = 'madrid' | 'xaloc_girona' | 'base_online' | 'ayunta_palma' | string;
 
 export interface QueueItem {
     site_id: SiteID;

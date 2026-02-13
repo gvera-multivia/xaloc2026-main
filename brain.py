@@ -39,7 +39,7 @@ from core.xvia_auth import create_authenticated_session_in_place
 from core.nt_expediente_fixer import is_nt_pattern, fix_nt_expediente
 from core.client_documentation import check_requires_gesdoc
 from core.address_classifier import classify_addresses_batch_with_ai, classify_address_fallback
-from sites.adapters import MadridAdapter, XalocAdapter, BaseOnlineAdapter
+from sites.adapters import MadridAdapter, XalocAdapter, BaseOnlineAdapter, AyuntaPalmaAdapter
 from sites.adapters.site_adapter import SiteAdapter
 
 
@@ -132,6 +132,7 @@ SITE_PRIORITIES: dict[str, int] = {
     "madrid": 0,
     "xaloc_girona": 1,
     "base_online": 2,
+    "ayunta_palma": 3,
 }
 
 
@@ -168,6 +169,7 @@ class BrainOrchestrator:
             "madrid": MadridAdapter(),
             "xaloc_girona": XalocAdapter(),
             "base_online": BaseOnlineAdapter(),
+            "ayunta_palma": AyuntaPalmaAdapter(),
         }
 
     def _record_incident_once(

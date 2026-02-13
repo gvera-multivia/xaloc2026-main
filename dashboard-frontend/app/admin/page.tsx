@@ -66,7 +66,7 @@ export default function AdminPage() {
     return () => clearInterval(id);
   }, []);
 
-  const KNOWN_SITES = ["madrid", "xaloc_girona", "base_online"];
+  const KNOWN_SITES = ["madrid", "xaloc_girona", "base_online", "ayunta_palma"];
 
   const sites = useMemo(() => {
     const s = new Set(KNOWN_SITES);

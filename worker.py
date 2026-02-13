@@ -351,12 +351,14 @@ async def process_task(
             protocol_norm = protocol.upper().strip()
             key = f"{protocol_norm.lower()}_archivos"
             mapped_data[key] = archivos_para_subir
+        elif site_id == "ayunta_palma":
+            mapped_data["archivos"] = archivos_para_subir
 
         datos = _call_with_supported_kwargs(controller.create_target, **mapped_data)
 
         # 6. EJECUTAR LA AUTOMATIZACIÓN
         logger.info(f"Iniciando automatización para {site_id}...")
-        if site_id in ["madrid", "base_online"]:
+        if site_id in ["madrid", "base_online", "ayunta_palma"]:
             os.environ["XALOC_KEEP_BROWSER_OPEN"] = "1"
             os.environ["XALOC_KEEP_TAB_OPEN"] = "1"
 
