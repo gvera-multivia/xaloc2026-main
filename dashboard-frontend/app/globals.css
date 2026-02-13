@@ -18,60 +18,167 @@
   --color-ring: hsl(var(--ring));
 }
 
-@layer base {
-  :root {
-    --background: 240 10% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 240 10% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 240 10% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 263.4 70% 50.4%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 240 3.7% 15.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 64.9%;
-    --accent: 240 3.7% 15.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
-    --ring: 240 4.9% 83.9%;
-    --radius: 0.5rem;
-  }
-}
+/* =========================================================
+   MORRIGAN — Sovereign Tactical Interface (Global Tokens)
+   Surfaces: Raven/Obsidian
+   Transitions: Violet (only on edges, focus, separators)
+   Action/Fate: Deep Crimson (not error red)
+   ========================================================= */
 
 @layer base {
+  :root {
+    /* Surfaces */
+    --background: 240 20% 4%; /* Raven Black */
+    --foreground: 0 0% 96%;
+
+    --card: 240 16% 7%; /* Obsidian */
+    --card-foreground: 0 0% 96%;
+
+    --popover: 240 16% 7%;
+    --popover-foreground: 0 0% 96%;
+
+    /* Violet (surface transitions / focus / edges) */
+    --primary: 266 55% 58%;
+    --primary-foreground: 0 0% 98%;
+
+    /* Lifted surface (inner panels) */
+    --secondary: 240 14% 10%;
+    --secondary-foreground: 0 0% 96%;
+
+    --muted: 240 12% 12%;
+    --muted-foreground: 240 6% 65%;
+
+    --accent: 240 12% 12%;
+    --accent-foreground: 0 0% 96%;
+
+    /* Error red (distinct from Fate crimson) */
+    --destructive: 0 68% 40%;
+    --destructive-foreground: 0 0% 98%;
+
+    /* Borders */
+    --border: 240 10% 18%;
+    --input: 240 10% 18%;
+
+    /* Focus ring */
+    --ring: 266 55% 58%;
+
+    /* Geometry */
+    --radius: 0.6rem;
+
+    /* Morrigan extra tokens (hex for utility classes) */
+    --morr-raven: #0b0c10;
+    --morr-obsidian: #11131a;
+    --morr-violet: #4b2e83;
+    --morr-violet-hi: #6c4dff;
+
+    /* Fate (action / sealing / processing) */
+    --morr-fate: #7a0f1e;
+    --morr-fate-hi: #8b0f1a; /* eye */
+  }
+
   * {
-    border-color: var(--color-border);
+    border-color: hsl(var(--border));
   }
 
   body {
-    background-color: var(--color-background);
-    color: var(--color-foreground);
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 }
 
-/* Custom animations and utilities */
+/* =========================================================
+   Morrigan surfaces & transitions
+   ========================================================= */
+
+/* Global background surface (use on page wrapper if needed) */
+.morr-surface {
+  background:
+    radial-gradient(1200px 600px at 50% 0%,
+      rgba(108, 77, 255, 0.10),
+      transparent 60%),
+    linear-gradient(180deg,
+      rgba(17, 19, 26, 0.92),
+      rgba(11, 12, 16, 0.96));
+}
+
+/* Primary card surface */
+.morr-card {
+  background: linear-gradient(180deg, rgba(17, 19, 26, 0.86), rgba(11, 12, 16, 0.92));
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+/* Edge transition (violet only on hover/focus) */
+.morr-edge:hover {
+  border-color: rgba(108, 77, 255, 0.32);
+  box-shadow:
+    0 12px 34px rgba(0, 0, 0, 0.50),
+    0 0 0 1px rgba(75, 46, 131, 0.25);
+}
+
+/* Strong focus for keyboard navigation */
+.morr-focus:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px rgba(108, 77, 255, 0.35),
+    0 0 0 6px rgba(0, 0, 0, 0.35);
+  border-color: rgba(108, 77, 255, 0.45);
+}
+
+/* Terminal harmony (for log blocks) */
+.morr-terminal {
+  background: rgba(9, 10, 14, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+/* Fate underline (thin, controlled) */
+.morr-fate-underline {
+  position: relative;
+}
+.morr-fate-underline::after {
+  content: "";
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: 14px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(122, 15, 30, 0.75), transparent);
+  opacity: 0.85;
+}
+
+/* =========================================================
+   Animations — slow, inevitable
+   ========================================================= */
+
+@keyframes morr-eye {
+  0%, 100% { opacity: 0.55; transform: translateZ(0) scale(1); }
+  50%      { opacity: 0.95; transform: translateZ(0) scale(1.02); }
+}
+
+@keyframes morr-scan {
+  0%   { transform: translateX(-120%); opacity: 0; }
+  10%  { opacity: 0.18; }
+  50%  { opacity: 0.12; }
+  90%  { opacity: 0.18; }
+  100% { transform: translateX(120%); opacity: 0; }
+}
+
+/* Keep your old pulse if you still need it elsewhere */
 .animate-pulse-slow {
   animation: pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
 @keyframes pulse {
-
-  0%,
-  100% {
-    opacity: 1;
-  }
-
-  50% {
-    opacity: .5;
-  }
+  0%, 100% { opacity: 1; }
+  50% { opacity: .5; }
 }
 
+/* You can keep .glass if some old areas still rely on it,
+   but Morrigan surfaces should prefer morr-card/morr-terminal. */
 .glass {
   background: rgba(23, 23, 23, 0.7);
   backdrop-filter: blur(8px);
