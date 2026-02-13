@@ -1,21 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import Any
+from pathlib import Path
 
 import aiohttp
-from fastapi import FastAPI, Query, HTTPException, Body
-from fastapi.responses import FileResponse, Response
+from fastapi import FastAPI, Query, HTTPException, Body, Request
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 
 load_dotenv()
 
 from dashboard import DashboardService
-from dashboard.dashboard_restarter import DashboardRestarter
 from dashboard.process_manager import ProcessManager
-from dashboard.update_manager import UpdateManager
 from core.xvia_auth import create_authenticated_session_in_place
 from core.xvia_deselect import deselect_resource
 
@@ -31,42 +30,91 @@ app.add_middleware(
 
 service = DashboardService()
 process_manager = ProcessManager(base_dir=".", logs_dir="logs")
-update_manager = UpdateManager(base_dir=".", service=service, process_manager=process_manager)
-dashboard_restarter = DashboardRestarter(base_dir=".")
 
-# Ensure frontend directory exists to avoid crash on StaticFiles mount
-frontend_out = os.path.join("dashboard-frontend", "out")
-if not os.path.exists(frontend_out):
-    os.makedirs(frontend_out, exist_ok=True)
-    index_placeholder = os.path.join(frontend_out, "index.html")
-    if not os.path.exists(index_placeholder):
-        with open(index_placeholder, "w", encoding="utf-8") as f:
-            f.write("<html><body><h1>Dashboard is building...</h1><p>Please wait a few minutes and refresh.</p></body></html>")
+FRONTEND_HOST = os.getenv("DASHBOARD_FRONTEND_HOST", "127.0.0.1").strip() or "127.0.0.1"
+FRONTEND_PORT = int((os.getenv("DASHBOARD_FRONTEND_PORT") or "3000").strip() or "3000")
+FRONTEND_DEV = (os.getenv("DASHBOARD_FRONTEND_DEV") or "1").strip().lower() not in {"0", "false", "no", "off"}
+
+_frontend_process: asyncio.subprocess.Process | None = None
 
 
-# Static assets mounts (defined BEFORE catch-all, but can be here or at bottom)
-app.mount("/_next", StaticFiles(directory="dashboard-frontend/out/_next"), name="next")
-assets_path = os.path.join("dashboard-frontend", "out", "assets")
-if os.path.exists(assets_path):
-    app.mount("/assets", StaticFiles(directory="dashboard-frontend/out/assets"), name="assets")
+async def _drain_frontend_logs(proc: asyncio.subprocess.Process) -> None:
+    stream = proc.stdout
+    if stream is None:
+        return
+    try:
+        while True:
+            line = await stream.readline()
+            if not line:
+                break
+            msg = line.decode("utf-8", errors="replace").rstrip()
+            if msg:
+                print(f"[frontend] {msg}")
+    except Exception:
+        return
 
-@app.get("/favicon.ico")
-async def favicon():
-    fpath = os.path.join("dashboard-frontend", "out", "favicon.ico")
-    if os.path.exists(fpath):
-        return FileResponse(fpath)
-    return Response(status_code=404)
+
+async def _wait_frontend_ready(timeout_seconds: float = 45.0) -> None:
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
+    target = f"http://{FRONTEND_HOST}:{FRONTEND_PORT}/"
+    timeout = aiohttp.ClientTimeout(total=2.5)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        while asyncio.get_running_loop().time() < deadline:
+            try:
+                async with session.get(target) as res:
+                    if int(res.status) < 500:
+                        return
+            except Exception:
+                pass
+            await asyncio.sleep(0.4)
+    raise RuntimeError(f"No se pudo arrancar frontend Next en {target} dentro de {timeout_seconds}s")
+
+
+async def _start_frontend_server() -> None:
+    global _frontend_process
+    if _frontend_process and _frontend_process.returncode is None:
+        return
+
+    frontend_dir = Path("dashboard-frontend").resolve()
+    if not frontend_dir.exists():
+        raise RuntimeError(f"No existe el directorio frontend: {frontend_dir}")
+
+    mode = "dev" if FRONTEND_DEV else "start"
+    cmd = ["cmd", "/c", "npm", "run", mode, "--", "--hostname", FRONTEND_HOST, "--port", str(FRONTEND_PORT)]
+    _frontend_process = await asyncio.create_subprocess_exec(
+        *cmd,
+        cwd=str(frontend_dir),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    asyncio.create_task(_drain_frontend_logs(_frontend_process))
+    await _wait_frontend_ready()
+
+
+async def _stop_frontend_server() -> None:
+    global _frontend_process
+    proc = _frontend_process
+    if not proc:
+        return
+    if proc.returncode is None:
+        proc.terminate()
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=8)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+    _frontend_process = None
 
 
 @app.on_event("startup")
 async def app_startup() -> None:
-    # No se inicia worker/brain automaticamente; control explicito desde frontend.
-    return None
+    await _start_frontend_server()
 
 
 @app.on_event("shutdown")
 async def app_shutdown() -> None:
     await process_manager.stop_all()
+    await _stop_frontend_server()
 
 
 @app.get("/api/history/days")
@@ -159,58 +207,6 @@ async def api_queue_live_screenshot():
 @app.get("/api/control/status")
 async def api_control_status() -> dict:
     return process_manager.get_all_status()
-
-
-@app.get("/api/control/update/status")
-async def api_control_update_status() -> dict:
-    return update_manager.status()
-
-
-@app.get("/api/control/restart/status")
-async def api_control_restart_status() -> dict:
-    return dashboard_restarter.status()
-
-
-@app.get("/api/control/update/check")
-async def api_control_update_check() -> dict:
-    try:
-        return await update_manager.check_for_updates()
-    except RuntimeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Error comprobando actualizaciones: {exc}") from exc
-
-
-@app.post("/api/control/update/run")
-async def api_control_update_run(
-    wait_timeout_seconds: int = Query(1800, ge=1, le=7200),
-    poll_seconds: float = Query(2.0, ge=0.2, le=10.0),
-) -> dict:
-    try:
-        return await update_manager.run_update(
-            wait_timeout_seconds=wait_timeout_seconds,
-            poll_seconds=poll_seconds,
-        )
-    except TimeoutError as exc:
-        raise HTTPException(status_code=408, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        detail = str(exc)
-        status_code = 409 if "en curso" in detail.lower() else 400
-        raise HTTPException(status_code=status_code, detail=detail) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Error ejecutando actualizacion: {exc}") from exc
-
-
-@app.post("/api/control/restart-dashboard")
-async def api_control_restart_dashboard(
-    delay_seconds: float = Query(1.0, ge=0.2, le=10.0),
-) -> dict:
-    try:
-        return await dashboard_restarter.schedule_restart(delay_seconds=delay_seconds)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Error programando reinicio: {exc}") from exc
 
 
 @app.post("/api/control/{process_name}/start")
@@ -513,42 +509,56 @@ async def api_client_folder(payload: dict[str, Any] = Body(...)) -> dict:
     return result
 
 
-# ==========================================================================
-# CATCH-ALL FOR NEXT.JS SPA ROUTING
-# ==========================================================================
+_HOP_BY_HOP_HEADERS = {
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailers",
+    "transfer-encoding",
+    "upgrade",
+}
 
-# This handles /, /admin, /history, /control, etc. and returns index.html
-# MUST be defined last so it doesn't shadow /api routes
-@app.get("/{rest_of_path:path}")
-@app.head("/{rest_of_path:path}")
-async def catch_all(rest_of_path: str):
-    # Skip if it starts with api/ (should have been caught above)
+
+@app.api_route(
+    "/{rest_of_path:path}",
+    methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+)
+async def catch_all(rest_of_path: str, request: Request):
     if rest_of_path.startswith("api/"):
         raise HTTPException(status_code=404, detail="API endpoint not found")
 
-    # 1. Try to serve the exact file from out/ (e.g. scripts, images, pre-rendered .txt)
-    file_path = os.path.join("dashboard-frontend", "out", rest_of_path)
-    if os.path.isfile(file_path):
-        return FileResponse(file_path)
+    if not _frontend_process or _frontend_process.returncode is not None:
+        await _start_frontend_server()
 
-    # 1.b Next static export may request "__next.<route>.__PAGE__.txt"
-    # while files are emitted as "__next.<route>/__PAGE__.txt".
-    if rest_of_path.endswith(".__PAGE__.txt"):
-        base_part = rest_of_path[: -len(".__PAGE__.txt")]
-        page_variant = os.path.join("dashboard-frontend", "out", base_part, "__PAGE__.txt")
-        if os.path.isfile(page_variant):
-            return FileResponse(page_variant)
-    
-    # 2. Try to serve as a pre-rendered HTML page (e.g. /admin -> /admin.html)
-    html_path = file_path.rstrip("/") + ".html"
-    if os.path.isfile(html_path):
-        return FileResponse(html_path)
+    target_url = f"http://{FRONTEND_HOST}:{FRONTEND_PORT}/{rest_of_path}"
+    if request.url.query:
+        target_url = f"{target_url}?{request.url.query}"
 
-    # 3. Fallback to index.html for SPA client-side routing
-    # ONLY if it doesn't look like a file (no extension)
-    if "." not in rest_of_path:
-        index_path = os.path.join("dashboard-frontend", "out", "index.html")
-        if os.path.exists(index_path):
-            return FileResponse(index_path)
-    
-    raise HTTPException(status_code=404, detail="Not Found")
+    body = await request.body()
+    headers = {
+        key: value
+        for key, value in request.headers.items()
+        if key.lower() not in _HOP_BY_HOP_HEADERS and key.lower() != "host"
+    }
+
+    timeout = aiohttp.ClientTimeout(total=120)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.request(
+                request.method,
+                target_url,
+                data=body if body else None,
+                headers=headers,
+                allow_redirects=False,
+            ) as upstream:
+                content = await upstream.read()
+                out_headers = {
+                    key: value
+                    for key, value in upstream.headers.items()
+                    if key.lower() not in _HOP_BY_HOP_HEADERS and key.lower() != "content-length"
+                }
+                return Response(content=content, status_code=upstream.status, headers=out_headers)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Error conectando con frontend Next: {exc}") from exc

@@ -1,75 +1,127 @@
-'use client';
+"use client";
 
-import React from 'react';
-import { QueueItem } from '@/lib/types';
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
-import { Box, Clock, ChevronRight } from 'lucide-react';
+import React from "react";
+import { QueueItem } from "@/lib/types";
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
+import { Box, Clock, ChevronRight } from "lucide-react";
 
 function cn(...inputs: ClassValue[]) {
-    return twMerge(clsx(inputs));
+  return twMerge(clsx(inputs));
 }
 
 interface QueueCardProps {
-    item: QueueItem;
-    index: number;
+  item: QueueItem;
+  index: number;
 }
 
+/**
+ * MORRIGAN QUEUE CARD
+ * - Surface: Raven/Obsidian
+ * - Violet: only as edge transition + chevron hover
+ * - Fate Crimson: “processing” + “high priority”
+ * - No neon colors, no playful badges
+ * - Looks native next to terminals: matte, restrained, precise
+ */
 export default function QueueCard({ item, index }: QueueCardProps) {
-    const isProcessing = item.state === 'processing';
-    const priority = item.priority || (index < 2 ? 'high' : 'medium');
+  const isProcessing = item.state === "processing";
+  const priority = item.priority || (index < 2 ? "high" : "medium");
 
-    return (
-        <div className={cn(
-            "group relative p-4 rounded-xl border transition-all duration-300 overflow-hidden",
-            isProcessing
-                ? "bg-primary/5 border-primary/50 shadow-[0_0_20px_rgba(var(--primary),0.1)]"
-                : "bg-secondary/20 border-border hover:border-muted-foreground/50"
-        )}>
-            {isProcessing && (
-                <div className="absolute top-0 right-0 p-2">
-                    <div className="w-2 h-2 bg-primary rounded-full animate-ping"></div>
-                </div>
-            )}
+  const badgeClass =
+    priority === "high"
+      ? "border-[rgba(122,15,30,0.30)] bg-[rgba(122,15,30,0.10)] text-[rgba(255,255,255,0.92)]"
+      : "border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] text-muted-foreground/90";
 
-            <div className="flex items-start gap-3">
-                <div className={cn(
-                    "w-10 h-10 rounded-lg flex items-center justify-center transition-colors",
-                    isProcessing ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground group-hover:bg-secondary/50"
-                )}>
-                    <Box size={20} />
-                </div>
-
-                <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2">
-                        <h4 className="text-sm font-bold truncate">#{item.resource_id}</h4>
-                        <span className={cn(
-                            "text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-tighter",
-                            priority === 'high' ? "text-red-400 bg-red-400/10" : "text-yellow-400 bg-yellow-400/10"
-                        )}>
-                            {priority}
-                        </span>
-                    </div>
-
-                    <p className="text-xs text-muted-foreground truncate mb-2">{item.site_id}</p>
-
-                    <div className="flex items-center gap-3 text-[10px] text-muted-foreground/60">
-                        <span className="flex items-center gap-1">
-                            <Clock size={10} />
-                            {item.state}
-                        </span>
-                        {item.protocol && (
-                            <span className="px-1.5 py-0.5 rounded bg-secondary/50 border border-border/30">
-                                Type: {item.protocol}
-                            </span>
-                        )}
-                    </div>
-                </div>
-
-                <div className="self-center">
-                    <ChevronRight size={16} className="text-muted-foreground/30 group-hover:text-primary transition-colors" />
-                </div>
-            </div>
+  return (
+    <div
+      className={cn(
+        "group relative rounded-xl border p-4 transition-all duration-300",
+        "bg-[rgba(17,19,26,0.55)] border-[rgba(255,255,255,0.06)]",
+        "hover:border-[rgba(108,77,255,0.22)] hover:bg-[rgba(17,19,26,0.62)]",
+        isProcessing &&
+          "border-[rgba(122,15,30,0.28)] bg-[rgba(122,15,30,0.06)]"
+      )}
+    >
+      {/* Processing marker (quiet heat, not ping spam) */}
+      {isProcessing && (
+        <div className="absolute top-3 right-3">
+          <span
+            className="block h-2 w-2 rounded-full"
+            style={{
+              background: "var(--morr-fate)",
+              boxShadow: "0 0 12px rgba(122,15,30,0.25)",
+              animation: "morr-eye 6.5s ease-in-out infinite",
+            }}
+          />
         </div>
-    );
+      )}
+
+      <div className="flex items-start gap-3">
+        {/* Icon tile */}
+        <div
+          className={cn(
+            "h-10 w-10 rounded-lg border flex items-center justify-center transition-colors",
+            "border-[rgba(255,255,255,0.06)] bg-[rgba(11,12,16,0.55)]",
+            "group-hover:border-[rgba(108,77,255,0.20)]",
+            isProcessing && "border-[rgba(122,15,30,0.20)] bg-[rgba(122,15,30,0.08)]"
+          )}
+        >
+          <Box
+            size={18}
+            className={cn(
+              "text-foreground/75",
+              isProcessing && "text-[rgba(255,255,255,0.90)]"
+            )}
+          />
+        </div>
+
+        {/* Main */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between gap-2">
+            <h4 className="text-sm font-black tracking-tight truncate text-foreground/95">
+              #{item.resource_id}
+            </h4>
+
+            <span
+              className={cn(
+                "text-[10px] font-black uppercase tracking-[0.14em] px-2 py-1 rounded-md border",
+                badgeClass
+              )}
+            >
+              {priority}
+            </span>
+          </div>
+
+          <p className="mt-1 text-xs text-muted-foreground/80 truncate">
+            {item.site_id}
+          </p>
+
+          <div className="mt-3 flex items-center gap-3 text-[11px] text-muted-foreground/70">
+            <span className="flex items-center gap-1">
+              <Clock size={12} className="text-muted-foreground/70" />
+              <span className="uppercase tracking-[0.12em]">{item.state}</span>
+            </span>
+
+            {item.protocol && (
+              <span className="px-2 py-1 rounded-md border border-[rgba(255,255,255,0.06)] bg-[rgba(11,12,16,0.45)]">
+                <span className="uppercase tracking-[0.12em]">Type</span>:{" "}
+                {item.protocol}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Chevron */}
+        <div className="self-center">
+          <ChevronRight
+            size={16}
+            className="text-muted-foreground/35 transition-colors group-hover:text-[rgba(108,77,255,0.80)]"
+          />
+        </div>
+      </div>
+
+      {/* Fate underline only when processing (signals “destiny in motion”) */}
+      {isProcessing && <div className="morr-fate-underline" />}
+    </div>
+  );
 }

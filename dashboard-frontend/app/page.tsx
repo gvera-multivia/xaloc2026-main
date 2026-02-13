@@ -20,7 +20,6 @@ export default function MonitorPage() {
   const [selectedDay] = useState(new Date().toISOString().split('T')[0]);
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [incidents, setIncidents] = useState<Incident[]>([]);
-  const [liveQueueItem, setLiveQueueItem] = useState<QueueItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [nowTs, setNowTs] = useState(Date.now());
@@ -28,18 +27,12 @@ export default function MonitorPage() {
   const refresh = async () => {
     try {
       const [queueRes, incidentsRes] = await Promise.all([
-        queueApi.getCurrent(selectedDay, 1, 14),
+        queueApi.getCurrent(selectedDay, 1, 1000),
         historyApi.getIncidents(selectedDay, 1, 15),
       ]);
 
       setQueue(queueRes.items || []);
       setIncidents(incidentsRes.items || []);
-      try {
-        const liveRes = await queueApi.getLive(selectedDay);
-        setLiveQueueItem((liveRes as QueueItem) || null);
-      } catch {
-        setLiveQueueItem(null);
-      }
       setError('');
     } catch (e) {
       setError('No se pudo actualizar el monitor en vivo.');
@@ -58,10 +51,7 @@ export default function MonitorPage() {
     };
   }, [selectedDay]);
 
-  const liveItem = useMemo(
-    () => liveQueueItem || queue.find(x => x.state === 'processing') || null,
-    [liveQueueItem, queue],
-  );
+  const liveItem = useMemo(() => queue.find(x => x.state === 'processing') || null, [queue]);
 
   const ringProgress = useMemo(() => {
     if (!liveItem?.started_at) return 0;
@@ -221,7 +211,7 @@ export default function MonitorPage() {
                 </p>
               </div>
             ) : (
-              queue.map((item, idx) => (
+              queue.slice(0, 14).map((item, idx) => (
                 <QueueCard key={`${item.site_id}-${item.resource_id}`} item={item} index={idx} />
               ))
             )}

@@ -66,13 +66,6 @@ export const controlApi = {
     start: (processName: string) => api.post<any>(`/control/${processName}/start`),
     stop: (processName: string) => api.post<any>(`/control/${processName}/stop`),
     restart: (processName: string) => api.post<any>(`/control/${processName}/restart`),
-
-    // Update & Restart endpoints
-    getUpdateStatus: () => api.get<any>('/control/update/status'),
-    checkUpdates: () => api.get<any>('/control/update/check'),
-    runUpdate: () => api.post<any>('/control/update/run'),
-    getRestartStatus: () => api.get<any>('/control/restart/status'),
-    restartDashboard: (delay = 1.0) => api.post<any>(`/control/restart-dashboard?delay_seconds=${delay}`),
 };
 
 export const authApi = {
