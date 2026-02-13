@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pypdf import PdfMerger
-
 
 def _is_pdf_file(path: Path) -> bool:
     try:
@@ -11,6 +9,38 @@ def _is_pdf_file(path: Path) -> bool:
             return fh.read(4) == b"%PDF"
     except Exception:
         return False
+
+
+def _load_pdf_backend():
+    """
+    Retorna un backend de merge compatible con distintas versiones:
+    - pypdf antiguos: PdfMerger
+    - pypdf recientes: PdfWriter.append
+    - fallback legacy: PyPDF2.PdfMerger
+    """
+    try:
+        from pypdf import PdfMerger  # type: ignore
+
+        return ("merger", PdfMerger)
+    except Exception:
+        pass
+
+    try:
+        from pypdf import PdfWriter  # type: ignore
+
+        if hasattr(PdfWriter, "append"):
+            return ("writer", PdfWriter)
+    except Exception:
+        pass
+
+    try:
+        from PyPDF2 import PdfMerger  # type: ignore
+
+        return ("merger", PdfMerger)
+    except Exception as e:
+        raise RuntimeError(
+            "No hay backend PDF disponible. Instala 'pypdf' (recomendado) o 'PyPDF2'."
+        ) from e
 
 
 def bundle_documents_to_single_pdf_for_palma(
@@ -40,7 +70,8 @@ def bundle_documents_to_single_pdf_for_palma(
     if len(normalized) == 1:
         return normalized[0]
 
-    merger = PdfMerger()
+    backend_kind, backend_cls = _load_pdf_backend()
+    merger = backend_cls()
     try:
         for pdf in normalized:
             merger.append(str(pdf))
@@ -51,7 +82,8 @@ def bundle_documents_to_single_pdf_for_palma(
         with out_path.open("wb") as out_fh:
             merger.write(out_fh)
     finally:
-        merger.close()
+        if backend_kind == "merger" and hasattr(merger, "close"):
+            merger.close()
 
     if not out_path.exists() or not _is_pdf_file(out_path):
         raise RuntimeError(f"No se generó un PDF válido tras la fusión: {out_path}")
