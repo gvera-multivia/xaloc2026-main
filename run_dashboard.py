@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import socket
+import sys
 
 import uvicorn
 from dotenv import load_dotenv
@@ -22,6 +24,8 @@ def find_free_port(host: str = "127.0.0.1", start_port: int = 8787, end_port: in
 
 
 if __name__ == "__main__":
+    if sys.platform.startswith("win"):
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     load_dotenv()
     host = os.getenv("DASHBOARD_HOST", "127.0.0.1")
     start_port = int(os.getenv("DASHBOARD_PORT_START", "8787"))

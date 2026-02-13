@@ -3,8 +3,8 @@ import "./globals.css";
 import Navbar from "@/components/Navbar";
 
 export const metadata: Metadata = {
-  title: "Xaloc Operations Console",
-  description: "Monitoreo y control de procesos en tiempo real",
+  title: "Morrigan",
+  description: "Morrigan es un dashboard de monitorización en tiempo real",
 };
 
 export default function RootLayout({

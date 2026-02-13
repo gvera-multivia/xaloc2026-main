@@ -16,39 +16,50 @@ interface EventConsoleProps {
 
 export default function EventConsole({ logs }: EventConsoleProps) {
     return (
-        <div className="flex flex-col h-full bg-[#0D0D0D] border border-border rounded-xl overflow-hidden shadow-2xl">
-            <div className="flex items-center justify-between px-4 py-2 bg-secondary/30 border-b border-border">
+        <div className="flex flex-col h-full morr-terminal rounded-xl overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-2 bg-[rgba(17,19,26,0.35)] border-b border-border/70">
                 <div className="flex items-center gap-2">
-                    <TerminalIcon size={14} className="text-primary" />
-                    <span className="text-xs font-bold uppercase tracking-wider">Consola de Eventos</span>
+                    <TerminalIcon size={14} className="text-foreground/70" />
+                    <span className="text-[10px] font-black uppercase tracking-[0.22em] text-foreground/85">
+                        Consola de Eventos
+                    </span>
                 </div>
-                <div className="flex gap-1.5">
-                    <div className="w-2.5 h-2.5 rounded-full bg-red-500/50"></div>
-                    <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/50"></div>
-                    <div className="w-2.5 h-2.5 rounded-full bg-green-500/50"></div>
+                {/* Minimal terminal buttons (subtle, non-playful) */}
+                <div className="flex gap-1.5 opacity-30">
+                    <div className="w-2 h-2 rounded-full bg-foreground/20"></div>
+                    <div className="w-2 h-2 rounded-full bg-foreground/20"></div>
+                    <div className="w-2 h-2 rounded-full bg-foreground/20"></div>
                 </div>
             </div>
 
-            <div className="flex-1 p-4 font-mono text-xs overflow-y-auto space-y-1 scrollbar-thin scrollbar-thumb-muted-foreground/20">
+            <div className="flex-1 p-4 font-mono text-[11px] overflow-y-auto space-y-1.5 scrollbar-thin scrollbar-thumb-muted-foreground/20">
                 {logs.length === 0 ? (
-                    <div className="h-full flex items-center justify-center text-muted-foreground/30 italic">
-                        Esperando eventos del sistema...
+                    <div className="h-full flex items-center justify-center text-muted-foreground/30 italic uppercase tracking-widest text-[10px]">
+                        Waiting for system signal...
                     </div>
                 ) : (
                     logs.map((log, idx) => (
                         <div key={`${log.ts}-${idx}`} className="flex gap-3 group">
-                            <span className="text-muted-foreground/50 whitespace-nowrap">
-                                [{new Date(log.ts).toLocaleTimeString('es-ES')}]
+                            <span className="text-muted-foreground/40 whitespace-nowrap font-bold">
+                                [{new Date(log.ts).toLocaleTimeString("es-ES")}]
                             </span>
-                            <span className={cn(
-                                "break-all",
-                                log.kind === 'ok' && "text-green-400",
-                                log.kind === 'warn' && "text-yellow-400",
-                                log.kind === 'error' && "text-red-400",
-                                log.kind === 'info' && "text-blue-400"
-                            )}>
-                                <span className="opacity-50 mr-2">
-                                    {log.kind === 'ok' ? '✓' : log.kind === 'error' ? '!' : log.kind === 'warn' ? '?' : 'i'}
+                            <span
+                                className={cn(
+                                    "break-all tracking-tight",
+                                    log.kind === "ok" && "text-foreground/90",
+                                    log.kind === "warn" && "text-[rgba(255,200,80,0.85)]",
+                                    log.kind === "error" && "text-[rgba(255,60,80,0.85)]",
+                                    log.kind === "info" && "text-muted-foreground/80"
+                                )}
+                            >
+                                <span className="opacity-30 mr-2 font-black">
+                                    {log.kind === "ok"
+                                        ? "::"
+                                        : log.kind === "error"
+                                            ? "!!"
+                                            : log.kind === "warn"
+                                                ? "??"
+                                                : ">>"}
                                 </span>
                                 {log.msg}
                             </span>

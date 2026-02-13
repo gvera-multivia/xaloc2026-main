@@ -29,17 +29,17 @@ export default function QueueCard({ item, index }: QueueCardProps) {
 
   const badgeClass =
     priority === "high"
-      ? "border-[rgba(122,15,30,0.30)] bg-[rgba(122,15,30,0.10)] text-[rgba(255,255,255,0.92)]"
-      : "border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] text-muted-foreground/90";
+      ? "border-[color:var(--morr-fate)]/30 bg-[color:var(--morr-fate)]/10 text-foreground/90"
+      : "border-border/70 bg-foreground/5 text-muted-foreground/90";
 
   return (
     <div
       className={cn(
         "group relative rounded-xl border p-4 transition-all duration-300",
-        "bg-[rgba(17,19,26,0.55)] border-[rgba(255,255,255,0.06)]",
+        "bg-[rgba(17,19,26,0.55)] border-border/60",
         "hover:border-[rgba(108,77,255,0.22)] hover:bg-[rgba(17,19,26,0.62)]",
         isProcessing &&
-          "border-[rgba(122,15,30,0.28)] bg-[rgba(122,15,30,0.06)]"
+        "border-[color:var(--morr-fate)]/28 bg-[color:var(--morr-fate)]/05"
       )}
     >
       {/* Processing marker (quiet heat, not ping spam) */}
@@ -61,16 +61,16 @@ export default function QueueCard({ item, index }: QueueCardProps) {
         <div
           className={cn(
             "h-10 w-10 rounded-lg border flex items-center justify-center transition-colors",
-            "border-[rgba(255,255,255,0.06)] bg-[rgba(11,12,16,0.55)]",
+            "border-border/80 bg-[rgba(11,12,16,0.55)]",
             "group-hover:border-[rgba(108,77,255,0.20)]",
-            isProcessing && "border-[rgba(122,15,30,0.20)] bg-[rgba(122,15,30,0.08)]"
+            isProcessing && "border-[color:var(--morr-fate)]/20 bg-[color:var(--morr-fate)]/08"
           )}
         >
           <Box
             size={18}
             className={cn(
               "text-foreground/75",
-              isProcessing && "text-[rgba(255,255,255,0.90)]"
+              isProcessing && "text-foreground"
             )}
           />
         </div>
@@ -78,13 +78,13 @@ export default function QueueCard({ item, index }: QueueCardProps) {
         {/* Main */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2">
-            <h4 className="text-sm font-black tracking-tight truncate text-foreground/95">
+            <h4 className="text-[13px] font-black uppercase tracking-[0.05em] truncate text-foreground/95">
               #{item.resource_id}
             </h4>
 
             <span
               className={cn(
-                "text-[10px] font-black uppercase tracking-[0.14em] px-2 py-1 rounded-md border",
+                "text-[9px] font-black uppercase tracking-[0.18em] px-2 py-1 rounded-md border",
                 badgeClass
               )}
             >
@@ -92,19 +92,19 @@ export default function QueueCard({ item, index }: QueueCardProps) {
             </span>
           </div>
 
-          <p className="mt-1 text-xs text-muted-foreground/80 truncate">
+          <p className="mt-1 text-[11px] font-bold uppercase tracking-wider text-muted-foreground/70 truncate">
             {item.site_id}
           </p>
 
-          <div className="mt-3 flex items-center gap-3 text-[11px] text-muted-foreground/70">
-            <span className="flex items-center gap-1">
-              <Clock size={12} className="text-muted-foreground/70" />
-              <span className="uppercase tracking-[0.12em]">{item.state}</span>
+          <div className="mt-3 flex items-center gap-3 text-[10px] text-muted-foreground/60">
+            <span className="flex items-center gap-1.5">
+              <Clock size={12} className="text-muted-foreground/50" />
+              <span className="uppercase font-black tracking-[0.14em]">{item.state}</span>
             </span>
 
             {item.protocol && (
-              <span className="px-2 py-1 rounded-md border border-[rgba(255,255,255,0.06)] bg-[rgba(11,12,16,0.45)]">
-                <span className="uppercase tracking-[0.12em]">Type</span>:{" "}
+              <span className="px-2 py-1 rounded-md border border-border/60 bg-[rgba(11,12,16,0.45)]">
+                <span className="uppercase font-black tracking-[0.14em]">TYPE</span>:{" "}
                 {item.protocol}
               </span>
             )}

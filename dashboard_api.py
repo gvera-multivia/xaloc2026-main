@@ -36,6 +36,7 @@ FRONTEND_PORT = int((os.getenv("DASHBOARD_FRONTEND_PORT") or "3000").strip() or 
 FRONTEND_DEV = (os.getenv("DASHBOARD_FRONTEND_DEV") or "1").strip().lower() not in {"0", "false", "no", "off"}
 
 _frontend_process: asyncio.subprocess.Process | None = None
+_proxy_session: aiohttp.ClientSession | None = None
 
 
 async def _drain_frontend_logs(proc: asyncio.subprocess.Process) -> None:
@@ -91,6 +92,16 @@ async def _start_frontend_server() -> None:
     await _wait_frontend_ready()
 
 
+async def _ensure_proxy_session() -> aiohttp.ClientSession:
+    global _proxy_session
+    if _proxy_session is not None and not _proxy_session.closed:
+        return _proxy_session
+    timeout = aiohttp.ClientTimeout(total=120)
+    connector = aiohttp.TCPConnector(limit=100, enable_cleanup_closed=True)
+    _proxy_session = aiohttp.ClientSession(timeout=timeout, connector=connector)
+    return _proxy_session
+
+
 async def _stop_frontend_server() -> None:
     global _frontend_process
     proc = _frontend_process
@@ -113,7 +124,11 @@ async def app_startup() -> None:
 
 @app.on_event("shutdown")
 async def app_shutdown() -> None:
+    global _proxy_session
     await process_manager.stop_all()
+    if _proxy_session is not None and not _proxy_session.closed:
+        await _proxy_session.close()
+    _proxy_session = None
     await _stop_frontend_server()
 
 
@@ -543,22 +558,21 @@ async def catch_all(rest_of_path: str, request: Request):
         if key.lower() not in _HOP_BY_HOP_HEADERS and key.lower() != "host"
     }
 
-    timeout = aiohttp.ClientTimeout(total=120)
     try:
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.request(
-                request.method,
-                target_url,
-                data=body if body else None,
-                headers=headers,
-                allow_redirects=False,
-            ) as upstream:
-                content = await upstream.read()
-                out_headers = {
-                    key: value
-                    for key, value in upstream.headers.items()
-                    if key.lower() not in _HOP_BY_HOP_HEADERS and key.lower() != "content-length"
-                }
-                return Response(content=content, status_code=upstream.status, headers=out_headers)
+        session = await _ensure_proxy_session()
+        async with session.request(
+            request.method,
+            target_url,
+            data=body if body else None,
+            headers=headers,
+            allow_redirects=False,
+        ) as upstream:
+            content = await upstream.read()
+            out_headers = {
+                key: value
+                for key, value in upstream.headers.items()
+                if key.lower() not in _HOP_BY_HOP_HEADERS and key.lower() != "content-length"
+            }
+            return Response(content=content, status_code=upstream.status, headers=out_headers)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Error conectando con frontend Next: {exc}") from exc
