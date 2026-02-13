@@ -172,10 +172,10 @@ export default function AdminPage() {
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h2 className="text-3xl font-black uppercase tracking-tight">
+          <h2 className="text-2xl font-black uppercase tracking-tight">
             Panel de Gestión
           </h2>
-          <p className="text-muted-foreground">
+          <p className="text-xs text-muted-foreground/60 uppercase tracking-widest mt-1">
             Control de sitios, pausas y autorizaciones operativas.
           </p>
         </div>
@@ -224,8 +224,8 @@ export default function AdminPage() {
               <div
                 key={auth.id}
                 className={cn(
-                  "morr-card morr-edge rounded-2xl p-6 space-y-4",
-                  "transition"
+                  "morr-card morr-edge rounded p-6 space-y-4",
+                  "transition-all duration-500"
                 )}
               >
                 <div className="flex justify-between items-start gap-4">
@@ -259,12 +259,12 @@ export default function AdminPage() {
                     onClick={() => handleApproveAuth(auth.id)}
                     disabled={busy === `auth-${auth.id}`}
                     className={cn(
-                      "morr-focus flex-1 rounded-xl py-2.5",
-                      "text-[11px] font-black uppercase tracking-[0.18em]",
-                      "bg-[color:var(--morr-fate)] text-white",
+                      "morr-focus flex-1 rounded py-2.5",
+                      "text-[10px] font-black uppercase tracking-[0.2em]",
+                      "bg-[color:var(--morr-fate)] text-white/95",
                       "border border-transparent",
-                      "hover:border-[rgba(108,77,255,0.28)]",
-                      "transition active:scale-[0.99] disabled:opacity-50",
+                      "hover:bg-[color:var(--morr-fate-hi)]",
+                      "transition-all duration-300 active:scale-[0.98] disabled:opacity-50",
                       "flex items-center justify-center gap-2"
                     )}
                   >
@@ -307,7 +307,7 @@ export default function AdminPage() {
           </h3>
         </div>
 
-        <div className="morr-card rounded-2xl overflow-hidden">
+        <div className="morr-card rounded overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>

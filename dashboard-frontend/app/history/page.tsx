@@ -68,12 +68,12 @@ export default function HistoryPage() {
         <div className="space-y-10 animate-in fade-in duration-700">
             <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
                 <div>
-                    <h2 className="text-3xl font-black uppercase tracking-tight">Historial de Ejecución</h2>
-                    <p className="text-muted-foreground">Registro detallado de trámites completados y fallidos.</p>
+                    <h2 className="text-2xl font-black uppercase tracking-tight">Historial de Ejecución</h2>
+                    <p className="text-xs text-muted-foreground/60 uppercase tracking-widest mt-1">Registro detallado de trámites completados y fallidos.</p>
                 </div>
                 <div className="flex items-center gap-2">
-                    <button className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-[0.18em] bg-[rgba(17,19,26,0.55)] border border-border/70 text-foreground/90 hover:border-[rgba(108,77,255,0.22)] transition-all">
-                        <Download size={14} /> Exportar CSV
+                    <button className="flex items-center gap-2 px-6 py-2 rounded-sm text-[9px] font-black uppercase tracking-[0.2em] bg-[rgba(17,19,26,0.65)] border border-border/70 text-foreground/80 hover:border-[rgba(108,77,255,0.22)] transition-all duration-300">
+                        <Download size={12} /> Exportar Reporte
                     </button>
                 </div>
             </div>
@@ -85,7 +85,7 @@ export default function HistoryPage() {
                         <Calendar size={16} className="text-muted-foreground/60" />
                         <span className="text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground/70">Fechas</span>
                     </div>
-                    <div className="morr-card rounded-2xl p-2 space-y-1">
+                    <div className="morr-card rounded p-2 space-y-1">
                         {days.map((d: any) => {
                             const dayStr = typeof d === 'string' ? d : d.day;
                             return (
@@ -93,13 +93,14 @@ export default function HistoryPage() {
                                     key={dayStr}
                                     onClick={() => { setSelectedDay(dayStr); setPage(1); }}
                                     className={cn(
-                                        "w-full flex items-center justify-between px-4 py-3 rounded-xl text-[12px] font-black uppercase tracking-[0.10em] transition-all group",
+                                        "w-full flex items-center justify-between px-4 py-2.5 rounded-sm text-[11px] font-black uppercase tracking-[0.12em] transition-all duration-300 group",
                                         selectedDay === dayStr
-                                            ? "bg-[color:var(--morr-fate)] text-white"
-                                            : "hover:bg-[rgba(255,255,255,0.04)] text-muted-foreground/80 hover:text-foreground"
+                                            ? "bg-[color:var(--morr-fate)] text-white/90 shadow-inner"
+                                            : "hover:bg-foreground/5 text-muted-foreground/60 hover:text-foreground/90"
                                     )}
                                 >
                                     <span>{dayStr}</span>
+                                    {selectedDay === dayStr && <div className="h-1 w-1 rounded-full bg-white animate-pulse" />}
                                 </button>
                             );
                         })}
@@ -121,7 +122,7 @@ export default function HistoryPage() {
                         </div>
                     </div>
 
-                    <div className="morr-card morr-edge rounded-2xl overflow-hidden">
+                    <div className="morr-card morr-edge rounded overflow-hidden">
                         <div className="overflow-x-auto">
                             <table className="w-full text-left border-collapse">
                                 <thead>

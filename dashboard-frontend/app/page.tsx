@@ -109,34 +109,33 @@ export default function MonitorPage() {
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h2 className="text-3xl font-black tracking-tight uppercase">
+          <h2 className="text-2xl font-black tracking-tight uppercase">
             Monitor de Operaciones
           </h2>
-          <p className="text-muted-foreground">
-            Seguimiento técnico de ejecución y flujo de trabajo en tiempo real.
+          <p className="text-xs text-muted-foreground/60 uppercase tracking-widest mt-1">
+            Seguimiento técnico de ejecución y flujo de trabajo.
           </p>
         </div>
 
         {/* Date + refresh */}
-        <div className="flex items-center gap-2 rounded-xl border border-border/60 px-2 py-2 bg-[rgba(17,19,26,0.55)]">
-          <div className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground/80">
-            <Calendar size={14} />
+        <div className="flex items-center gap-2 rounded border border-border/70 px-2 py-1.5 bg-[rgba(17,19,26,0.65)]">
+          <div className="flex items-center gap-2 px-3 py-1.5 text-[9px] font-black uppercase tracking-[0.25em] text-muted-foreground/60">
+            <Calendar size={12} />
             {today}
           </div>
 
           <button
             onClick={refresh}
             className={[
-              "flex items-center gap-2 px-4 py-2 rounded-lg",
-              "text-[11px] font-black uppercase tracking-[0.18em]",
-              "bg-[color:var(--morr-fate)] text-white",
+              "flex items-center gap-2 px-6 py-2 rounded-sm",
+              "text-[9px] font-black uppercase tracking-[0.2em]",
+              "bg-[color:var(--morr-fate)] text-white/90",
               "border border-transparent",
-              "hover:border-[rgba(108,77,255,0.35)]",
-              "transition active:scale-[0.99]",
+              "hover:bg-[color:var(--morr-fate-hi)] transition-all duration-300 active:scale-[0.98]",
             ].join(" ")}
           >
-            <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
-            Actualizar
+            <RefreshCw size={12} className={loading ? "animate-spin" : ""} />
+            Sincronizar
           </button>
         </div>
       </div>
@@ -162,7 +161,7 @@ export default function MonitorPage() {
             />
 
             {/* Live metrics card */}
-            <div className="morr-card morr-edge rounded-2xl p-7">
+            <div className="morr-card morr-edge rounded p-7">
               <div className="flex items-center justify-between">
                 <h4 className="text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground">
                   Métricas en Vivo
@@ -173,22 +172,22 @@ export default function MonitorPage() {
                 />
               </div>
 
-              <div className="mt-5 space-y-3">
-                <div className="flex justify-between items-center rounded-xl border border-border/60 bg-[rgba(17,19,26,0.55)] p-4">
-                  <span className="text-[11px] font-black uppercase tracking-[0.16em] text-muted-foreground">
-                    Tarea Activa
+              <div className="mt-5 space-y-3 font-mono">
+                <div className="flex justify-between items-center rounded border border-border/60 bg-[rgba(17,19,26,0.65)] p-4">
+                  <span className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/50">
+                    ID_RECURSO
                   </span>
                   <span className="text-sm font-black text-foreground">
-                    {liveItem ? `ID ${liveItem.resource_id}` : "NINGUNA"}
+                    {liveItem ? `#${liveItem.resource_id}` : "VOID"}
                   </span>
                 </div>
 
-                <div className="flex justify-between items-center rounded-xl border border-border/60 bg-[rgba(17,19,26,0.55)] p-4">
-                  <span className="text-[11px] font-black uppercase tracking-[0.16em] text-muted-foreground">
-                    Sitio Fuente
+                <div className="flex justify-between items-center rounded border border-border/60 bg-[rgba(17,19,26,0.65)] p-4">
+                  <span className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/50">
+                    ID_SITIO
                   </span>
                   <span className="text-sm font-black text-foreground uppercase">
-                    {liveItem?.site_id || "STANDBY"}
+                    {liveItem?.site_id || "OBSERVING"}
                   </span>
                 </div>
               </div>
@@ -218,7 +217,7 @@ export default function MonitorPage() {
         {/* Right */}
         <div className="lg:col-span-4 space-y-8">
           {/* Queue */}
-          <div className="morr-card morr-edge rounded-2xl overflow-hidden flex flex-col h-[500px]">
+          <div className="morr-card morr-edge rounded overflow-hidden flex flex-col h-[500px]">
             <div className="p-5 border-b border-border/70 sticky top-0 bg-[rgba(11,12,16,0.60)] backdrop-blur-md z-20">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -253,7 +252,7 @@ export default function MonitorPage() {
           </div>
 
           {/* Incidents */}
-          <div className="morr-card morr-edge rounded-2xl overflow-hidden">
+          <div className="morr-card morr-edge rounded overflow-hidden">
             <div className="p-5 border-b border-border/70 flex items-center gap-2">
               <div className="w-8 h-8 rounded-lg border border-[color:rgba(255,60,80,0.25)] bg-[rgba(255,60,80,0.08)] flex items-center justify-center">
                 <AlertCircle size={18} className="text-[color:rgba(255,60,80,0.85)]" />

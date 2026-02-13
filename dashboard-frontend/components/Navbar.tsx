@@ -41,7 +41,7 @@ export default function Navbar() {
   const navLinks = [
     { href: "/", label: "Estado", icon: LayoutDashboard },
     { href: "/control", label: "Control", icon: Terminal },
-    { href: "/admin", label: "GestiÃ³n", icon: Settings },
+    { href: "/admin", label: "Gestión", icon: Settings },
     { href: "/history", label: "Historial", icon: History },
     { href: "/blacklist", label: "Bloqueos", icon: ShieldAlert },
   ];
@@ -63,13 +63,13 @@ export default function Navbar() {
           {/* Replace 'M' with your raven side logo later; keep as sigil placeholder */}
           <div
             className={cn(
-              "w-10 h-10 rounded-xl border",
+              "w-10 h-10 rounded border",
               "flex items-center justify-center",
-              "bg-[rgba(17,19,26,0.70)] border-[rgba(255,255,255,0.08)]",
-              "group-hover:border-[rgba(108,77,255,0.22)] transition"
+              "bg-[rgba(17,19,26,0.80)] border-[rgba(255,255,255,0.06)]",
+              "group-hover:border-[rgba(108,77,255,0.22)] transition-all duration-500"
             )}
           >
-            <span className="text-[11px] font-black tracking-[0.18em] text-foreground/90">
+            <span className="text-[11px] font-black tracking-[0.25em] text-foreground/80">
               M
             </span>
           </div>
@@ -85,7 +85,7 @@ export default function Navbar() {
         </Link>
 
         {/* Nav links (desktop) */}
-        <div className="hidden lg:flex items-center gap-1 rounded-xl border border-border/70 bg-[rgba(17,19,26,0.55)] p-1">
+        <div className="hidden lg:flex items-center gap-1 rounded border border-border/70 bg-[rgba(17,19,26,0.65)] p-0.5">
           {navLinks.map((link) => {
             const Icon = link.icon;
             const isActive = pathname === link.href;
@@ -96,32 +96,31 @@ export default function Navbar() {
                 href={link.href}
                 className={cn(
                   "relative flex items-center gap-2",
-                  "px-4 py-2 rounded-lg",
-                  "text-[12px] font-black uppercase tracking-[0.12em]",
-                  "transition",
+                  "px-4 py-2 rounded-sm",
+                  "text-[11px] font-black uppercase tracking-[0.15em]",
+                  "transition-all duration-300",
                   isActive
-                    ? "text-foreground"
-                    : "text-muted-foreground/80 hover:text-foreground hover:bg-[rgba(255,255,255,0.04)]"
+                    ? "text-foreground bg-foreground/5 shadow-inner"
+                    : "text-muted-foreground/60 hover:text-foreground hover:bg-foreground/5"
                 )}
               >
                 <Icon
-                  size={16}
+                  size={14}
                   className={cn(
                     "transition-colors",
                     isActive
                       ? "text-foreground/90"
-                      : "text-muted-foreground/75 group-hover:text-foreground/80"
+                      : "text-muted-foreground/50 group-hover:text-foreground/75"
                   )}
                 />
                 {link.label}
 
-                {/* Active = Fate underline (thin, addictive, not loud) */}
+                {/* Active = Fate rail (extremely thin, inevitable) */}
                 {isActive && (
                   <span
-                    className="absolute left-4 right-4 -bottom-[2px] h-[1px]"
+                    className="absolute inset-x-2 -bottom-[1px] h-[0.5px]"
                     style={{
-                      background:
-                        "linear-gradient(90deg, transparent, rgba(122,15,30,0.80), transparent)",
+                      background: "linear-gradient(90deg, transparent, var(--morr-fate), transparent)",
                     }}
                   />
                 )}
@@ -140,7 +139,7 @@ export default function Navbar() {
             />
             <input
               type="text"
-              placeholder="Buscar trÃ¡miteâ€¦"
+              placeholder="Buscar trámite…"
               value={quickSearch}
               onChange={(e) => setQuickSearch(e.target.value)}
               className={cn(

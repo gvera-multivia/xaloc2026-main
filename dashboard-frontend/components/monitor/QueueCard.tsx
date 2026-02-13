@@ -35,11 +35,11 @@ export default function QueueCard({ item, index }: QueueCardProps) {
   return (
     <div
       className={cn(
-        "group relative rounded-xl border p-4 transition-all duration-300",
-        "bg-[rgba(17,19,26,0.55)] border-border/60",
-        "hover:border-[rgba(108,77,255,0.22)] hover:bg-[rgba(17,19,26,0.62)]",
+        "group relative rounded border p-4 transition-all duration-500",
+        "bg-[rgba(17,19,26,0.65)] border-border/60",
+        "hover:border-[rgba(108,77,255,0.22)]",
         isProcessing &&
-        "border-[color:var(--morr-fate)]/28 bg-[color:var(--morr-fate)]/05"
+        "border-[color:var(--morr-fate)]/40 bg-[color:var(--morr-fate)]/10"
       )}
     >
       {/* Processing marker (quiet heat, not ping spam) */}
@@ -60,10 +60,10 @@ export default function QueueCard({ item, index }: QueueCardProps) {
         {/* Icon tile */}
         <div
           className={cn(
-            "h-10 w-10 rounded-lg border flex items-center justify-center transition-colors",
-            "border-border/80 bg-[rgba(11,12,16,0.55)]",
+            "h-10 w-10 rounded border flex items-center justify-center transition-all duration-500",
+            "border-border/80 bg-[rgba(11,12,16,0.65)]",
             "group-hover:border-[rgba(108,77,255,0.20)]",
-            isProcessing && "border-[color:var(--morr-fate)]/20 bg-[color:var(--morr-fate)]/08"
+            isProcessing && "border-[color:var(--morr-fate)]/30 bg-[color:var(--morr-fate)]/15"
           )}
         >
           <Box

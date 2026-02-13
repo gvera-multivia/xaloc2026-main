@@ -16,7 +16,7 @@ interface EventConsoleProps {
 
 export default function EventConsole({ logs }: EventConsoleProps) {
     return (
-        <div className="flex flex-col h-full morr-terminal rounded-xl overflow-hidden">
+        <div className="flex flex-col h-full morr-terminal rounded overflow-hidden">
             <div className="flex items-center justify-between px-4 py-2 bg-[rgba(17,19,26,0.35)] border-b border-border/70">
                 <div className="flex items-center gap-2">
                     <TerminalIcon size={14} className="text-foreground/70" />

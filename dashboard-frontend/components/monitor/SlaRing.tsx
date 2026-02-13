@@ -27,7 +27,7 @@ export default function SlaRing({ progress, label, elapsed }: SlaRingProps) {
   const innerTick = "rgba(108,77,255,0.08)";
 
   return (
-    <div className="relative morr-card morr-edge rounded-2xl overflow-hidden p-8">
+    <div className="relative morr-card morr-edge rounded overflow-hidden p-8">
       {/* Subtle inner surface split (violet only as a surface transition whisper) */}
       <div
         className="pointer-events-none absolute inset-0 opacity-[0.35]"

@@ -35,7 +35,7 @@ export default function LiveScreencast({ live = false }: LiveScreencastProps) {
     <div
       className={[
         "relative overflow-hidden",
-        "min-h-[500px] rounded-2xl",
+        "min-h-[500px] rounded",
         "morr-card morr-edge",
         "transition-all duration-500",
       ].join(" ")}
