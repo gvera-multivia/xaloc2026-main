@@ -112,6 +112,39 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         return "".join(c for c in unicodedata.normalize("NFD", t) if unicodedata.category(c) != "Mn")
 
     @classmethod
+    def _build_organisme_patterns(cls, raw: Any) -> list[str]:
+        text = cls._clean_str(raw)
+        if not text:
+            return ["%"]
+
+        # Allow explicit multi-pattern syntax with commas/semicolons, otherwise fallback to space tokens.
+        if "," in text or ";" in text:
+            chunks = re.split(r"[;,]+", text)
+        else:
+            chunks = text.split(" ")
+
+        patterns: list[str] = []
+        for chunk in chunks:
+            p = cls._clean_str(chunk)
+            if not p:
+                continue
+            if p == "%":
+                patterns.append(p)
+                continue
+
+            # If token has no SQL wildcard, search as contains.
+            if "%" not in p and "_" not in p:
+                p = f"%{p}%"
+            else:
+                if not p.startswith("%"):
+                    p = f"%{p}"
+                if not p.endswith("%"):
+                    p = f"{p}%"
+            patterns.append(p)
+
+        return patterns or ["%"]
+
+    @classmethod
     def _build_expone_solicita(cls, fase_raw: str, expediente: str, sujeto: str) -> tuple[str, str]:
         config = cls._load_motivos_config()
         fase_norm = cls._normalize_text(fase_raw)
@@ -172,10 +205,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
             texp_values = [2, 3]
         texp_placeholders = ",".join(["?"] * len(texp_values))
 
-        query_organisme_raw = self._clean_str(config.get("query_organisme")) or "%"
-        patterns = [p.strip() for p in query_organisme_raw.split(" ") if p.strip()]
-        if not patterns:
-            patterns = ["%"]
+        patterns = self._build_organisme_patterns(config.get("query_organisme"))
         like_clauses = ["rs.Organisme LIKE ?"] * len(patterns)
         organisme_like_clause = " AND ".join(like_clauses)
 
