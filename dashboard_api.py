@@ -33,7 +33,7 @@ process_manager = ProcessManager(base_dir=".", logs_dir="logs")
 
 FRONTEND_HOST = os.getenv("DASHBOARD_FRONTEND_HOST", "127.0.0.1").strip() or "127.0.0.1"
 FRONTEND_PORT = int((os.getenv("DASHBOARD_FRONTEND_PORT") or "3000").strip() or "3000")
-FRONTEND_DEV = (os.getenv("DASHBOARD_FRONTEND_DEV") or "1").strip().lower() not in {"0", "false", "no", "off"}
+FRONTEND_DEV = (os.getenv("DASHBOARD_FRONTEND_DEV") or "0").strip().lower() not in {"0", "false", "no", "off"}
 
 _frontend_process: asyncio.subprocess.Process | None = None
 _proxy_session: aiohttp.ClientSession | None = None
@@ -102,8 +102,30 @@ async def _start_frontend_server() -> None:
     if not frontend_dir.exists():
         raise RuntimeError(f"No existe el directorio frontend: {frontend_dir}")
 
-    mode = "dev" if FRONTEND_DEV else "start"
-    cmd = ["cmd", "/c", "npm", "run", mode, "--", "--hostname", FRONTEND_HOST, "--port", str(FRONTEND_PORT)]
+    if FRONTEND_DEV:
+        cmd = ["cmd", "/c", "npm", "run", "dev", "--", "--hostname", FRONTEND_HOST, "--port", str(FRONTEND_PORT)]
+    else:
+        build_cmd = ["cmd", "/c", "npm", "run", "build"]
+        build_proc = await asyncio.create_subprocess_exec(
+            *build_cmd,
+            cwd=str(frontend_dir),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        assert build_proc.stdout is not None
+        while True:
+            line = await build_proc.stdout.readline()
+            if not line:
+                break
+            msg = line.decode("utf-8", errors="replace").rstrip()
+            if msg:
+                print(f"[frontend-build] {msg}")
+        build_rc = await build_proc.wait()
+        if int(build_rc or 0) != 0:
+            raise RuntimeError(f"Fallo en npm run build (rc={build_rc})")
+
+        cmd = ["cmd", "/c", "npm", "run", "start", "--", "--hostname", FRONTEND_HOST, "--port", str(FRONTEND_PORT)]
+
     _frontend_process = await asyncio.create_subprocess_exec(
         *cmd,
         cwd=str(frontend_dir),
@@ -581,11 +603,26 @@ async def catch_all(rest_of_path: str, request: Request):
         target_url = f"{target_url}?{request.url.query}"
 
     body = await request.body()
+    incoming_host = request.headers.get("host", "").strip()
+    forwarded_proto = request.headers.get("x-forwarded-proto", request.url.scheme or "http")
+    forwarded_for = request.headers.get("x-forwarded-for")
+    client_ip = (request.client.host if request.client else "") or ""
+    if forwarded_for and client_ip:
+        x_forwarded_for = f"{forwarded_for}, {client_ip}"
+    else:
+        x_forwarded_for = forwarded_for or client_ip
+
     headers = {
         key: value
         for key, value in request.headers.items()
-        if key.lower() not in _HOP_BY_HOP_HEADERS and key.lower() != "host"
+        if key.lower() not in _HOP_BY_HOP_HEADERS
     }
+    if incoming_host:
+        headers["host"] = incoming_host
+    headers["x-forwarded-host"] = incoming_host or f"{FRONTEND_HOST}:{FRONTEND_PORT}"
+    headers["x-forwarded-proto"] = forwarded_proto
+    if x_forwarded_for:
+        headers["x-forwarded-for"] = x_forwarded_for
 
     try:
         session = await _ensure_proxy_session()
