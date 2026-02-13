@@ -5,6 +5,14 @@ import Navbar from "@/components/Navbar";
 export const metadata: Metadata = {
   title: "Morrigan",
   description: "Morrigan es un dashboard de monitorización en tiempo real",
+  icons: {
+    icon: [
+      { url: "/raven.webp", sizes: "256x256", type: "image/webp" },
+      { url: "/favicon.ico", sizes: "32x32" },
+    ],
+    shortcut: "/favicon.ico",
+    apple: "/raven.webp",
+  },
 };
 
 export default function RootLayout({
