@@ -17,6 +17,7 @@ from dashboard import DashboardService
 from dashboard.process_manager import ProcessManager
 from core.xvia_auth import create_authenticated_session_in_place
 from core.xvia_deselect import deselect_resource
+from core.process_launcher import get_npm_command, start_async_process, terminate_process_tree
 
 app = FastAPI(title="Xaloc Realtime Dashboard", version="2.0.0")
 
@@ -103,11 +104,15 @@ async def _start_frontend_server() -> None:
         raise RuntimeError(f"No existe el directorio frontend: {frontend_dir}")
 
     if FRONTEND_DEV:
-        cmd = ["cmd", "/c", "npm", "run", "dev", "--", "--hostname", FRONTEND_HOST, "--port", str(FRONTEND_PORT)]
+        args = ["run", "dev", "--", "--hostname", FRONTEND_HOST, "--port", str(FRONTEND_PORT)]
+        cmd = get_npm_command(args)
     else:
-        build_cmd = ["cmd", "/c", "npm", "run", "build"]
-        build_proc = await asyncio.create_subprocess_exec(
-            *build_cmd,
+        # Build step
+        build_args = ["run", "build"]
+        build_cmd = get_npm_command(build_args)
+
+        build_proc = await start_async_process(
+            build_cmd,
             cwd=str(frontend_dir),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
@@ -124,10 +129,12 @@ async def _start_frontend_server() -> None:
         if int(build_rc or 0) != 0:
             raise RuntimeError(f"Fallo en npm run build (rc={build_rc})")
 
-        cmd = ["cmd", "/c", "npm", "run", "start", "--", "--hostname", FRONTEND_HOST, "--port", str(FRONTEND_PORT)]
+        # Start step
+        args = ["run", "start", "--", "--hostname", FRONTEND_HOST, "--port", str(FRONTEND_PORT)]
+        cmd = get_npm_command(args)
 
-    _frontend_process = await asyncio.create_subprocess_exec(
-        *cmd,
+    _frontend_process = await start_async_process(
+        cmd,
         cwd=str(frontend_dir),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
@@ -156,13 +163,7 @@ async def _stop_frontend_server() -> None:
     proc = _frontend_process
     if not proc:
         return
-    if proc.returncode is None:
-        proc.terminate()
-        try:
-            await asyncio.wait_for(proc.wait(), timeout=8)
-        except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
+    await terminate_process_tree(proc)
     _frontend_process = None
 
 

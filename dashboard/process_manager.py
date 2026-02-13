@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import sys
-import os
-import signal
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+
+from core.process_launcher import start_async_process, terminate_process_tree
 
 
 @dataclass
@@ -56,23 +55,13 @@ class ProcessManager:
             stdout_path = self.logs_dir / f"{process_name}_out.log"
             stdout_handle = open(stdout_path, "a", encoding="utf-8")
 
-            # Preparar argumentos de creacion de proceso para asegurar nuevo grupo
-            kwargs = {}
-            if sys.platform == "win32":
-                # En Windows usamos CREATE_NEW_PROCESS_GROUP para poder enviar CTRL_BREAK_EVENT
-                kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-            else:
-                # En Unix usamos start_new_session=True para crear un nuevo grupo de procesos
-                kwargs["start_new_session"] = True
+            cmd = [sys.executable, "-u", str(script_path)]
 
-            proc = await asyncio.create_subprocess_exec(
-                sys.executable,
-                "-u",
-                str(script_path),
+            proc = await start_async_process(
+                cmd,
                 cwd=str(self.base_dir),
                 stdout=stdout_handle,
                 stderr=asyncio.subprocess.STDOUT,
-                **kwargs
             )
 
             self._processes[process_name] = ManagedProcess(
@@ -96,59 +85,15 @@ class ProcessManager:
             if not current:
                 return {"name": process_name, "status": "stopped", "stopped": False}
 
-            proc = current.process
-            if proc.returncode is not None:
-                self._close_handles(current)
-                return {"name": process_name, "status": "stopped", "stopped": False}
-
-            # Intentar parada graciosa (graceful shutdown)
-            if sys.platform == "win32":
-                # En Windows enviamos CTRL_BREAK_EVENT al grupo
-                try:
-                    proc.send_signal(signal.CTRL_BREAK_EVENT)
-                except Exception:
-                    # Si falla, intentamos terminate normal
-                    proc.terminate()
-            else:
-                # En Unix enviamos SIGTERM al grupo de procesos
-                try:
-                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-                except ProcessLookupError:
-                    pass # Ya murio
-                except Exception:
-                    proc.terminate()
-
-            killed = False
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=timeout_seconds)
-            except asyncio.TimeoutError:
-                # Si no para, forzamos kill al grupo
-                killed = True
-                if sys.platform == "win32":
-                    # En Windows usamos taskkill para asegurar arbol completo
-                    try:
-                        subprocess.call(["taskkill", "/F", "/T", "/PID", str(proc.pid)])
-                    except Exception:
-                        proc.kill()
-                else:
-                    try:
-                        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                    except Exception:
-                        proc.kill()
-
-                # Esperar confirmacion final
-                try:
-                    await asyncio.wait_for(proc.wait(), timeout=5.0)
-                except asyncio.TimeoutError:
-                    pass # Ya deberia estar muerto
-
+            result = await terminate_process_tree(current.process, timeout=timeout_seconds)
             self._close_handles(current)
+
             return {
                 "name": process_name,
                 "status": "stopped",
-                "stopped": True,
-                "killed": killed,
-                "returncode": proc.returncode,
+                "stopped": result.get("stopped", False),
+                "killed": result.get("killed", False),
+                "returncode": result.get("returncode"),
             }
 
     async def restart_process(self, name: str) -> dict:

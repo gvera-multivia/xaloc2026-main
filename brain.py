@@ -9,11 +9,13 @@ from dotenv import load_dotenv
 from core.sqlite_db import SQLiteDatabase
 from core.sqlserver_utils import build_sqlserver_connection_string
 from core.brain.orchestrator import BrainOrchestrator
+from core.process_launcher import setup_asyncio_policy
 
 # Load env vars
 load_dotenv()
 
 def main():
+    setup_asyncio_policy()
     Path("logs").mkdir(exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,
