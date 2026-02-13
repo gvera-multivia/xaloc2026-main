@@ -37,6 +37,28 @@ FRONTEND_DEV = (os.getenv("DASHBOARD_FRONTEND_DEV") or "1").strip().lower() not 
 
 _frontend_process: asyncio.subprocess.Process | None = None
 _proxy_session: aiohttp.ClientSession | None = None
+_prev_loop_exception_handler = None
+
+
+def _is_windows_connection_reset(context: dict[str, Any]) -> bool:
+    exc = context.get("exception")
+    if not isinstance(exc, ConnectionResetError):
+        return False
+    msg = str(exc)
+    if "10054" in msg:
+        return True
+    handle = context.get("handle")
+    handle_text = str(handle or "")
+    return "_ProactorBasePipeTransport._call_connection_lost" in handle_text
+
+
+def _loop_exception_handler(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
+    if _is_windows_connection_reset(context):
+        return
+    if _prev_loop_exception_handler:
+        _prev_loop_exception_handler(loop, context)
+    else:
+        loop.default_exception_handler(context)
 
 
 async def _drain_frontend_logs(proc: asyncio.subprocess.Process) -> None:
@@ -119,12 +141,19 @@ async def _stop_frontend_server() -> None:
 
 @app.on_event("startup")
 async def app_startup() -> None:
+    global _prev_loop_exception_handler
+    loop = asyncio.get_running_loop()
+    _prev_loop_exception_handler = loop.get_exception_handler()
+    loop.set_exception_handler(_loop_exception_handler)
     await _start_frontend_server()
 
 
 @app.on_event("shutdown")
 async def app_shutdown() -> None:
-    global _proxy_session
+    global _proxy_session, _prev_loop_exception_handler
+    loop = asyncio.get_running_loop()
+    loop.set_exception_handler(_prev_loop_exception_handler)
+    _prev_loop_exception_handler = None
     await process_manager.stop_all()
     if _proxy_session is not None and not _proxy_session.closed:
         await _proxy_session.close()
