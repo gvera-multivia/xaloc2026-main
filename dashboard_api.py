@@ -142,7 +142,12 @@ async def _ensure_proxy_session() -> aiohttp.ClientSession:
         return _proxy_session
     timeout = aiohttp.ClientTimeout(total=120)
     connector = aiohttp.TCPConnector(limit=100, enable_cleanup_closed=True)
-    _proxy_session = aiohttp.ClientSession(timeout=timeout, connector=connector)
+    # Preserve upstream encoding as-is; otherwise browser can fail decoding.
+    _proxy_session = aiohttp.ClientSession(
+        timeout=timeout,
+        connector=connector,
+        auto_decompress=False,
+    )
     return _proxy_session
 
 
