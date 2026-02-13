@@ -530,6 +530,14 @@ async def catch_all(rest_of_path: str):
     file_path = os.path.join("dashboard-frontend", "out", rest_of_path)
     if os.path.isfile(file_path):
         return FileResponse(file_path)
+
+    # 1.b Next static export may request "__next.<route>.__PAGE__.txt"
+    # while files are emitted as "__next.<route>/__PAGE__.txt".
+    if rest_of_path.endswith(".__PAGE__.txt"):
+        base_part = rest_of_path[: -len(".__PAGE__.txt")]
+        page_variant = os.path.join("dashboard-frontend", "out", base_part, "__PAGE__.txt")
+        if os.path.isfile(page_variant):
+            return FileResponse(page_variant)
     
     # 2. Try to serve as a pre-rendered HTML page (e.g. /admin -> /admin.html)
     html_path = file_path.rstrip("/") + ".html"
