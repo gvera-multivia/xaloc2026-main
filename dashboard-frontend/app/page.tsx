@@ -9,6 +9,7 @@ import {
   BarChart3,
   Calendar,
   RefreshCw,
+  ZapOff,
 } from 'lucide-react';
 import { queueApi, historyApi } from '@/lib/api';
 import { QueueItem, Incident } from '@/lib/types';
@@ -26,6 +27,8 @@ export default function MonitorPage() {
   const [error, setError] = useState('');
   const [nowTs, setNowTs] = useState(Date.now());
   const completionMarkerRef = useRef<string>('');
+  const [recovering, setRecovering] = useState(false);
+  const [recoverFeedback, setRecoverFeedback] = useState<string | null>(null);
 
   const today = useMemo(() => new Date().toISOString().split('T')[0], []);
 
@@ -52,6 +55,31 @@ export default function MonitorPage() {
       setError('No se pudo actualizar el monitor en vivo.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRecoverStuck = async () => {
+    setRecoverFeedback(null);
+    setRecovering(true);
+    try {
+      const result = await queueApi.recoverStuck();
+      const recovered = Number(result?.recovered || 0);
+      const alive = Number(result?.alive_workers || 0);
+      const scanned = Number(result?.scanned || 0);
+      if (recovered > 0) {
+        setRecoverFeedback(
+          `Recuperados ${recovered} items huérfanos (explorados ${scanned}, workers vivos=${alive}).`
+        );
+      } else {
+        setRecoverFeedback(
+          `Sin items huérfanos detectados (explorados ${scanned}, workers vivos=${alive}).`
+        );
+      }
+      await refreshQueue();
+    } catch (err) {
+      setRecoverFeedback('Error validando UUID-workers; revisa los logs del dashboard.');
+    } finally {
+      setRecovering(false);
     }
   };
 
@@ -219,20 +247,36 @@ export default function MonitorPage() {
           {/* Queue */}
           <div className="morr-card morr-edge rounded overflow-hidden flex flex-col h-[500px]">
             <div className="p-5 border-b border-border/70 sticky top-0 bg-[rgba(11,12,16,0.60)] backdrop-blur-md z-20">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg border border-border/70 bg-[rgba(17,19,26,0.55)] flex items-center justify-center">
-                    <BarChart3 size={18} className="text-[color:rgba(108,77,255,0.75)]" />
-                  </div>
-                  <span className="font-black text-sm uppercase tracking-tight">
-                    Cola de Proceso
-                  </span>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg border border-border/70 bg-[rgba(17,19,26,0.55)] flex items-center justify-center">
+                  <BarChart3 size={18} className="text-[color:rgba(108,77,255,0.75)]" />
                 </div>
+                <span className="font-black text-sm uppercase tracking-tight">
+                  Cola de Proceso
+                </span>
+              </div>
 
+              <div className="flex items-center gap-2">
                 <span className="text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground px-2 py-1 rounded-md border border-border/70 bg-[rgba(17,19,26,0.55)]">
                   {queue.length} items
                 </span>
+                <button
+                  onClick={handleRecoverStuck}
+                  disabled={recovering}
+                  className="flex items-center gap-1 rounded-full border border-border/80 bg-[rgba(255,255,255,0.04)] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] transition hover:border-[rgba(108,77,255,0.45)] hover:bg-[rgba(108,77,255,0.08)] disabled:opacity-50"
+                >
+                  <ZapOff size={14} className={recovering ? "animate-spin" : ""} />
+                  <span>{recovering ? "Revisando..." : "Reconcilia UUID"}</span>
+                </button>
               </div>
+            </div>
+
+            {recoverFeedback && (
+              <div className="px-4 pb-3 text-[11px] text-[color:rgba(255,255,255,0.85)]">
+                {recoverFeedback}
+              </div>
+            )}
             </div>
 
             <div className="p-4 overflow-y-auto flex-1 space-y-3 scrollbar-thin scrollbar-thumb-muted-foreground/20">

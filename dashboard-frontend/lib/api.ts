@@ -48,6 +48,28 @@ export const queueApi = {
         api.delete<any>(`/queue/items/${encodeURIComponent(siteId)}/${resourceId}/pause`),
     recoverItem: (siteId: string, resourceId: number | string) =>
         api.post<any>(`/queue/items/${encodeURIComponent(siteId)}/${resourceId}/recover`),
+    recoverStuck: (params?: {
+        heartbeatTimeoutSeconds?: number;
+        limit?: number;
+        siteId?: string;
+        resourceId?: number | string;
+    }) => {
+        const query = new URLSearchParams();
+        if (params?.heartbeatTimeoutSeconds) {
+            query.set('heartbeat_timeout_seconds', String(params.heartbeatTimeoutSeconds));
+        }
+        if (params?.limit) {
+            query.set('limit', String(params.limit));
+        }
+        if (params?.siteId) {
+            query.set('site_id', params.siteId);
+        }
+        if (params?.resourceId !== undefined && params?.resourceId !== null) {
+            query.set('resource_id', String(params.resourceId));
+        }
+        const suffix = query.toString() ? `?${query.toString()}` : '';
+        return api.post<any>(`/queue/recover-stuck${suffix}`);
+    },
 };
 
 export const historyApi = {
