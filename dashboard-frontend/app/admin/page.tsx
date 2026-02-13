@@ -92,6 +92,19 @@ export default function AdminPage() {
     return map;
   }, [itemPauses]);
 
+  const queueBySite = useMemo(() => {
+    const out: Record<string, { total: number; pending: number; processing: number }> = {};
+    for (const site of sites) out[site] = { total: 0, pending: 0, processing: 0 };
+    for (const item of queueItems) {
+      const site = item.site_id;
+      if (!out[site]) out[site] = { total: 0, pending: 0, processing: 0 };
+      out[site].total += 1;
+      if ((item.state || '').toLowerCase() === 'processing') out[site].processing += 1;
+      else out[site].pending += 1;
+    }
+    return out;
+  }, [sites, queueItems]);
+
   const handlePause = async (siteId: string, minutes?: number) => {
     setBusy(`pause-${siteId}`);
     try {
@@ -303,6 +316,15 @@ export default function AdminPage() {
                   <th className="px-6 py-4 text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground/80">
                     Site / Contexto
                   </th>
+                  <th className="px-6 py-4 text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground/80 text-center">
+                    Total Cola
+                  </th>
+                  <th className="px-6 py-4 text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground/80 text-center">
+                    Pendientes
+                  </th>
+                  <th className="px-6 py-4 text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground/80 text-center">
+                    Procesando
+                  </th>
                   <th className="px-6 py-4 text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground/80">
                     Estado Actual
                   </th>
@@ -326,6 +348,29 @@ export default function AdminPage() {
                       <td className="px-6 py-4">
                         <span className="font-black text-sm tracking-tight text-foreground/90">
                           {site}
+                        </span>
+                      </td>
+
+                      <td className="px-6 py-4 text-center">
+                        <span className="font-mono text-sm font-bold text-foreground/90">
+                          {(queueBySite[site] || { total: 0 }).total}
+                        </span>
+                      </td>
+
+                      <td className="px-6 py-4 text-center">
+                        <span className="font-mono text-sm text-muted-foreground/80">
+                          {(queueBySite[site] || { pending: 0 }).pending}
+                        </span>
+                      </td>
+
+                      <td className="px-6 py-4 text-center">
+                        <span className={cn(
+                          "font-mono text-sm font-bold",
+                          (queueBySite[site]?.processing || 0) > 0
+                            ? "text-[rgba(108,77,255,0.90)]"
+                            : "text-muted-foreground/60"
+                        )}>
+                          {(queueBySite[site] || { processing: 0 }).processing}
                         </span>
                       </td>
 

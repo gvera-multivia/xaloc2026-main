@@ -41,7 +41,7 @@ export default function HistoryPage() {
     };
 
     const fetchHistory = async () => {
-        if (!selectedDay) return;
+        if (!selectedDay) { setLoading(false); return; }
         setLoading(true);
         try {
             const res = await historyApi.getSuccesses(selectedDay, page, 50);
