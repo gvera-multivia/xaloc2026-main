@@ -31,9 +31,12 @@ export default function HistoryPage() {
     const fetchDays = async () => {
         try {
             const res = await historyApi.getDays('all', 1, 20);
-            setDays(res.items || []);
-            if (res.items && res.items.length > 0 && !selectedDay) {
-                setSelectedDay(res.items[0].day);
+            const dayList = (res.items || []) as any[];
+            setDays(dayList);
+            if (dayList.length > 0 && !selectedDay) {
+                // items are plain strings like "2026-02-13"
+                const first = typeof dayList[0] === 'string' ? dayList[0] : dayList[0].day;
+                setSelectedDay(first);
             }
         } catch (e) {
             console.error('Error fetching days', e);
@@ -83,26 +86,23 @@ export default function HistoryPage() {
                         <span className="text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground/70">Fechas</span>
                     </div>
                     <div className="morr-card rounded-2xl p-2 space-y-1">
-                        {days.map((d) => (
-                            <button
-                                key={d.day}
-                                onClick={() => { setSelectedDay(d.day); setPage(1); }}
-                                className={cn(
-                                    "w-full flex items-center justify-between px-4 py-3 rounded-xl text-[12px] font-black uppercase tracking-[0.10em] transition-all group",
-                                    selectedDay === d.day
-                                        ? "bg-[color:var(--morr-fate)] text-white"
-                                        : "hover:bg-[rgba(255,255,255,0.04)] text-muted-foreground/80 hover:text-foreground"
-                                )}
-                            >
-                                <span>{d.day}</span>
-                                <span className={cn(
-                                    "px-2 py-0.5 rounded text-[10px] font-black border",
-                                    selectedDay === d.day ? "bg-white/20 border-white/10" : "bg-[rgba(11,12,16,0.55)] border-border/70"
-                                )}>
-                                    {d.count}
-                                </span>
-                            </button>
-                        ))}
+                        {days.map((d: any) => {
+                            const dayStr = typeof d === 'string' ? d : d.day;
+                            return (
+                                <button
+                                    key={dayStr}
+                                    onClick={() => { setSelectedDay(dayStr); setPage(1); }}
+                                    className={cn(
+                                        "w-full flex items-center justify-between px-4 py-3 rounded-xl text-[12px] font-black uppercase tracking-[0.10em] transition-all group",
+                                        selectedDay === dayStr
+                                            ? "bg-[color:var(--morr-fate)] text-white"
+                                            : "hover:bg-[rgba(255,255,255,0.04)] text-muted-foreground/80 hover:text-foreground"
+                                    )}
+                                >
+                                    <span>{dayStr}</span>
+                                </button>
+                            );
+                        })}
                     </div>
                 </aside>
 
@@ -153,7 +153,7 @@ export default function HistoryPage() {
                                                 <td className="px-6 py-3 text-[12px] font-mono text-muted-foreground/90">#{item.resource_id}</td>
                                                 <td className="px-6 py-3 text-[11px] font-bold text-muted-foreground/70">{item.protocol || '-'}</td>
                                                 <td className="px-6 py-3 text-[11px] font-mono text-muted-foreground/60 uppercase">
-                                                    {new Date(item.completed_at || item.started_at).toLocaleString('es-ES')}
+                                                    {new Date(item.ended_at || item.completed_at || item.started_at).toLocaleString('es-ES')}
                                                 </td>
                                                 <td className="px-6 py-3">
                                                     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[9px] font-black bg-[rgba(108,77,255,0.08)] text-foreground/90 border border-[rgba(108,77,255,0.22)] uppercase tracking-[0.12em]">
