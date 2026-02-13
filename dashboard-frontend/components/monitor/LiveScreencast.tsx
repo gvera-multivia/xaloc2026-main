@@ -1,16 +1,16 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { Monitor, RefreshCw } from "lucide-react";
+import { Monitor } from "lucide-react";
 
 interface LiveScreencastProps {
   live?: boolean;
 }
 
 /**
- * MORRIGAN LiveScreencast
- * - Idle state: uses 'raven.webp' as a ghostly silhouette.
- * - Crimson eye positioned to overlay the logo's eye socket.
+ * MORRIGAN LiveScreencast - Refined Version
+ * - Raven: Más visible con glow suave.
+ * - Pulse: Transferido del ojo a las letras para un efecto "respiración".
  */
 export default function LiveScreencast({ live = false }: LiveScreencastProps) {
   const [now, setNow] = useState(Date.now());
@@ -23,17 +23,11 @@ export default function LiveScreencast({ live = false }: LiveScreencastProps) {
     return () => clearInterval(timer);
   }, [live]);
 
-  const onRefresh = () => {
-    setNow(Date.now());
-    setLoading(true);
-    setError(false);
-  };
-
   return (
     <div
-      className="relative overflow-hidden min-h-[500px] rounded morr-card morr-edge transition-all duration-500"
+      className="relative overflow-hidden min-h-[500px] rounded morr-card morr-edge transition-all duration-500 bg-[#050608]"
       style={{
-        background: "linear-gradient(180deg, rgba(12,14,18,0.6) 0%, rgba(5,6,8,0.9) 100%)",
+        background: "radial-gradient(circle at center, rgba(20,22,28,1) 0%, rgba(5,6,8,1) 100%)",
       }}
     >
       {/* --- LIVE HUD --- */}
@@ -56,47 +50,36 @@ export default function LiveScreencast({ live = false }: LiveScreencastProps) {
       {/* --- CONTENT --- */}
       {!live ? (
         <div className="absolute inset-0 flex items-center justify-center">
-          {/* Raven Logo Shadow Presence */}
+          {/* Raven Logo - Presencia Mejorada */}
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <img 
               src="/raven.webp" 
               alt="Morrigan Logo" 
-              className="w-full max-w-[450px] opacity-[0.07] select-none"
+              className="w-full max-w-[500px] opacity-[0.15] select-none transition-opacity duration-1000"
               style={{
-                filter: "grayscale(1) brightness(0.8) contrast(1.2)",
-                maskImage: "radial-gradient(circle, black 30%, transparent 80%)",
-                WebkitMaskImage: "radial-gradient(circle, black 30%, transparent 80%)",
+                filter: "grayscale(1) brightness(1.2) contrast(1.1)",
+                maskImage: "radial-gradient(circle, black 40%, transparent 90%)",
+                WebkitMaskImage: "radial-gradient(circle, black 40%, transparent 90%)",
               }}
             />
           </div>
 
-          {/* The Eye & Typography */}
+          {/* Typography con Pulso de "Respiración" */}
           <div className="relative z-10 flex flex-col items-center">
-            {/* Crimson Eye - Aligned with the 'eye' area of your raven.webp */}
-            <div className="relative mb-6 mr-[-28px] mt-[-10px]"> 
-              <span
-                className="block h-2 w-2 rounded-full"
-                style={{
-                  background: "#ff0022",
-                  animation: "morr-eye 5s ease-in-out infinite",
-                  boxShadow: "0 0 12px rgba(255, 0, 34, 0.7), 0 0 25px rgba(255, 0, 34, 0.3)",
-                }}
-              />
-              {/* Inner focus glow */}
-              <span className="absolute inset-0 rounded-full bg-white/20 blur-[1px]" />
-            </div>
-
-            <div className="text-center">
-              <h4 className="text-lg font-black uppercase tracking-tighter text-white/90">
+            <div className="text-center animate-pulse duration-[4000ms]">
+              <h4 className="text-xl font-black uppercase tracking-tighter text-white/80 drop-shadow-[0_0_15px_rgba(255,255,255,0.1)]">
                 Monitor en Reposo
               </h4>
-              <p className="mt-1 text-sm text-white/40 font-medium">
-                No hay tareas en ejecución.
+              <p className="mt-1 text-sm text-white/30 font-medium tracking-wide">
+                Esperando señales de ejecución...
               </p>
-              <div className="mt-6 h-[1px] w-12 bg-gradient-to-r from-transparent via-white/10 to-transparent" />
-              <p className="mt-4 text-[10px] uppercase tracking-[0.3em] text-white/20">
-                Watching.
-              </p>
+              
+              <div className="mt-8 flex flex-col items-center gap-3">
+                <div className="h-[1px] w-24 bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+                <p className="text-[11px] uppercase tracking-[0.5em] text-[#ff0022]/60 font-bold">
+                  Watching
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -116,9 +99,9 @@ export default function LiveScreencast({ live = false }: LiveScreencastProps) {
 
       {/* Glass Reflection Overlay */}
       <div 
-        className="absolute inset-0 pointer-events-none opacity-[0.03]"
+        className="absolute inset-0 pointer-events-none opacity-[0.05]"
         style={{
-          background: "linear-gradient(135deg, white 0%, transparent 40%, transparent 60%, white 100%)"
+          background: "linear-gradient(135deg, rgba(255,255,255,0.1) 0%, transparent 40%, transparent 60%, rgba(255,255,255,0.1) 100%)"
         }}
       />
     </div>
