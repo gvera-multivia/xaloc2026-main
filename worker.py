@@ -31,6 +31,7 @@ from core.sqlserver_utils import build_sqlserver_connection_string
 from core.xvia_deselect import deselect_resource
 from core.worker_logging import setup_worker_logging
 from core.realtime_store import build_realtime_store
+from core.pdf_bundle import bundle_documents_to_single_pdf_for_palma
 
 # Configuracion de URLs y Directorios
 DOCUMENT_URL_TEMPLATE = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf/{idRecurso}"
@@ -316,6 +317,16 @@ async def process_task(
         elif disable_gesdoc:
             logger.info("GESDOC deshabilitado por payload (disable_gesdoc=1). Se omite la documentación obligatoria de cliente en worker.")
 
+        # Palma solo admite un archivo: fusionar recurso + adjuntos + docs cliente en un único PDF.
+        if site_id == "ayunta_palma":
+            pdf_unico = bundle_documents_to_single_pdf_for_palma(
+                archivos_para_subir,
+                id_recurso=payload.get("idRecurso"),
+            )
+            archivos_para_subir = [pdf_unico]
+            payload["archivos"] = [str(pdf_unico)]
+            logger.info("ayunta_palma: PDF único generado para subida: %s", pdf_unico)
+
         # 4. PREPARAR AUTOMATIZACIÓN
         try:
             controller = get_site_controller(site_id)
@@ -422,8 +433,11 @@ async def process_task(
                 # --- MARCAR COMO COMPLETADO EN XVIA ---
                 if not getattr(bot, "_exit_has_nonfatal_issues", False):
                     is_base_p1 = site_id == "base_online" and (protocol or "").upper() == "P1"
+                    is_ayunta_palma = site_id == "ayunta_palma"
                     if is_base_p1:
                         logger.info("Saltando marcado autom. en XVIA para base_online P1.")
+                    elif is_ayunta_palma:
+                        logger.info("Saltando marcado autom. en XVIA para ayunta_palma.")
                     elif payload.get("idRecurso") and not payload.get("skip_auto_complete"):
                         logger.info(f"Intentando marcar recurso {payload['idRecurso']} como completado en la web...")
                         success_mark = await mark_resource_complete(auth_session, payload)

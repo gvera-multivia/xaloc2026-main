@@ -11,3 +11,4 @@ redis
 psycopg[binary]
 fastapi
 uvicorn
+pypdf
