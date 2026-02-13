@@ -622,10 +622,10 @@ class SqliteQueueRepository:
             if self.queue_backend == "redis":
                 row = conn.execute(
                     """
-                    SELECT COUNT(*) AS completed_count,
-                           MAX(finished_at) AS last_completed_at
+                    SELECT COUNT(*) AS finished_count,
+                           MAX(finished_at) AS last_finished_at
                     FROM job_runs
-                    WHERE state = 'succeeded'
+                    WHERE state IN ('completed', 'succeeded', 'failed', 'dead', 'cancelled')
                       AND substr(COALESCE(finished_at, updated_at, created_at), 1, 10) = ?
                     """,
                     (day,),
@@ -633,22 +633,22 @@ class SqliteQueueRepository:
             else:
                 row = conn.execute(
                     """
-                    SELECT COUNT(*) AS completed_count,
-                           MAX(processed_at) AS last_completed_at
+                    SELECT COUNT(*) AS finished_count,
+                           MAX(processed_at) AS last_finished_at
                     FROM tramite_queue
-                    WHERE status = 'completed'
+                    WHERE status IN ('completed', 'failed')
                       AND substr(COALESCE(processed_at, created_at), 1, 10) = ?
                     """,
                     (day,),
                 ).fetchone()
 
-            completed_count = int(row["completed_count"] if row and row["completed_count"] is not None else 0)
-            last_completed_at = row["last_completed_at"] if row else None
-            marker = f"{completed_count}|{last_completed_at or ''}"
+            finished_count = int(row["finished_count"] if row and row["finished_count"] is not None else 0)
+            last_finished_at = row["last_finished_at"] if row else None
+            marker = f"{finished_count}|{last_finished_at or ''}"
             return {
                 "day": day,
-                "completed_count": completed_count,
-                "last_completed_at": last_completed_at,
+                "completed_count": finished_count,
+                "last_completed_at": last_finished_at,
                 "marker": marker,
             }
         except Exception as exc:

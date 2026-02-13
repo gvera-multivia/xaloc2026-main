@@ -106,6 +106,18 @@ def _int_env(name: str, default: int, *, minimum: int = 1) -> int:
     except Exception:
         return max(minimum, int(default))
 
+
+def _purge_invalid_incidents_if_supported(realtime_store, logger: logging.Logger) -> None:
+    cleanup = getattr(realtime_store, "purge_invalid_incidents", None)
+    if not callable(cleanup):
+        return
+    try:
+        removed = int(cleanup() or 0)
+        if removed > 0:
+            logger.info("Panel incidencias: %s incidencia(s) invalida(s) eliminada(s).", removed)
+    except Exception as exc:
+        logger.warning("No se pudo depurar incidencias invalidas: %s", exc)
+
 def apply_url_cert_config():
     if sys.platform != "win32":
         return
@@ -661,6 +673,7 @@ async def worker_loop():
                                     started_at=started_at,
                                     ended_at=ended_at,
                                 )
+                                _purge_invalid_incidents_if_supported(realtime_store, logger)
                                 current_job = None
                                 runtime_state["current_job_id"] = None
                                 await asyncio.sleep(10)
@@ -726,6 +739,7 @@ async def worker_loop():
                                 started_at=started_at,
                                 ended_at=ended_at,
                             )
+                        _purge_invalid_incidents_if_supported(realtime_store, logger)
                         current_job = None
                         runtime_state["current_job_id"] = None
                         # Pausa fija entre jobs para no encadenar acciones en la sede/web

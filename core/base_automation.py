@@ -388,7 +388,8 @@ class BaseAutomation:
             quality = int(os.getenv("LIVE_STREAM_QUALITY", "85"))
             max_width = int(os.getenv("LIVE_STREAM_WIDTH", "1920"))
             max_height = int(os.getenv("LIVE_STREAM_HEIGHT", "1080"))
-            every_nth = int(os.getenv("LIVE_STREAM_EVERY_NTH", "2"))
+            # 30fps / 8 ~= 3.75fps (objetivo operacional ~4fps por defecto).
+            every_nth = int(os.getenv("LIVE_STREAM_EVERY_NTH", "8"))
 
             async def _on_frame(params: dict, _session=new_session) -> None:
                 try:

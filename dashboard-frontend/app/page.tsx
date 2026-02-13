@@ -11,27 +11,42 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { queueApi, historyApi } from '@/lib/api';
-import { QueueItem, Incident, EventLog } from '@/lib/types';
+import { QueueItem, Incident } from '@/lib/types';
 import LiveScreencast from '@/components/monitor/LiveScreencast';
 import SlaRing from '@/components/monitor/SlaRing';
 import QueueCard from '@/components/monitor/QueueCard';
 
 export default function MonitorPage() {
+  const UI_REFRESH_MS = 1000;
+  const INCIDENT_MARKER_POLL_MS = 1000;
+
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [nowTs, setNowTs] = useState(Date.now());
+  const completionMarkerRef = useRef<string>('');
+
+  const today = useMemo(() => new Date().toISOString().split('T')[0], []);
+
+  const refreshQueue = async () => {
+    const queueRes = await queueApi.getCurrent(1, 1000);
+    setQueue(queueRes.items || []);
+  };
+
+  const refreshIncidents = async () => {
+    const incidentsRes = await historyApi.getIncidents(undefined, 1, 15);
+    setIncidents(incidentsRes.items || []);
+  };
 
   const refresh = async () => {
     try {
-      const [queueRes, incidentsRes] = await Promise.all([
-        queueApi.getCurrent(1, 1000),
-        historyApi.getIncidents(undefined, 1, 15),
+      const [markerRes] = await Promise.all([
+        queueApi.getCompletionMarker(today),
+        refreshQueue(),
+        refreshIncidents(),
       ]);
-
-      setQueue(queueRes.items || []);
-      setIncidents(incidentsRes.items || []);
+      completionMarkerRef.current = markerRes.marker || '';
       setError('');
     } catch (e) {
       setError('No se pudo actualizar el monitor en vivo.');
@@ -42,13 +57,34 @@ export default function MonitorPage() {
 
   useEffect(() => {
     refresh();
-    const interval = setInterval(refresh, 5000);
+    const interval = setInterval(async () => {
+      try {
+        await refreshQueue();
+      } catch (e) {
+        setError('No se pudo actualizar el monitor en vivo.');
+      }
+    }, UI_REFRESH_MS);
+
+    const markerPoll = setInterval(async () => {
+      try {
+        const markerRes = await queueApi.getCompletionMarker(today);
+        const marker = markerRes.marker || '';
+        if (completionMarkerRef.current && completionMarkerRef.current !== marker) {
+          refreshIncidents().catch(() => setError('No se pudo actualizar el panel de incidencias.'));
+        }
+        completionMarkerRef.current = marker;
+      } catch (e) {
+        setError('No se pudo actualizar el panel de incidencias.');
+      }
+    }, INCIDENT_MARKER_POLL_MS);
+
     const clock = setInterval(() => setNowTs(Date.now()), 1000);
     return () => {
       clearInterval(interval);
+      clearInterval(markerPoll);
       clearInterval(clock);
     };
-  }, []);
+  }, [today]);
 
   const liveItem = useMemo(() => queue.find(x => (x.state || '').toLowerCase() === 'processing') || null, [queue]);
 
@@ -85,7 +121,7 @@ export default function MonitorPage() {
         <div className="flex items-center gap-2 rounded-xl border border-border/60 px-2 py-2 bg-[rgba(17,19,26,0.55)]">
           <div className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground/80">
             <Calendar size={14} />
-            {new Date().toISOString().split('T')[0]}
+            {today}
           </div>
 
           <button

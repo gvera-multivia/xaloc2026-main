@@ -72,6 +72,9 @@ class NullRealtimeStore:
     ) -> None:
         return
 
+    def purge_invalid_incidents(self) -> int:
+        return 0
+
 
 @dataclass
 class PostgresConfig:
@@ -346,6 +349,27 @@ class PostgresRealtimeStore:
                 )
             conn.commit()
 
+    def purge_invalid_incidents(self) -> int:
+        # En PG limpiamos incidencias de recursos que ya tienen resultado exitoso.
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    DELETE FROM realtime_incidents ri
+                    WHERE ri.resource_id IS NOT NULL
+                      AND EXISTS (
+                        SELECT 1
+                        FROM realtime_task_results rtr
+                        WHERE rtr.status = 'success'
+                          AND rtr.site_id = ri.site_id
+                          AND rtr.resource_id = ri.resource_id
+                      )
+                    """
+                )
+                deleted = int(cur.rowcount or 0)
+            conn.commit()
+            return deleted
+
 
 class SqliteRealtimeStore:
     enabled = True
@@ -597,6 +621,61 @@ class SqliteRealtimeStore:
                 ),
             )
             conn.commit()
+
+    def purge_invalid_incidents(self) -> int:
+        # Limpia incidencias de recursos:
+        # 1) ya completados con exito
+        # 2) actualmente seleccionados/en cola (pending/processing/queued)
+        with self._conn() as conn:
+            cur = conn.cursor()
+            try:
+                cur.execute(
+                    """
+                    DELETE FROM realtime_incidents
+                    WHERE resource_id IS NOT NULL
+                      AND (
+                        EXISTS (
+                            SELECT 1
+                            FROM realtime_task_results rtr
+                            WHERE rtr.status = 'success'
+                              AND rtr.site_id = realtime_incidents.site_id
+                              AND rtr.resource_id = realtime_incidents.resource_id
+                        )
+                        OR EXISTS (
+                            SELECT 1
+                            FROM tramite_queue tq
+                            WHERE tq.site_id = realtime_incidents.site_id
+                              AND tq.resource_id = realtime_incidents.resource_id
+                              AND tq.status IN ('pending', 'processing')
+                        )
+                        OR EXISTS (
+                            SELECT 1
+                            FROM job_runs jr
+                            WHERE jr.site_id = realtime_incidents.site_id
+                              AND jr.resource_id = realtime_incidents.resource_id
+                              AND jr.state IN ('queued', 'processing')
+                        )
+                      )
+                    """
+                )
+            except sqlite3.OperationalError:
+                # Compatibilidad con esquemas antiguos sin job_runs/tramite_queue.
+                cur.execute(
+                    """
+                    DELETE FROM realtime_incidents
+                    WHERE resource_id IS NOT NULL
+                      AND EXISTS (
+                        SELECT 1
+                        FROM realtime_task_results rtr
+                        WHERE rtr.status = 'success'
+                          AND rtr.site_id = realtime_incidents.site_id
+                          AND rtr.resource_id = realtime_incidents.resource_id
+                      )
+                    """
+                )
+            deleted = int(cur.rowcount or 0)
+            conn.commit()
+            return deleted
 
 
 def build_realtime_store(logger: Optional[logging.Logger] = None):

@@ -21,7 +21,7 @@ export default function LiveScreencast({ live = false }: LiveScreencastProps) {
 
   useEffect(() => {
     if (!live) return;
-    const timer = setInterval(() => setNow(Date.now()), 5000);
+    const timer = setInterval(() => setNow(Date.now()), 250);
     return () => clearInterval(timer);
   }, [live]);
 
