@@ -12,35 +12,20 @@ load_dotenv()
 
 def build_sqlserver_connection_string() -> str:
     """
-    Construye el connection string de SQL Server desde variables de entorno.
-    
-    Variables requeridas en .env:
-    - SQLSERVER_SERVER
-    - SQLSERVER_DATABASE
-    - SQLSERVER_USERNAME
-    - SQLSERVER_PASSWORD
-    
-    Returns:
-        Connection string para pyodbc
+    Construye el connection string para SQL Server.
+    Prioridad: variable de entorno completa > variables separadas.
     """
-    host = os.getenv("SQLSERVER_SERVER")
+    direct = os.getenv("SQLSERVER_CONNECTION_STRING")
+    if direct:
+        return direct
+
+    driver = os.getenv("SQLSERVER_DRIVER", "{ODBC Driver 17 for SQL Server}")
+    server = os.getenv("SQLSERVER_SERVER")
     database = os.getenv("SQLSERVER_DATABASE")
-    user = os.getenv("SQLSERVER_USERNAME")
+    username = os.getenv("SQLSERVER_USERNAME")
     password = os.getenv("SQLSERVER_PASSWORD")
     
-    if not all([host, database, user, password]):
-        missing = []
-        if not host: missing.append("SQLSERVER_SERVER")
-        if not database: missing.append("SQLSERVER_DATABASE")
-        if not user: missing.append("SQLSERVER_USERNAME")
-        if not password: missing.append("SQLSERVER_PASSWORD")
-        raise ValueError(f"Faltan variables de entorno para SQL Server: {', '.join(missing)}")
+    if os.getenv("SQLSERVER_TRUSTED_CONNECTION") == "1":
+        return f"DRIVER={driver};SERVER={server};DATABASE={database};Trusted_Connection=yes"
     
-    return (
-        f"DRIVER={{ODBC Driver 17 for SQL Server}};"
-        f"SERVER={host};"
-        f"DATABASE={database};"
-        f"UID={user};"
-        f"PWD={password};"
-        f"TrustServerCertificate=yes;"
-    )
+    return f"DRIVER={driver};SERVER={server};DATABASE={database};UID={username};PWD={password}"
