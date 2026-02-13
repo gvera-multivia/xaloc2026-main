@@ -482,7 +482,8 @@ class SqliteQueueRepository:
         finally:
             conn.close()
 
-    def list_current(self, *, day: str, page: int, page_size: int) -> dict[str, Any]:
+    def list_current(self, *, day: str | None = None, page: int, page_size: int) -> dict[str, Any]:
+        """Return ALL active queue items (queued/processing/pending) regardless of date."""
         offset = max(0, (page - 1) * page_size)
         conn = self._conn()
         try:
@@ -492,9 +493,7 @@ class SqliteQueueRepository:
                     SELECT COUNT(*)
                     FROM job_runs
                     WHERE state IN ('queued', 'processing')
-                      AND substr(COALESCE(queued_at, created_at), 1, 10) = ?
                     """,
-                    (day,),
                 ).fetchone()
                 total = int(count_row[0] if count_row else 0)
                 rows = conn.execute(
@@ -505,11 +504,10 @@ class SqliteQueueRepository:
                            payload_snapshot AS payload
                     FROM job_runs
                     WHERE state IN ('queued', 'processing')
-                      AND substr(COALESCE(queued_at, created_at), 1, 10) = ?
                     ORDER BY started_at DESC
                     LIMIT ? OFFSET ?
                     """,
-                    (day, page_size, offset),
+                    (page_size, offset),
                 ).fetchall()
                 items = [
                     {
@@ -532,9 +530,7 @@ class SqliteQueueRepository:
                 SELECT COUNT(*)
                 FROM tramite_queue
                 WHERE status IN ('pending', 'processing')
-                  AND substr(created_at, 1, 10) = ?
                 """,
-                (day,),
             ).fetchone()
             total = int(count_row[0] if count_row else 0)
             rows = conn.execute(
@@ -543,11 +539,10 @@ class SqliteQueueRepository:
                        created_at AS started_at, processed_at AS ended_at, payload
                 FROM tramite_queue
                 WHERE status IN ('pending', 'processing')
-                  AND substr(created_at, 1, 10) = ?
                 ORDER BY created_at DESC
                 LIMIT ? OFFSET ?
                 """,
-                (day, page_size, offset),
+                (page_size, offset),
             ).fetchall()
             items = [
                 {

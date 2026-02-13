@@ -26,8 +26,8 @@ export const api = {
 
 // Typed endpoints helpers
 export const queueApi = {
-    getCurrent: (day: string, page = 1, pageSize = 200) =>
-        api.get<{ items: any[], total: number }>(`/queue/current?day=${day}&page=${page}&page_size=${pageSize}`),
+    getCurrent: (page = 1, pageSize = 200) =>
+        api.get<{ items: any[], total: number }>(`/queue/current?page=${page}&page_size=${pageSize}`),
     getCompletionMarker: (day: string) => api.get<{ marker: string }>(`/queue/completion-marker?day=${day}`),
     deleteItem: (siteId: string, resourceId: number | string) =>
         api.delete<any>(`/queue/items/${encodeURIComponent(siteId)}/${resourceId}`),

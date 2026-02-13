@@ -29,7 +29,6 @@ function cn(...inputs: ClassValue[]) {
  * - Table is matte + terminal-native (clean dividers, minimal hover)
  */
 export default function AdminPage() {
-  const [selectedDay] = useState(new Date().toISOString().split("T")[0]);
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
   const [pauses, setPauses] = useState<PauseInfo[]>([]);
   const [itemPauses, setItemPauses] = useState<ItemPauseInfo[]>([]);
@@ -43,7 +42,7 @@ export default function AdminPage() {
   const refresh = async () => {
     try {
       const [queueRes, pausesRes, itemPausesRes, authRes] = await Promise.all([
-        queueApi.getCurrent(selectedDay, 1, 1000),
+        queueApi.getCurrent(1, 1000),
         api.get<{ items: PauseInfo[] }>("/queue/pauses?active_only=true"),
         api.get<{ items: ItemPauseInfo[] }>("/queue/item-pauses?active_only=true"),
         authApi.getPending(),
@@ -65,7 +64,7 @@ export default function AdminPage() {
     refresh();
     const id = setInterval(refresh, 10000);
     return () => clearInterval(id);
-  }, [selectedDay]);
+  }, []);
 
   const KNOWN_SITES = ["madrid", "xaloc_girona", "base_online"];
 

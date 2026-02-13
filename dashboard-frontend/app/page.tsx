@@ -17,7 +17,6 @@ import SlaRing from '@/components/monitor/SlaRing';
 import QueueCard from '@/components/monitor/QueueCard';
 
 export default function MonitorPage() {
-  const [selectedDay] = useState(new Date().toISOString().split('T')[0]);
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,8 +26,8 @@ export default function MonitorPage() {
   const refresh = async () => {
     try {
       const [queueRes, incidentsRes] = await Promise.all([
-        queueApi.getCurrent(selectedDay, 1, 1000),
-        historyApi.getIncidents(selectedDay, 1, 15),
+        queueApi.getCurrent(1, 1000),
+        historyApi.getIncidents(undefined, 1, 15),
       ]);
 
       setQueue(queueRes.items || []);
@@ -49,9 +48,9 @@ export default function MonitorPage() {
       clearInterval(interval);
       clearInterval(clock);
     };
-  }, [selectedDay]);
+  }, []);
 
-  const liveItem = useMemo(() => queue.find(x => x.state === 'processing') || null, [queue]);
+  const liveItem = useMemo(() => queue.find(x => (x.state || '').toLowerCase() === 'processing') || null, [queue]);
 
   const ringProgress = useMemo(() => {
     if (!liveItem?.started_at) return 0;
@@ -86,7 +85,7 @@ export default function MonitorPage() {
         <div className="flex items-center gap-2 rounded-xl border border-border/60 px-2 py-2 bg-[rgba(17,19,26,0.55)]">
           <div className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground/80">
             <Calendar size={14} />
-            {selectedDay}
+            {new Date().toISOString().split('T')[0]}
           </div>
 
           <button
