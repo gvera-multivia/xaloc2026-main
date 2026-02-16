@@ -109,17 +109,37 @@ class BaseAutomation:
             excluded = protocol_handler.setdefault("excluded_schemes", {})
             excluded[self.config.autofirma_protocol] = False
 
-            pairs = protocol_handler.setdefault("allowed_origin_protocol_pairs", [])
-            wanted = {
-                "protocol": self.config.autofirma_protocol,
-                "origin": self.config.autofirma_origin,
-            }
-            if not any(
-                str(p.get("protocol")) == wanted["protocol"] and str(p.get("origin")) == wanted["origin"]
-                for p in pairs
-                if isinstance(p, dict)
-            ):
-                pairs.append(wanted)
+            pairs = protocol_handler.get("allowed_origin_protocol_pairs")
+            wanted_protocol = str(self.config.autofirma_protocol)
+            wanted_origin = str(self.config.autofirma_origin)
+
+            # Chromium puede guardar esta clave como lista de objetos
+            # o como diccionario {origin: [protocols]} según versión/perfil.
+            if isinstance(pairs, list):
+                wanted = {"protocol": wanted_protocol, "origin": wanted_origin}
+                if not any(
+                    isinstance(p, dict)
+                    and str(p.get("protocol")) == wanted_protocol
+                    and str(p.get("origin")) == wanted_origin
+                    for p in pairs
+                ):
+                    pairs.append(wanted)
+            elif isinstance(pairs, dict):
+                current = pairs.get(wanted_origin)
+                if isinstance(current, list):
+                    if wanted_protocol not in current:
+                        current.append(wanted_protocol)
+                elif isinstance(current, str):
+                    if current != wanted_protocol:
+                        pairs[wanted_origin] = [current, wanted_protocol]
+                elif current is None:
+                    pairs[wanted_origin] = [wanted_protocol]
+                else:
+                    pairs[wanted_origin] = [wanted_protocol]
+            else:
+                protocol_handler["allowed_origin_protocol_pairs"] = [
+                    {"protocol": wanted_protocol, "origin": wanted_origin}
+                ]
 
             pref_path.write_text(
                 json.dumps(prefs, ensure_ascii=False, separators=(",", ":")),
