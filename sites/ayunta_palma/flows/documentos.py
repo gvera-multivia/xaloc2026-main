@@ -4,6 +4,8 @@ Subida de documentos en el flujo de Ayunta Palma.
 
 from __future__ import annotations
 
+import asyncio
+import sys
 from pathlib import Path
 
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
@@ -14,6 +16,52 @@ from sites.ayunta_palma.config import AyuntaPalmaConfig
 async def _esperar_subida_completa(page: Page, config: AyuntaPalmaConfig) -> None:
     # Espera fija solicitada: dar margen a la subida antes de confirmar.
     await page.wait_for_timeout(6000)
+
+
+async def _launch_autofirma_cert_acceptor() -> None:
+    """
+    Lanza en paralelo un watcher de UIAutomation que pulsa el boton
+    'Aceptar/Acceptar' del dialogo nativo de certificados de Windows.
+    """
+    if not sys.platform.startswith("win"):
+        return
+
+    ps_script = r"""
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+$root = [System.Windows.Automation.AutomationElement]::RootElement
+$names = @("Aceptar", "Acceptar", "OK")
+for ($i=0; $i -lt 40; $i++) {
+  foreach ($name in $names) {
+    $cond = New-Object System.Windows.Automation.PropertyCondition(
+      [System.Windows.Automation.AutomationElement]::NameProperty, $name
+    )
+    $btn = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond)
+    if ($btn -ne $null) {
+      try {
+        $invoke = $btn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+        $invoke.Invoke()
+        return
+      } catch {}
+    }
+  }
+  Start-Sleep -Milliseconds 500
+}
+"""
+    try:
+        await asyncio.create_subprocess_exec(
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            ps_script,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+    except Exception:
+        # No bloquear el flujo web si falla el watcher.
+        pass
 
 
 async def _esperar_velo_oculto(page: Page, config: AyuntaPalmaConfig) -> None:
@@ -121,32 +169,45 @@ async def _click_firmar(page: Page, config: AyuntaPalmaConfig) -> None:
 
 
 async def _click_signar_tots_documents(page: Page, config: AyuntaPalmaConfig) -> None:
-    candidates = [
-        page.locator("button.btnFirmar").first,
-        page.locator("button", has_text="Signar tots els documents").first,
-        page.locator("button", has_text="Firmar todos los documentos").first,
-        page.locator(config.selectors.btn_signar_tots_documents).first,
-    ]
+    async def _try_click_in_frame(frame) -> bool:
+        candidates = [
+            frame.locator("button.btnFirmar").first,
+            frame.locator("button", has_text="Signar tots els documents").first,
+            frame.locator("button", has_text="Firmar todos los documentos").first,
+            frame.locator(config.selectors.btn_signar_tots_documents).first,
+        ]
+        for locator in candidates:
+            try:
+                if await locator.count() > 0 and await locator.is_visible():
+                    await locator.click()
+                    return True
+            except Exception:
+                try:
+                    await locator.click(force=True)
+                    return True
+                except Exception:
+                    continue
+        return False
 
-    for locator in candidates:
-        try:
-            await locator.wait_for(state="visible", timeout=12000)
-            await locator.click()
+    deadline_ms = config.timeouts.general
+    waited = 0
+    step = 1000
+    while waited < deadline_ms:
+        if await _try_click_in_frame(page):
             await page.wait_for_timeout(config.delay_ms)
             await _esperar_velo_oculto(page, config)
             return
-        except PlaywrightTimeoutError:
-            continue
-        except Exception:
-            try:
-                await locator.click(force=True)
+        for fr in page.frames:
+            if fr is page.main_frame:
+                continue
+            if await _try_click_in_frame(fr):
                 await page.wait_for_timeout(config.delay_ms)
                 await _esperar_velo_oculto(page, config)
                 return
-            except Exception:
-                continue
+        await page.wait_for_timeout(step)
+        waited += step
 
-    # Fallback final por JS: localizar por clase/Texto y clicar.
+    # Fallback final por JS en main frame.
     clicked = await page.evaluate(
         """() => {
             const byClass = document.querySelector('button.btnFirmar');
@@ -161,7 +222,7 @@ async def _click_signar_tots_documents(page: Page, config: AyuntaPalmaConfig) ->
         }"""
     )
     if not clicked:
-        raise PlaywrightTimeoutError("No se localizó el botón 'Signar tots els documents'.")
+        raise PlaywrightTimeoutError("No se localizó el botón 'Signar tots els documents' en la página/frames.")
     await page.wait_for_timeout(config.delay_ms)
     await _esperar_velo_oculto(page, config)
 
@@ -204,6 +265,8 @@ async def subir_documentos(
 
     # 4) Ir a firma y lanzar firma de todos los documentos.
     await page.wait_for_timeout(config.delay_ms)
+    await _launch_autofirma_cert_acceptor()
     await _click_firmar(page, config)
+    await _launch_autofirma_cert_acceptor()
     await _click_signar_tots_documents(page, config)
     return page

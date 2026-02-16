@@ -158,6 +158,27 @@ class BrainOrchestrator:
             return False
         return self.db.is_resource_blocked(site_id=site_id, resource_id=rid)
 
+    def _extract_csrf_token(self, html: str) -> Optional[str]:
+        """
+        Extrae el token CSRF del HTML tolerando variaciones de comillas/orden.
+        """
+        if not html:
+            return None
+
+        patterns = [
+            r'name=["\']_token["\'][^>]*value=["\']([^"\']+)["\']',
+            r'value=["\']([^"\']+)["\'][^>]*name=["\']_token["\']',
+            r'"_token"\s*:\s*"([^"]+)"',
+            r"'_token'\s*:\s*'([^']+)'",
+        ]
+        for pattern in patterns:
+            m = re.search(pattern, html, flags=re.IGNORECASE)
+            if m:
+                token = (m.group(1) or "").strip()
+                if token:
+                    return token
+        return None
+
     async def init_session(self, login_url: str) -> None:
         """Inicializa sesiÃ³n aiohttp y realiza login en Xvia."""
         if self.dry_run:
@@ -314,11 +335,10 @@ class BrainOrchestrator:
                 "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos"
             ) as resp:
                 html = await resp.text()
-                match = re.search(r'name="_token"\s+value="([^"]+)"', html)
-                if not match:
+                csrf_token = self._extract_csrf_token(html)
+                if not csrf_token:
                     self.logger.error("No se pudo obtener el token CSRF del HTML")
                     return False
-                csrf_token = match.group(1)
 
             form_data = {
                 "_token": csrf_token,
@@ -357,11 +377,10 @@ class BrainOrchestrator:
                 "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos"
             ) as resp:
                 html = await resp.text()
-                match = re.search(r'name="_token"\s+value="([^"]+)"', html)
-                if not match:
+                csrf_token = self._extract_csrf_token(html)
+                if not csrf_token:
                     self.logger.error("No se pudo obtener el token CSRF del HTML")
                     return False
-                csrf_token = match.group(1)
 
             form_data = {
                 "_token": csrf_token,
