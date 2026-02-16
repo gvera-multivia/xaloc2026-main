@@ -159,7 +159,7 @@ public class User32 {
 $root = [System.Windows.Automation.AutomationElement]::RootElement
 $wshell = New-Object -ComObject WScript.Shell
 $windowHints = @(
-  "Diálogo de seguridad del almacén Windows",
+  "DiÃƒÂ¡logo de seguridad del almacÃƒÂ©n Windows",
   "Seleccione un certificado",
   "Certificado", "Certificat", "Certificate",
   "Seguridad", "Security", "Windows"
@@ -267,7 +267,7 @@ $hints = @(
   "trying to open autofirma",
   "wants to open this application",
   "vol obrir aquesta aplicacio",
-  "vol obrir aquesta aplicació"
+  "vol obrir aquesta aplicaciÃƒÂ³"
 )
 
 for ($i=0; $i -lt 80; $i++) {
@@ -381,7 +381,7 @@ def _get_folder_name_from_fase(fase_raw: str | None) -> str:
         "identificacion": "IDENTIFICACIONES",
         "denuncia": "ALEGACIONES",
         "propuesta de resolucion": "ALEGACIONES",
-        "extraordinario de revision": "EXTRAORDINARIOS DE REVISIÓN",
+        "extraordinario de revision": "EXTRAORDINARIOS DE REVISIÃƒâ€œN",
         "subsanacion": "SUBSANACIONES",
         "reclamaciones": "RECLAMACIONES",
         "requerimiento embargo": "EMBARGOS",
@@ -466,7 +466,7 @@ async def _esperar_exito_firma_o_refrescar(page: Page, config: AyuntaPalmaConfig
 
 async def _descargar_justificante_instancia(page: Page, payload: dict | None) -> Path:
     """
-    Descarga el justificante de la fila "Instancia/Instància ..." y lo guarda
+    Descarga el justificante de la fila "Instancia/InstÃƒÂ ncia ..." y lo guarda
     en RECURSOS TELEMATICOS del cliente.
     """
     rows = page.locator("table.tabla-ficheros tbody tr")
@@ -484,7 +484,7 @@ async def _descargar_justificante_instancia(page: Page, payload: dict | None) ->
             break
 
     if target_row is None:
-        raise RuntimeError("No se encontro la fila del justificante 'Instancia/Instància'.")
+        raise RuntimeError("No se encontro la fila del justificante 'Instancia/InstÃƒÂ ncia'.")
 
     download_input = target_row.locator("input[id$='_btnDescargar']").first
     if await download_input.count() == 0:
@@ -679,7 +679,7 @@ async def _click_signar_tots_documents(page: Page, config: AyuntaPalmaConfig) ->
         }"""
     )
     if not clicked:
-        raise PlaywrightTimeoutError("No se localizó el botón 'Signar tots els documents' en la página/frames.")
+        raise PlaywrightTimeoutError("No se localizÃƒÂ³ el botÃƒÂ³n 'Signar tots els documents' en la pÃƒÂ¡gina/frames.")
     await page.wait_for_timeout(config.delay_ms)
     await _esperar_velo_oculto(page, config)
 
@@ -735,7 +735,7 @@ async def subir_documentos(
     # 1) Avanzar tras aceptar el documento subido.
     await _click_siguiente(page, config)
 
-    # 2) Marcar protección de datos y avanzar.
+    # 2) Marcar protecciÃƒÂ³n de datos y avanzar.
     await page.wait_for_timeout(config.delay_ms)
     await _marcar_proteccion_datos(page, config)
     await _click_siguiente(page, config)
