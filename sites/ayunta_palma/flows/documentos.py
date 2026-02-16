@@ -31,7 +31,7 @@ async def _esperar_subida_completa(page: Page, config: AyuntaPalmaConfig) -> Non
             const disabled = btn.hasAttribute('disabled') || btn.getAttribute('aria-disabled') === 'true';
             return !disabled;
         }""",
-        selectors.btn_confirmar_archivo,
+        arg=selectors.btn_confirmar_archivo,
         timeout=config.timeouts.subida_archivo,
     )
 
