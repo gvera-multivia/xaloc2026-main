@@ -160,7 +160,9 @@ for ($i=0; $i -lt 180; $i++) {
   Start-Sleep -Milliseconds 500
 }
 """
-    await _run_ps_diagnostic("autofirma_auto_open", ps_script, timeout_s=35)
+    # No bloquear el flujo principal esperando este watcher.
+    logger.info("[AP-DIAG] Lanzando watcher autofirma_auto_open en background.")
+    asyncio.create_task(_run_ps_diagnostic("autofirma_auto_open", ps_script, timeout_s=35))
 
 
 async def _aceptar_certificado_windows() -> None:
@@ -643,6 +645,33 @@ async def _click_firmar(page: Page, config: AyuntaPalmaConfig) -> None:
     await _esperar_velo_oculto(page, config)
 
 
+async def _click_firmar_con_reintentos(page: Page, config: AyuntaPalmaConfig, max_intentos: int = 3) -> None:
+    """
+    Algunos intentos de click en pre-firma no hacen efecto.
+    Reintenta si el boton "Firmar" sigue visible tras unos segundos.
+    """
+    for intento in range(1, max_intentos + 1):
+        logger.info("[AP-DIAG] Pre-firma intento %s/%s: click en Firmar.", intento, max_intentos)
+        await _click_firmar(page, config)
+        await page.wait_for_timeout(1800)
+
+        try:
+            btn_firmar = page.locator(config.selectors.btn_firmar).first
+            sigue_visible = await btn_firmar.count() > 0 and await btn_firmar.is_visible()
+        except Exception:
+            sigue_visible = False
+
+        if not sigue_visible:
+            logger.info("[AP-DIAG] Pre-firma: boton Firmar ya no visible tras intento %s.", intento)
+            return
+
+        logger.warning("[AP-DIAG] Pre-firma: boton Firmar sigue visible tras intento %s.", intento)
+        await _aceptar_dialogo_edge_abrir_autofirma()
+        await page.wait_for_timeout(1200)
+
+    logger.warning("[AP-DIAG] Pre-firma: agotados reintentos; continuamos con flujo y watchers.")
+
+
 async def _click_signar_tots_documents(page: Page, config: AyuntaPalmaConfig) -> None:
     async def _try_click_in_frame(frame) -> bool:
         candidates = [
@@ -773,17 +802,22 @@ async def subir_documentos(
     # 4) Ir a firma y lanzar firma de todos los documentos.
     await page.wait_for_timeout(config.delay_ms)
     await page.wait_for_timeout(2000)
-    logger.info("[AP-DIAG] Pre-firma: click en boton Firmar.")
-    await _click_firmar(page, config)
+    logger.info("[AP-DIAG] Pre-firma: click/reintentos en boton Firmar.")
+    await _click_firmar_con_reintentos(page, config, max_intentos=3)
     await _aceptar_dialogo_edge_abrir_autofirma()
     await _launch_autofirma_cert_acceptor()
     await _aceptar_dialogo_edge_abrir_autofirma()
+    logger.info("[AP-DIAG] Arrancando watcher de certificado Windows en paralelo.")
+    cert_task = asyncio.create_task(_aceptar_certificado_windows())
     await page.wait_for_timeout(2000)
     logger.info("[AP-DIAG] Firma modal: click en 'Signar tots els documents'.")
     await _click_signar_tots_documents(page, config)
     await _aceptar_dialogo_edge_abrir_autofirma()
-    logger.info("[AP-DIAG] Intentando aceptar dialogo de certificado Windows.")
-    await _aceptar_certificado_windows()
+    logger.info("[AP-DIAG] Esperando resultado del watcher de certificado Windows.")
+    try:
+        await cert_task
+    except Exception as e:
+        logger.warning("[AP-DIAG] Watcher certificado devolvio error: %s", e)
     logger.info("[AP-DIAG] Validando firma real.")
     await _verificar_firma_realizada(page, config)
     logger.info("[AP-DIAG] Firma validada; iniciando descarga de justificante.")
