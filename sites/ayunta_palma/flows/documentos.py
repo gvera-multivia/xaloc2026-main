@@ -283,78 +283,70 @@ Add-Type -AssemblyName UIAutomationTypes
 $root = [System.Windows.Automation.AutomationElement]::RootElement
 $wshell = New-Object -ComObject WScript.Shell
 
-$hints = @(
-  "intentant obrir autofirma",
-  "intentando abrir autofirma",
-  "trying to open autofirma",
-  "wants to open this application",
-  "vol obrir aquesta aplicacio",
-  "vol obrir aquesta aplicaciÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³"
-)
+function Is-RelevantWindow([string]$name) {
+  if ([string]::IsNullOrWhiteSpace($name)) { return $false }
+  $n = $name.ToLowerInvariant()
+  if ($n.Contains("autofirma")) { return $true }
+  if ($n.Contains("obrir")) { return $true }
+  if ($n.Contains("abrir")) { return $true }
+  if ($n.Contains("open")) { return $true }
+  if ($n.Contains("application")) { return $true }
+  if ($n.Contains("aplicacio")) { return $true }
+  if ($n.Contains("aplicacion")) { return $true }
+  return $false
+}
 
-for ($i=0; $i -lt 80; $i++) {
+for ($i=0; $i -lt 120; $i++) {
   try {
-    $condText = New-Object System.Windows.Automation.PropertyCondition(
+    $condWindow = New-Object System.Windows.Automation.PropertyCondition(
       [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-      [System.Windows.Automation.ControlType]::Text
+      [System.Windows.Automation.ControlType]::Window
     )
-    $texts = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condText)
-    $found = $false
-    foreach ($t in $texts) {
-      $name = [string]$t.Current.Name
-      if ([string]::IsNullOrWhiteSpace($name)) { continue }
-      $low = $name.ToLowerInvariant()
-      foreach ($hint in $hints) {
-        if ($low.Contains($hint)) {
-          $found = $true
-          break
+    $wins = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $condWindow)
+
+    foreach ($w in $wins) {
+      $wName = [string]$w.Current.Name
+      if (-not (Is-RelevantWindow $wName)) { continue }
+
+      Write-Output ("edge-open-dialog-detected title=" + $wName)
+      try { $w.SetFocus() } catch {}
+      try { $wshell.AppActivate($wName) | Out-Null } catch {}
+      Start-Sleep -Milliseconds 120
+
+      $condBtn = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Button
+      )
+      $buttons = $w.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condBtn)
+
+      foreach ($btn in $buttons) {
+        $btnName = [string]$btn.Current.Name
+        if ($btnName -eq "Obre" -or $btnName -eq "Abrir" -or $btnName -eq "Open" -or $btnName -like "*Obre*" -or $btnName -like "*Abrir*" -or $btnName -like "*Open*") {
+          try {
+            $invoke = $btn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+            $invoke.Invoke()
+            Write-Output ("edge-open-click name=" + $btnName)
+            return
+          } catch {}
         }
       }
-      if ($found) { break }
-    }
 
-    if ($found) {
-      Write-Output "edge-open-dialog-detected"
-      $clicked = $false
+      # Fallback keyboard if button invoke failed.
       try {
-        # Primer intento: click directo de botones del propio dialogo.
-        $condBtn = New-Object System.Windows.Automation.PropertyCondition(
-          [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-          [System.Windows.Automation.ControlType]::Button
-        )
-        $buttons = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condBtn)
-        foreach ($btn in $buttons) {
-          $btnName = [string]$btn.Current.Name
-          if ($btnName -eq "Obre" -or $btnName -eq "Abrir" -or $btnName -eq "Open" -or $btnName -like "*Obre*" -or $btnName -like "*Abrir*" -or $btnName -like "*Open*") {
-            try {
-              $invoke = $btn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-              $invoke.Invoke()
-              Write-Output ("edge-open-click name=" + $btnName)
-              $clicked = $true
-              break
-            } catch {}
-          }
-        }
+        $wshell.SendKeys("%o")
+        Start-Sleep -Milliseconds 120
+        $wshell.SendKeys("{TAB}{ENTER}")
+        Write-Output "edge-open-fallback-keys"
+        return
       } catch {}
-
-      if (-not $clicked) {
-        try {
-          # Fallback 1: atajo directo.
-          $wshell.SendKeys('%o')
-          Start-Sleep -Milliseconds 180
-          # Fallback 2: navegar foco y confirmar.
-          $wshell.SendKeys('+{TAB}{ENTER}')
-          Write-Output "edge-open-fallback-keys"
-        } catch {}
-      }
-      return
     }
   } catch {}
+
   Start-Sleep -Milliseconds 250
 }
+Write-Output "edge-open-timeout"
 """
-    await _run_ps_diagnostic("edge_open_dialog", ps_script, timeout_s=35)
-
+    await _run_ps_diagnostic("edge_open_dialog", ps_script, timeout_s=20)
 
 def _normalize_text(text: str) -> str:
     if not text:
@@ -394,7 +386,7 @@ def _get_folder_name_from_fase(fase_raw: str | None) -> str:
         "identificacion": "IDENTIFICACIONES",
         "denuncia": "ALEGACIONES",
         "propuesta de resolucion": "ALEGACIONES",
-        "extraordinario de revision": "EXTRAORDINARIOS DE REVISIÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“N",
+        "extraordinario de revision": "EXTRAORDINARIOS DE REVISIÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œN",
         "subsanacion": "SUBSANACIONES",
         "reclamaciones": "RECLAMACIONES",
         "requerimiento embargo": "EMBARGOS",
@@ -483,10 +475,10 @@ async def _esperar_exito_firma_o_refrescar(page: Page, config: AyuntaPalmaConfig
 
 async def _descargar_justificante_instancia(page: Page, payload: dict | None) -> Path:
     """
-    Descarga el justificante de la fila "Instancia/InstÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ncia ..." y lo guarda
+    Descarga el justificante de la fila "Instancia/InstÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ncia ..." y lo guarda
     en RECURSOS TELEMATICOS del cliente.
     """
-    logger.info("[AP-DIAG] Buscando fila de justificante 'Instancia/InstÃƒÂ ncia'...")
+    logger.info("[AP-DIAG] Buscando fila de justificante 'Instancia/InstÃƒÆ’Ã‚Â ncia'...")
     rows = page.locator("table.tabla-ficheros tbody tr")
     row_count = await rows.count()
     logger.info("[AP-DIAG] Filas de tabla de ficheros detectadas: %s", row_count)
@@ -504,7 +496,7 @@ async def _descargar_justificante_instancia(page: Page, payload: dict | None) ->
             break
 
     if target_row is None:
-        raise RuntimeError("No se encontro la fila del justificante 'Instancia/InstÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ncia'.")
+        raise RuntimeError("No se encontro la fila del justificante 'Instancia/InstÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ncia'.")
 
     download_input = target_row.locator("input[id$='_btnDescargar']").first
     if await download_input.count() == 0:
@@ -774,7 +766,7 @@ async def _click_signar_tots_documents(page: Page, config: AyuntaPalmaConfig) ->
         }"""
     )
     if not clicked:
-        raise PlaywrightTimeoutError("No se localizÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³ el botÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³n 'Signar tots els documents' en la pÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡gina/frames.")
+        raise PlaywrightTimeoutError("No se localizÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³ el botÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³n 'Signar tots els documents' en la pÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡gina/frames.")
     await page.wait_for_timeout(config.delay_ms)
     await _esperar_velo_oculto(page, config)
 
@@ -836,7 +828,7 @@ async def subir_documentos(
     # 1) Avanzar tras aceptar el documento subido.
     await _click_siguiente(page, config)
 
-    # 2) Marcar protecciÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³n de datos y avanzar.
+    # 2) Marcar protecciÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³n de datos y avanzar.
     await page.wait_for_timeout(config.delay_ms)
     await _marcar_proteccion_datos(page, config)
     await _click_siguiente(page, config)
@@ -852,15 +844,20 @@ async def subir_documentos(
     await page.wait_for_timeout(2000)
     logger.info("[AP-DIAG] Pre-firma: click/reintentos en boton Firmar.")
     await _click_firmar_con_reintentos(page, config, max_intentos=3)
-    await _aceptar_dialogo_edge_abrir_autofirma()
+    logger.info("[AP-DIAG] Lanzando watcher edge_open_dialog en background.")
+    edge_task = asyncio.create_task(_aceptar_dialogo_edge_abrir_autofirma())
     await _launch_autofirma_cert_acceptor()
-    await _aceptar_dialogo_edge_abrir_autofirma()
     logger.info("[AP-DIAG] Arrancando watcher de certificado Windows en paralelo.")
     cert_task = asyncio.create_task(_aceptar_certificado_windows())
     await page.wait_for_timeout(2000)
     logger.info("[AP-DIAG] Firma modal: click en 'Signar tots els documents'.")
     await _click_signar_tots_documents(page, config)
-    await _aceptar_dialogo_edge_abrir_autofirma()
+    if not edge_task.done():
+        logger.info("[AP-DIAG] edge_open_dialog sigue activo; esperamos su resultado.")
+        try:
+            await edge_task
+        except Exception as e:
+            logger.warning("[AP-DIAG] Watcher edge_open_dialog devolvio error: %s", e)
     logger.info("[AP-DIAG] Esperando resultado del watcher de certificado Windows.")
     try:
         await cert_task
