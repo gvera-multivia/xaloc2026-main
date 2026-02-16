@@ -237,6 +237,80 @@ for ($i=0; $i -lt 60; $i++) {
         pass
 
 
+async def _aceptar_dialogo_edge_abrir_autofirma() -> None:
+    """
+    Fallback especifico para el dialogo de Edge:
+    "Aquest lloc esta intentant obrir AutoFirma".
+    Intenta accionar "Obre/Open" via atajo de teclado cuando detecta ese texto.
+    """
+    if not sys.platform.startswith("win"):
+        return
+
+    ps_script = r"""
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+$root = [System.Windows.Automation.AutomationElement]::RootElement
+$wshell = New-Object -ComObject WScript.Shell
+
+$hints = @(
+  "intentant obrir autofirma",
+  "intentando abrir autofirma",
+  "trying to open autofirma",
+  "wants to open this application",
+  "vol obrir aquesta aplicacio",
+  "vol obrir aquesta aplicació"
+)
+
+for ($i=0; $i -lt 80; $i++) {
+  try {
+    $condText = New-Object System.Windows.Automation.PropertyCondition(
+      [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+      [System.Windows.Automation.ControlType]::Text
+    )
+    $texts = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condText)
+    $found = $false
+    foreach ($t in $texts) {
+      $name = [string]$t.Current.Name
+      if ([string]::IsNullOrWhiteSpace($name)) { continue }
+      $low = $name.ToLowerInvariant()
+      foreach ($hint in $hints) {
+        if ($low.Contains($hint)) {
+          $found = $true
+          break
+        }
+      }
+      if ($found) { break }
+    }
+
+    if ($found) {
+      try {
+        # Intenta abrir con el atajo de "Obre/Open".
+        $wshell.SendKeys('%o')
+        Start-Sleep -Milliseconds 180
+        # Fallback: mover foco al boton de abrir y confirmar.
+        $wshell.SendKeys('+{TAB}{ENTER}')
+      } catch {}
+      return
+    }
+  } catch {}
+  Start-Sleep -Milliseconds 250
+}
+"""
+    try:
+        await asyncio.create_subprocess_exec(
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            ps_script,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+    except Exception:
+        pass
+
+
 async def _esperar_velo_oculto(page: Page, config: AyuntaPalmaConfig) -> None:
     try:
         await page.wait_for_selector(
@@ -440,8 +514,11 @@ async def subir_documentos(
     await page.wait_for_timeout(config.delay_ms)
     await _launch_autofirma_cert_acceptor()
     await _click_firmar(page, config)
+    await _aceptar_dialogo_edge_abrir_autofirma()
     await _launch_autofirma_cert_acceptor()
+    await _aceptar_dialogo_edge_abrir_autofirma()
     await _aceptar_certificado_windows()
     await _click_signar_tots_documents(page, config)
+    await _aceptar_dialogo_edge_abrir_autofirma()
     await _aceptar_certificado_windows()
     return page
