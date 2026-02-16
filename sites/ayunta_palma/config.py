@@ -35,6 +35,7 @@ class AyuntaPalmaSelectors:
     btn_indicar_representante: str = "button:has-text(\"Indicar representante\")"
     btn_siguiente: str = ".btn-bar-horizontal-centrada-inner button:has-text(\"Siguiente\")"
     input_siguiente: str = "#ctl00_ctl00_cphM_cph_btnSiguiente"
+    chk_proteccion_datos: str = "#ctl00_ctl00_cphM_cph_chkProteccionDatos"
     btn_anadir_documento: str = ".btn-bar-horizontal-centrada-inner button:has-text(\"Añadir\")"
     btn_confirmar_archivo: str = ".panel-dialog button:has-text(\"Aceptar\")"
     velo: str = "#velo"
