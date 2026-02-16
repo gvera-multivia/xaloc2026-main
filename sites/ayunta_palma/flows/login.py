@@ -13,6 +13,14 @@ def _is_nueva_entrada_url(url: str) -> bool:
     return "/carpetaciudadana/nueva_entrada.aspx" in (url or "")
 
 
+def _is_preguntar_entrada_url(url: str) -> bool:
+    return "/carpetaciudadana/preguntar_entrada_anterior.aspx" in (url or "")
+
+
+def _is_post_login_url(url: str) -> bool:
+    return _is_nueva_entrada_url(url) or _is_preguntar_entrada_url(url)
+
+
 async def _abrir_nueva_instancia(page: Page, config: AyuntaPalmaConfig) -> None:
     selectors = config.selectors
 
@@ -47,7 +55,7 @@ async def ejecutar_login(page: Page, config: AyuntaPalmaConfig) -> Page:
     """
     Accede al portal de Palma y pulsa la opción de certificado dentro del iframe.
     """
-    if page.url.startswith(config.url_base) or _is_nueva_entrada_url(page.url):
+    if page.url.startswith(config.url_base) or _is_post_login_url(page.url):
         # Evitar recargar si ya estamos en la misma URL (perfil persistente)
         await page.wait_for_timeout(config.delay_ms)
         await _abrir_nueva_instancia(page, config)
@@ -55,7 +63,7 @@ async def ejecutar_login(page: Page, config: AyuntaPalmaConfig) -> Page:
 
     await page.goto(config.url_base, wait_until="networkidle")
     await page.wait_for_timeout(config.delay_ms)
-    if _is_nueva_entrada_url(page.url):
+    if _is_post_login_url(page.url):
         await _abrir_nueva_instancia(page, config)
         return page
 
@@ -65,7 +73,7 @@ async def ejecutar_login(page: Page, config: AyuntaPalmaConfig) -> Page:
         await opcion.wait_for(state="visible", timeout=10000)
     except PlaywrightTimeoutError:
         # Si durante la espera ya hemos navegado a nueva_entrada, seguimos flujo.
-        if _is_nueva_entrada_url(page.url):
+        if _is_post_login_url(page.url):
             await _abrir_nueva_instancia(page, config)
             return page
         raise
