@@ -45,8 +45,8 @@ $checkboxHints = @(
 )
 $windowHints = @(
   "afirma", "autofirma", "portafirm",
-  "protocol", "protocolo", "seguridad", "security",
-  "certificat", "certificado", "certificate", "windows"
+  "protocol", "protocolo",
+  "intentant obrir", "intentando abrir", "trying to open"
 )
 
 $clicks = 0
@@ -474,6 +474,65 @@ async def _click_signar_tots_documents(page: Page, config: AyuntaPalmaConfig) ->
     await _esperar_velo_oculto(page, config)
 
 
+async def _verificar_firma_realizada(page: Page, config: AyuntaPalmaConfig) -> None:
+    """
+    Verifica que la instancia deje de estar en estado "pendiente de firma".
+    Si no cambia tras varios intentos de refresco, falla el flujo.
+    """
+    estado_selector = "#ctl00_ctl00_cphM_cph_txtDescripcionEstado"
+    estado_fecha_selector = "#ctl00_ctl00_cphM_cph_txtDescripcionEstadoFecha"
+    panel_no_firmada_selector = "#ctl00_ctl00_cphM_cph_pnlFirmaNoRealizada"
+    refresh_selector = "#ctl00_ctl00_cphM_btnActualizarPendientes"
+
+    timeout_ms = max(config.timeouts.general, 45000)
+    waited = 0
+    step = 1500
+    refresh_every = 4
+    attempts = 0
+
+    while waited < timeout_ms:
+        attempts += 1
+        try:
+            estado = (await page.locator(estado_selector).first.inner_text()).strip().lower()
+        except Exception:
+            estado = ""
+        try:
+            estado_fecha = (await page.locator(estado_fecha_selector).first.inner_text()).strip().lower()
+        except Exception:
+            estado_fecha = ""
+
+        pendiente = ("pendiente de firma" in estado) or ("firma no se ha realizado" in estado)
+        no_registrado = "no registrado" in estado_fecha
+
+        if not pendiente and not no_registrado:
+            return
+
+        try:
+            panel_no_firmada = page.locator(panel_no_firmada_selector).first
+            if await panel_no_firmada.count() > 0 and await panel_no_firmada.is_hidden():
+                if not pendiente and not no_registrado:
+                    return
+        except Exception:
+            pass
+
+        if attempts % refresh_every == 0:
+            try:
+                refresh_btn = page.locator(refresh_selector).first
+                if await refresh_btn.count() > 0 and await refresh_btn.is_visible():
+                    await refresh_btn.click()
+                    await page.wait_for_timeout(config.delay_ms)
+                    await _esperar_velo_oculto(page, config)
+            except Exception:
+                pass
+
+        await page.wait_for_timeout(step)
+        waited += step
+
+    raise PlaywrightTimeoutError(
+        "Firma no confirmada: la instancia sigue pendiente/no registrada tras intentar AutoFirma."
+    )
+
+
 async def subir_documentos(
     page: Page,
     config: AyuntaPalmaConfig,
@@ -512,7 +571,6 @@ async def subir_documentos(
 
     # 4) Ir a firma y lanzar firma de todos los documentos.
     await page.wait_for_timeout(config.delay_ms)
-    await _launch_autofirma_cert_acceptor()
     await _click_firmar(page, config)
     await _aceptar_dialogo_edge_abrir_autofirma()
     await _launch_autofirma_cert_acceptor()
@@ -521,4 +579,5 @@ async def subir_documentos(
     await _click_signar_tots_documents(page, config)
     await _aceptar_dialogo_edge_abrir_autofirma()
     await _aceptar_certificado_windows()
+    await _verificar_firma_realizada(page, config)
     return page
