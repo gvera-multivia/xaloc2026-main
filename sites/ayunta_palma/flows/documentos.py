@@ -20,6 +20,45 @@ from sites.ayunta_palma.config import AyuntaPalmaConfig
 logger = logging.getLogger(__name__)
 
 
+async def _run_ps_diagnostic(step_name: str, ps_script: str, timeout_s: int = 45) -> None:
+    """
+    Ejecuta un script de PowerShell y vuelca stdout/stderr a logs para diagnostico.
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            ps_script,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.communicate()
+            logger.warning("[AP-DIAG][%s] Timeout tras %ss", step_name, timeout_s)
+            return
+
+        stdout = (stdout_b or b"").decode("utf-8", errors="ignore").strip()
+        stderr = (stderr_b or b"").decode("utf-8", errors="ignore").strip()
+
+        if stdout:
+            for line in stdout.splitlines():
+                logger.info("[AP-DIAG][%s][OUT] %s", step_name, line.strip())
+        else:
+            logger.info("[AP-DIAG][%s] Sin salida stdout.", step_name)
+
+        if stderr:
+            for line in stderr.splitlines():
+                logger.warning("[AP-DIAG][%s][ERR] %s", step_name, line.strip())
+    except Exception as e:
+        logger.warning("[AP-DIAG][%s] Error ejecutando PowerShell: %s", step_name, e)
+
+
 async def _esperar_subida_completa(page: Page, config: AyuntaPalmaConfig) -> None:
     # Espera fija solicitada: dar margen a la subida antes de confirmar.
     await page.wait_for_timeout(6000)
@@ -108,6 +147,7 @@ for ($i=0; $i -lt 180; $i++) {
             try {
               $invoke = $btn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
               $invoke.Invoke()
+              Write-Output ("auto-open-click name=" + $btnName + " window=" + $wName)
               $clicks += 1
               Start-Sleep -Milliseconds 300
               if ($clicks -ge 2) { return }
@@ -120,20 +160,7 @@ for ($i=0; $i -lt 180; $i++) {
   Start-Sleep -Milliseconds 500
 }
 """
-    try:
-        await asyncio.create_subprocess_exec(
-            "powershell",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            ps_script,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-    except Exception:
-        # No bloquear el flujo web si falla el watcher.
-        pass
+    await _run_ps_diagnostic("autofirma_auto_open", ps_script, timeout_s=35)
 
 
 async def _aceptar_certificado_windows() -> None:
@@ -159,7 +186,7 @@ public class User32 {
 $root = [System.Windows.Automation.AutomationElement]::RootElement
 $wshell = New-Object -ComObject WScript.Shell
 $windowHints = @(
-  "DiÃƒÂ¡logo de seguridad del almacÃƒÂ©n Windows",
+  "DiÃƒÆ’Ã‚Â¡logo de seguridad del almacÃƒÆ’Ã‚Â©n Windows",
   "Seleccione un certificado",
   "Certificado", "Certificat", "Certificate",
   "Seguridad", "Security", "Windows"
@@ -184,6 +211,7 @@ for ($i=0; $i -lt 240; $i++) {
         if ($wName -like "*$hint*") { $match = $true; break }
       }
       if (-not $match) { continue }
+      Write-Output ("cert-window-detected title=" + $wName)
 
       try {
         $hWnd = [IntPtr]$win.Current.NativeWindowHandle
@@ -206,6 +234,7 @@ for ($i=0; $i -lt 240; $i++) {
               try {
                 $invoke = $btn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
                 $invoke.Invoke()
+                Write-Output ("cert-click-invoke button=" + $btnName + " window=" + $wName)
                 $clicked = $true
                 break
               } catch {}
@@ -220,6 +249,7 @@ for ($i=0; $i -lt 240; $i++) {
           # Unico fallback de teclado para no "spammear" el dialogo.
           Start-Sleep -Milliseconds 150
           $wshell.SendKeys('{ENTER}')
+          Write-Output ("cert-fallback-enter window=" + $wName)
           $sentEnterFallback = $true
         } catch {}
       }
@@ -230,19 +260,7 @@ for ($i=0; $i -lt 240; $i++) {
   Start-Sleep -Milliseconds 500
 }
 """
-    try:
-        await asyncio.create_subprocess_exec(
-            "powershell",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            ps_script,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-    except Exception:
-        pass
+    await _run_ps_diagnostic("windows_cert_dialog", ps_script, timeout_s=130)
 
 
 async def _aceptar_dialogo_edge_abrir_autofirma() -> None:
@@ -267,7 +285,7 @@ $hints = @(
   "trying to open autofirma",
   "wants to open this application",
   "vol obrir aquesta aplicacio",
-  "vol obrir aquesta aplicaciÃƒÂ³"
+  "vol obrir aquesta aplicaciÃƒÆ’Ã‚Â³"
 )
 
 for ($i=0; $i -lt 80; $i++) {
@@ -292,6 +310,7 @@ for ($i=0; $i -lt 80; $i++) {
     }
 
     if ($found) {
+      Write-Output "edge-open-dialog-detected"
       $clicked = $false
       try {
         # Primer intento: click directo de botones del propio dialogo.
@@ -306,6 +325,7 @@ for ($i=0; $i -lt 80; $i++) {
             try {
               $invoke = $btn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
               $invoke.Invoke()
+              Write-Output ("edge-open-click name=" + $btnName)
               $clicked = $true
               break
             } catch {}
@@ -320,6 +340,7 @@ for ($i=0; $i -lt 80; $i++) {
           Start-Sleep -Milliseconds 180
           # Fallback 2: navegar foco y confirmar.
           $wshell.SendKeys('+{TAB}{ENTER}')
+          Write-Output "edge-open-fallback-keys"
         } catch {}
       }
       return
@@ -328,19 +349,7 @@ for ($i=0; $i -lt 80; $i++) {
   Start-Sleep -Milliseconds 250
 }
 """
-    try:
-        await asyncio.create_subprocess_exec(
-            "powershell",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            ps_script,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-    except Exception:
-        pass
+    await _run_ps_diagnostic("edge_open_dialog", ps_script, timeout_s=35)
 
 
 def _normalize_text(text: str) -> str:
@@ -381,7 +390,7 @@ def _get_folder_name_from_fase(fase_raw: str | None) -> str:
         "identificacion": "IDENTIFICACIONES",
         "denuncia": "ALEGACIONES",
         "propuesta de resolucion": "ALEGACIONES",
-        "extraordinario de revision": "EXTRAORDINARIOS DE REVISIÃƒâ€œN",
+        "extraordinario de revision": "EXTRAORDINARIOS DE REVISIÃƒÆ’Ã¢â‚¬Å“N",
         "subsanacion": "SUBSANACIONES",
         "reclamaciones": "RECLAMACIONES",
         "requerimiento embargo": "EMBARGOS",
@@ -449,28 +458,34 @@ async def _esperar_exito_firma_o_refrescar(page: Page, config: AyuntaPalmaConfig
     }"""
 
     try:
+        logger.info("[AP-DIAG] Esperando texto de exito de firma (intento 1, 120s)...")
         await page.wait_for_function(success_js, timeout=120000)
+        logger.info("[AP-DIAG] Texto de exito detectado en intento 1.")
         return
     except Exception:
-        pass
+        logger.warning("[AP-DIAG] No se detecto exito en 120s. Probable pantalla gris; refrescando.")
 
     try:
         await page.reload(wait_until="domcontentloaded", timeout=60000)
         await page.wait_for_timeout(config.delay_ms)
         await _esperar_velo_oculto(page, config)
+        logger.info("[AP-DIAG] Reload completado. Reintentando espera de exito (intento 2, 120s)...")
     except Exception:
-        pass
+        logger.warning("[AP-DIAG] Error durante reload previo a reintento de exito.")
 
     await page.wait_for_function(success_js, timeout=120000)
+    logger.info("[AP-DIAG] Texto de exito detectado en intento 2.")
 
 
 async def _descargar_justificante_instancia(page: Page, payload: dict | None) -> Path:
     """
-    Descarga el justificante de la fila "Instancia/InstÃƒÂ ncia ..." y lo guarda
+    Descarga el justificante de la fila "Instancia/InstÃƒÆ’Ã‚Â ncia ..." y lo guarda
     en RECURSOS TELEMATICOS del cliente.
     """
+    logger.info("[AP-DIAG] Buscando fila de justificante 'Instancia/Instància'...")
     rows = page.locator("table.tabla-ficheros tbody tr")
     row_count = await rows.count()
+    logger.info("[AP-DIAG] Filas de tabla de ficheros detectadas: %s", row_count)
     target_row = None
     for i in range(row_count):
         row = rows.nth(i)
@@ -479,18 +494,20 @@ async def _descargar_justificante_instancia(page: Page, payload: dict | None) ->
             continue
         value = (await desc_input.get_attribute("value")) or ""
         value_norm = _normalize_text(value)
+        logger.info("[AP-DIAG] Fila %s descripcion=%s", i, value)
         if "instancia" in value_norm:
             target_row = row
             break
 
     if target_row is None:
-        raise RuntimeError("No se encontro la fila del justificante 'Instancia/InstÃƒÂ ncia'.")
+        raise RuntimeError("No se encontro la fila del justificante 'Instancia/InstÃƒÆ’Ã‚Â ncia'.")
 
     download_input = target_row.locator("input[id$='_btnDescargar']").first
     if await download_input.count() == 0:
         raise RuntimeError("No se encontro el boton de descarga del justificante en la fila de Instancia.")
 
     download_url = (await download_input.get_attribute("data-clickable-url")) or ""
+    logger.info("[AP-DIAG] URL de descarga justificante: %s", download_url)
     if not download_url:
         raise RuntimeError("No se pudo extraer 'data-clickable-url' del justificante.")
 
@@ -498,6 +515,7 @@ async def _descargar_justificante_instancia(page: Page, payload: dict | None) ->
     if not response.ok:
         raise RuntimeError(f"Error descargando justificante (HTTP {response.status}).")
     pdf_bytes = await response.body()
+    logger.info("[AP-DIAG] Descarga HTTP OK, bytes=%s", len(pdf_bytes))
     if not pdf_bytes.startswith(b"%PDF"):
         raise RuntimeError("El justificante descargado no parece PDF (%PDF ausente).")
     if len(pdf_bytes) < 2000:
@@ -679,7 +697,7 @@ async def _click_signar_tots_documents(page: Page, config: AyuntaPalmaConfig) ->
         }"""
     )
     if not clicked:
-        raise PlaywrightTimeoutError("No se localizÃƒÂ³ el botÃƒÂ³n 'Signar tots els documents' en la pÃƒÂ¡gina/frames.")
+        raise PlaywrightTimeoutError("No se localizÃƒÆ’Ã‚Â³ el botÃƒÆ’Ã‚Â³n 'Signar tots els documents' en la pÃƒÆ’Ã‚Â¡gina/frames.")
     await page.wait_for_timeout(config.delay_ms)
     await _esperar_velo_oculto(page, config)
 
@@ -701,6 +719,7 @@ async def _verificar_firma_realizada(page: Page, config: AyuntaPalmaConfig) -> N
         estado_fecha = _normalize_text(await page.locator(estado_fecha_selector).first.inner_text())
     except Exception:
         estado_fecha = ""
+    logger.info("[AP-DIAG] Estado post-firma: estado='%s' estado_fecha='%s'", estado, estado_fecha)
 
     if ("pendiente de firma" in estado) or ("no registrado" in estado_fecha):
         raise PlaywrightTimeoutError(
@@ -714,7 +733,9 @@ async def subir_documentos(
     archivos: list[Path] | None,
     payload: dict | None = None,
 ) -> Page:
+    logger.info("[AP-DIAG] Inicio subir_documentos. archivos=%s", 0 if not archivos else len(archivos))
     if not archivos:
+        logger.info("[AP-DIAG] Sin archivos; se omite fase documentos.")
         return page
 
     selectors = config.selectors
@@ -722,20 +743,23 @@ async def subir_documentos(
     await boton_anadir.wait_for(state="visible")
     await boton_anadir.click()
     await page.wait_for_timeout(config.delay_ms)
+    logger.info("[AP-DIAG] Dialogo de anadir documento abierto.")
 
     ruta = [str(p) for p in archivos]
     await page.set_input_files(selectors.archivo_input, ruta)
     await _esperar_subida_completa(page, config)
+    logger.info("[AP-DIAG] Upload de archivos completado.")
 
     confirmar = page.locator(selectors.btn_confirmar_archivo)
     await confirmar.wait_for(state="visible", timeout=config.timeouts.general)
     await confirmar.click(timeout=config.timeouts.subida_archivo)
     await page.wait_for_timeout(config.delay_ms)
+    logger.info("[AP-DIAG] Confirmacion de archivo subida pulsada.")
 
     # 1) Avanzar tras aceptar el documento subido.
     await _click_siguiente(page, config)
 
-    # 2) Marcar protecciÃƒÂ³n de datos y avanzar.
+    # 2) Marcar protecciÃƒÆ’Ã‚Â³n de datos y avanzar.
     await page.wait_for_timeout(config.delay_ms)
     await _marcar_proteccion_datos(page, config)
     await _click_siguiente(page, config)
@@ -744,19 +768,25 @@ async def subir_documentos(
     await page.wait_for_timeout(config.delay_ms)
     await _click_modal_aceptar(page, config)
     await _click_confirmar(page, config)
+    logger.info("[AP-DIAG] Navegacion previa a firma completada.")
 
     # 4) Ir a firma y lanzar firma de todos los documentos.
     await page.wait_for_timeout(config.delay_ms)
     await page.wait_for_timeout(2000)
+    logger.info("[AP-DIAG] Pre-firma: click en boton Firmar.")
     await _click_firmar(page, config)
     await _aceptar_dialogo_edge_abrir_autofirma()
     await _launch_autofirma_cert_acceptor()
     await _aceptar_dialogo_edge_abrir_autofirma()
     await page.wait_for_timeout(2000)
+    logger.info("[AP-DIAG] Firma modal: click en 'Signar tots els documents'.")
     await _click_signar_tots_documents(page, config)
     await _aceptar_dialogo_edge_abrir_autofirma()
+    logger.info("[AP-DIAG] Intentando aceptar dialogo de certificado Windows.")
     await _aceptar_certificado_windows()
+    logger.info("[AP-DIAG] Validando firma real.")
     await _verificar_firma_realizada(page, config)
+    logger.info("[AP-DIAG] Firma validada; iniciando descarga de justificante.")
     justificante_path = await _descargar_justificante_instancia(page, payload)
     logger.info("ayunta_palma: Justificante guardado en: %s", justificante_path)
     return page
