@@ -22,7 +22,7 @@ async def _launch_autofirma_cert_acceptor() -> None:
     """
     Lanza en paralelo un watcher de UIAutomation que intenta:
     1) aceptar el dialogo del navegador para abrir AutoFirma (Obre/Abrir/Open),
-    2) aceptar el dialogo nativo de certificados (Aceptar/Acceptar/OK).
+    2) aceptar dialogos nativos encadenados (certificado/seguridad de Windows).
     """
     if not sys.platform.startswith("win"):
         return
@@ -32,46 +32,81 @@ Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 $root = [System.Windows.Automation.AutomationElement]::RootElement
 
-$buttonNames = @("Obre", "Abrir", "Open", "Aceptar", "Acceptar", "OK")
-$checkboxHints = @("Permet sempre", "Permitir siempre", "Always allow")
+$buttonNames = @(
+  "Obre", "Abrir", "Open",
+  "Aceptar", "Acceptar", "OK", "Si", "Yes"
+)
+$checkboxHints = @(
+  "Permet sempre",
+  "Permitir siempre",
+  "Always allow",
+  "siempre permitir",
+  "always open"
+)
+$windowHints = @(
+  "afirma", "autofirma", "portafirm",
+  "protocol", "protocolo", "seguridad", "security",
+  "certificat", "certificado", "certificate", "windows"
+)
 
-for ($i=0; $i -lt 120; $i++) {
+$clicks = 0
+for ($i=0; $i -lt 180; $i++) {
   try {
-    # Intentar activar el checkbox de "permitir siempre" si aparece.
-    $condCheck = New-Object System.Windows.Automation.PropertyCondition(
+    $condWindow = New-Object System.Windows.Automation.PropertyCondition(
       [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-      [System.Windows.Automation.ControlType]::CheckBox
+      [System.Windows.Automation.ControlType]::Window
     )
-    $checks = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condCheck)
-    foreach ($chk in $checks) {
-      $chkName = [string]$chk.Current.Name
-      foreach ($hint in $checkboxHints) {
-        if ($chkName -like "*$hint*") {
-          try {
-            $toggle = $chk.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
-            if ($chk.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::Off) {
-              $toggle.Toggle()
-            }
-          } catch {}
+    $wins = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $condWindow)
+
+    foreach ($win in $wins) {
+      $wName = [string]$win.Current.Name
+      if ([string]::IsNullOrWhiteSpace($wName)) { continue }
+
+      $looksRelevant = $false
+      $wLower = $wName.ToLowerInvariant()
+      foreach ($hint in $windowHints) {
+        if ($wLower.Contains($hint)) { $looksRelevant = $true; break }
+      }
+      if (-not $looksRelevant) { continue }
+
+      # Activar "Permitir siempre" si existe.
+      $condCheck = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::CheckBox
+      )
+      $checks = $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condCheck)
+      foreach ($chk in $checks) {
+        $chkName = [string]$chk.Current.Name
+        foreach ($hint in $checkboxHints) {
+          if ($chkName -like "*$hint*") {
+            try {
+              $toggle = $chk.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+              if ($chk.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::Off) {
+                $toggle.Toggle()
+              }
+            } catch {}
+          }
         }
       }
-    }
 
-    # Buscar botones compatibles con abrir AutoFirma/aceptar certificado.
-    $condBtn = New-Object System.Windows.Automation.PropertyCondition(
-      [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-      [System.Windows.Automation.ControlType]::Button
-    )
-    $buttons = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condBtn)
-    foreach ($btn in $buttons) {
-      $btnName = [string]$btn.Current.Name
-      foreach ($target in $buttonNames) {
-        if ($btnName -eq $target -or $btnName -like "*$target*") {
-          try {
-            $invoke = $btn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-            $invoke.Invoke()
-            return
-          } catch {}
+      # Buscar botones de abrir/aceptar.
+      $condBtn = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Button
+      )
+      $buttons = $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condBtn)
+      foreach ($btn in $buttons) {
+        $btnName = [string]$btn.Current.Name
+        foreach ($target in $buttonNames) {
+          if ($btnName -eq $target -or $btnName -like "*$target*") {
+            try {
+              $invoke = $btn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+              $invoke.Invoke()
+              $clicks += 1
+              Start-Sleep -Milliseconds 300
+              if ($clicks -ge 4) { return }
+            } catch {}
+          }
         }
       }
     }
@@ -98,12 +133,14 @@ for ($i=0; $i -lt 120; $i++) {
 async def _aceptar_certificado_windows() -> None:
     """
     Fallback para el dialogo nativo de seleccion de certificado en Windows.
-    Busca una ventana con titulo de certificado/seleccion, la enfoca y envia Enter.
+    Busca ventanas de certificado/seguridad y pulsa "Aceptar/OK" por UIAutomation.
     """
     if not sys.platform.startswith("win"):
         return
 
     ps_script = r"""
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
@@ -113,27 +150,75 @@ public class User32 {
 }
 "@
 
+$root = [System.Windows.Automation.AutomationElement]::RootElement
 $wshell = New-Object -ComObject WScript.Shell
+$windowHints = @(
+  "Diálogo de seguridad del almacén Windows",
+  "Seleccione un certificado",
+  "Certificado", "Certificat", "Certificate",
+  "Seguridad", "Security", "Windows"
+)
+$buttonNames = @("Aceptar", "Acceptar", "OK", "Si", "Yes")
 
-for ($i=0; $i -lt 25; $i++) {
-  $wins = Get-Process | Where-Object {
-    $_.MainWindowHandle -ne 0 -and (
-      $_.MainWindowTitle -like "*Certificado*" -or
-      $_.MainWindowTitle -like "*Certificat*" -or
-      $_.MainWindowTitle -like "*Seleccione*" -or
-      $_.MainWindowTitle -like "*Selecciona*" -or
-      $_.MainWindowTitle -like "*Security*"
+for ($i=0; $i -lt 60; $i++) {
+  try {
+    $condWindow = New-Object System.Windows.Automation.PropertyCondition(
+      [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+      [System.Windows.Automation.ControlType]::Window
     )
-  }
+    $wins = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $condWindow)
 
-  foreach ($w in $wins) {
-    try {
-      [User32]::SetForegroundWindow($w.MainWindowHandle) | Out-Null
-      Start-Sleep -Milliseconds 250
-      $wshell.SendKeys('{ENTER}')
-      return
-    } catch {}
-  }
+    foreach ($win in $wins) {
+      $wName = [string]$win.Current.Name
+      if ([string]::IsNullOrWhiteSpace($wName)) { continue }
+
+      $match = $false
+      foreach ($hint in $windowHints) {
+        if ($wName -like "*$hint*") { $match = $true; break }
+      }
+      if (-not $match) { continue }
+
+      try {
+        $hWnd = [IntPtr]$win.Current.NativeWindowHandle
+        if ($hWnd -ne [IntPtr]::Zero) {
+          [User32]::SetForegroundWindow($hWnd) | Out-Null
+        }
+      } catch {}
+
+      $clicked = $false
+      try {
+        $condBtn = New-Object System.Windows.Automation.PropertyCondition(
+          [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+          [System.Windows.Automation.ControlType]::Button
+        )
+        $buttons = $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condBtn)
+        foreach ($btn in $buttons) {
+          $btnName = [string]$btn.Current.Name
+          foreach ($target in $buttonNames) {
+            if ($btnName -eq $target -or $btnName -like "*$target*") {
+              try {
+                $invoke = $btn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+                $invoke.Invoke()
+                $clicked = $true
+                break
+              } catch {}
+            }
+          }
+          if ($clicked) { break }
+        }
+      } catch {}
+
+      if (-not $clicked) {
+        try {
+          Start-Sleep -Milliseconds 150
+          $wshell.SendKeys('{ENTER}')
+          $clicked = $true
+        } catch {}
+      }
+
+      if ($clicked) { return }
+    }
+  } catch {}
   Start-Sleep -Milliseconds 500
 }
 """
