@@ -61,21 +61,35 @@ async def _select_otro_option(locator: Locator) -> None:
 
 async def _fill_email(page: Page, selectors: AyuntaPalmaSelectors, correo: str) -> None:
     email_selector = page.locator(selectors.email_selector)
-    await email_selector.wait_for(state="visible")
-    await _select_otro_option(email_selector)
+    if await email_selector.count() > 0:
+        try:
+            await email_selector.wait_for(state="visible", timeout=3000)
+            await _select_otro_option(email_selector)
+        except PlaywrightTimeoutError:
+            # En algunas variantes del formulario no hay selector visible:
+            # solo aparecen los campos manuales de email.
+            pass
 
     email_input = page.locator(selectors.email_input)
     email_confirm = page.locator(selectors.email_confirm_input)
+    await email_input.wait_for(state="visible", timeout=20000)
+    await email_confirm.wait_for(state="visible", timeout=20000)
     await email_input.fill(correo)
     await email_confirm.fill(correo)
 
 
 async def _fill_telefono(page: Page, selectors: AyuntaPalmaSelectors, telefono: str) -> None:
     telefono_selector = page.locator(selectors.telefono_selector)
-    await telefono_selector.wait_for(state="visible")
-    await _select_otro_option(telefono_selector)
+    if await telefono_selector.count() > 0:
+        try:
+            await telefono_selector.wait_for(state="visible", timeout=3000)
+            await _select_otro_option(telefono_selector)
+        except PlaywrightTimeoutError:
+            # Variante con telefono manual sin selector previo.
+            pass
 
     telefono_input = page.locator(selectors.telefono_input)
+    await telefono_input.wait_for(state="visible", timeout=20000)
     await telefono_input.fill(telefono)
 
 
