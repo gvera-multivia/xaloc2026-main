@@ -12,6 +12,35 @@ from sites.base_online.flows.upload import subir_archivos_por_modal
 DELAY_MS = 500
 
 
+async def _set_input_stable(page: Page, selector: str, value: str, *, label: str, retries: int = 3) -> None:
+    expected = str(value or "").strip()
+    locator = page.locator(selector).first
+    await locator.wait_for(state="visible")
+
+    for intento in range(1, retries + 1):
+        await locator.fill(expected)
+        await page.wait_for_timeout(120)
+        ok = await page.evaluate(
+            """([sel, val]) => {
+                const el = document.querySelector(sel);
+                if (!el) return false;
+                el.value = val;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                el.dispatchEvent(new Event('blur', { bubbles: true }));
+                return String(el.value || '').trim() === String(val || '').trim();
+            }""",
+            [selector, expected],
+        )
+        if ok:
+            return
+        logging.warning("[P2] Reintento %s/%s al persistir %s", intento, retries, label)
+        await page.wait_for_timeout(180)
+
+    current = await locator.input_value()
+    raise ValueError(f"[P2] No se pudo persistir {label}. esperado={expected!r} actual={current!r}")
+
+
 async def ejecutar_p2(page: Page, data: BaseOnlineP2Data, *, payload: dict) -> None:
     logging.info("[P2] Rellenando formulario de alegaciones (paso 1)...")
 
@@ -38,11 +67,26 @@ async def ejecutar_p2(page: Page, data: BaseOnlineP2Data, *, payload: dict) -> N
         raise ValueError("P2: es obligatorio indicar Num. Expedient o Num. Butlleti.")
 
     if tiene_expediente:
-        await page.locator("#form\\:clau_expedient_id_ens").first.fill(data.expedient_id_ens or "")
+        await _set_input_stable(
+            page,
+            "#form\\:clau_expedient_id_ens",
+            data.expedient_id_ens or "",
+            label="expedient_id_ens",
+        )
         await page.wait_for_timeout(DELAY_MS)
-        await page.locator("#form\\:clau_expedient_any_exp").first.fill(data.expedient_any or "")
+        await _set_input_stable(
+            page,
+            "#form\\:clau_expedient_any_exp",
+            data.expedient_any or "",
+            label="expedient_any",
+        )
         await page.wait_for_timeout(DELAY_MS)
-        await page.locator("#form\\:clau_expedient_num_exp").first.fill(data.expedient_num or "")
+        await _set_input_stable(
+            page,
+            "#form\\:clau_expedient_num_exp",
+            data.expedient_num or "",
+            label="expedient_num",
+        )
         await page.wait_for_timeout(DELAY_MS)
         await page.evaluate(
             "typeof actualitzarClauExpedientclau_expedient === 'function' && actualitzarClauExpedientclau_expedient()"
@@ -50,21 +94,7 @@ async def ejecutar_p2(page: Page, data: BaseOnlineP2Data, *, payload: dict) -> N
         await page.wait_for_timeout(DELAY_MS)
 
     if tiene_butlleti:
-        locator_butlleti = page.locator("#form\\:butlleti").first
-        await locator_butlleti.fill(butlleti_value)
-        await page.wait_for_timeout(DELAY_MS)
-        # Some JSF variants do not persist fill() unless input/change events are dispatched.
-        await page.evaluate(
-            """([selector, value]) => {
-                const el = document.querySelector(selector);
-                if (!el) return false;
-                el.value = value;
-                el.dispatchEvent(new Event('input', { bubbles: true }));
-                el.dispatchEvent(new Event('change', { bubbles: true }));
-                return true;
-            }""",
-            ["#form\\:butlleti", butlleti_value],
-        )
+        await _set_input_stable(page, "#form\\:butlleti", butlleti_value, label="butlleti")
         await page.wait_for_timeout(DELAY_MS)
         logging.info("[P2] Butlleti informado: %s", butlleti_value)
 
