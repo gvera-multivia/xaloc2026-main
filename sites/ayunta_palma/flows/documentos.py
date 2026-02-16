@@ -188,7 +188,7 @@ public class User32 {
 $root = [System.Windows.Automation.AutomationElement]::RootElement
 $wshell = New-Object -ComObject WScript.Shell
 $windowHints = @(
-  "DiÃƒÆ’Ã‚Â¡logo de seguridad del almacÃƒÆ’Ã‚Â©n Windows",
+  "DiÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡logo de seguridad del almacÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©n Windows",
   "Seleccione un certificado",
   "Certificado", "Certificat", "Certificate",
   "Seguridad", "Security", "Windows"
@@ -262,7 +262,7 @@ for ($i=0; $i -lt 240; $i++) {
   Start-Sleep -Milliseconds 500
 }
 """
-    await _run_ps_diagnostic("windows_cert_dialog", ps_script, timeout_s=130)
+    await _run_ps_diagnostic("windows_cert_dialog", ps_script, timeout_s=180)
 
 
 async def _aceptar_dialogo_edge_abrir_autofirma() -> None:
@@ -287,7 +287,7 @@ $hints = @(
   "trying to open autofirma",
   "wants to open this application",
   "vol obrir aquesta aplicacio",
-  "vol obrir aquesta aplicaciÃƒÆ’Ã‚Â³"
+  "vol obrir aquesta aplicaciÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³"
 )
 
 for ($i=0; $i -lt 80; $i++) {
@@ -392,7 +392,7 @@ def _get_folder_name_from_fase(fase_raw: str | None) -> str:
         "identificacion": "IDENTIFICACIONES",
         "denuncia": "ALEGACIONES",
         "propuesta de resolucion": "ALEGACIONES",
-        "extraordinario de revision": "EXTRAORDINARIOS DE REVISIÃƒÆ’Ã¢â‚¬Å“N",
+        "extraordinario de revision": "EXTRAORDINARIOS DE REVISIÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œN",
         "subsanacion": "SUBSANACIONES",
         "reclamaciones": "RECLAMACIONES",
         "requerimiento embargo": "EMBARGOS",
@@ -481,10 +481,10 @@ async def _esperar_exito_firma_o_refrescar(page: Page, config: AyuntaPalmaConfig
 
 async def _descargar_justificante_instancia(page: Page, payload: dict | None) -> Path:
     """
-    Descarga el justificante de la fila "Instancia/InstÃƒÆ’Ã‚Â ncia ..." y lo guarda
+    Descarga el justificante de la fila "Instancia/InstÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â ncia ..." y lo guarda
     en RECURSOS TELEMATICOS del cliente.
     """
-    logger.info("[AP-DIAG] Buscando fila de justificante 'Instancia/Instància'...")
+    logger.info("[AP-DIAG] Buscando fila de justificante 'Instancia/InstÃ ncia'...")
     rows = page.locator("table.tabla-ficheros tbody tr")
     row_count = await rows.count()
     logger.info("[AP-DIAG] Filas de tabla de ficheros detectadas: %s", row_count)
@@ -502,7 +502,7 @@ async def _descargar_justificante_instancia(page: Page, payload: dict | None) ->
             break
 
     if target_row is None:
-        raise RuntimeError("No se encontro la fila del justificante 'Instancia/InstÃƒÆ’Ã‚Â ncia'.")
+        raise RuntimeError("No se encontro la fila del justificante 'Instancia/InstÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â ncia'.")
 
     download_input = target_row.locator("input[id$='_btnDescargar']").first
     if await download_input.count() == 0:
@@ -772,7 +772,7 @@ async def _click_signar_tots_documents(page: Page, config: AyuntaPalmaConfig) ->
         }"""
     )
     if not clicked:
-        raise PlaywrightTimeoutError("No se localizÃƒÆ’Ã‚Â³ el botÃƒÆ’Ã‚Â³n 'Signar tots els documents' en la pÃƒÆ’Ã‚Â¡gina/frames.")
+        raise PlaywrightTimeoutError("No se localizÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³ el botÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³n 'Signar tots els documents' en la pÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡gina/frames.")
     await page.wait_for_timeout(config.delay_ms)
     await _esperar_velo_oculto(page, config)
 
@@ -834,7 +834,7 @@ async def subir_documentos(
     # 1) Avanzar tras aceptar el documento subido.
     await _click_siguiente(page, config)
 
-    # 2) Marcar protecciÃƒÆ’Ã‚Â³n de datos y avanzar.
+    # 2) Marcar protecciÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³n de datos y avanzar.
     await page.wait_for_timeout(config.delay_ms)
     await _marcar_proteccion_datos(page, config)
     await _click_siguiente(page, config)
