@@ -1708,14 +1708,23 @@ class SQLiteDatabase:
              
             site_id = row["site_id"]
             resource_id = row["resource_id"]
+            payload = json.loads(row["payload"])
+            protocol = payload.get("protocol") or payload.get("naturaleza")
+            if protocol is not None:
+                protocol = str(protocol).strip() or None
+            if site_id == "base_online" and protocol:
+                protocol = protocol.upper()
+            if site_id == "base_online" and not protocol:
+                raise ValueError(
+                    f"pending_id={pending_id}: falta protocol en payload para site_id=base_online"
+                )
             queue_backend = (os.getenv("QUEUE_BACKEND", "sqlite") or "sqlite").strip().lower()
             if queue_backend == "redis":
                 from core.queue_gateway import build_queue_gateway
 
-                payload = json.loads(row["payload"])
                 queue_gateway = build_queue_gateway(backend=queue_backend, db=self)
                 enqueued, job_id = asyncio.run(
-                    queue_gateway.enqueue(site_id=site_id, protocol=None, payload=payload)
+                    queue_gateway.enqueue(site_id=site_id, protocol=protocol, payload=payload)
                 )
                 new_task_id = -1
                 self.logger.info(
@@ -1728,10 +1737,10 @@ class SQLiteDatabase:
                 try:
                     cursor.execute(
                         """
-                        INSERT INTO tramite_queue (site_id, resource_id, payload)
-                        VALUES (?, ?, ?)
+                        INSERT INTO tramite_queue (site_id, protocol, resource_id, payload)
+                        VALUES (?, ?, ?, ?)
                         """,
-                        (site_id, resource_id, row["payload"]),
+                        (site_id, protocol, resource_id, row["payload"]),
                     )
                     new_task_id = cursor.lastrowid
                 except sqlite3.IntegrityError:

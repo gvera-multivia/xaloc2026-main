@@ -40,8 +40,7 @@ Add-Type -AssemblyName UIAutomationTypes
 $root = [System.Windows.Automation.AutomationElement]::RootElement
 
 $buttonNames = @(
-  "Obre", "Abrir", "Open",
-  "Aceptar", "Acceptar", "OK", "Si", "Yes"
+  "Obre", "Abrir", "Open"
 )
 $checkboxHints = @(
   "Permet sempre",
@@ -111,7 +110,7 @@ for ($i=0; $i -lt 180; $i++) {
               $invoke.Invoke()
               $clicks += 1
               Start-Sleep -Milliseconds 300
-              if ($clicks -ge 4) { return }
+              if ($clicks -ge 2) { return }
             } catch {}
           }
         }
@@ -166,8 +165,9 @@ $windowHints = @(
   "Seguridad", "Security", "Windows"
 )
 $buttonNames = @("Aceptar", "Acceptar", "OK", "Si", "Yes")
+$sentEnterFallback = $false
 
-for ($i=0; $i -lt 60; $i++) {
+for ($i=0; $i -lt 240; $i++) {
   try {
     $condWindow = New-Object System.Windows.Automation.PropertyCondition(
       [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
@@ -215,11 +215,12 @@ for ($i=0; $i -lt 60; $i++) {
         }
       } catch {}
 
-      if (-not $clicked) {
+      if (-not $clicked -and -not $sentEnterFallback) {
         try {
+          # Unico fallback de teclado para no "spammear" el dialogo.
           Start-Sleep -Milliseconds 150
           $wshell.SendKeys('{ENTER}')
-          $clicked = $true
+          $sentEnterFallback = $true
         } catch {}
       }
 
@@ -751,7 +752,6 @@ async def subir_documentos(
     await _aceptar_dialogo_edge_abrir_autofirma()
     await _launch_autofirma_cert_acceptor()
     await _aceptar_dialogo_edge_abrir_autofirma()
-    await _aceptar_certificado_windows()
     await page.wait_for_timeout(2000)
     await _click_signar_tots_documents(page, config)
     await _aceptar_dialogo_edge_abrir_autofirma()
