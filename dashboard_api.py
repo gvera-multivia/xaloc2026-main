@@ -512,6 +512,17 @@ async def api_config_update(site_id: str, payload: dict[str, Any] = Body(...)) -
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.post("/api/config/{site_id}/active")
+async def api_config_set_active(site_id: str, payload: dict[str, Any] = Body(...)) -> dict:
+    if "active" not in payload:
+        raise HTTPException(status_code=400, detail="Campo 'active' obligatorio.")
+    try:
+        active = bool(payload.get("active"))
+        return service.set_organismo_active(site_id=site_id, active=active)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 # ==========================================================================
 # PENDING AUTHORIZATION QUEUE
 # ==========================================================================

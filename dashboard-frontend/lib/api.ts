@@ -94,3 +94,9 @@ export const authApi = {
     approve: (id: number) => api.post<any>(`/pending-auth/${id}/approve`),
     reject: (id: number, reason: string) => api.post<any>(`/pending-auth/${id}/reject`, { reason }),
 };
+
+export const configApi = {
+    list: () => api.get<{ items: any[], total: number }>('/config'),
+    setSiteActive: (siteId: string, active: boolean) =>
+        api.post<any>(`/config/${encodeURIComponent(siteId)}/active`, { active }),
+};

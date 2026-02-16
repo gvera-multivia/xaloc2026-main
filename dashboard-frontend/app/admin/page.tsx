@@ -6,13 +6,14 @@ import {
   ShieldCheck,
   Pause,
   Play,
+  Power,
   Clock,
   AlertTriangle,
   Check,
   X,
 } from "lucide-react";
-import { queueApi, authApi, api } from "@/lib/api";
-import { QueueItem, PendingAuth, PauseInfo, ItemPauseInfo } from "@/lib/types";
+import { queueApi, authApi, configApi, api } from "@/lib/api";
+import { QueueItem, PendingAuth, PauseInfo, ItemPauseInfo, OrganismoConfig } from "@/lib/types";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
@@ -32,6 +33,7 @@ export default function AdminPage() {
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
   const [pauses, setPauses] = useState<PauseInfo[]>([]);
   const [itemPauses, setItemPauses] = useState<ItemPauseInfo[]>([]);
+  const [configs, setConfigs] = useState<OrganismoConfig[]>([]);
   const [pendingAuth, setPendingAuth] = useState<PendingAuth[]>([]);
   const [globalReason, setGlobalReason] = useState("");
   const [globalMinutes, setGlobalMinutes] = useState("120");
@@ -41,17 +43,19 @@ export default function AdminPage() {
 
   const refresh = async () => {
     try {
-      const [queueRes, pausesRes, itemPausesRes, authRes] = await Promise.all([
+      const [queueRes, pausesRes, itemPausesRes, authRes, configRes] = await Promise.all([
         queueApi.getCurrent(1, 1000),
         api.get<{ items: PauseInfo[] }>("/queue/pauses?active_only=true"),
         api.get<{ items: ItemPauseInfo[] }>("/queue/item-pauses?active_only=true"),
         authApi.getPending(),
+        configApi.list(),
       ]);
 
       setQueueItems(queueRes.items || []);
       setPauses(pausesRes.items || []);
       setItemPauses(itemPausesRes.items || []);
       setPendingAuth(authRes.items || []);
+      setConfigs((configRes.items || []) as OrganismoConfig[]);
       setError("");
     } catch {
       setError("Error al cargar datos administrativos.");
@@ -70,10 +74,11 @@ export default function AdminPage() {
 
   const sites = useMemo(() => {
     const s = new Set(KNOWN_SITES);
+    configs.forEach((cfg) => s.add(cfg.site_id));
     queueItems.forEach((it) => s.add(it.site_id));
     pauses.forEach((p) => s.add(p.site_id));
     return Array.from(s).filter(Boolean).sort();
-  }, [queueItems, pauses]);
+  }, [configs, queueItems, pauses]);
 
   const pauseMap = useMemo(() => {
     const map: Record<string, PauseInfo> = {};
@@ -104,6 +109,14 @@ export default function AdminPage() {
     return out;
   }, [sites, queueItems]);
 
+  const configActiveMap = useMemo(() => {
+    const map: Record<string, boolean> = {};
+    configs.forEach((cfg) => {
+      map[cfg.site_id] = Number(cfg.active) === 1 || cfg.active === true;
+    });
+    return map;
+  }, [configs]);
+
   const handlePause = async (siteId: string, minutes?: number) => {
     setBusy(`pause-${siteId}`);
     try {
@@ -123,6 +136,18 @@ export default function AdminPage() {
       await refresh();
     } catch {
       setError(`Error al reanudar ${siteId}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleSetSiteActive = async (siteId: string, active: boolean) => {
+    setBusy(`active-${siteId}`);
+    try {
+      await configApi.setSiteActive(siteId, active);
+      await refresh();
+    } catch {
+      setError(`Error al ${active ? "activar" : "desactivar"} ${siteId}`);
     } finally {
       setBusy(null);
     }
@@ -328,6 +353,9 @@ export default function AdminPage() {
                     Estado Actual
                   </th>
                   <th className="px-6 py-4 text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground/80">
+                    Organismo
+                  </th>
+                  <th className="px-6 py-4 text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground/80">
                     Motivo Pausa
                   </th>
                   <th className="px-6 py-4 text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground/80 text-right">
@@ -339,6 +367,7 @@ export default function AdminPage() {
               <tbody className="divide-y divide-[rgba(255,255,255,0.06)]">
                 {sites.map((site) => {
                   const isPaused = !!pauseMap[site];
+                  const isActiveConfig = configActiveMap[site] ?? true;
                   return (
                     <tr
                       key={site}
@@ -394,6 +423,27 @@ export default function AdminPage() {
                             }}
                           />
                           {isPaused ? "PAUSADO" : "ACTIVO"}
+                        </span>
+                      </td>
+
+                      <td className="px-6 py-4">
+                        <span
+                          className={cn(
+                            "inline-flex items-center gap-2 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-[0.20em] border",
+                            isActiveConfig
+                              ? "border-[rgba(108,77,255,0.22)] bg-[rgba(108,77,255,0.08)] text-foreground/90"
+                              : "border-[rgba(255,60,80,0.30)] bg-[rgba(255,60,80,0.10)] text-foreground/90"
+                          )}
+                        >
+                          <span
+                            className="w-1.5 h-1.5 rounded-full"
+                            style={{
+                              background: isActiveConfig
+                                ? "rgba(108,77,255,0.85)"
+                                : "rgba(255,60,80,0.85)",
+                            }}
+                          />
+                          {isActiveConfig ? "HABILITADO" : "DESHABILITADO"}
                         </span>
                       </td>
 
@@ -455,6 +505,22 @@ export default function AdminPage() {
                               </button>
                             </>
                           )}
+                          <button
+                            onClick={() => handleSetSiteActive(site, !isActiveConfig)}
+                            disabled={!!busy}
+                            className={cn(
+                              "morr-focus px-4 py-2 rounded-xl",
+                              "text-[11px] font-black uppercase tracking-[0.18em]",
+                              isActiveConfig
+                                ? "bg-[rgba(255,60,80,0.08)] text-foreground/90 border border-[rgba(255,60,80,0.25)] hover:bg-[rgba(255,60,80,0.14)]"
+                                : "bg-[rgba(108,77,255,0.10)] text-foreground/95 border border-[rgba(108,77,255,0.28)] hover:bg-[rgba(108,77,255,0.16)]",
+                              "transition active:scale-[0.99] disabled:opacity-50",
+                              "inline-flex items-center gap-2"
+                            )}
+                          >
+                            <Power size={14} />
+                            {isActiveConfig ? "Desactivar" : "Activar"}
+                          </button>
                         </div>
                       </td>
                     </tr>

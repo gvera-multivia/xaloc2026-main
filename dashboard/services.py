@@ -431,6 +431,19 @@ class DashboardService:
         row = self.db.get_organismo_config(site)
         return {"updated": True, "item": row}
 
+    def set_organismo_active(self, *, site_id: str, active: bool) -> dict[str, Any]:
+        site = (site_id or "").strip()
+        if not site:
+            raise ValueError("site_id es obligatorio.")
+        row = self.db.get_organismo_config(site)
+        if not row:
+            raise ValueError(f"site_id no existe en organismo_config: {site}")
+        updated = self.db.update_organismo_config(site_id=site, updates={"active": 1 if bool(active) else 0})
+        if not updated:
+            raise ValueError("No se pudo actualizar el estado activo del organismo.")
+        row = self.db.get_organismo_config(site)
+        return {"updated": True, "item": row}
+
     # ==========================================================================
     # PENDING AUTHORIZATION QUEUE
     # ==========================================================================

@@ -55,3 +55,13 @@ export interface PauseInfo {
 export interface ItemPauseInfo extends PauseInfo {
     resource_id: number | string;
 }
+
+export interface OrganismoConfig {
+    site_id: SiteID;
+    active: number | boolean;
+    query_organisme?: string;
+    filtro_texp?: string;
+    regex_expediente?: string;
+    login_url?: string;
+    recursos_url?: string;
+}
