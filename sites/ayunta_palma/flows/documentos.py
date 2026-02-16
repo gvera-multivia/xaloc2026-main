@@ -722,11 +722,13 @@ async def subir_documentos(
 
     # 4) Ir a firma y lanzar firma de todos los documentos.
     await page.wait_for_timeout(config.delay_ms)
+    await page.wait_for_timeout(2000)
     await _click_firmar(page, config)
     await _aceptar_dialogo_edge_abrir_autofirma()
     await _launch_autofirma_cert_acceptor()
     await _aceptar_dialogo_edge_abrir_autofirma()
     await _aceptar_certificado_windows()
+    await page.wait_for_timeout(2000)
     await _click_signar_tots_documents(page, config)
     await _aceptar_dialogo_edge_abrir_autofirma()
     await _aceptar_certificado_windows()
