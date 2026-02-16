@@ -10,6 +10,37 @@ from sites.ayunta_palma.config import AyuntaPalmaConfig, AyuntaPalmaSelectors
 from sites.ayunta_palma.data_models import AyuntaPalmaTarget
 
 
+async def _abrir_modal_nuevo_interesado(page: Page, selectors: AyuntaPalmaSelectors, delay_ms: int) -> None:
+    tipo_usuario = page.locator(selectors.persona_tipo_usuario).first
+    try:
+        await tipo_usuario.wait_for(state="visible", timeout=2000)
+        return
+    except PlaywrightTimeoutError:
+        pass
+
+    boton_nuevo = page.locator(selectors.btn_nuevo_interesado).first
+    if await boton_nuevo.count() > 0 and await boton_nuevo.is_visible():
+        await boton_nuevo.click()
+    else:
+        input_nuevo = page.locator(selectors.input_nuevo_interesado).first
+        if await input_nuevo.count() > 0:
+            if await input_nuevo.is_visible():
+                await input_nuevo.click()
+            else:
+                await page.evaluate(
+                    """(selector) => {
+                        const el = document.querySelector(selector);
+                        if (!el) return false;
+                        el.click();
+                        return true;
+                    }""",
+                    selectors.input_nuevo_interesado,
+                )
+
+    await tipo_usuario.wait_for(state="visible", timeout=20000)
+    await page.wait_for_timeout(delay_ms)
+
+
 async def _wait_for_velo_to_vanish(
     page: Page,
     selectors: AyuntaPalmaSelectors,
@@ -54,6 +85,8 @@ async def registrar_interesado(
     target: AyuntaPalmaTarget,
 ) -> Page:
     selectors = config.selectors
+
+    await _abrir_modal_nuevo_interesado(page, selectors, config.delay_ms)
 
     tipo_usuario = page.locator(selectors.persona_tipo_usuario)
     await tipo_usuario.wait_for(state="visible")

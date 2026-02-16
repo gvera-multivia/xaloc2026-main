@@ -15,6 +15,8 @@ class AyuntaPalmaSelectors:
     login_option_rows: str = "#optSsl tr"
     btn_nueva_instancia: str = "button.redirect-url.stop-click-propagation:has-text(\"Nueva instancia en blanco\")"
     input_nueva_instancia: str = "#ctl00_ctl00_cphM_cph_btnUltimoBorradorCancelar"
+    btn_nuevo_interesado: str = ".btn-bar-horizontal-centrada-inner button:has-text(\"Nuevo/a interesado/a\")"
+    input_nuevo_interesado: str = "#ctl00_ctl00_cphM_cph_btnListaInteresadosOpcionesNuevo"
     persona_tipo_usuario: str = "#ctl00_ctl00_cphM_cph_ddlPersonaTipoUsuario"
     persona_tipo_personalidad: str = "#ctl00_ctl00_cphM_cph_ddlPersonaTipoPersonalidad"
     persona_tipo_documento: str = "#ctl00_ctl00_cphM_cph_ddlPersonaTipoDocumentoIdentidad"

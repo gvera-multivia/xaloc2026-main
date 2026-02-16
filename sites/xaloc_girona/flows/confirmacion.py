@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -270,15 +271,44 @@ async def confirmar_tramite(
     await continuar.scroll_into_view_if_needed()
     await continuar.wait_for(state="visible", timeout=30000)
 
-    try:
-        async with page.expect_navigation(wait_until="domcontentloaded", timeout=60000):
-            await continuar.click()
-    except TimeoutError:
-        await continuar.click()
-    await page.wait_for_timeout(DELAY_MS)
+    async def _esperar_pantalla_final(timeout_ms: int = 15000) -> bool:
+        try:
+            await page.wait_for_url(re.compile(r".*/Tramita(Sign|Confirm).*", re.IGNORECASE), timeout=timeout_ms)
+            return True
+        except TimeoutError:
+            return False
 
-    if "TramitaSign" not in page.url:
-        await page.wait_for_url("**/TramitaSign**", timeout=60000)
+    avanzando = False
+    try:
+        async with page.expect_navigation(wait_until="domcontentloaded", timeout=15000):
+            await continuar.click()
+        avanzando = True
+    except TimeoutError:
+        pass
+
+    if not avanzando:
+        avanzando = await _esperar_pantalla_final(timeout_ms=8000)
+
+    if not avanzando:
+        logging.warning("No hubo navegación tras click en 'Continuar'. Ejecutando onSave() por JavaScript...")
+        js_ok = await page.evaluate(
+            """() => {
+                const link = document.querySelector("div#botoncontinuar a[onclick*='onSave']");
+                if (link) link.click();
+                if (typeof window.onSave === "function") {
+                    window.onSave();
+                    return true;
+                }
+                return false;
+            }"""
+        )
+        logging.info(f"Fallback JS onSave ejecutado: {js_ok}")
+        avanzando = await _esperar_pantalla_final(timeout_ms=30000)
+
+    if not avanzando:
+        raise TimeoutError(f"No se avanzó a pantalla final tras pulsar Continuar. URL actual: {page.url}")
+
+    await page.wait_for_timeout(DELAY_MS)
     await page.wait_for_load_state("networkidle")
 
     # Screenshot ANTES del envío
