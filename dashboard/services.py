@@ -3,7 +3,9 @@ from __future__ import annotations
 import logging
 import os
 import re
+import json
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, Optional
 
 import requests
@@ -140,6 +142,29 @@ class DashboardService:
         )
         self.queue_backend = (queue_backend or os.getenv("QUEUE_BACKEND", "sqlite")).strip().lower()
         self.db = SQLiteDatabase(db_path=sqlite_path)
+
+    def _ensure_site_config_exists(self, site_id: str) -> bool:
+        site = (site_id or "").strip()
+        if not site:
+            return False
+        if self.db.get_organismo_config(site):
+            return True
+
+        cfg_path = Path("organismo_config.json")
+        if not cfg_path.exists():
+            return False
+        try:
+            raw = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
+            configs = raw.get("configs") if isinstance(raw, dict) else None
+            if not isinstance(configs, list):
+                return False
+            match = next((c for c in configs if str(c.get("site_id") or "").strip() == site), None)
+            if not isinstance(match, dict):
+                return False
+            self.db.upsert_organismo_config(match)
+            return self.db.get_organismo_config(site) is not None
+        except Exception:
+            return False
 
     @staticmethod
     def _worker_runtime_timeout_seconds() -> int:
@@ -437,7 +462,10 @@ class DashboardService:
             raise ValueError("site_id es obligatorio.")
         row = self.db.get_organismo_config(site)
         if not row:
-            raise ValueError(f"site_id no existe en organismo_config: {site}")
+            created = self._ensure_site_config_exists(site)
+            if not created:
+                raise ValueError(f"site_id no existe en organismo_config: {site}")
+            row = self.db.get_organismo_config(site)
         updated = self.db.update_organismo_config(site_id=site, updates={"active": 1 if bool(active) else 0})
         if not updated:
             raise ValueError("No se pudo actualizar el estado activo del organismo.")
