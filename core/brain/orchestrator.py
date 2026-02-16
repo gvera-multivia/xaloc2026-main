@@ -699,6 +699,12 @@ class BrainOrchestrator:
         stats = {"claimed": 0, "enqueued": 0, "errors": 0, "per_site": {}}
 
         adapters, configs = self._get_enabled_adapters_and_configs()
+        enabled_csv = ENABLED_SITES_CSV or "(todos)"
+        self.logger.info(
+            "Adapters efectivos tick (BRAIN_ENABLED_SITES=%s): %s",
+            enabled_csv,
+            ", ".join(a.site_id for a in adapters) if adapters else "(ninguno)",
+        )
         if not adapters:
             self.logger.warning("No hay adapters habilitados/configurados (revisa organismo_config + BRAIN_ENABLED_SITES)")
             return stats
@@ -841,7 +847,11 @@ class BrainOrchestrator:
 
     async def run_forever(self) -> None:
         self.logger.info(f"=== Brain Orchestrator Iniciado (Sync: {SYNC_INTERVAL_SECONDS}s, Budget: {MAX_CLAIMS_PER_CYCLE}) ===")
-        self.logger.info(f"Adapters habilitados: {', '.join(self.adapters.keys())}")
+        self.logger.info(f"Adapters registrados en codigo: {', '.join(self.adapters.keys())}")
+        self.logger.info(
+            "Filtro BRAIN_ENABLED_SITES: %s",
+            ENABLED_SITES_CSV or "(todos)",
+        )
 
         shutdown_event = asyncio.Event()
 
