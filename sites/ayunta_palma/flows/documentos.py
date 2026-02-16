@@ -20,8 +20,9 @@ async def _esperar_subida_completa(page: Page, config: AyuntaPalmaConfig) -> Non
 
 async def _launch_autofirma_cert_acceptor() -> None:
     """
-    Lanza en paralelo un watcher de UIAutomation que pulsa el boton
-    'Aceptar/Acceptar' del dialogo nativo de certificados de Windows.
+    Lanza en paralelo un watcher de UIAutomation que intenta:
+    1) aceptar el dialogo del navegador para abrir AutoFirma (Obre/Abrir/Open),
+    2) aceptar el dialogo nativo de certificados (Aceptar/Acceptar/OK).
     """
     if not sys.platform.startswith("win"):
         return
@@ -30,21 +31,51 @@ async def _launch_autofirma_cert_acceptor() -> None:
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 $root = [System.Windows.Automation.AutomationElement]::RootElement
-$names = @("Aceptar", "Acceptar", "OK")
-for ($i=0; $i -lt 40; $i++) {
-  foreach ($name in $names) {
-    $cond = New-Object System.Windows.Automation.PropertyCondition(
-      [System.Windows.Automation.AutomationElement]::NameProperty, $name
+
+$buttonNames = @("Obre", "Abrir", "Open", "Aceptar", "Acceptar", "OK")
+$checkboxHints = @("Permet sempre", "Permitir siempre", "Always allow")
+
+for ($i=0; $i -lt 120; $i++) {
+  try {
+    # Intentar activar el checkbox de "permitir siempre" si aparece.
+    $condCheck = New-Object System.Windows.Automation.PropertyCondition(
+      [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+      [System.Windows.Automation.ControlType]::CheckBox
     )
-    $btn = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond)
-    if ($btn -ne $null) {
-      try {
-        $invoke = $btn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-        $invoke.Invoke()
-        return
-      } catch {}
+    $checks = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condCheck)
+    foreach ($chk in $checks) {
+      $chkName = [string]$chk.Current.Name
+      foreach ($hint in $checkboxHints) {
+        if ($chkName -like "*$hint*") {
+          try {
+            $toggle = $chk.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+            if ($chk.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::Off) {
+              $toggle.Toggle()
+            }
+          } catch {}
+        }
+      }
     }
-  }
+
+    # Buscar botones compatibles con abrir AutoFirma/aceptar certificado.
+    $condBtn = New-Object System.Windows.Automation.PropertyCondition(
+      [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+      [System.Windows.Automation.ControlType]::Button
+    )
+    $buttons = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condBtn)
+    foreach ($btn in $buttons) {
+      $btnName = [string]$btn.Current.Name
+      foreach ($target in $buttonNames) {
+        if ($btnName -eq $target -or $btnName -like "*$target*") {
+          try {
+            $invoke = $btn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+            $invoke.Invoke()
+            return
+          } catch {}
+        }
+      }
+    }
+  } catch {}
   Start-Sleep -Milliseconds 500
 }
 """
