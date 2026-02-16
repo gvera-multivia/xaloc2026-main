@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from core.process_launcher import start_async_process, terminate_process_tree
+
 
 @dataclass
 class ManagedProcess:
@@ -53,10 +55,10 @@ class ProcessManager:
             stdout_path = self.logs_dir / f"{process_name}_out.log"
             stdout_handle = open(stdout_path, "a", encoding="utf-8")
 
-            proc = await asyncio.create_subprocess_exec(
-                sys.executable,
-                "-u",
-                str(script_path),
+            cmd = [sys.executable, "-u", str(script_path)]
+
+            proc = await start_async_process(
+                cmd,
                 cwd=str(self.base_dir),
                 stdout=stdout_handle,
                 stderr=asyncio.subprocess.STDOUT,
@@ -83,27 +85,15 @@ class ProcessManager:
             if not current:
                 return {"name": process_name, "status": "stopped", "stopped": False}
 
-            proc = current.process
-            if proc.returncode is not None:
-                self._close_handles(current)
-                return {"name": process_name, "status": "stopped", "stopped": False}
-
-            proc.terminate()
-            killed = False
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=timeout_seconds)
-            except asyncio.TimeoutError:
-                proc.kill()
-                killed = True
-                await proc.wait()
-
+            result = await terminate_process_tree(current.process, timeout=timeout_seconds)
             self._close_handles(current)
+
             return {
                 "name": process_name,
                 "status": "stopped",
-                "stopped": True,
-                "killed": killed,
-                "returncode": proc.returncode,
+                "stopped": result.get("stopped", False),
+                "killed": result.get("killed", False),
+                "returncode": result.get("returncode"),
             }
 
     async def restart_process(self, name: str) -> dict:
