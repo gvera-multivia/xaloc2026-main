@@ -26,6 +26,11 @@ def _parse_expediente_parts(raw: str) -> tuple[str | None, str | None, str | Non
     if m_exe:
         return m_exe.group("id_ens"), m_exe.group("any"), m_exe.group("num")
 
+    # Fallback tolerante para variantes con separadores distintos.
+    m_fallback = re.match(r"^(?P<id_ens>\d{1,5})\D+(?P<any>\d{4})\D+(?P<num>\d{1,7})\D*[A-Z]*$", exp)
+    if m_fallback:
+        return m_fallback.group("id_ens"), m_fallback.group("any"), m_fallback.group("num")
+
     return None, None, None
 
 
@@ -58,6 +63,32 @@ async def _set_input_stable(page: Page, selector: str, value: str, *, label: str
     raise ValueError(f"[P2] No se pudo persistir {label}. esperado={expected!r} actual={current!r}")
 
 
+async def _set_input_with_onchange(page: Page, selector: str, value: str, *, label: str, retries: int = 3) -> None:
+    expected = str(value or "").strip()
+    locator = page.locator(selector).first
+    await locator.wait_for(state="visible")
+
+    for intento in range(1, retries + 1):
+        await locator.click()
+        await locator.press("Control+A")
+        await locator.type(expected, delay=45)
+        await locator.press("Tab")  # fuerza blur/onchange en JSF
+        await page.wait_for_timeout(180)
+        await page.evaluate(
+            "typeof actualitzarClauExpedientclau_expedient === 'function' && actualitzarClauExpedientclau_expedient()"
+        )
+        await page.wait_for_timeout(220)
+        current = (await locator.input_value()).strip()
+        if current == expected:
+            return
+        logging.warning("[P2] Reintento %s/%s al persistir %s tras onchange", intento, retries, label)
+
+    current = await locator.input_value()
+    raise ValueError(
+        f"[P2] No se pudo persistir {label} tras onchange. esperado={expected!r} actual={current!r}"
+    )
+
+
 async def ejecutar_p2(page: Page, data: BaseOnlineP2Data, *, payload: dict) -> None:
     logging.info("[P2] Rellenando formulario de alegaciones (paso 1)...")
 
@@ -76,14 +107,14 @@ async def ejecutar_p2(page: Page, data: BaseOnlineP2Data, *, payload: dict) -> N
     exp_id_ens = (data.expedient_id_ens or "").strip() or None
     exp_any = (data.expedient_any or "").strip() or None
     exp_num = (data.expedient_num or "").strip() or None
+    payload_exp = (
+        str(payload.get("expediente") or "").strip()
+        or str(payload.get("num_butlleti") or "").strip()
+        or str(payload.get("expediente_raw") or "").strip()
+        or str(payload.get("expediente_base") or "").strip()
+    )
 
     if not (exp_id_ens and exp_any and exp_num):
-        payload_exp = (
-            str(payload.get("expediente") or "").strip()
-            or str(payload.get("num_butlleti") or "").strip()
-            or str(payload.get("expediente_raw") or "").strip()
-            or str(payload.get("expediente_base") or "").strip()
-        )
         p_id_ens, p_any, p_num = _parse_expediente_parts(payload_exp)
         exp_id_ens = exp_id_ens or p_id_ens
         exp_any = exp_any or p_any
@@ -99,23 +130,26 @@ async def ejecutar_p2(page: Page, data: BaseOnlineP2Data, *, payload: dict) -> N
     if not (tiene_expediente or tiene_butlleti):
         raise ValueError("P2: es obligatorio indicar Num. Expedient o Num. Butlleti.")
 
+    if payload_exp and not (exp_id_ens and exp_any and exp_num):
+        raise ValueError(f"P2: no se pudo parsear expediente en partes (id_ens/any/num): {payload_exp!r}")
+
     if tiene_expediente:
         logging.info("[P2] Expediente a informar: id_ens=%s any=%s num=%s", exp_id_ens, exp_any, exp_num)
-        await _set_input_stable(
+        await _set_input_with_onchange(
             page,
             "#form\\:clau_expedient_id_ens",
             exp_id_ens or "",
             label="expedient_id_ens",
         )
         await page.wait_for_timeout(DELAY_MS)
-        await _set_input_stable(
+        await _set_input_with_onchange(
             page,
             "#form\\:clau_expedient_any_exp",
             exp_any or "",
             label="expedient_any",
         )
         await page.wait_for_timeout(DELAY_MS)
-        await _set_input_stable(
+        await _set_input_with_onchange(
             page,
             "#form\\:clau_expedient_num_exp",
             exp_num or "",
