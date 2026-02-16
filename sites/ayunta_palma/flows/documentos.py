@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from playwright.async_api import Page
+from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
 from sites.ayunta_palma.config import AyuntaPalmaConfig
 
@@ -121,9 +121,47 @@ async def _click_firmar(page: Page, config: AyuntaPalmaConfig) -> None:
 
 
 async def _click_signar_tots_documents(page: Page, config: AyuntaPalmaConfig) -> None:
-    btn_signar = page.locator(config.selectors.btn_signar_tots_documents).first
-    await btn_signar.wait_for(state="visible", timeout=config.timeouts.general)
-    await btn_signar.click()
+    candidates = [
+        page.locator("button.btnFirmar").first,
+        page.locator("button", has_text="Signar tots els documents").first,
+        page.locator("button", has_text="Firmar todos los documentos").first,
+        page.locator(config.selectors.btn_signar_tots_documents).first,
+    ]
+
+    for locator in candidates:
+        try:
+            await locator.wait_for(state="visible", timeout=12000)
+            await locator.click()
+            await page.wait_for_timeout(config.delay_ms)
+            await _esperar_velo_oculto(page, config)
+            return
+        except PlaywrightTimeoutError:
+            continue
+        except Exception:
+            try:
+                await locator.click(force=True)
+                await page.wait_for_timeout(config.delay_ms)
+                await _esperar_velo_oculto(page, config)
+                return
+            except Exception:
+                continue
+
+    # Fallback final por JS: localizar por clase/Texto y clicar.
+    clicked = await page.evaluate(
+        """() => {
+            const byClass = document.querySelector('button.btnFirmar');
+            if (byClass) { byClass.click(); return true; }
+            const buttons = Array.from(document.querySelectorAll('button'));
+            const target = buttons.find(b => {
+                const t = (b.textContent || '').toLowerCase();
+                return t.includes('signar tots els documents') || t.includes('firmar todos los documentos');
+            });
+            if (target) { target.click(); return true; }
+            return false;
+        }"""
+    )
+    if not clicked:
+        raise PlaywrightTimeoutError("No se localizó el botón 'Signar tots els documents'.")
     await page.wait_for_timeout(config.delay_ms)
     await _esperar_velo_oculto(page, config)
 
