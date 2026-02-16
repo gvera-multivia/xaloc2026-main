@@ -1,164 +1,132 @@
-# Investigación: Sistema Multi-usuario y Gestión de Incidencias Concurrentes
+# Investigación: Sistema Multi-usuario y Gestión de Incidencias Concurrentes (V2: Redis + Real-Time)
 
 ## 1. Contexto y Definición del Problema
 
-Actualmente, el sistema de automatización (`xaloc_automation`) opera bajo un modelo centralizado donde los "workers" procesan tareas de una cola (`tramite_queue` en SQLite) de manera automática. La intervención humana es necesaria cuando ocurren incidencias o se requieren autorizaciones manuales.
+El sistema de automatización (`xaloc_automation`) necesita evolucionar hacia una arquitectura **multi-usuario en tiempo real** que soporte:
+1.  **Concurrencia:** Múltiples operadores resolviendo incidencias sin pisarse.
+2.  **Interactividad:** Actualizaciones inmediatas en el Dashboard (WebSockets) sin necesidad de recargar la página.
+3.  **Coordinación Eficiente:** Uso de Redis para bloqueos distribuidos (Locks), colas de trabajo y monitoreo de estado de los Workers.
 
-El objetivo es evolucionar la aplicación actual (Dashboard en Next.js + FastAPI) para soportar múltiples usuarios humanos trabajando simultáneamente en la resolución de incidencias, evitando conflictos (ej. dos personas intentando arreglar el mismo expediente a la vez) y restringiendo el acceso según roles.
-
-### Requerimientos Clave:
-1.  **Control de Acceso (RBAC):**
-    *   **Administrador:** Acceso total (Configuración, Logs, Gestión de Usuarios, todas las colas).
-    *   **Operador (Usuario Estándar):** Acceso restringido a:
-        *   Estado (Ver colas).
-        *   Gestión (Resolver incidencias).
-        *   Historial (Consultar expedientes pasados).
-2.  **Concurrencia:** Evitar que dos usuarios editen/resuelvan la misma incidencia simultáneamente.
-3.  **Asignación:** Mecanismo para repartir el trabajo (Manual vs Automático).
+### Requerimientos Clave (V2):
+*   **Redis como Orquestador:** Manejo de Locks (`lock:incident:{id}`), Colas (`queue:tramites`) y Presencia (`worker:status:{id}`).
+*   **Comunicación en Tiempo Real:** Pub/Sub de Redis puenteado a WebSockets en el Frontend.
+*   **Persistencia Robusta:** Transición recomendada de SQLite a PostgreSQL para manejo relacional complejo (Usuarios/Roles/Historial).
 
 ---
 
-## 2. Control de Acceso Basado en Roles (RBAC)
+## 2. Arquitectura de Datos en Redis
 
-Para soportar múltiples usuarios, el sistema necesita dejar de ser "single-tenant" (o sin autenticación real) e implementar una tabla de usuarios y sesiones.
+Para mantener el orden y la eficiencia, se define la siguiente estructura de claves y convenciones:
 
-### 2.1. Cambios en Base de Datos (SQLite)
-Se requiere una nueva tabla `users` en `core/sqlite_db.py`:
+### 2.1. Naming Convention
+| Tipo | Clave (Key) | Valor / Estructura | Propósito | Expiración (TTL) |
+| :--- | :--- | :--- | :--- | :--- |
+| **Lock** | `lock:incident:{id}` | `user_id` (String) | Bloqueo exclusivo para edición. Evita conflictos. | 30 min (1800s) |
+| **Cola** | `queue:tramites` | List (JSON) | Tareas pendientes que los workers procesan (FIFO). | N/A |
+| **Estado Worker** | `worker:status:{w_id}` | JSON (String) | Info del robot: `{"status": "busy", "task_id": 123}`. | 60s (Heartbeat) |
+| **Pub/Sub** | `channel:ui_updates` | Mensaje JSON | Canal para difundir eventos al Dashboard. | N/A |
 
-```sql
-CREATE TABLE users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    role TEXT CHECK(role IN ('admin', 'operator')) DEFAULT 'operator',
-    is_active BOOLEAN DEFAULT 1,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    last_login TIMESTAMP
-);
+---
+
+## 3. Contratos de Mensajes (JSON)
+
+### A. Para los WebSockets (Backend → Frontend)
+El backend escucha el canal `channel:ui_updates` de Redis y retransmite los mensajes a los clientes conectados vía WebSocket.
+
+**Evento: Incidencia Bloqueada/Reclamada**
+```json
+{
+  "event": "INCIDENT_LOCKED",
+  "data": {
+    "incident_id": 1025,
+    "user_id": 7,
+    "username": "Ana Operador",
+    "expires_at": "2023-10-27T10:30:00Z"
+  }
+}
 ```
 
-### 2.2. Implementación en FastAPI (`dashboard_api.py`)
-Utilizaríamos **OAuth2 con Password Flow** y **JWT Tokens**.
-*   **Dependencia:** `fastapi.security.OAuth2PasswordBearer`.
-*   **Flujo:**
-    1.  Usuario hace POST a `/token` con usuario/contraseña.
-    2.  Servidor valida hash (usando `bcrypt` o `passlib`) y retorna un JWT firmado.
-    3.  El JWT contiene el `role` del usuario.
-    4.  Endpoints protegidos leen el JWT e inyectan el usuario actual (`current_user`).
-    5.  Middleware o dependencias para verificar permisos: `RequireRole('admin')`.
-
----
-
-## 3. Modelos de Concurrencia y Asignación
-
-El problema principal es la **Condition de Carrera (Race Condition)**: El Usuario A abre una incidencia para arreglarla. El Usuario B abre la misma 10 segundos después. Ambos intentan guardar cambios. El último en guardar sobrescribe al primero, o el sistema genera un estado inconsistente.
-
-Analicemos tres estrategias para resolver esto:
-
-### Modelo A: "Shark Tank" (Pull / Reclamación) - **RECOMENDADO**
-Los usuarios ven una lista global de incidencias pendientes ("pool"). Para trabajar en una, deben "reclamarla" explícitamente.
-
-*   **Flujo:**
-    1.  El usuario ve la lista de incidencias con estado `pending_fix`.
-    2.  Hace clic en "Atender".
-    3.  El sistema marca la tarea: `assigned_to = UserA`, `status = 'fixing'`, `locked_at = NOW`.
-    4.  La tarea desaparece de la lista general o aparece marcada como "En uso por UserA".
-    5.  Nadie más puede entrar a esa tarea.
-*   **Pros:** Sencillo, flexible, evita cuellos de botella si un usuario se va a comer (el admin puede liberar la tarea).
-*   **Contras:** Requiere acción explícita del usuario.
-
-### Modelo B: "The Dealer" (Push / Reparto Automático)
-El sistema asigna incidencias automáticamente a los usuarios conectados (Round Robin o por carga).
-
-*   **Flujo:**
-    1.  El usuario se loguea.
-    2.  El sistema busca incidencias sin asignar y se las asigna al usuario automáticamente.
-    3.  El usuario ve "Mis Tareas" y no tiene que elegir.
-*   **Pros:** Eficiencia máxima teórica. Nadie "escoge las fáciles".
-*   **Contras:** Complejo de implementar (detectar presencia real, qué pasa si el usuario ignora la tarea, re-asignación por timeouts). Puede ser estresante para el usuario.
-
-### Modelo C: Asignación por Manager
-Un usuario "Jefe de Sala" asigna manualmente las incidencias a cada operador.
-
-*   **Pros:** Control total humano.
-*   **Contras:** Cuello de botella en el manager. Micro-management innecesario.
-
----
-
-## 4. Solución Técnica Propuesta: "Bloqueo Optimista con Reclamación"
-
-Para este proyecto, dado el stack (Python/SQLite/FastAPI) y el caso de uso (automatización administrativa), la mejor solución es el **Modelo A (Pull) con Bloqueo Exclusivo**.
-
-### 4.1. Cambios en Esquema de Datos (`tramite_queue`)
-Añadiremos columnas para controlar el bloqueo humano:
-
-```sql
-ALTER TABLE tramite_queue ADD COLUMN assigned_to_user_id INTEGER REFERENCES users(id);
-ALTER TABLE tramite_queue ADD COLUMN locked_at TIMESTAMP;
--- El status ya existe, pero definiremos nuevos estados lógicos para UI
--- status actuales: 'pending', 'processing', 'completed', 'failed'
--- status propuesto para intervención humana: 'manual_intervention'
+**Evento: Actualización de Worker**
+```json
+{
+  "event": "WORKER_UPDATE",
+  "data": {
+    "worker_id": "robot_01",
+    "status": "processing",
+    "current_incident": 1025,
+    "progress": 45
+  }
+}
 ```
 
-### 4.2. API Endpoints Necesarios
+### B. Para la Cola de Trabajo (Backend → Workers)
+Estructura del payload que el worker recibe al hacer `BRPOP` de `queue:tramites`.
 
-1.  **`POST /api/incidents/{id}/claim`**
-    *   Verifica si `assigned_to_user_id` es NULL o si el bloqueo expiró (ej. > 30 min).
-    *   Si está libre: `UPDATE tramite_queue SET assigned_to_user_id = me, locked_at = NOW WHERE id = {id}`.
-    *   Si está ocupado: Retorna 409 Conflict ("Tarea bloqueada por Usuario B").
-
-2.  **`POST /api/incidents/{id}/release`**
-    *   Permite al usuario (o admin) soltar la tarea sin resolverla.
-    *   `UPDATE tramite_queue SET assigned_to_user_id = NULL, locked_at = NULL`.
-
-3.  **`POST /api/incidents/{id}/resolve`**
-    *   El usuario marca la incidencia como resuelta.
-    *   `UPDATE tramite_queue SET status = 'pending' (para reintento), attempts = 0, assigned_to_user_id = NULL`.
-
-### 4.3. Gestión de "Bloqueos Zombis"
-Si un usuario reclama una incidencia y cierra el navegador o se va a casa, la incidencia queda bloqueada.
-**Solución:** Un "Heartbeat" o TTL (Time To Live).
-*   Si `locked_at` es más antiguo que 30 minutos, cualquiera puede "robar" (re-reclamar) la incidencia, asumiendo que el usuario original abandonó.
+```json
+{
+  "task_id": "uuid-9876",
+  "incident_id": 1025,
+  "type": "RETRY_SUBMISSION",
+  "payload": {
+    "url": "https://sede.administracion.gob...",
+    "data_to_fix": { "field": "cp", "value": "08001" }
+  },
+  "created_at": "2023-10-27T10:00:00Z"
+}
+```
 
 ---
 
-## 5. Comparativa con el Mundo Real
+## 4. Flujo de Trabajo "Real-Time"
 
-| Sistema | Modelo | Descripción | Similitud con Proyecto |
-| :--- | :--- | :--- | :--- |
-| **Jira** | Asignación Explícita | Un ticket tiene un campo `Assignee`. Cualquiera puede cambiarlo, pero generalmente uno se lo asigna a sí mismo. No bloquea edición simultánea estricta, pero avisa. | Alta (Gestión de tareas) |
-| **Zendesk** | Pull ("Play") | Botón "Play" que te sirve el siguiente ticket disponible y lo bloquea temporalmente para ti. | Media (Atención al cliente rápida) |
-| **Uber** | Algorítmico (Push) | El sistema decide quién recibe el viaje. El conductor tiene pocos segundos para aceptar. | Baja (Tiempo real crítico) |
-| **Git** | Merge Conflict | Permite edición paralela y obliga a resolver conflictos al guardar. | Inviable (Muy complejo para usuarios no técnicos) |
+### Paso 1: El Error (Worker → DB → Redis)
+1.  El Worker encuentra un error en un trámite.
+2.  Persiste el error en la Base de Datos Principal (PostgreSQL/SQLite).
+3.  Publica el evento en Redis: `PUBLISH channel:ui_updates '{"event": "NEW_INCIDENT", "id": 1025}'`.
+4.  **Resultado UI:** El Dashboard muestra una alerta roja o actualiza la lista al instante.
+
+### Paso 2: La Reclamación (Usuario → Redis)
+1.  El Usuario pulsa "Atender" en el Dashboard.
+2.  FastAPI ejecuta: `SET lock:incident:1025 {user_id} NX EX 1800`.
+3.  **Si tiene éxito (NX = Not Exists):**
+    *   Publica `INCIDENT_LOCKED` en `channel:ui_updates`.
+    *   **Resultado UI:** El botón se deshabilita para el resto de usuarios ("En uso por Ana").
+    *   El usuario entra a la pantalla de edición.
+4.  **Si falla:** Informa al usuario que la incidencia ya está siendo atendida.
+
+### Paso 3: La Resolución (Usuario → Redis/Worker)
+1.  El Usuario corrige los datos y pulsa "Re-lanzar".
+2.  FastAPI:
+    *   Elimina el bloqueo: `DEL lock:incident:1025`.
+    *   Añade la tarea a la cola: `LPUSH queue:tramites {task_json}`.
+    *   Publica `INCIDENT_RELEASED` (o `INCIDENT_QUEUED`).
+3.  **Resultado UI:** La incidencia desaparece de la lista "Pendientes".
+4.  **Worker:** Un Worker libre hace `BRPOP`, recibe la tarea y empieza a trabajar inmediatamente.
 
 ---
 
-## 6. Recomendación Final y Plan de Acción
+## 5. Gestión de "Presencia" de Workers (Heartbeat)
 
-### Recomendación
-Implementar el **Modelo de Reclamación (Pull)**. Es intuitivo, fácil de implementar sobre SQLite y escala bien para equipos pequeños/medianos.
+Para detectar robots caídos ("Zombis"):
+1.  **Heartbeat:** Cada Worker ejecuta un hilo en segundo plano que hace `SET worker:status:{id} {info} EX 60` cada 30 segundos.
+2.  **Monitoreo:** El Dashboard (o un servicio de backend) consulta `KEYS worker:status:*`.
+3.  **Detección de Fallos:** Si un worker crashea, deja de enviar el heartbeat. A los 60 segundos, la clave expira automáticamente en Redis. El Dashboard deja de recibirlo y lo marca como "Offline".
 
-### Pasos de Implementación
+---
 
-1.  **Fase 1: Autenticación (Backend)**
-    *   Crear tabla `users` y script de seed para crear el primer Admin.
-    *   Implementar login (`/token`) y protección de rutas en FastAPI.
-    *   Decorador `@requires_role("admin")` para rutas sensibles.
+## 6. Stack Tecnológico Recomendado (Final)
 
-2.  **Fase 2: Asignación de Incidencias (Backend)**
-    *   Modificar `tramite_queue` para incluir `assigned_to` y `locked_at`.
-    *   Crear endpoints `claim` y `release`.
-    *   Modificar endpoints de listado (`GET /api/history/incidents`) para mostrar quién tiene asignada cada tarea.
+1.  **Persistencia:** **PostgreSQL**.
+    *   Motivo: Integridad referencial fuerte para Usuarios, Roles e Historial. SQLite tiene limitaciones de concurrencia de escritura que podrían ser un cuello de botella con múltiples usuarios escribiendo logs simultáneamente.
+2.  **Coordinación & Caché:** **Redis**.
+    *   Motivo: Estándar de industria para Locks distribuidos, Colas rápidas y Pub/Sub.
+3.  **Backend API:** **FastAPI**.
+    *   Librerías: `redis-py` (modo async) para interactuar con Redis. `WebSockets` nativos de FastAPI.
+4.  **Frontend:** **Next.js + TanStack Query**.
+    *   Motivo: TanStack Query maneja el estado del servidor eficientemente. Next.js provee SSR/SSG.
 
-3.  **Fase 3: Frontend (Dashboard)**
-    *   Pantalla de Login.
-    *   Ocultar menús (Config, Logs) si el usuario no es Admin.
-    *   En la lista de incidencias:
-        *   Mostrar candado si está asignada a otro.
-        *   Botón "Asignarme" si está libre.
-    *   Filtro "Mis Incidencias".
+---
 
-4.  **Fase 4: Limpieza Automática**
-    *   Una tarea en background (en `brain.py` o cron) que libere bloqueos antiguos (> 30 min) para evitar tareas huérfanas.
+## 7. Plan de Acción Detallado
 
-Esta arquitectura asegura que el sistema sea **robusto** (sin conflictos de escritura), **seguro** (cada uno ve lo que debe) y **organizado** (claridad sobre quién está haciendo qué).
+Ver el documento adjunto `ACTION_PLAN_REDIS_MIGRATION.md` para la guía paso a paso de implementación.
