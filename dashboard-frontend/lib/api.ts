@@ -100,3 +100,10 @@ export const configApi = {
     setSiteActive: (siteId: string, active: boolean) =>
         api.post<any>(`/config/${encodeURIComponent(siteId)}/active`, { active }),
 };
+
+export const incidentsApi = {
+    getPending: (page = 1, pageSize = 200) =>
+        api.get<{ items: any[], total: number }>(`/incidents?page=${page}&page_size=${pageSize}`),
+    claim: (id: string) => api.post<any>(`/incidents/${id}/claim`),
+    release: (id: string) => api.post<any>(`/incidents/${id}/release`),
+};

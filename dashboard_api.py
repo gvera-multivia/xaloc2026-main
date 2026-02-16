@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import Any
+import json
+import logging
+from typing import Any, Optional
 from pathlib import Path
 
 import aiohttp
-from fastapi import FastAPI, Query, HTTPException, Body, Request
+import jwt
+from fastapi import FastAPI, Query, HTTPException, Body, Request, WebSocket, WebSocketDisconnect, Header, Depends, status
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -18,6 +21,7 @@ from dashboard.process_manager import ProcessManager
 from core.xvia_auth import create_authenticated_session_in_place
 from core.xvia_deselect import deselect_resource
 from core.process_launcher import get_npm_command, start_async_process, terminate_process_tree
+from core.redis_client import get_redis_client
 
 app = FastAPI(title="Xaloc Realtime Dashboard", version="2.0.0")
 
@@ -31,10 +35,12 @@ app.add_middleware(
 
 service = DashboardService()
 process_manager = ProcessManager(base_dir=".", logs_dir="logs")
+logger = logging.getLogger("dashboard_api")
 
 FRONTEND_HOST = os.getenv("DASHBOARD_FRONTEND_HOST", "127.0.0.1").strip() or "127.0.0.1"
 FRONTEND_PORT = int((os.getenv("DASHBOARD_FRONTEND_PORT") or "3000").strip() or "3000")
 FRONTEND_DEV = (os.getenv("DASHBOARD_FRONTEND_DEV") or "0").strip().lower() not in {"0", "false", "no", "off"}
+SECRET_KEY = os.getenv("SECRET_KEY", "insecure-secret-key-dev")
 
 _frontend_process: asyncio.subprocess.Process | None = None
 _proxy_session: aiohttp.ClientSession | None = None
@@ -188,6 +194,120 @@ async def app_shutdown() -> None:
     _proxy_session = None
     await _stop_frontend_server()
 
+# ==========================================================================
+# AUTH & REDIS
+# ==========================================================================
+
+def get_current_user(authorization: Optional[str] = Header(None)) -> dict[str, Any]:
+    if not authorization:
+        # Fallback for now if no auth header sent, maybe dev mode or strict mode
+        # If strict mode, raise HTTPException
+        # raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Authorization header")
+        return {"sub": "anonymous", "username": "Anonymous", "role": "operator"}
+
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication scheme")
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+        return payload
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+@app.websocket("/ws/dashboard")
+async def websocket_dashboard(websocket: WebSocket):
+    await websocket.accept()
+    redis = get_redis_client()
+    if not redis:
+        await websocket.close(code=1011, reason="Redis not available")
+        return
+
+    pubsub = redis.pubsub()
+    await pubsub.subscribe("channel:ui_updates")
+
+    try:
+        async for message in pubsub.listen():
+            if message["type"] == "message":
+                await websocket.send_text(message["data"])
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+    finally:
+        await pubsub.unsubscribe("channel:ui_updates")
+        await pubsub.close()
+
+@app.post("/api/incidents/{id}/claim")
+async def api_claim_incident(id: str, user: dict = Depends(get_current_user)):
+    redis = get_redis_client()
+    if not redis:
+        raise HTTPException(status_code=503, detail="Redis not available")
+
+    lock_key = f"lock:incident:{id}"
+    user_id = str(user.get("sub", "unknown"))
+    username = user.get("username", "Unknown")
+
+    # Try to acquire lock
+    # NX: Set if Not Exists
+    # EX: Expire in 1800 seconds (30 min)
+    acquired = await redis.set(lock_key, user_id, nx=True, ex=1800)
+
+    if acquired:
+        event = {
+            "event": "INCIDENT_LOCKED",
+            "data": {
+                "incident_id": id,
+                "user_id": user_id,
+                "username": username,
+                "expires_at": (asyncio.get_running_loop().time() + 1800) # approximate
+            }
+        }
+        await redis.publish("channel:ui_updates", json.dumps(event))
+        return {"status": "locked", "user_id": user_id}
+    else:
+        # Get current owner
+        owner_id = await redis.get(lock_key)
+        # We could fetch user details if we had a user store
+        raise HTTPException(
+            status_code=409,
+            detail=f"Incident already locked by user {owner_id}"
+        )
+
+@app.post("/api/incidents/{id}/release")
+async def api_release_incident(id: str, user: dict = Depends(get_current_user)):
+    redis = get_redis_client()
+    if not redis:
+        raise HTTPException(status_code=503, detail="Redis not available")
+
+    lock_key = f"lock:incident:{id}"
+    user_id = str(user.get("sub", "unknown"))
+    role = user.get("role", "operator")
+
+    owner_id = await redis.get(lock_key)
+
+    if not owner_id:
+        return {"status": "unlocked", "message": "Was not locked"}
+
+    if owner_id != user_id and role != "admin":
+        raise HTTPException(status_code=403, detail="You do not own this lock")
+
+    await redis.delete(lock_key)
+
+    event = {
+        "event": "INCIDENT_UNLOCKED",
+        "data": {
+            "incident_id": id
+        }
+    }
+    await redis.publish("channel:ui_updates", json.dumps(event))
+    return {"status": "unlocked"}
+
+# ==========================================================================
+# EXISTING ROUTES
+# ==========================================================================
 
 @app.get("/api/history/days")
 async def api_history_days(
@@ -205,6 +325,15 @@ async def api_history_incidents(
     page_size: int = Query(200, ge=1, le=1000),
 ) -> dict:
     return service.list_history_incidents(day=day, page=page, page_size=page_size)
+
+
+@app.get("/api/incidents")
+async def api_incidents_pending(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(200, ge=1, le=1000),
+) -> dict:
+    # For now, return incidents from today as "pending" list
+    return service.list_history_incidents(day=None, page=page, page_size=page_size)
 
 
 @app.get("/api/history/successes")
