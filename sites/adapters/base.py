@@ -17,6 +17,7 @@ logger = logging.getLogger("brain")
 
 
 class BaseOnlineAdapter(SiteAdapter):
+    DEFAULT_REGEX_EXPEDIENTE = r"^(\d{5}-\d{4}/\d{4,5}-GIM|\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{7}|\d-\d{4}[/\-]\d{4,6}-(EXE|ECC))$"
     SQL_FETCH_RECURSOS_BASE = """
 SELECT
     rs.idRecurso,
@@ -63,7 +64,7 @@ INNER JOIN clientes c ON rs.numclient = c.numerocliente
 INNER JOIN expedientes e ON rs.idExp = e.idexpediente
 LEFT JOIN DadesIdentif di ON rs.idExp = di.idExp
 LEFT JOIN attachments_resource_documents att ON rs.automatic_id = att.automatic_id
-WHERE rs.Organisme LIKE '%BASE%'
+WHERE {organisme_like_clause}
   AND rs.TExp IN ({texp_list})
   AND rs.Estado IN (0, 1)
   AND rs.Expedient IS NOT NULL
@@ -112,6 +113,8 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
 
     def __init__(self):
         super().__init__(site_id="base_online", priority=1)
+        self._regex_expediente_cache: dict[str, re.Pattern[str]] = {}
+        self._regex_expediente_fallback = re.compile(self.DEFAULT_REGEX_EXPEDIENTE)
 
     @staticmethod
     def _clean_str(v: Any) -> str:
@@ -287,14 +290,41 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         limit: int,
         on_discard: Optional[SiteAdapter.DiscardCallback] = None,
     ) -> list[dict]:
-        texp_values = [2, 3]
+        regex_pattern = self._clean_str(config.get("regex_expediente")) or self.DEFAULT_REGEX_EXPEDIENTE
+        regex = self._regex_expediente_cache.get(regex_pattern)
+        if regex is None:
+            try:
+                regex = re.compile(regex_pattern)
+            except re.error:
+                logger.warning(f"[base_online] Regex invalido en config.regex_expediente: {regex_pattern!r}. Usando fallback.")
+                regex = self._regex_expediente_fallback
+            self._regex_expediente_cache[regex_pattern] = regex
+
+        filtro_texp = self._clean_str(config.get("filtro_texp"))
+        try:
+            texp_values = [int(x.strip()) for x in filtro_texp.split(",") if x.strip()]
+        except Exception:
+            texp_values = [2, 3]
+        if not texp_values:
+            texp_values = [2, 3]
         texp_placeholders = ",".join(["?"] * len(texp_values))
-        query = self.SQL_FETCH_RECURSOS_BASE.format(texp_list=texp_placeholders)
+
+        query_organisme_raw = self._clean_str(config.get("query_organisme")) or "%"
+        patterns = [p.strip() for p in query_organisme_raw.split(" ") if p.strip()]
+        if not patterns:
+            patterns = ["%"]
+        like_clauses = ["rs.Organisme LIKE ?"] * len(patterns)
+        organisme_like_clause = " AND ".join(like_clauses)
+
+        query = self.SQL_FETCH_RECURSOS_BASE.format(
+            organisme_like_clause=organisme_like_clause,
+            texp_list=texp_placeholders,
+        )
 
         conn = pyodbc.connect(conn_str)
         try:
             cursor = conn.cursor()
-            cursor.execute(query, texp_values)
+            cursor.execute(query, patterns + texp_values)
             columns = [column[0] for column in cursor.description]
 
             recursos_map: dict[int, dict] = {}
@@ -320,8 +350,9 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 if limit and len(out) >= limit:
                     break
 
-                expediente = self._clean_str(recurso.get("Expedient"))
-                if not self._valida_expediente_base(expediente):
+                expediente = self._clean_str(recurso.get("Expedient")).upper()
+                expediente = re.sub(r"\s+", "", expediente)
+                if not expediente or not regex.match(expediente):
                     if on_discard:
                         on_discard(
                             {
@@ -333,6 +364,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                             }
                         )
                     continue
+                recurso["Expedient"] = expediente
 
                 estado = int(recurso.get("Estado") or 0)
                 usuario = self._clean_str(recurso.get("UsuarioAsignado"))

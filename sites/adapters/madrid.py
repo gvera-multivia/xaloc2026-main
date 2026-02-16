@@ -190,6 +190,19 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 expediente = self._clean_str(recurso.get("Expedient")).upper()
                 expediente = re.sub(r"\s+", "", expediente)
                 if not expediente or not regex.match(expediente):
+                    if on_discard:
+                        try:
+                            on_discard(
+                                {
+                                    "site_id": self.site_id,
+                                    "idRecurso": recurso.get("idRecurso"),
+                                    "Expedient": expediente,
+                                    "tipo_incidencia": "REGEX_DISCARDED",
+                                    "motivo": f"Expediente no valido para madrid: {expediente}",
+                                }
+                            )
+                        except Exception:
+                            pass
                     continue
                 recurso["Expedient"] = expediente
 

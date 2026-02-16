@@ -308,6 +308,19 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                                 conn.rollback()
 
                 if not is_valid:
+                    if on_discard:
+                        try:
+                            on_discard(
+                                {
+                                    "site_id": self.site_id,
+                                    "idRecurso": rid,
+                                    "Expedient": expediente_raw,
+                                    "tipo_incidencia": "REGEX_DISCARDED",
+                                    "motivo": f"Expediente no valido para xaloc_girona: {expediente_raw}",
+                                }
+                            )
+                        except Exception:
+                            pass
                     continue  # Descartar si el formato sigue siendo inválido
 
                 # 2. Regla de usuario asignado

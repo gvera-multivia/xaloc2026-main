@@ -716,6 +716,7 @@ class BrainOrchestrator:
                 break
 
             site_id = adapter.site_id
+            self.logger.info(f"[{site_id}] Evaluando site para refill/claim.")
             config = configs.get(site_id)
             if not config:
                 self.logger.warning(f"[{site_id}] Sin config activa; saltando.")
