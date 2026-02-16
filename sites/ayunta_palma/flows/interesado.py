@@ -9,6 +9,9 @@ from playwright.async_api import Locator, Page, TimeoutError as PlaywrightTimeou
 from sites.ayunta_palma.config import AyuntaPalmaConfig, AyuntaPalmaSelectors
 from sites.ayunta_palma.data_models import AyuntaPalmaTarget
 
+PALMA_CONTACT_EMAIL = "info@xvia-serviciosjuridicos.com"
+PALMA_CONTACT_PHONE = "932531411"
+
 
 async def _abrir_modal_nuevo_interesado(page: Page, selectors: AyuntaPalmaSelectors, delay_ms: int) -> None:
     tipo_usuario = page.locator(selectors.persona_tipo_usuario).first
@@ -136,8 +139,8 @@ async def registrar_interesado(
         await page.locator(selectors.persona_documento).fill(juridica.nif)
         await page.locator(selectors.persona_nombre).fill(juridica.razon_social)
 
-    await _fill_email(page, selectors, target.contacto.correo)
-    await _fill_telefono(page, selectors, target.contacto.telefono)
+    await _fill_email(page, selectors, PALMA_CONTACT_EMAIL)
+    await _fill_telefono(page, selectors, PALMA_CONTACT_PHONE)
 
     aceptar = page.locator(selectors.btn_aceptar_modal)
     await aceptar.wait_for(state="visible")
