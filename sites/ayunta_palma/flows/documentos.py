@@ -51,6 +51,39 @@ async def _click_siguiente(page: Page, config: AyuntaPalmaConfig) -> None:
     await _esperar_velo_oculto(page, config)
 
 
+async def _click_confirmar(page: Page, config: AyuntaPalmaConfig) -> None:
+    selectors = config.selectors
+    btn_confirmar = page.locator(selectors.btn_confirmar).first
+    if await btn_confirmar.count() > 0 and await btn_confirmar.is_visible():
+        await btn_confirmar.click()
+    else:
+        # En esta pantalla "Confirmar" puede reutilizar el input hidden de btnSiguiente.
+        hidden_input = page.locator(selectors.input_siguiente).first
+        if await hidden_input.count() > 0:
+            if await hidden_input.is_visible():
+                await hidden_input.click()
+            else:
+                await page.evaluate(
+                    """(selector) => {
+                        const el = document.querySelector(selector);
+                        if (!el) return false;
+                        el.click();
+                        return true;
+                    }""",
+                    selectors.input_siguiente,
+                )
+    await page.wait_for_timeout(config.delay_ms)
+    await _esperar_velo_oculto(page, config)
+
+
+async def _click_modal_aceptar(page: Page, config: AyuntaPalmaConfig) -> None:
+    btn_modal_aceptar = page.locator(config.selectors.btn_modal_aceptar).first
+    await btn_modal_aceptar.wait_for(state="visible", timeout=config.timeouts.general)
+    await btn_modal_aceptar.click()
+    await page.wait_for_timeout(config.delay_ms)
+    await _esperar_velo_oculto(page, config)
+
+
 async def _marcar_proteccion_datos(page: Page, config: AyuntaPalmaConfig) -> None:
     chk = page.locator(config.selectors.chk_proteccion_datos).first
     await chk.wait_for(state="visible", timeout=config.timeouts.general)
@@ -59,6 +92,38 @@ async def _marcar_proteccion_datos(page: Page, config: AyuntaPalmaConfig) -> Non
             await chk.check()
         except Exception:
             await chk.check(force=True)
+    await page.wait_for_timeout(config.delay_ms)
+    await _esperar_velo_oculto(page, config)
+
+
+async def _click_firmar(page: Page, config: AyuntaPalmaConfig) -> None:
+    selectors = config.selectors
+    btn_firmar = page.locator(selectors.btn_firmar).first
+    if await btn_firmar.count() > 0 and await btn_firmar.is_visible():
+        await btn_firmar.click()
+    else:
+        hidden_input = page.locator(selectors.input_firmar).first
+        if await hidden_input.count() > 0:
+            if await hidden_input.is_visible():
+                await hidden_input.click()
+            else:
+                await page.evaluate(
+                    """(selector) => {
+                        const el = document.querySelector(selector);
+                        if (!el) return false;
+                        el.click();
+                        return true;
+                    }""",
+                    selectors.input_firmar,
+                )
+    await page.wait_for_timeout(config.delay_ms)
+    await _esperar_velo_oculto(page, config)
+
+
+async def _click_signar_tots_documents(page: Page, config: AyuntaPalmaConfig) -> None:
+    btn_signar = page.locator(config.selectors.btn_signar_tots_documents).first
+    await btn_signar.wait_for(state="visible", timeout=config.timeouts.general)
+    await btn_signar.click()
     await page.wait_for_timeout(config.delay_ms)
     await _esperar_velo_oculto(page, config)
 
@@ -86,15 +151,21 @@ async def subir_documentos(
     await confirmar.click(timeout=config.timeouts.subida_archivo)
     await page.wait_for_timeout(config.delay_ms)
 
-    # 1) Confirmar/aceptar los documentos y avanzar.
+    # 1) Avanzar tras aceptar el documento subido.
     await _click_siguiente(page, config)
 
-    # 2) Avanzar a la pantalla de aceptación de condiciones.
-    await page.wait_for_timeout(config.delay_ms)
-    await _click_siguiente(page, config)
-
-    # 3) Marcar protección de datos y avanzar de nuevo.
+    # 2) Marcar protección de datos y avanzar.
     await page.wait_for_timeout(config.delay_ms)
     await _marcar_proteccion_datos(page, config)
     await _click_siguiente(page, config)
+
+    # 3) Aceptar modal intermedio y confirmar.
+    await page.wait_for_timeout(config.delay_ms)
+    await _click_modal_aceptar(page, config)
+    await _click_confirmar(page, config)
+
+    # 4) Ir a firma y lanzar firma de todos los documentos.
+    await page.wait_for_timeout(config.delay_ms)
+    await _click_firmar(page, config)
+    await _click_signar_tots_documents(page, config)
     return page
