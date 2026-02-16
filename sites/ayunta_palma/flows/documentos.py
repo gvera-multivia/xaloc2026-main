@@ -35,26 +35,41 @@ async def _run_ps_diagnostic(step_name: str, ps_script: str, timeout_s: int = 45
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
+        saw_stdout = False
+        saw_stderr = False
+
+        async def _pump_stream(stream, is_err: bool) -> bool:
+            saw_any = False
+            while True:
+                line_b = await stream.readline()
+                if not line_b:
+                    break
+                line = line_b.decode("utf-8", errors="ignore").strip()
+                if not line:
+                    continue
+                saw_any = True
+                if is_err:
+                    logger.warning("[AP-DIAG][%s][ERR] %s", step_name, line)
+                else:
+                    logger.info("[AP-DIAG][%s][OUT] %s", step_name, line)
+            return saw_any
+
+        stdout_task = asyncio.create_task(_pump_stream(proc.stdout, is_err=False))
+        stderr_task = asyncio.create_task(_pump_stream(proc.stderr, is_err=True))
         try:
-            stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
+            await asyncio.wait_for(proc.wait(), timeout=timeout_s)
         except asyncio.TimeoutError:
             proc.kill()
-            await proc.communicate()
+            await proc.wait()
             logger.warning("[AP-DIAG][%s] Timeout tras %ss", step_name, timeout_s)
-            return
+        finally:
+            saw_stdout = await stdout_task
+            saw_stderr = await stderr_task
 
-        stdout = (stdout_b or b"").decode("utf-8", errors="ignore").strip()
-        stderr = (stderr_b or b"").decode("utf-8", errors="ignore").strip()
-
-        if stdout:
-            for line in stdout.splitlines():
-                logger.info("[AP-DIAG][%s][OUT] %s", step_name, line.strip())
-        else:
+        if not saw_stdout:
             logger.info("[AP-DIAG][%s] Sin salida stdout.", step_name)
-
-        if stderr:
-            for line in stderr.splitlines():
-                logger.warning("[AP-DIAG][%s][ERR] %s", step_name, line.strip())
+        if not saw_stderr and proc.returncode not in (0, None):
+            logger.warning("[AP-DIAG][%s] PowerShell returncode=%s sin stderr.", step_name, proc.returncode)
     except Exception as e:
         logger.warning("[AP-DIAG][%s] Error ejecutando PowerShell: %s", step_name, e)
 
@@ -167,8 +182,9 @@ for ($i=0; $i -lt 180; $i++) {
 
 async def _aceptar_certificado_windows() -> None:
     """
-    Fallback para el dialogo nativo de seleccion de certificado en Windows.
-    Busca ventanas de certificado/seguridad y pulsa "Aceptar/OK" por UIAutomation.
+    Acepta el dialogo nativo de certificado de Windows.
+    Estrategia: detectar ventana, llevar foco y pulsar Aceptar por UIAutomation
+    (con fallback por teclado), sin spam de detecciones.
     """
     if not sys.platform.startswith("win"):
         return
@@ -176,27 +192,23 @@ async def _aceptar_certificado_windows() -> None:
     ps_script = r"""
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
-Add-Type -TypeDefinition @"
-using System;
-using System.Runtime.InteropServices;
-public class User32 {
-  [DllImport("user32.dll")]
-  public static extern bool SetForegroundWindow(IntPtr hWnd);
-}
-"@
-
 $root = [System.Windows.Automation.AutomationElement]::RootElement
 $wshell = New-Object -ComObject WScript.Shell
-$windowHints = @(
-  "DiÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡logo de seguridad del almacÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©n Windows",
-  "Seleccione un certificado",
-  "Certificado", "Certificat", "Certificate",
-  "Seguridad", "Security", "Windows"
-)
-$buttonNames = @("Aceptar", "Acceptar", "OK", "Si", "Yes")
-$sentEnterFallback = $false
+$logged = @{}
 
-for ($i=0; $i -lt 240; $i++) {
+function Is-CertWindowTitle([string]$title) {
+  if ([string]::IsNullOrWhiteSpace($title)) { return $false }
+  $t = $title.ToLowerInvariant()
+  if ($t.Contains("certificat")) { return $true }
+  if ($t.Contains("certific")) { return $true }
+  if ($t.Contains("security")) { return $true }
+  if ($t.Contains("seguridad")) { return $true }
+  if ($t.Contains("almacen windows")) { return $true }
+  if ($t.Contains("almac")) { return $true }
+  return $false
+}
+
+for ($i=0; $i -lt 420; $i++) {
   try {
     $condWindow = New-Object System.Windows.Automation.PropertyCondition(
       [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
@@ -204,66 +216,56 @@ for ($i=0; $i -lt 240; $i++) {
     )
     $wins = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $condWindow)
 
-    foreach ($win in $wins) {
-      $wName = [string]$win.Current.Name
-      if ([string]::IsNullOrWhiteSpace($wName)) { continue }
+    foreach ($w in $wins) {
+      $title = [string]$w.Current.Name
+      if (-not (Is-CertWindowTitle $title)) { continue }
 
-      $match = $false
-      foreach ($hint in $windowHints) {
-        if ($wName -like "*$hint*") { $match = $true; break }
+      if (-not $logged.ContainsKey($title)) {
+        Write-Output ("cert-window-detected title=" + $title)
+        $logged[$title] = $true
       }
-      if (-not $match) { continue }
-      Write-Output ("cert-window-detected title=" + $wName)
 
       try {
-        $hWnd = [IntPtr]$win.Current.NativeWindowHandle
-        if ($hWnd -ne [IntPtr]::Zero) {
-          [User32]::SetForegroundWindow($hWnd) | Out-Null
-        }
-      } catch {}
+        try { $w.SetFocus() } catch {}
+        try { $wshell.AppActivate($title) | Out-Null } catch {}
+        Start-Sleep -Milliseconds 120
 
-      $clicked = $false
-      try {
         $condBtn = New-Object System.Windows.Automation.PropertyCondition(
           [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
           [System.Windows.Automation.ControlType]::Button
         )
-        $buttons = $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condBtn)
+        $buttons = $w.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condBtn)
+        $clicked = $false
         foreach ($btn in $buttons) {
           $btnName = [string]$btn.Current.Name
-          foreach ($target in $buttonNames) {
-            if ($btnName -eq $target -or $btnName -like "*$target*") {
-              try {
-                $invoke = $btn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-                $invoke.Invoke()
-                Write-Output ("cert-click-invoke button=" + $btnName + " window=" + $wName)
-                $clicked = $true
-                break
-              } catch {}
-            }
+          if ($btnName -eq "Aceptar" -or $btnName -eq "Accept" -or $btnName -eq "OK" -or $btnName -like "*Aceptar*") {
+            try {
+              $invoke = $btn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+              $invoke.Invoke()
+              Write-Output ("cert-accept-click name=" + $btnName + " title=" + $title)
+              $clicked = $true
+              break
+            } catch {}
           }
-          if ($clicked) { break }
         }
-      } catch {}
 
-      if (-not $clicked -and -not $sentEnterFallback) {
-        try {
-          # Unico fallback de teclado para no "spammear" el dialogo.
-          Start-Sleep -Milliseconds 150
+        if (-not $clicked) {
+          $wshell.SendKeys('%a')
+          Start-Sleep -Milliseconds 120
           $wshell.SendKeys('{ENTER}')
-          Write-Output ("cert-fallback-enter window=" + $wName)
-          $sentEnterFallback = $true
-        } catch {}
+          Write-Output ("cert-accept-fallback-keys title=" + $title)
+        }
+        return
+      } catch {
+        Write-Output ("cert-accept-failed title=" + $title)
       }
-
-      if ($clicked) { return }
     }
   } catch {}
   Start-Sleep -Milliseconds 500
 }
+Write-Output "cert-window-timeout"
 """
-    await _run_ps_diagnostic("windows_cert_dialog", ps_script, timeout_s=180)
-
+    await _run_ps_diagnostic("windows_cert_dialog", ps_script, timeout_s=220)
 
 async def _aceptar_dialogo_edge_abrir_autofirma() -> None:
     """
@@ -287,7 +289,7 @@ $hints = @(
   "trying to open autofirma",
   "wants to open this application",
   "vol obrir aquesta aplicacio",
-  "vol obrir aquesta aplicaciÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³"
+  "vol obrir aquesta aplicaciÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³"
 )
 
 for ($i=0; $i -lt 80; $i++) {
@@ -392,7 +394,7 @@ def _get_folder_name_from_fase(fase_raw: str | None) -> str:
         "identificacion": "IDENTIFICACIONES",
         "denuncia": "ALEGACIONES",
         "propuesta de resolucion": "ALEGACIONES",
-        "extraordinario de revision": "EXTRAORDINARIOS DE REVISIÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œN",
+        "extraordinario de revision": "EXTRAORDINARIOS DE REVISIÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“N",
         "subsanacion": "SUBSANACIONES",
         "reclamaciones": "RECLAMACIONES",
         "requerimiento embargo": "EMBARGOS",
@@ -481,10 +483,10 @@ async def _esperar_exito_firma_o_refrescar(page: Page, config: AyuntaPalmaConfig
 
 async def _descargar_justificante_instancia(page: Page, payload: dict | None) -> Path:
     """
-    Descarga el justificante de la fila "Instancia/InstÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â ncia ..." y lo guarda
+    Descarga el justificante de la fila "Instancia/InstÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ncia ..." y lo guarda
     en RECURSOS TELEMATICOS del cliente.
     """
-    logger.info("[AP-DIAG] Buscando fila de justificante 'Instancia/InstÃ ncia'...")
+    logger.info("[AP-DIAG] Buscando fila de justificante 'Instancia/InstÃƒÂ ncia'...")
     rows = page.locator("table.tabla-ficheros tbody tr")
     row_count = await rows.count()
     logger.info("[AP-DIAG] Filas de tabla de ficheros detectadas: %s", row_count)
@@ -502,7 +504,7 @@ async def _descargar_justificante_instancia(page: Page, payload: dict | None) ->
             break
 
     if target_row is None:
-        raise RuntimeError("No se encontro la fila del justificante 'Instancia/InstÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â ncia'.")
+        raise RuntimeError("No se encontro la fila del justificante 'Instancia/InstÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ncia'.")
 
     download_input = target_row.locator("input[id$='_btnDescargar']").first
     if await download_input.count() == 0:
@@ -772,7 +774,7 @@ async def _click_signar_tots_documents(page: Page, config: AyuntaPalmaConfig) ->
         }"""
     )
     if not clicked:
-        raise PlaywrightTimeoutError("No se localizÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³ el botÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³n 'Signar tots els documents' en la pÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡gina/frames.")
+        raise PlaywrightTimeoutError("No se localizÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³ el botÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³n 'Signar tots els documents' en la pÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡gina/frames.")
     await page.wait_for_timeout(config.delay_ms)
     await _esperar_velo_oculto(page, config)
 
@@ -834,7 +836,7 @@ async def subir_documentos(
     # 1) Avanzar tras aceptar el documento subido.
     await _click_siguiente(page, config)
 
-    # 2) Marcar protecciÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³n de datos y avanzar.
+    # 2) Marcar protecciÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³n de datos y avanzar.
     await page.wait_for_timeout(config.delay_ms)
     await _marcar_proteccion_datos(page, config)
     await _click_siguiente(page, config)
