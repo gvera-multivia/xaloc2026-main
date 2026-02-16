@@ -10,7 +10,7 @@ from sites.ayunta_palma.config import AyuntaPalmaConfig, AyuntaPalmaSelectors
 from sites.ayunta_palma.data_models import AyuntaPalmaTarget
 
 PALMA_CONTACT_EMAIL = "info@xvia-serviciosjuridicos.com"
-PALMA_CONTACT_PHONE = "932531411"
+PALMA_CONTACT_PHONE = "722761154"
 
 
 async def _abrir_modal_nuevo_interesado(page: Page, selectors: AyuntaPalmaSelectors, delay_ms: int) -> None:
@@ -137,7 +137,14 @@ async def registrar_interesado(
         if not juridica:
             raise ValueError("Ayunta Palma: faltan datos de PersonaJuridica.")
         await page.locator(selectors.persona_documento).fill(juridica.nif)
-        await page.locator(selectors.persona_nombre).fill(juridica.razon_social)
+        razon_social_loc = page.locator(selectors.persona_razon_social).first
+        nombre_loc = page.locator(selectors.persona_nombre).first
+        try:
+            await razon_social_loc.wait_for(state="visible", timeout=5000)
+            await razon_social_loc.fill(juridica.razon_social)
+        except PlaywrightTimeoutError:
+            await nombre_loc.wait_for(state="visible", timeout=15000)
+            await nombre_loc.fill(juridica.razon_social)
 
     await _fill_email(page, selectors, PALMA_CONTACT_EMAIL)
     await _fill_telefono(page, selectors, PALMA_CONTACT_PHONE)

@@ -293,7 +293,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
             expone, solicita = self._build_expone_solicita(fase, expediente, sujeto)
 
             email = "info@xvia-serviciosjuridicos.com"
-            telefono = "932531411"
+            telefono = "722761154"
 
             es_juridica = bool(cliente_tipo == 2 or self._clean_str(r.get("cliente_nif_empresa")) or self._clean_str(r.get("cif")))
             tipo_persona = "PersonaJuridica" if es_juridica else "PersonaFisica"

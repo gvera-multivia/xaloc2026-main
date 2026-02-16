@@ -21,6 +21,7 @@ class AyuntaPalmaSelectors:
     persona_tipo_personalidad: str = "#ctl00_ctl00_cphM_cph_ddlPersonaTipoPersonalidad"
     persona_tipo_documento: str = "#ctl00_ctl00_cphM_cph_ddlPersonaTipoDocumentoIdentidad"
     persona_documento: str = "#ctl00_ctl00_cphM_cph_txtPersonaCodigoDocumentoIdentidad"
+    persona_razon_social: str = "#ctl00_ctl00_cphM_cph_txtPersonaRazonSocial"
     persona_nombre: str = "#ctl00_ctl00_cphM_cph_txtPersonaNombre"
     persona_apellido1: str = "#ctl00_ctl00_cphM_cph_txtPersonaApellido1"
     persona_apellido2: str = "#ctl00_ctl00_cphM_cph_txtPersonaApellido2"
