@@ -248,7 +248,8 @@ async def _aceptar_dialogo_edge_abrir_autofirma() -> None:
     """
     Fallback especifico para el dialogo de Edge:
     "Aquest lloc esta intentant obrir AutoFirma".
-    Intenta accionar "Obre/Open" via atajo de teclado cuando detecta ese texto.
+    Intenta clicar "Obre/Open" via UIAutomation cuando detecta ese texto.
+    Si no puede, usa atajos de teclado como fallback.
     """
     if not sys.platform.startswith("win"):
         return
@@ -290,13 +291,36 @@ for ($i=0; $i -lt 80; $i++) {
     }
 
     if ($found) {
+      $clicked = $false
       try {
-        # Intenta abrir con el atajo de "Obre/Open".
-        $wshell.SendKeys('%o')
-        Start-Sleep -Milliseconds 180
-        # Fallback: mover foco al boton de abrir y confirmar.
-        $wshell.SendKeys('+{TAB}{ENTER}')
+        # Primer intento: click directo de botones del propio dialogo.
+        $condBtn = New-Object System.Windows.Automation.PropertyCondition(
+          [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+          [System.Windows.Automation.ControlType]::Button
+        )
+        $buttons = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condBtn)
+        foreach ($btn in $buttons) {
+          $btnName = [string]$btn.Current.Name
+          if ($btnName -eq "Obre" -or $btnName -eq "Abrir" -or $btnName -eq "Open" -or $btnName -like "*Obre*" -or $btnName -like "*Abrir*" -or $btnName -like "*Open*") {
+            try {
+              $invoke = $btn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+              $invoke.Invoke()
+              $clicked = $true
+              break
+            } catch {}
+          }
+        }
       } catch {}
+
+      if (-not $clicked) {
+        try {
+          # Fallback 1: atajo directo.
+          $wshell.SendKeys('%o')
+          Start-Sleep -Milliseconds 180
+          # Fallback 2: navegar foco y confirmar.
+          $wshell.SendKeys('+{TAB}{ENTER}')
+        } catch {}
+      }
       return
     }
   } catch {}
