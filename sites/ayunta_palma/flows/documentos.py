@@ -56,11 +56,13 @@ async def _run_ps_diagnostic(step_name: str, ps_script: str, timeout_s: int = 45
 
         stdout_task = asyncio.create_task(_pump_stream(proc.stdout, is_err=False))
         stderr_task = asyncio.create_task(_pump_stream(proc.stderr, is_err=True))
+        timed_out = False
         try:
             await asyncio.wait_for(proc.wait(), timeout=timeout_s)
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
+            timed_out = True
             logger.warning("[AP-DIAG][%s] Timeout tras %ss", step_name, timeout_s)
         finally:
             saw_stdout = await stdout_task
@@ -68,7 +70,7 @@ async def _run_ps_diagnostic(step_name: str, ps_script: str, timeout_s: int = 45
 
         if not saw_stdout:
             logger.info("[AP-DIAG][%s] Sin salida stdout.", step_name)
-        if not saw_stderr and proc.returncode not in (0, None):
+        if (not timed_out) and (not saw_stderr) and proc.returncode not in (0, None):
             logger.warning("[AP-DIAG][%s] PowerShell returncode=%s sin stderr.", step_name, proc.returncode)
     except Exception as e:
         logger.warning("[AP-DIAG][%s] Error ejecutando PowerShell: %s", step_name, e)
@@ -282,71 +284,108 @@ Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 $root = [System.Windows.Automation.AutomationElement]::RootElement
 $wshell = New-Object -ComObject WScript.Shell
+$walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
 
-function Is-RelevantWindow([string]$name) {
-  if ([string]::IsNullOrWhiteSpace($name)) { return $false }
-  $n = $name.ToLowerInvariant()
-  if ($n.Contains("autofirma")) { return $true }
-  if ($n.Contains("obrir")) { return $true }
-  if ($n.Contains("abrir")) { return $true }
-  if ($n.Contains("open")) { return $true }
-  if ($n.Contains("application")) { return $true }
-  if ($n.Contains("aplicacio")) { return $true }
-  if ($n.Contains("aplicacion")) { return $true }
+function Is-EdgePromptText([string]$txt) {
+  if ([string]::IsNullOrWhiteSpace($txt)) { return $false }
+  $t = $txt.ToLowerInvariant()
+  if ($t.Contains("autofirma")) { return $true }
+  if ($t.Contains("intentant obrir")) { return $true }
+  if ($t.Contains("intentando abrir")) { return $true }
+  if ($t.Contains("trying to open")) { return $true }
+  if ($t.Contains("wants to open")) { return $true }
   return $false
 }
 
-for ($i=0; $i -lt 120; $i++) {
-  try {
-    $condWindow = New-Object System.Windows.Automation.PropertyCondition(
-      [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-      [System.Windows.Automation.ControlType]::Window
-    )
-    $wins = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $condWindow)
-
-    foreach ($w in $wins) {
-      $wName = [string]$w.Current.Name
-      if (-not (Is-RelevantWindow $wName)) { continue }
-
-      Write-Output ("edge-open-dialog-detected title=" + $wName)
-      try { $w.SetFocus() } catch {}
-      try { $wshell.AppActivate($wName) | Out-Null } catch {}
-      Start-Sleep -Milliseconds 120
-
-      $condBtn = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-        [System.Windows.Automation.ControlType]::Button
-      )
-      $buttons = $w.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condBtn)
-
-      foreach ($btn in $buttons) {
-        $btnName = [string]$btn.Current.Name
-        if ($btnName -eq "Obre" -or $btnName -eq "Abrir" -or $btnName -eq "Open" -or $btnName -like "*Obre*" -or $btnName -like "*Abrir*" -or $btnName -like "*Open*") {
-          try {
-            $invoke = $btn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-            $invoke.Invoke()
-            Write-Output ("edge-open-click name=" + $btnName)
-            return
-          } catch {}
-        }
+function Get-ParentWindow($el) {
+  $cur = $el
+  for ($k=0; $k -lt 12; $k++) {
+    if ($null -eq $cur) { return $null }
+    try {
+      if ($cur.Current.ControlType -eq [System.Windows.Automation.ControlType]::Window) {
+        return $cur
       }
+    } catch {}
+    $cur = $walker.GetParent($cur)
+  }
+  return $null
+}
 
-      # Fallback keyboard if button invoke failed.
-      try {
-        $wshell.SendKeys("%o")
-        Start-Sleep -Milliseconds 120
-        $wshell.SendKeys("{TAB}{ENTER}")
-        Write-Output "edge-open-fallback-keys"
-        return
-      } catch {}
+for ($i=0; $i -lt 360; $i++) {
+  try {
+    $targetWindow = $null
+    $condText = New-Object System.Windows.Automation.PropertyCondition(
+      [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+      [System.Windows.Automation.ControlType]::Text
+    )
+    $texts = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condText)
+    foreach ($t in $texts) {
+      $name = [string]$t.Current.Name
+      if (-not (Is-EdgePromptText $name)) { continue }
+      $targetWindow = Get-ParentWindow $t
+      if ($null -ne $targetWindow) {
+        Write-Output ("edge-open-dialog-detected title=" + [string]$targetWindow.Current.Name)
+        break
+      }
     }
-  } catch {}
 
+    if ($null -eq $targetWindow) {
+      Start-Sleep -Milliseconds 250
+      continue
+    }
+
+    try { $targetWindow.SetFocus() } catch {}
+    try { $wshell.AppActivate([string]$targetWindow.Current.Name) | Out-Null } catch {}
+    Start-Sleep -Milliseconds 120
+
+    $condCheck = New-Object System.Windows.Automation.PropertyCondition(
+      [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+      [System.Windows.Automation.ControlType]::CheckBox
+    )
+    $checks = $targetWindow.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condCheck)
+    foreach ($chk in $checks) {
+      $chkName = [string]$chk.Current.Name
+      if ($chkName -like "*Permet sempre*" -or $chkName -like "*Permitir siempre*" -or $chkName -like "*Always allow*") {
+        try {
+          $toggle = $chk.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+          if ($chk.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::Off) {
+            $toggle.Toggle()
+            Write-Output ("edge-open-checkbox-checked name=" + $chkName)
+          }
+        } catch {}
+      }
+    }
+
+    $condBtn = New-Object System.Windows.Automation.PropertyCondition(
+      [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+      [System.Windows.Automation.ControlType]::Button
+    )
+    $buttons = $targetWindow.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condBtn)
+    foreach ($btn in $buttons) {
+      $btnName = [string]$btn.Current.Name
+      if ($btnName -eq "Obre" -or $btnName -eq "Abrir" -or $btnName -eq "Open" -or $btnName -like "*Obre*" -or $btnName -like "*Abrir*" -or $btnName -like "*Open*") {
+        try {
+          $invoke = $btn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+          $invoke.Invoke()
+          Write-Output ("edge-open-click name=" + $btnName)
+          return
+        } catch {}
+      }
+    }
+
+    try {
+      $wshell.SendKeys("%o")
+      Start-Sleep -Milliseconds 100
+      $wshell.SendKeys("{ENTER}")
+      Write-Output "edge-open-fallback-keys"
+      return
+    } catch {}
+  } catch {}
   Start-Sleep -Milliseconds 250
 }
 Write-Output "edge-open-timeout"
 """
-    await _run_ps_diagnostic("edge_open_dialog", ps_script, timeout_s=20)
+    await _run_ps_diagnostic("edge_open_dialog", ps_script, timeout_s=95)
 
 def _normalize_text(text: str) -> str:
     if not text:
@@ -853,16 +892,18 @@ async def subir_documentos(
     logger.info("[AP-DIAG] Firma modal: click en 'Signar tots els documents'.")
     await _click_signar_tots_documents(page, config)
     if not edge_task.done():
-        logger.info("[AP-DIAG] edge_open_dialog sigue activo; esperamos su resultado.")
-        try:
-            await edge_task
-        except Exception as e:
-            logger.warning("[AP-DIAG] Watcher edge_open_dialog devolvio error: %s", e)
+        logger.info("[AP-DIAG] edge_open_dialog sigue activo en background.")
     logger.info("[AP-DIAG] Esperando resultado del watcher de certificado Windows.")
     try:
         await cert_task
     except Exception as e:
         logger.warning("[AP-DIAG] Watcher certificado devolvio error: %s", e)
+    if not edge_task.done():
+        logger.info("[AP-DIAG] edge_open_dialog no ha terminado; esperamos 3s finales.")
+        try:
+            await asyncio.wait_for(edge_task, timeout=3)
+        except Exception:
+            logger.warning("[AP-DIAG] edge_open_dialog sigue pendiente tras 3s; continuamos.")
     logger.info("[AP-DIAG] Validando firma real.")
     await _verificar_firma_realizada(page, config)
     logger.info("[AP-DIAG] Firma validada; iniciando descarga de justificante.")
