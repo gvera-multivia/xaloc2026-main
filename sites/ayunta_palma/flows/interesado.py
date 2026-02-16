@@ -21,24 +21,43 @@ async def _abrir_modal_nuevo_interesado(page: Page, selectors: AyuntaPalmaSelect
     except PlaywrightTimeoutError:
         pass
 
-    boton_nuevo = page.locator(selectors.btn_nuevo_interesado).first
-    if await boton_nuevo.count() > 0 and await boton_nuevo.is_visible():
-        await boton_nuevo.click()
-    else:
-        input_nuevo = page.locator(selectors.input_nuevo_interesado).first
-        if await input_nuevo.count() > 0:
-            if await input_nuevo.is_visible():
-                await input_nuevo.click()
-            else:
-                await page.evaluate(
-                    """(selector) => {
-                        const el = document.querySelector(selector);
-                        if (!el) return false;
-                        el.click();
-                        return true;
-                    }""",
-                    selectors.input_nuevo_interesado,
-                )
+    async def _try_open_once() -> None:
+        # Evitar clics durante cargas parciales.
+        try:
+            await page.wait_for_selector(selectors.velo, state="hidden", timeout=6000)
+        except PlaywrightTimeoutError:
+            pass
+
+        boton_nuevo = page.locator(selectors.btn_nuevo_interesado).first
+        if await boton_nuevo.count() > 0 and await boton_nuevo.is_visible():
+            try:
+                await boton_nuevo.click()
+            except Exception:
+                await boton_nuevo.click(force=True)
+        else:
+            input_nuevo = page.locator(selectors.input_nuevo_interesado).first
+            if await input_nuevo.count() > 0:
+                if await input_nuevo.is_visible():
+                    await input_nuevo.click()
+                else:
+                    await page.evaluate(
+                        """(selector) => {
+                            const el = document.querySelector(selector);
+                            if (!el) return false;
+                            el.click();
+                            return true;
+                        }""",
+                        selectors.input_nuevo_interesado,
+                    )
+
+    for _ in range(3):
+        await _try_open_once()
+        try:
+            await tipo_usuario.wait_for(state="visible", timeout=7000)
+            await page.wait_for_timeout(delay_ms)
+            return
+        except PlaywrightTimeoutError:
+            await page.wait_for_timeout(800)
 
     await tipo_usuario.wait_for(state="visible", timeout=20000)
     await page.wait_for_timeout(delay_ms)
