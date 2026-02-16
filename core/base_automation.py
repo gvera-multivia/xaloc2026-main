@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import logging
 import os
 import shutil
@@ -83,7 +84,49 @@ class BaseAutomation:
         if self.config.disable_translate_ui:
             args.append("--disable-features=TranslateUI")
 
+        if self.config.autofirma_auto_open:
+            # Intentar reducir prompts al abrir protocolos externos (afirma://).
+            args.append("--protocol-handler-registration-mode=auto")
+            args.append("--enable-features=ExternalProtocolDialogShowAlwaysOpenCheckbox")
+
         return args
+
+    def _prepare_protocol_preferences(self, user_data_dir: str) -> None:
+        if not self.config.autofirma_auto_open:
+            return
+        try:
+            pref_path = Path(user_data_dir) / "Default" / "Preferences"
+            pref_path.parent.mkdir(parents=True, exist_ok=True)
+
+            prefs = {}
+            if pref_path.exists():
+                try:
+                    prefs = json.loads(pref_path.read_text(encoding="utf-8"))
+                except Exception:
+                    prefs = {}
+
+            protocol_handler = prefs.setdefault("protocol_handler", {})
+            excluded = protocol_handler.setdefault("excluded_schemes", {})
+            excluded[self.config.autofirma_protocol] = False
+
+            pairs = protocol_handler.setdefault("allowed_origin_protocol_pairs", [])
+            wanted = {
+                "protocol": self.config.autofirma_protocol,
+                "origin": self.config.autofirma_origin,
+            }
+            if not any(
+                str(p.get("protocol")) == wanted["protocol"] and str(p.get("origin")) == wanted["origin"]
+                for p in pairs
+                if isinstance(p, dict)
+            ):
+                pairs.append(wanted)
+
+            pref_path.write_text(
+                json.dumps(prefs, ensure_ascii=False, separators=(",", ":")),
+                encoding="utf-8",
+            )
+        except Exception as e:
+            self.logger.warning("No se pudieron preparar preferencias de protocolo para AutoFirma: %s", e)
 
     async def __aenter__(self):
         await self._start_browser()
@@ -103,6 +146,7 @@ class BaseAutomation:
 
     async def _start_browser(self) -> None:
         user_data_dir = str(self.config.navegador.perfil_path.absolute())
+        self._prepare_protocol_preferences(user_data_dir)
         args = self._build_browser_args()
 
         # Viewport: en headless, forzar 1920x1080; en headed, dejar que siga el tamaÃ±o de ventana.
