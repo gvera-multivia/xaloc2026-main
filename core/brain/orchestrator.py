@@ -90,6 +90,12 @@ SITE_PRIORITIES: dict[str, int] = {
     "ayunta_palma": 3,
 }
 
+# Limites por sitio para recursos reclamados/encolados por tick.
+# Temporalmente en Palma solo se procesa 1 recurso por ciclo.
+SITE_CLAIM_LIMIT_PER_TICK: dict[str, int] = {
+    "ayunta_palma": 1,
+}
+
 def _parse_enabled_sites(csv_value: str) -> Optional[set[str]]:
     value = (csv_value or "").strip()
     if not value:
@@ -699,7 +705,15 @@ class BrainOrchestrator:
                 self.logger.info(f"[{site_id}] Cola llena (depth={current_depth}/{target_depth}). Saltando refill.")
                 continue
 
+            site_claim_limit = SITE_CLAIM_LIMIT_PER_TICK.get(site_id)
+            site_claims_done = 0
+
             fetch_limit = min(refill_amount, 9999)
+            if site_claim_limit is not None:
+                fetch_limit = min(fetch_limit, max(0, site_claim_limit))
+                if fetch_limit <= 0:
+                    self.logger.info(f"[{site_id}] Limite por sitio agotado para este tick.")
+                    continue
             self.logger.info(f"[{site_id}] Refill: depth={current_depth}/{target_depth} -> fetch_limit={fetch_limit}")
 
             try:
@@ -761,6 +775,9 @@ class BrainOrchestrator:
                 for payload in payloads:
                     if remaining_claim_budget <= 0:
                         break
+                    if site_claim_limit is not None and site_claims_done >= site_claim_limit:
+                        self.logger.info(f"[{site_id}] Limite por sitio alcanzado ({site_claim_limit}) en este tick.")
+                        break
 
                     rid = int(payload["idRecurso"])
                     exp = str(payload.get("expediente") or "")
@@ -778,6 +795,7 @@ class BrainOrchestrator:
                         else:
                             per_site["duplicates"] += 1
                         remaining_claim_budget -= 1
+                        site_claims_done += 1
                     else:
                         stats["errors"] += 1
                         per_site["errors"] += 1
