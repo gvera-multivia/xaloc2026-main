@@ -625,12 +625,29 @@ async def _click_firmar(page: Page, config: AyuntaPalmaConfig) -> None:
     selectors = config.selectors
     btn_firmar = page.locator(selectors.btn_firmar).first
     if await btn_firmar.count() > 0 and await btn_firmar.is_visible():
-        await btn_firmar.click()
+        try:
+            await btn_firmar.click()
+        except Exception:
+            try:
+                await btn_firmar.click(force=True)
+            except Exception:
+                await page.evaluate(
+                    """(selector) => {
+                        const el = document.querySelector(selector);
+                        if (!el) return false;
+                        el.click();
+                        return true;
+                    }""",
+                    selectors.btn_firmar,
+                )
     else:
         hidden_input = page.locator(selectors.input_firmar).first
         if await hidden_input.count() > 0:
             if await hidden_input.is_visible():
-                await hidden_input.click()
+                try:
+                    await hidden_input.click()
+                except Exception:
+                    await hidden_input.click(force=True)
             else:
                 await page.evaluate(
                     """(selector) => {
@@ -645,15 +662,44 @@ async def _click_firmar(page: Page, config: AyuntaPalmaConfig) -> None:
     await _esperar_velo_oculto(page, config)
 
 
+async def _modal_firma_lista(page: Page, config: AyuntaPalmaConfig) -> bool:
+    """
+    Detecta si ya estamos en el punto donde se puede pulsar
+    'Signar tots els documents' (modal/iframe de firma listo).
+    """
+    try:
+        locator = page.locator("button.btnFirmar, button:has-text('Signar tots els documents')").first
+        if await locator.count() > 0 and await locator.is_visible():
+            return True
+    except Exception:
+        pass
+    for fr in page.frames:
+        try:
+            locator = fr.locator("button.btnFirmar, button:has-text('Signar tots els documents')").first
+            if await locator.count() > 0 and await locator.is_visible():
+                return True
+        except Exception:
+            continue
+    return False
+
+
 async def _click_firmar_con_reintentos(page: Page, config: AyuntaPalmaConfig, max_intentos: int = 3) -> None:
     """
     Algunos intentos de click en pre-firma no hacen efecto.
     Reintenta si el boton "Firmar" sigue visible tras unos segundos.
     """
+    if await _modal_firma_lista(page, config):
+        logger.info("[AP-DIAG] Pre-firma: modal de firma ya lista, se omite click en 'Firmar'.")
+        return
+
     for intento in range(1, max_intentos + 1):
         logger.info("[AP-DIAG] Pre-firma intento %s/%s: click en Firmar.", intento, max_intentos)
         await _click_firmar(page, config)
         await page.wait_for_timeout(1800)
+
+        if await _modal_firma_lista(page, config):
+            logger.info("[AP-DIAG] Pre-firma: modal de firma lista tras intento %s.", intento)
+            return
 
         try:
             btn_firmar = page.locator(config.selectors.btn_firmar).first
