@@ -44,6 +44,7 @@ class AyuntaPalmaController:
         expone: str,
         solicita: str,
         archivos: list[str] | None = None,
+        payload: dict | None = None,
     ) -> AyuntaPalmaTarget:
         def _require(name: str, value: str | None) -> str:
             v = (value or "").strip()
@@ -93,6 +94,7 @@ class AyuntaPalmaController:
             juridica=juridica,
             alegaciones=alegaciones,
             archivos=archivos_paths,
+            payload=payload,
         )
 
     create_target = create_target_strict
@@ -115,6 +117,7 @@ class AyuntaPalmaController:
             "expone": data.get("expone"),
             "solicita": data.get("solicita"),
             "archivos": data.get("archivos") or data.get("documentos"),
+            "payload": data,
         }
 
 

@@ -5,12 +5,19 @@ Subida de documentos en el flujo de Ayunta Palma.
 from __future__ import annotations
 
 import asyncio
+import logging
+import re
+import shutil
 import sys
+import unicodedata
 from pathlib import Path
 
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
+from core.client_documentation import client_identity_from_payload, get_ruta_cliente_documentacion
 from sites.ayunta_palma.config import AyuntaPalmaConfig
+
+logger = logging.getLogger(__name__)
 
 
 async def _esperar_subida_completa(page: Page, config: AyuntaPalmaConfig) -> None:
@@ -311,6 +318,184 @@ for ($i=0; $i -lt 80; $i++) {
         pass
 
 
+def _normalize_text(text: str) -> str:
+    if not text:
+        return ""
+    text = str(text).strip().lower()
+    return "".join(c for c in unicodedata.normalize("NFD", text) if unicodedata.category(c) != "Mn")
+
+
+def _folder_matches(folder_name: str, target_name: str) -> bool:
+    folder_norm = _normalize_text(folder_name)
+    target_norm = _normalize_text(target_name)
+    if folder_norm == target_norm:
+        return True
+    target_words = set(target_norm.split())
+    folder_words = set(folder_norm.split())
+    if target_words.issubset(folder_words):
+        return True
+    target_singular = {w.rstrip("s") for w in target_words}
+    folder_singular = {w.rstrip("s") for w in folder_words}
+    return target_singular == folder_singular
+
+
+def _find_or_create_subfolder(base_path: Path, folder_name: str) -> Path:
+    if not folder_name:
+        return base_path
+    if base_path.exists():
+        for item in base_path.iterdir():
+            if item.is_dir() and _folder_matches(item.name, folder_name):
+                return item
+    new_folder = base_path / folder_name
+    new_folder.mkdir(parents=True, exist_ok=True)
+    return new_folder
+
+
+def _get_folder_name_from_fase(fase_raw: str | None) -> str:
+    motivo_to_folder = {
+        "identificacion": "IDENTIFICACIONES",
+        "denuncia": "ALEGACIONES",
+        "propuesta de resolucion": "ALEGACIONES",
+        "extraordinario de revision": "EXTRAORDINARIOS DE REVISIÓN",
+        "subsanacion": "SUBSANACIONES",
+        "reclamaciones": "RECLAMACIONES",
+        "requerimiento embargo": "EMBARGOS",
+        "sancion": "SANCIONES",
+        "apremio": "APREMIOS",
+        "embargo": "EMBARGOS",
+    }
+    fase_norm = _normalize_text(fase_raw or "")
+    for motivo_key, folder_name in motivo_to_folder.items():
+        if motivo_key in fase_norm:
+            return folder_name
+    return ""
+
+
+def _construir_ruta_recursos_telematicos(payload: dict | None) -> Path:
+    payload = payload or {}
+    client = client_identity_from_payload(payload)
+    base_path = r"\\SERVER-DOC\clientes"
+    ruta_cliente_base = get_ruta_cliente_documentacion(client, base_path=base_path)
+    ruta_recursos = _find_or_create_subfolder(ruta_cliente_base, "RECURSOS TELEMATICOS")
+
+    fase = payload.get("fase_procedimiento")
+    folder_name = _get_folder_name_from_fase(fase)
+    if folder_name:
+        return _find_or_create_subfolder(ruta_recursos, folder_name)
+    return ruta_recursos
+
+
+def _sanitize_filename_component(value: str) -> str:
+    text = str(value or "").strip()
+    text = text.replace("/", "-").replace("\\", "-")
+    text = re.sub(r'[<>:"|?*\x00-\x1F]', "_", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    text = text.rstrip(". ")
+    return text or "UNKNOWN"
+
+
+def _extraer_n_expediente(payload: dict | None) -> str:
+    payload = payload or {}
+    keys = (
+        "expediente",
+        "expediente_num",
+        "denuncia_num",
+        "Expedient",
+        "nExp",
+        "numero_expediente",
+        "idRecurso",
+    )
+    for key in keys:
+        value = payload.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return "UNKNOWN"
+
+
+async def _esperar_exito_firma_o_refrescar(page: Page, config: AyuntaPalmaConfig) -> None:
+    """
+    Espera el texto de exito de firma.
+    Si en 2 minutos no aparece, refresca la pagina (caso pantalla gris) y reintenta.
+    """
+    success_js = """() => {
+        const t = (document.body?.innerText || "")
+            .normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").toLowerCase();
+        return t.includes("instancia firmada correctamente");
+    }"""
+
+    try:
+        await page.wait_for_function(success_js, timeout=120000)
+        return
+    except Exception:
+        pass
+
+    try:
+        await page.reload(wait_until="domcontentloaded", timeout=60000)
+        await page.wait_for_timeout(config.delay_ms)
+        await _esperar_velo_oculto(page, config)
+    except Exception:
+        pass
+
+    await page.wait_for_function(success_js, timeout=120000)
+
+
+async def _descargar_justificante_instancia(page: Page, payload: dict | None) -> Path:
+    """
+    Descarga el justificante de la fila "Instancia/Instància ..." y lo guarda
+    en RECURSOS TELEMATICOS del cliente.
+    """
+    rows = page.locator("table.tabla-ficheros tbody tr")
+    row_count = await rows.count()
+    target_row = None
+    for i in range(row_count):
+        row = rows.nth(i)
+        desc_input = row.locator("input.descripcion.documento-pdf").first
+        if await desc_input.count() == 0:
+            continue
+        value = (await desc_input.get_attribute("value")) or ""
+        value_norm = _normalize_text(value)
+        if "instancia" in value_norm:
+            target_row = row
+            break
+
+    if target_row is None:
+        raise RuntimeError("No se encontro la fila del justificante 'Instancia/Instància'.")
+
+    download_input = target_row.locator("input[id$='_btnDescargar']").first
+    if await download_input.count() == 0:
+        raise RuntimeError("No se encontro el boton de descarga del justificante en la fila de Instancia.")
+
+    download_url = (await download_input.get_attribute("data-clickable-url")) or ""
+    if not download_url:
+        raise RuntimeError("No se pudo extraer 'data-clickable-url' del justificante.")
+
+    response = await page.context.request.get(download_url, timeout=90000)
+    if not response.ok:
+        raise RuntimeError(f"Error descargando justificante (HTTP {response.status}).")
+    pdf_bytes = await response.body()
+    if not pdf_bytes.startswith(b"%PDF"):
+        raise RuntimeError("El justificante descargado no parece PDF (%PDF ausente).")
+    if len(pdf_bytes) < 2000:
+        raise RuntimeError(f"Justificante PDF sospechosamente pequeno ({len(pdf_bytes)} bytes).")
+
+    payload = payload or {}
+    expediente = _sanitize_filename_component(_extraer_n_expediente(payload))
+    filename = f"JUSTIFICANTE - {expediente}.pdf"
+    tmp_dir = Path("tmp") / "ayunta_palma" / "justificantes" / str(payload.get("idRecurso") or "unknown")
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    tmp_path = tmp_dir / filename
+    tmp_path.write_bytes(pdf_bytes)
+
+    destino_dir = _construir_ruta_recursos_telematicos(payload)
+    destino_dir.mkdir(parents=True, exist_ok=True)
+    final_path = destino_dir / filename
+    if final_path.exists():
+        final_path.unlink()
+    shutil.copy2(tmp_path, final_path)
+    tmp_path.unlink(missing_ok=True)
+    return final_path
+
+
 async def _esperar_velo_oculto(page: Page, config: AyuntaPalmaConfig) -> None:
     try:
         await page.wait_for_selector(
@@ -476,67 +661,33 @@ async def _click_signar_tots_documents(page: Page, config: AyuntaPalmaConfig) ->
 
 async def _verificar_firma_realizada(page: Page, config: AyuntaPalmaConfig) -> None:
     """
-    Verifica que la instancia deje de estar en estado "pendiente de firma".
-    Si no cambia tras varios intentos de refresco, falla el flujo.
+    Verifica que aparezca la confirmacion de firma.
+    Como fallback, valida que no siga en estado pendiente/no registrado.
     """
+    await _esperar_exito_firma_o_refrescar(page, config)
+
     estado_selector = "#ctl00_ctl00_cphM_cph_txtDescripcionEstado"
     estado_fecha_selector = "#ctl00_ctl00_cphM_cph_txtDescripcionEstadoFecha"
-    panel_no_firmada_selector = "#ctl00_ctl00_cphM_cph_pnlFirmaNoRealizada"
-    refresh_selector = "#ctl00_ctl00_cphM_btnActualizarPendientes"
+    try:
+        estado = _normalize_text(await page.locator(estado_selector).first.inner_text())
+    except Exception:
+        estado = ""
+    try:
+        estado_fecha = _normalize_text(await page.locator(estado_fecha_selector).first.inner_text())
+    except Exception:
+        estado_fecha = ""
 
-    timeout_ms = max(config.timeouts.general, 45000)
-    waited = 0
-    step = 1500
-    refresh_every = 4
-    attempts = 0
-
-    while waited < timeout_ms:
-        attempts += 1
-        try:
-            estado = (await page.locator(estado_selector).first.inner_text()).strip().lower()
-        except Exception:
-            estado = ""
-        try:
-            estado_fecha = (await page.locator(estado_fecha_selector).first.inner_text()).strip().lower()
-        except Exception:
-            estado_fecha = ""
-
-        pendiente = ("pendiente de firma" in estado) or ("firma no se ha realizado" in estado)
-        no_registrado = "no registrado" in estado_fecha
-
-        if not pendiente and not no_registrado:
-            return
-
-        try:
-            panel_no_firmada = page.locator(panel_no_firmada_selector).first
-            if await panel_no_firmada.count() > 0 and await panel_no_firmada.is_hidden():
-                if not pendiente and not no_registrado:
-                    return
-        except Exception:
-            pass
-
-        if attempts % refresh_every == 0:
-            try:
-                refresh_btn = page.locator(refresh_selector).first
-                if await refresh_btn.count() > 0 and await refresh_btn.is_visible():
-                    await refresh_btn.click()
-                    await page.wait_for_timeout(config.delay_ms)
-                    await _esperar_velo_oculto(page, config)
-            except Exception:
-                pass
-
-        await page.wait_for_timeout(step)
-        waited += step
-
-    raise PlaywrightTimeoutError(
-        "Firma no confirmada: la instancia sigue pendiente/no registrada tras intentar AutoFirma."
-    )
+    if ("pendiente de firma" in estado) or ("no registrado" in estado_fecha):
+        raise PlaywrightTimeoutError(
+            "Firma no confirmada: la pagina sigue indicando estado pendiente/no registrado."
+        )
 
 
 async def subir_documentos(
     page: Page,
     config: AyuntaPalmaConfig,
     archivos: list[Path] | None,
+    payload: dict | None = None,
 ) -> Page:
     if not archivos:
         return page
@@ -580,4 +731,6 @@ async def subir_documentos(
     await _aceptar_dialogo_edge_abrir_autofirma()
     await _aceptar_certificado_windows()
     await _verificar_firma_realizada(page, config)
+    justificante_path = await _descargar_justificante_instancia(page, payload)
+    logger.info("ayunta_palma: Justificante guardado en: %s", justificante_path)
     return page

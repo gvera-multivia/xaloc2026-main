@@ -47,3 +47,4 @@ class AyuntaPalmaTarget:
     juridica: AyuntaPalmaPersonaJuridica | None = None
     alegaciones: AyuntaPalmaAlegaciones | None = None
     archivos: List[Path] | None = None
+    payload: dict | None = None

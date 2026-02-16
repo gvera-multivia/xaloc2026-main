@@ -44,7 +44,7 @@ class AyuntaPalmaAutomation(BaseAutomation):
                 await self.sync_screencast_with_page()
 
             self.logger.info("FASE 5: SUBIR DOCUMENTOS")
-            self.page = await subir_documentos(self.page, self.config, datos.archivos)
+            self.page = await subir_documentos(self.page, self.config, datos.archivos, payload=datos.payload)
             await self.sync_screencast_with_page()
 
             screenshot_path = self.config.dir_screenshots / "ayunta_palma_final.png"
