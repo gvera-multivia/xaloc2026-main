@@ -12,28 +12,8 @@ from sites.ayunta_palma.config import AyuntaPalmaConfig
 
 
 async def _esperar_subida_completa(page: Page, config: AyuntaPalmaConfig) -> None:
-    selectors = config.selectors
-    await page.wait_for_selector(".tabla-ficheros td", timeout=config.timeouts.subida_archivo)
-
-    # Si existe velo de carga, esperar a que desaparezca.
-    try:
-        await page.wait_for_selector(selectors.velo, state="hidden", timeout=config.timeouts.subida_archivo)
-    except Exception:
-        pass
-
-    # Esperar a que el boton Aceptar del modal de ficheros este habilitado.
-    confirmar = page.locator(selectors.btn_confirmar_archivo).first
-    await confirmar.wait_for(state="visible", timeout=config.timeouts.subida_archivo)
-    await page.wait_for_function(
-        """(selector) => {
-            const btn = document.querySelector(selector);
-            if (!btn) return false;
-            const disabled = btn.hasAttribute('disabled') || btn.getAttribute('aria-disabled') === 'true';
-            return !disabled;
-        }""",
-        arg=selectors.btn_confirmar_archivo,
-        timeout=config.timeouts.subida_archivo,
-    )
+    # Espera fija solicitada: dar margen a la subida antes de confirmar.
+    await page.wait_for_timeout(6000)
 
 
 async def _esperar_velo_oculto(page: Page, config: AyuntaPalmaConfig) -> None:
