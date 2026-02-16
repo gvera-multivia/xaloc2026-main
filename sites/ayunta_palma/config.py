@@ -13,6 +13,8 @@ from core.base_config import BaseConfig
 class AyuntaPalmaSelectors:
     login_frame: str = "#ventanaModal"
     login_option_rows: str = "#optSsl tr"
+    btn_nueva_instancia: str = "button.redirect-url.stop-click-propagation:has-text(\"Nueva instancia en blanco\")"
+    input_nueva_instancia: str = "#ctl00_ctl00_cphM_cph_btnUltimoBorradorCancelar"
     persona_tipo_usuario: str = "#ctl00_ctl00_cphM_cph_ddlPersonaTipoUsuario"
     persona_tipo_personalidad: str = "#ctl00_ctl00_cphM_cph_ddlPersonaTipoPersonalidad"
     persona_tipo_documento: str = "#ctl00_ctl00_cphM_cph_ddlPersonaTipoDocumentoIdentidad"
