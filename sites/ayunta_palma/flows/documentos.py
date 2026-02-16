@@ -95,6 +95,63 @@ for ($i=0; $i -lt 120; $i++) {
         pass
 
 
+async def _aceptar_certificado_windows() -> None:
+    """
+    Fallback para el dialogo nativo de seleccion de certificado en Windows.
+    Busca una ventana con titulo de certificado/seleccion, la enfoca y envia Enter.
+    """
+    if not sys.platform.startswith("win"):
+        return
+
+    ps_script = r"""
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public class User32 {
+  [DllImport("user32.dll")]
+  public static extern bool SetForegroundWindow(IntPtr hWnd);
+}
+"@
+
+$wshell = New-Object -ComObject WScript.Shell
+
+for ($i=0; $i -lt 25; $i++) {
+  $wins = Get-Process | Where-Object {
+    $_.MainWindowHandle -ne 0 -and (
+      $_.MainWindowTitle -like "*Certificado*" -or
+      $_.MainWindowTitle -like "*Certificat*" -or
+      $_.MainWindowTitle -like "*Seleccione*" -or
+      $_.MainWindowTitle -like "*Selecciona*" -or
+      $_.MainWindowTitle -like "*Security*"
+    )
+  }
+
+  foreach ($w in $wins) {
+    try {
+      [User32]::SetForegroundWindow($w.MainWindowHandle) | Out-Null
+      Start-Sleep -Milliseconds 250
+      $wshell.SendKeys('{ENTER}')
+      return
+    } catch {}
+  }
+  Start-Sleep -Milliseconds 500
+}
+"""
+    try:
+        await asyncio.create_subprocess_exec(
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            ps_script,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+    except Exception:
+        pass
+
+
 async def _esperar_velo_oculto(page: Page, config: AyuntaPalmaConfig) -> None:
     try:
         await page.wait_for_selector(
@@ -299,5 +356,7 @@ async def subir_documentos(
     await _launch_autofirma_cert_acceptor()
     await _click_firmar(page, config)
     await _launch_autofirma_cert_acceptor()
+    await _aceptar_certificado_windows()
     await _click_signar_tots_documents(page, config)
+    await _aceptar_certificado_windows()
     return page
