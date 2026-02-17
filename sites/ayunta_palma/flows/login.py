@@ -43,8 +43,20 @@ async def _abrir_nueva_instancia(page: Page, config: AyuntaPalmaConfig) -> None:
     except PlaywrightTimeoutError:
         pass
 
-    boton_visible = page.locator(selectors.btn_nueva_instancia).first
     input_submit = page.locator(selectors.input_nueva_instancia).first
+    boton_visible = page.locator(selectors.btn_nueva_instancia_visible).first
+    boton_visible_alt = page.locator(selectors.btn_nueva_instancia).first
+
+    # En Palma el input oculto contiene la URL real de navegación.
+    # Priorizamos esta ruta para evitar clics ambiguos en botones duplicados.
+    try:
+        if await input_submit.count() > 0:
+            clickable_url = await input_submit.get_attribute("data-clickable-url")
+            if clickable_url:
+                await page.goto(clickable_url, wait_until="domcontentloaded")
+                await page.wait_for_timeout(config.delay_ms)
+    except Exception:
+        pass
 
     async def _misma_pantalla() -> bool:
         # Si ya hemos salido de login hacia cualquier pantalla autenticada,
@@ -63,7 +75,7 @@ async def _abrir_nueva_instancia(page: Page, config: AyuntaPalmaConfig) -> None:
             page,
             description="Nueva instancia",
             primary=boton_visible,
-            secondary=input_submit,
+            secondary=boton_visible_alt,
             fallback_selector=selectors.input_nueva_instancia,
             same_screen_check=_misma_pantalla,
             max_attempts=3,
@@ -123,9 +135,13 @@ async def ejecutar_login(page: Page, config: AyuntaPalmaConfig) -> Page:
         return page
 
     frame = page.frame_locator(config.selectors.login_frame)
-    opcion = frame.locator(config.selectors.login_option_rows).first
+    opcion_titulo = frame.locator(config.selectors.login_option_cert_titulo).first
+    opcion_fila = frame.locator(config.selectors.login_option_rows).first
     try:
-        await opcion.wait_for(state="visible", timeout=10000)
+        if await opcion_titulo.count() > 0:
+            await opcion_titulo.wait_for(state="visible", timeout=10000)
+        else:
+            await opcion_fila.wait_for(state="visible", timeout=10000)
     except PlaywrightTimeoutError:
         # Si durante la espera ya hemos navegado a nueva_entrada, seguimos flujo.
         if _is_authenticated_portal_url(page.url):
@@ -139,7 +155,7 @@ async def ejecutar_login(page: Page, config: AyuntaPalmaConfig) -> Page:
     await robust_click(
         page,
         description="Login certificado (fila #optSsl)",
-        primary=opcion,
+        primary=opcion_titulo if await opcion_titulo.count() > 0 else opcion_fila,
         same_screen_check=_sigue_en_login,
         max_attempts=3,
         retry_wait_ms=5000,
