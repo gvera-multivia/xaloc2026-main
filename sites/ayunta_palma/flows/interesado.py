@@ -39,7 +39,31 @@ async def _abrir_modal_nuevo_interesado(page: Page, selectors: AyuntaPalmaSelect
         except PlaywrightTimeoutError:
             return True
 
+    # En esta pantalla el control real es el submit oculto; el texto visible cambia
+    # por idioma y el button visual no siempre dispara el postback.
+    fired = False
     try:
+        fired = bool(
+            await page.evaluate(
+                """() => {
+                    const hidden = document.querySelector('#ctl00_ctl00_cphM_cph_btnListaInteresadosOpcionesNuevo, input[id$="btnListaInteresadosOpcionesNuevo"]');
+                    if (hidden) {
+                        hidden.click();
+                        return true;
+                    }
+                    if (typeof window.__doPostBack === 'function') {
+                        window.__doPostBack('ctl00$ctl00$cphM$cph$btnListaInteresadosOpcionesNuevo', '');
+                        return true;
+                    }
+                    return false;
+                }"""
+            )
+        )
+    except Exception:
+        fired = False
+
+    # Fallback secundario al botón visible si el control oculto no existe por variante DOM.
+    if not fired:
         await robust_click(
             page,
             description="Abrir modal Nuevo/a interesado/a",
@@ -47,26 +71,10 @@ async def _abrir_modal_nuevo_interesado(page: Page, selectors: AyuntaPalmaSelect
             secondary=boton_nuevo_alt,
             fallback_selector=selectors.input_nuevo_interesado,
             same_screen_check=_misma_pantalla,
-            max_attempts=3,
-            retry_wait_ms=5000,
+            max_attempts=2,
+            retry_wait_ms=2500,
         )
-    except PlaywrightTimeoutError:
-        # Fallback duro: en esta pantalla suele funcionar mejor forzar postback
-        # al control submit oculto.
-        await page.evaluate(
-            """() => {
-                const hidden = document.getElementById('ctl00_ctl00_cphM_cph_btnListaInteresadosOpcionesNuevo');
-                if (hidden) {
-                    hidden.click();
-                    return true;
-                }
-                if (typeof window.__doPostBack === 'function') {
-                    window.__doPostBack('ctl00$ctl00$cphM$cph$btnListaInteresadosOpcionesNuevo', '');
-                    return true;
-                }
-                return false;
-            }"""
-        )
+    else:
         await page.wait_for_timeout(1200)
 
     await tipo_usuario.wait_for(state="visible", timeout=20000)
