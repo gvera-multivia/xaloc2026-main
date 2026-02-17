@@ -30,28 +30,72 @@ async def _abrir_modal_nuevo_interesado(page: Page, selectors: AyuntaPalmaSelect
     except PlaywrightTimeoutError:
         pass
 
-    # Boton/input exactos de "Nuevo/a interesado/a" (segun HTML real):
-    # - button.btn-icono (visible)
-    # - input#ctl00_ctl00_cphM_cph_btnListaInteresadosOpcionesNuevo (hidden submit)
+    # El problema observado era un disparo en cascada (button + hidden + postback)
+    # que acababa refrescando la misma pagina y perdiendo el estado.
+    # Aqui hacemos UN solo disparo por intento y validamos apertura del modal.
     await page.wait_for_timeout(5000)
-    await page.evaluate(
-        """() => {
-            const hidden = document.getElementById("ctl00_ctl00_cphM_cph_btnListaInteresadosOpcionesNuevo");
-            if (hidden) {
+    opened = False
+    for mode in ("button", "hidden", "postback"):
+        before_url = page.url
+        before_token = await page.evaluate(
+            """() => {
+                const t = document.getElementById("ctl00_ctl00_hfPeticionUnica");
+                return t ? (t.value || "") : "";
+            }"""
+        )
+        fired = await page.evaluate(
+            """(m) => {
+                const hidden = document.getElementById("ctl00_ctl00_cphM_cph_btnListaInteresadosOpcionesNuevo");
+                if (!hidden) return false;
                 const wrapper = hidden.closest(".btn-bar-horizontal-centrada-inner");
                 const button = wrapper ? wrapper.querySelector("button.btn-icono[data-icono='plus.svg']") : null;
-                if (button) {
-                    try { button.click(); } catch {}
+                if (m === "button") {
+                    if (!button) return false;
+                    try { button.click(); return true; } catch { return false; }
                 }
-                try { hidden.click(); } catch {}
-            }
-            if (typeof window.__doPostBack === "function") {
-                try { window.__doPostBack("ctl00$ctl00$cphM$cph$btnListaInteresadosOpcionesNuevo", ""); } catch {}
-            }
-        }"""
-    )
+                if (m === "hidden") {
+                    try { hidden.click(); return true; } catch { return false; }
+                }
+                if (m === "postback") {
+                    try {
+                        if (typeof window.__doPostBack === "function") {
+                            window.__doPostBack("ctl00$ctl00$cphM$cph$btnListaInteresadosOpcionesNuevo", "");
+                            return true;
+                        }
+                    } catch {}
+                    return false;
+                }
+                return false;
+            }""",
+            mode,
+        )
+        await page.wait_for_timeout(800)
+        after_url = page.url
+        after_token = await page.evaluate(
+            """() => {
+                const t = document.getElementById("ctl00_ctl00_hfPeticionUnica");
+                return t ? (t.value || "") : "";
+            }"""
+        )
+        logger.info(
+            "[AP-DIAG] Nuevo interesado: modo=%s fired=%s url_before=%s url_after=%s token_changed=%s",
+            mode,
+            fired,
+            before_url,
+            after_url,
+            bool(before_token != after_token),
+        )
+        if not fired:
+            continue
+        try:
+            await tipo_usuario.wait_for(state="visible", timeout=7000)
+            opened = True
+            break
+        except PlaywrightTimeoutError:
+            continue
 
-    await tipo_usuario.wait_for(state="visible", timeout=20000)
+    if not opened:
+        await tipo_usuario.wait_for(state="visible", timeout=20000)
     await page.wait_for_timeout(delay_ms)
 
 
