@@ -20,6 +20,13 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   const { isAuthenticated, loading } = useAuth();
 
   useEffect(() => {
+    const wsEnabled = (process.env.NEXT_PUBLIC_ENABLE_WS || '0').toLowerCase();
+    const shouldEnableWs = wsEnabled === '1' || wsEnabled === 'true' || wsEnabled === 'yes' || wsEnabled === 'on';
+    if (!shouldEnableWs) {
+      setIsConnected(false);
+      return;
+    }
+
     if (loading || !isAuthenticated || pathname === '/login') {
       return;
     }

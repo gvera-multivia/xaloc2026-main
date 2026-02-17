@@ -41,6 +41,7 @@ JWT_SECRET_KEY = resolve_secret_key()
 JWT_ISSUER = (os.getenv("DASHBOARD_JWT_ISSUER") or "xaloc-dashboard").strip() or "xaloc-dashboard"
 JWT_AUDIENCE = (os.getenv("DASHBOARD_JWT_AUDIENCE") or "xaloc-dashboard-clients").strip() or "xaloc-dashboard-clients"
 AUTH_COOKIE_SECURE = (os.getenv("DASHBOARD_AUTH_COOKIE_SECURE") or "0").strip().lower() in {"1", "true", "yes", "on"}
+ENABLE_WS_REALTIME = (os.getenv("DASHBOARD_ENABLE_WS") or "0").strip().lower() in {"1", "true", "yes", "on"}
 
 cors_origins_raw = (os.getenv("DASHBOARD_CORS_ORIGINS") or "").strip()
 if cors_origins_raw:
@@ -397,6 +398,10 @@ async def api_auth_create_user(
 
 @app.websocket("/ws/dashboard")
 async def websocket_dashboard(websocket: WebSocket):
+    if not ENABLE_WS_REALTIME:
+        await websocket.close(code=1008, reason="Realtime disabled")
+        return
+
     token = _extract_token_from_websocket(websocket)
     if not token:
         await websocket.close(code=4401, reason="Missing auth token")
