@@ -4,6 +4,8 @@ Flujo para registrar al interesado en Ayunta Palma.
 
 from __future__ import annotations
 
+import logging
+
 from playwright.async_api import Locator, Page, TimeoutError as PlaywrightTimeoutError, expect
 
 from sites.ayunta_palma.config import AyuntaPalmaConfig, AyuntaPalmaSelectors
@@ -12,6 +14,7 @@ from sites.ayunta_palma.data_models import AyuntaPalmaTarget
 
 PALMA_CONTACT_EMAIL = "info@xvia-serviciosjuridicos.com"
 PALMA_CONTACT_PHONE = "722761154"
+logger = logging.getLogger(__name__)
 
 
 async def _abrir_modal_nuevo_interesado(page: Page, selectors: AyuntaPalmaSelectors, delay_ms: int) -> None:
@@ -39,43 +42,80 @@ async def _abrir_modal_nuevo_interesado(page: Page, selectors: AyuntaPalmaSelect
         except PlaywrightTimeoutError:
             return True
 
-    # En esta pantalla el control real es el submit oculto; el texto visible cambia
-    # por idioma y el button visual no siempre dispara el postback.
-    fired = False
-    try:
-        fired = bool(
-            await page.evaluate(
+    opened = False
+    for intento in range(1, 7):
+        try:
+            await page.wait_for_selector(selectors.velo, state="hidden", timeout=5000)
+        except PlaywrightTimeoutError:
+            pass
+
+        try:
+            result = await page.evaluate(
                 """() => {
                     const hidden = document.querySelector('#ctl00_ctl00_cphM_cph_btnListaInteresadosOpcionesNuevo, input[id$="btnListaInteresadosOpcionesNuevo"]');
+                    const cont = hidden ? hidden.closest('.btn-bar-horizontal-centrada-inner') : null;
+                    const visibleBtn = cont ? cont.querySelector('button.btn-icono') : document.querySelector('.btn-bar-horizontal-centrada-inner button.btn-icono');
+                    let fired = false;
+
+                    if (visibleBtn) {
+                        try { visibleBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); } catch {}
+                        try { visibleBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); } catch {}
+                        try { visibleBtn.click(); fired = true; } catch {}
+                    }
                     if (hidden) {
-                        hidden.click();
-                        return true;
+                        try { hidden.disabled = false; } catch {}
+                        try { hidden.style.display = 'block'; } catch {}
+                        try { hidden.click(); fired = true; } catch {}
                     }
-                    if (typeof window.__doPostBack === 'function') {
-                        window.__doPostBack('ctl00$ctl00$cphM$cph$btnListaInteresadosOpcionesNuevo', '');
-                        return true;
-                    }
-                    return false;
+                    try {
+                        if (window.jQuery && hidden) {
+                            window.jQuery(hidden).trigger('click');
+                            fired = true;
+                        }
+                    } catch {}
+                    try {
+                        if (typeof window.__doPostBack === 'function') {
+                            window.__doPostBack('ctl00$ctl00$cphM$cph$btnListaInteresadosOpcionesNuevo', '');
+                            fired = true;
+                        }
+                    } catch {}
+                    return { fired, hasHidden: !!hidden, hasVisibleBtn: !!visibleBtn };
                 }"""
             )
-        )
-    except Exception:
-        fired = False
+            logger.info(
+                "[AP-DIAG] Nuevo interesado hard-click intento %s/6 fired=%s hidden=%s visibleBtn=%s",
+                intento,
+                result.get("fired"),
+                result.get("hasHidden"),
+                result.get("hasVisibleBtn"),
+            )
+        except Exception as e:
+            logger.warning("[AP-DIAG] Nuevo interesado hard-click intento %s/6 error: %s", intento, e)
 
-    # Fallback secundario al botón visible si el control oculto no existe por variante DOM.
-    if not fired:
-        await robust_click(
-            page,
-            description="Abrir modal Nuevo/a interesado/a",
-            primary=boton_nuevo,
-            secondary=boton_nuevo_alt,
-            fallback_selector=selectors.input_nuevo_interesado,
-            same_screen_check=_misma_pantalla,
-            max_attempts=2,
-            retry_wait_ms=2500,
-        )
-    else:
         await page.wait_for_timeout(1200)
+        try:
+            await tipo_usuario.wait_for(state="visible", timeout=2500)
+            opened = True
+            break
+        except PlaywrightTimeoutError:
+            # Fallback adicional al click tradicional en cada ciclo.
+            try:
+                await robust_click(
+                    page,
+                    description="Abrir modal Nuevo/a interesado/a",
+                    primary=boton_nuevo,
+                    secondary=boton_nuevo_alt,
+                    fallback_selector=selectors.input_nuevo_interesado,
+                    same_screen_check=_misma_pantalla,
+                    max_attempts=1,
+                    retry_wait_ms=900,
+                )
+            except Exception:
+                pass
+            await page.wait_for_timeout(700)
+
+    if not opened:
+        await tipo_usuario.wait_for(state="visible", timeout=20000)
 
     await tipo_usuario.wait_for(state="visible", timeout=20000)
     await page.wait_for_timeout(delay_ms)
