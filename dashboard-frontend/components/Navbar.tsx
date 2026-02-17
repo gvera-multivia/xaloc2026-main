@@ -15,7 +15,11 @@ import {
 } from "lucide-react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+<<<<<<< HEAD
+import { isClientView } from "@/lib/permissions";
+=======
 import { useAuth } from "@/lib/AuthContext";
+>>>>>>> b2d5f2af1d9c9ebf9e4459d107739ad00436c0f1
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -35,6 +39,14 @@ export default function Navbar() {
   }, []);
 
   const navLinks = [
+<<<<<<< HEAD
+    { href: "/", label: "Estado", icon: LayoutDashboard },
+    { href: "/control", label: "Control", icon: Terminal },
+    { href: "/admin", label: "Gestión", icon: Settings },
+    { href: "/history", label: "Historial", icon: History },
+    { href: "/blacklist", label: "Bloqueos", icon: ShieldAlert },
+  ].filter((link) => !(isClientView && link.href === "/control"));
+=======
     { href: "/", label: "Estado", icon: LayoutDashboard, adminOnly: false },
     { href: "/history", label: "Historial", icon: History, adminOnly: false },
     { href: "/admin", label: "Gestion", icon: Settings, adminOnly: true },
@@ -42,6 +54,7 @@ export default function Navbar() {
     { href: "/control", label: "Control", icon: Terminal, adminOnly: true },
     { href: "/blacklist", label: "Bloqueos", icon: ShieldAlert, adminOnly: true },
   ].filter((link) => !link.adminOnly || isAdmin);
+>>>>>>> b2d5f2af1d9c9ebf9e4459d107739ad00436c0f1
 
   return (
     <nav

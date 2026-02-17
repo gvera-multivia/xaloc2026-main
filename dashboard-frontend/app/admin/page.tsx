@@ -12,14 +12,17 @@ import {
   Check,
   X,
 } from "lucide-react";
-import { queueApi, authApi, configApi, api } from "@/lib/api";
-import { QueueItem, PendingAuth, PauseInfo, ItemPauseInfo, OrganismoConfig } from "@/lib/types";
+import { queueApi, authApi, configApi, api, historyApi } from "@/lib/api";
+import { QueueItem, PendingAuth, PauseInfo, OrganismoConfig, Incident } from "@/lib/types";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { canManagePauses } from "@/lib/permissions";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
+
+const KNOWN_SITES = ["madrid", "xaloc_girona", "base_online", "ayunta_palma"];
 
 /**
  * MORRIGAN ADMIN PAGE
@@ -32,9 +35,9 @@ function cn(...inputs: ClassValue[]) {
 export default function AdminPage() {
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
   const [pauses, setPauses] = useState<PauseInfo[]>([]);
-  const [itemPauses, setItemPauses] = useState<ItemPauseInfo[]>([]);
   const [configs, setConfigs] = useState<OrganismoConfig[]>([]);
   const [pendingAuth, setPendingAuth] = useState<PendingAuth[]>([]);
+  const [recentIncidents, setRecentIncidents] = useState<Incident[]>([]);
   const [globalReason, setGlobalReason] = useState("");
   const [globalMinutes, setGlobalMinutes] = useState("120");
   const [loading, setLoading] = useState(true);
@@ -43,19 +46,19 @@ export default function AdminPage() {
 
   const refresh = async () => {
     try {
-      const [queueRes, pausesRes, itemPausesRes, authRes, configRes] = await Promise.all([
+      const [queueRes, pausesRes, authRes, configRes, incidentsRes] = await Promise.all([
         queueApi.getCurrent(1, 1000),
         api.get<{ items: PauseInfo[] }>("/queue/pauses?active_only=true"),
-        api.get<{ items: ItemPauseInfo[] }>("/queue/item-pauses?active_only=true"),
         authApi.getPending(),
         configApi.list(),
+        historyApi.getIncidents(undefined, 1, 10),
       ]);
 
       setQueueItems(queueRes.items || []);
       setPauses(pausesRes.items || []);
-      setItemPauses(itemPausesRes.items || []);
       setPendingAuth(authRes.items || []);
       setConfigs((configRes.items || []) as OrganismoConfig[]);
+      setRecentIncidents(incidentsRes.items || []);
       setError("");
     } catch {
       setError("Error al cargar datos administrativos.");
@@ -69,8 +72,6 @@ export default function AdminPage() {
     const id = setInterval(refresh, 10000);
     return () => clearInterval(id);
   }, []);
-
-  const KNOWN_SITES = ["madrid", "xaloc_girona", "base_online", "ayunta_palma"];
 
   const sites = useMemo(() => {
     const s = new Set(KNOWN_SITES);
@@ -87,14 +88,6 @@ export default function AdminPage() {
     });
     return map;
   }, [pauses]);
-
-  const itemPauseMap = useMemo(() => {
-    const map: Record<string, ItemPauseInfo> = {};
-    itemPauses.forEach((p) => {
-      map[`${p.site_id}::${p.resource_id}`] = p;
-    });
-    return map;
-  }, [itemPauses]);
 
   const queueBySite = useMemo(() => {
     const out: Record<string, { total: number; pending: number; processing: number }> = {};
@@ -179,19 +172,6 @@ export default function AdminPage() {
     }
   };
 
-  const handleDeleteItem = async (siteId: string, resourceId: string | number) => {
-    if (!confirm(`¿Eliminar ${resourceId} de ${siteId}?`)) return;
-    setBusy(`del-${siteId}-${resourceId}`);
-    try {
-      await queueApi.deleteItem(siteId, resourceId);
-      await refresh();
-    } catch {
-      setError("Error al eliminar item");
-    } finally {
-      setBusy(null);
-    }
-  };
-
   return (
     <div className="space-y-10 animate-in fade-in duration-700">
       {/* Header */}
@@ -201,7 +181,7 @@ export default function AdminPage() {
             Panel de Gestión
           </h2>
           <p className="text-xs text-muted-foreground/60 uppercase tracking-widest mt-1">
-            Control de sitios, pausas y autorizaciones operativas.
+            Control de sitios, autorizaciones e incidencias operativas.
           </p>
         </div>
       </div>
@@ -320,6 +300,50 @@ export default function AdminPage() {
       </section>
 
       {/* =========================
+          Incidents
+         ========================= */}
+      <section className="space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg border border-border/70 bg-[rgba(17,19,26,0.55)] flex items-center justify-center">
+            <AlertTriangle size={18} className="text-[rgba(255,60,80,0.75)]" />
+          </div>
+          <h3 className="text-xl font-black uppercase tracking-tight text-foreground/90">
+            Incidencias Recientes
+          </h3>
+          <span className="px-2 py-1 rounded-full text-[10px] font-black uppercase tracking-[0.22em] border border-border/70 bg-[rgba(17,19,26,0.55)] text-muted-foreground/80">
+            {recentIncidents.length}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {recentIncidents.length === 0 ? (
+            <div className="col-span-full py-10 text-center morr-card rounded-2xl border border-dashed border-border/70 text-muted-foreground/80">
+              <p className="text-sm italic">No hay incidencias recientes.</p>
+            </div>
+          ) : (
+            recentIncidents.slice(0, 6).map((inc, idx) => (
+              <div
+                key={`${inc.site_id}-${inc.resource_id}-${inc.started_at}-${idx}`}
+                className="morr-card morr-edge rounded p-5 space-y-3 transition-all duration-500"
+              >
+                <div className="flex justify-between items-start gap-3">
+                  <h4 className="font-black text-sm uppercase tracking-[0.10em] truncate">
+                    {inc.site_id}
+                  </h4>
+                  <span className="text-[10px] px-2 py-1 rounded-md border border-border/70 bg-[rgba(17,19,26,0.55)] text-muted-foreground/80 font-mono">
+                    #{inc.resource_id}
+                  </span>
+                </div>
+                <p className="text-sm leading-relaxed text-foreground/90">
+                  {inc.reason || "Error en flujo de automatizacion"}
+                </p>
+              </div>
+            ))
+          )}
+        </div>
+      </section>
+
+      {/* =========================
           Site Control Table
          ========================= */}
       <section className="space-y-4">
@@ -355,9 +379,11 @@ export default function AdminPage() {
                   <th className="px-6 py-4 text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground/80">
                     Organismo
                   </th>
-                  <th className="px-6 py-4 text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground/80">
-                    Motivo Pausa
-                  </th>
+                  {canManagePauses && (
+                    <th className="px-6 py-4 text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground/80">
+                      Motivo Pausa
+                    </th>
+                  )}
                   <th className="px-6 py-4 text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground/80 text-right">
                     Acciones de Control
                   </th>
@@ -447,15 +473,17 @@ export default function AdminPage() {
                         </span>
                       </td>
 
-                      <td className="px-6 py-4">
-                        <span className="text-xs text-muted-foreground/80 italic">
-                          {pauseMap[site]?.reason || "-"}
-                        </span>
-                      </td>
+                      {canManagePauses && (
+                        <td className="px-6 py-4">
+                          <span className="text-xs text-muted-foreground/80 italic">
+                            {pauseMap[site]?.reason || "-"}
+                          </span>
+                        </td>
+                      )}
 
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          {isPaused ? (
+                          {canManagePauses && (isPaused ? (
                             <button
                               onClick={() => handleUnpause(site)}
                               disabled={!!busy}
@@ -504,7 +532,7 @@ export default function AdminPage() {
                                 <Pause size={14} fill="currentColor" /> ∞
                               </button>
                             </>
-                          )}
+                          ))}
                           <button
                             onClick={() => handleSetSiteActive(site, !isActiveConfig)}
                             disabled={!!busy}
@@ -535,7 +563,8 @@ export default function AdminPage() {
       {/* =========================
           Global Action Bar
          ========================= */}
-      <section className="morr-card rounded-2xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+      {canManagePauses && (
+        <section className="morr-card rounded-2xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
         <div className="space-y-1">
           <h4 className="font-black uppercase tracking-tight text-foreground/90">
             Acción Global
@@ -588,7 +617,8 @@ export default function AdminPage() {
             Pausar Todos
           </button>
         </div>
-      </section>
+        </section>
+      )}
 
       {/* Optional: show loading quietly if you want */}
       {loading && (

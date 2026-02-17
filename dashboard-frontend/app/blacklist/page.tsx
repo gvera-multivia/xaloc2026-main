@@ -3,7 +3,6 @@
 import React, { useState, useEffect } from 'react';
 import {
     ShieldAlert,
-    Trash2,
     Plus,
     Search,
     AlertCircle,
@@ -12,26 +11,32 @@ import {
     Unlock
 } from 'lucide-react';
 import { api } from '@/lib/api';
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
 
-function cn(...inputs: ClassValue[]) {
-    return twMerge(clsx(inputs));
+interface BlacklistItem {
+    site_id: string;
+    resource_id: number;
+    reason?: string;
+    source?: string;
+    created_at: string;
 }
 
 export default function BlacklistPage() {
-    const [items, setItems] = useState<any[]>([]);
+    const [items, setItems] = useState<BlacklistItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
     const [error, setError] = useState('');
     const [busy, setBusy] = useState<string | null>(null);
+    const [showAddForm, setShowAddForm] = useState(false);
+    const [newSiteId, setNewSiteId] = useState('ayunta_palma');
+    const [newResourceId, setNewResourceId] = useState('');
+    const [newReason, setNewReason] = useState('');
 
     const fetchBlacklist = async () => {
         setLoading(true);
         try {
-            const res = await api.get<any>('/blacklist');
+            const res = await api.get<{ items: BlacklistItem[] }>('/blacklist');
             setItems(res.items || []);
-        } catch (e) {
+        } catch {
             setError('Error al cargar la lista negra.');
         } finally {
             setLoading(false);
@@ -39,14 +44,46 @@ export default function BlacklistPage() {
     };
 
     useEffect(() => { fetchBlacklist(); }, []);
+    const knownSites = ['madrid', 'xaloc_girona', 'base_online', 'ayunta_palma'];
 
     const handleUnblock = async (siteId: string, resourceId: number) => {
         setBusy(`${siteId}-${resourceId}`);
         try {
-            await api.delete<any>(`/blacklist/${encodeURIComponent(siteId)}/${resourceId}`);
+            await api.delete<Record<string, unknown>>(`/blacklist/${encodeURIComponent(siteId)}/${resourceId}`);
             await fetchBlacklist();
-        } catch (e) {
+        } catch {
             setError('Error al desbloquear recurso.');
+        } finally {
+            setBusy(null);
+        }
+    };
+
+    const handleBlock = async () => {
+        const resourceId = Number(newResourceId);
+        if (!newSiteId.trim()) {
+            setError('Debes indicar un site.');
+            return;
+        }
+        if (!Number.isInteger(resourceId) || resourceId <= 0) {
+            setError('El ID de recurso debe ser un número entero positivo.');
+            return;
+        }
+
+        setBusy(`new-${newSiteId}-${resourceId}`);
+        try {
+            await api.post<Record<string, unknown>>('/blacklist', {
+                site_id: newSiteId.trim(),
+                resource_id: resourceId,
+                reason: newReason.trim() || 'Bloqueo manual desde dashboard',
+                source: 'manual',
+            });
+            setShowAddForm(false);
+            setNewResourceId('');
+            setNewReason('');
+            setError('');
+            await fetchBlacklist();
+        } catch {
+            setError('Error al crear el bloqueo manual.');
         } finally {
             setBusy(null);
         }
@@ -64,10 +101,69 @@ export default function BlacklistPage() {
                     <h2 className="text-3xl font-black tracking-tighter">Recursos Bloqueados</h2>
                     <p className="text-muted-foreground">Gestión de la lista negra operativa (Blacklist).</p>
                 </div>
-                <button className="flex items-center gap-2 px-6 py-2.5 bg-primary text-primary-foreground rounded-xl text-sm font-bold shadow-lg shadow-primary/20 hover:scale-105 transition-transform active:scale-95">
+                <button
+                    onClick={() => setShowAddForm(prev => !prev)}
+                    className="flex items-center gap-2 px-6 py-2.5 bg-primary text-primary-foreground rounded-xl text-sm font-bold shadow-lg shadow-primary/20 hover:scale-105 transition-transform active:scale-95"
+                >
                     <Plus size={18} /> Añadir Bloqueo Manual
                 </button>
             </div>
+
+            {showAddForm && (
+                <div className="bg-card border border-border rounded-2xl p-5 space-y-4">
+                    <h3 className="text-sm font-black uppercase tracking-wider">Nuevo bloqueo manual</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <label className="text-xs text-muted-foreground space-y-1">
+                            <span>Site</span>
+                            <select
+                                value={newSiteId}
+                                onChange={(e) => setNewSiteId(e.target.value)}
+                                className="w-full bg-background border border-border rounded-xl px-3 py-2 text-sm"
+                            >
+                                {knownSites.map((site) => (
+                                    <option key={site} value={site}>{site}</option>
+                                ))}
+                            </select>
+                        </label>
+                        <label className="text-xs text-muted-foreground space-y-1">
+                            <span>ID Recurso</span>
+                            <input
+                                type="number"
+                                min={1}
+                                value={newResourceId}
+                                onChange={(e) => setNewResourceId(e.target.value)}
+                                className="w-full bg-background border border-border rounded-xl px-3 py-2 text-sm"
+                                placeholder="Ej: 12345"
+                            />
+                        </label>
+                        <label className="text-xs text-muted-foreground space-y-1">
+                            <span>Motivo</span>
+                            <input
+                                type="text"
+                                value={newReason}
+                                onChange={(e) => setNewReason(e.target.value)}
+                                className="w-full bg-background border border-border rounded-xl px-3 py-2 text-sm"
+                                placeholder="Opcional"
+                            />
+                        </label>
+                    </div>
+                    <div className="flex items-center justify-end gap-2">
+                        <button
+                            onClick={() => setShowAddForm(false)}
+                            className="px-4 py-2 border border-border rounded-xl text-xs font-bold"
+                        >
+                            Cancelar
+                        </button>
+                        <button
+                            onClick={handleBlock}
+                            disabled={busy === `new-${newSiteId}-${Number(newResourceId)}`}
+                            className="px-4 py-2 bg-primary text-primary-foreground rounded-xl text-xs font-bold disabled:opacity-50"
+                        >
+                            Guardar Bloqueo
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {error && (
                 <div className="bg-destructive/10 border border-destructive/50 text-destructive px-4 py-3 rounded-xl flex items-center gap-3">
