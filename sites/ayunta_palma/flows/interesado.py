@@ -28,7 +28,8 @@ async def _abrir_modal_nuevo_interesado(page: Page, selectors: AyuntaPalmaSelect
     except PlaywrightTimeoutError:
         pass
 
-    boton_nuevo = page.locator(selectors.btn_nuevo_interesado).first
+    boton_nuevo = page.locator(selectors.btn_nuevo_interesado_visible).first
+    boton_nuevo_alt = page.locator(selectors.btn_nuevo_interesado).first
     input_nuevo = page.locator(selectors.input_nuevo_interesado).first
 
     async def _misma_pantalla() -> bool:
@@ -38,16 +39,35 @@ async def _abrir_modal_nuevo_interesado(page: Page, selectors: AyuntaPalmaSelect
         except PlaywrightTimeoutError:
             return True
 
-    await robust_click(
-        page,
-        description="Abrir modal Nuevo/a interesado/a",
-        primary=boton_nuevo,
-        secondary=input_nuevo,
-        fallback_selector=selectors.input_nuevo_interesado,
-        same_screen_check=_misma_pantalla,
-        max_attempts=3,
-        retry_wait_ms=5000,
-    )
+    try:
+        await robust_click(
+            page,
+            description="Abrir modal Nuevo/a interesado/a",
+            primary=boton_nuevo,
+            secondary=boton_nuevo_alt,
+            fallback_selector=selectors.input_nuevo_interesado,
+            same_screen_check=_misma_pantalla,
+            max_attempts=3,
+            retry_wait_ms=5000,
+        )
+    except PlaywrightTimeoutError:
+        # Fallback duro: en esta pantalla suele funcionar mejor forzar postback
+        # al control submit oculto.
+        await page.evaluate(
+            """() => {
+                const hidden = document.getElementById('ctl00_ctl00_cphM_cph_btnListaInteresadosOpcionesNuevo');
+                if (hidden) {
+                    hidden.click();
+                    return true;
+                }
+                if (typeof window.__doPostBack === 'function') {
+                    window.__doPostBack('ctl00$ctl00$cphM$cph$btnListaInteresadosOpcionesNuevo', '');
+                    return true;
+                }
+                return false;
+            }"""
+        )
+        await page.wait_for_timeout(1200)
 
     await tipo_usuario.wait_for(state="visible", timeout=20000)
     await page.wait_for_timeout(delay_ms)

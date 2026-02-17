@@ -586,6 +586,39 @@ async def _esperar_velo_oculto(page: Page, config: AyuntaPalmaConfig) -> None:
         pass
 
 
+async def _force_submit_with_postback(
+    page: Page,
+    *,
+    hidden_input_selector: str,
+    event_target: str,
+    description: str,
+) -> bool:
+    try:
+        clicked = bool(
+            await page.evaluate(
+                """({ hiddenSelector, target }) => {
+                    const hidden = document.querySelector(hiddenSelector);
+                    if (hidden) {
+                        hidden.click();
+                        return true;
+                    }
+                    if (typeof window.__doPostBack === 'function') {
+                        window.__doPostBack(target, '');
+                        return true;
+                    }
+                    return false;
+                }""",
+                {"hiddenSelector": hidden_input_selector, "target": event_target},
+            )
+        )
+        if clicked:
+            logger.info("[AP-DIAG] %s: fallback __doPostBack/hidden.click lanzado.", description)
+        return clicked
+    except Exception as e:
+        logger.warning("[AP-DIAG] %s: fallo fallback __doPostBack (%s).", description, e)
+        return False
+
+
 async def _click_siguiente(
     page: Page,
     config: AyuntaPalmaConfig,
@@ -596,16 +629,26 @@ async def _click_siguiente(
     selectors = config.selectors
     btn = page.locator(selectors.btn_siguiente).first
     hidden_input = page.locator(selectors.input_siguiente).first
-    await robust_click(
-        page,
-        description=description,
-        primary=btn,
-        secondary=hidden_input,
-        fallback_selector=selectors.input_siguiente,
-        same_screen_check=same_screen_check,
-        max_attempts=3,
-        retry_wait_ms=5000,
-    )
+    try:
+        await robust_click(
+            page,
+            description=description,
+            primary=btn,
+            secondary=hidden_input,
+            fallback_selector=selectors.input_siguiente,
+            same_screen_check=same_screen_check,
+            max_attempts=3,
+            retry_wait_ms=5000,
+        )
+    except PlaywrightTimeoutError:
+        ok = await _force_submit_with_postback(
+            page,
+            hidden_input_selector=selectors.input_siguiente,
+            event_target="ctl00$ctl00$cphM$cph$btnSiguiente",
+            description=description,
+        )
+        if not ok:
+            raise
     await page.wait_for_timeout(config.delay_ms)
     await _esperar_velo_oculto(page, config)
 
@@ -620,16 +663,26 @@ async def _click_confirmar(
     selectors = config.selectors
     btn_confirmar = page.locator(selectors.btn_confirmar).first
     hidden_input = page.locator(selectors.input_siguiente).first
-    await robust_click(
-        page,
-        description=description,
-        primary=btn_confirmar,
-        secondary=hidden_input,
-        fallback_selector=selectors.input_siguiente,
-        same_screen_check=same_screen_check,
-        max_attempts=3,
-        retry_wait_ms=5000,
-    )
+    try:
+        await robust_click(
+            page,
+            description=description,
+            primary=btn_confirmar,
+            secondary=hidden_input,
+            fallback_selector=selectors.input_siguiente,
+            same_screen_check=same_screen_check,
+            max_attempts=3,
+            retry_wait_ms=5000,
+        )
+    except PlaywrightTimeoutError:
+        ok = await _force_submit_with_postback(
+            page,
+            hidden_input_selector=selectors.input_siguiente,
+            event_target="ctl00$ctl00$cphM$cph$btnSiguiente",
+            description=description,
+        )
+        if not ok:
+            raise
     await page.wait_for_timeout(config.delay_ms)
     await _esperar_velo_oculto(page, config)
 
