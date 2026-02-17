@@ -22,14 +22,35 @@ def _is_authenticated_portal_url(url: str) -> bool:
     )
 
 
+async def _is_interesado_stage_ready(page: Page, config: AyuntaPalmaConfig) -> bool:
+    selectors = config.selectors
+    try:
+        persona = page.locator(selectors.persona_tipo_usuario).first
+        if await persona.count() > 0 and await persona.is_visible():
+            return True
+    except Exception:
+        pass
+    try:
+        nuevo = page.locator(selectors.input_nuevo_interesado).first
+        if await nuevo.count() > 0:
+            return True
+    except Exception:
+        pass
+    return False
+
+
 async def _abrir_nueva_instancia(page: Page, config: AyuntaPalmaConfig) -> None:
     selectors = config.selectors
     persona_tipo_usuario = page.locator(selectors.persona_tipo_usuario).first
 
     try:
+        if await _is_interesado_stage_ready(page, config):
+            return
         await persona_tipo_usuario.wait_for(state="visible", timeout=2000)
         return
     except PlaywrightTimeoutError:
+        pass
+    except Exception:
         pass
 
     try:
@@ -120,6 +141,8 @@ async def _abrir_nueva_instancia(page: Page, config: AyuntaPalmaConfig) -> None:
 
     await page.wait_for_timeout(config.delay_ms)
     try:
+        if await _is_interesado_stage_ready(page, config):
+            return
         await persona_tipo_usuario.wait_for(state="visible", timeout=8000)
     except PlaywrightTimeoutError:
         # Fallback fuerte: abrir directamente la URL de nueva instancia en blanco.
@@ -131,7 +154,8 @@ async def _abrir_nueva_instancia(page: Page, config: AyuntaPalmaConfig) -> None:
         )
         await page.goto(config.url_nueva_instancia_directa, wait_until="domcontentloaded")
         await page.wait_for_timeout(config.delay_ms)
-        await persona_tipo_usuario.wait_for(state="visible", timeout=20000)
+        if not await _is_interesado_stage_ready(page, config):
+            await persona_tipo_usuario.wait_for(state="visible", timeout=20000)
     await page.wait_for_timeout(config.delay_ms)
 
 
