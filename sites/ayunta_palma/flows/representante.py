@@ -7,7 +7,6 @@ from __future__ import annotations
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
 from sites.ayunta_palma.config import AyuntaPalmaConfig
-from sites.ayunta_palma.flows.common import robust_click
 
 REPRESENTANTE_EMAIL = "info@xvia-serviciosjuridicos.com"
 REPRESENTANTE_TELEFONO = "722761154"
@@ -59,22 +58,23 @@ async def indicar_representante(page: Page, config: AyuntaPalmaConfig) -> Page:
     await boton_alt.wait_for(state="visible")
     dialog_titulo = page.locator(".ui-dialog-title", has_text="Nuevo/a representante del/de la interesado/a").first
 
-    async def _dialogo_no_visible() -> bool:
+    await page.wait_for_timeout(5000)
+    if await boton.count() > 0:
         try:
-            return not (await dialog_titulo.count() > 0 and await dialog_titulo.is_visible())
+            await boton.click(timeout=5000)
         except Exception:
-            return True
-
-    await robust_click(
-        page,
-        description="Abrir modal representante",
-        primary=boton,
-        secondary=boton_alt,
-        fallback_selector=selectors.input_indicar_representante,
-        same_screen_check=_dialogo_no_visible,
-        max_attempts=3,
-        retry_wait_ms=5000,
-    )
+            await boton.click(force=True, timeout=5000)
+    else:
+        try:
+            await boton_alt.click(timeout=5000)
+        except Exception:
+            await page.evaluate(
+                """(sel) => {
+                    const el = document.querySelector(sel);
+                    if (el) el.click();
+                }""",
+                selectors.input_indicar_representante,
+            )
     await page.wait_for_timeout(config.delay_ms)
 
     await dialog_titulo.wait_for(state="visible", timeout=15000)
@@ -87,21 +87,20 @@ async def indicar_representante(page: Page, config: AyuntaPalmaConfig) -> Page:
     except PlaywrightTimeoutError:
         await aceptar_alt.wait_for(state="visible", timeout=4000)
 
-    async def _dialogo_sigue_visible() -> bool:
-        try:
-            return await dialog_titulo.count() > 0 and await dialog_titulo.is_visible()
-        except Exception:
-            return False
-
-    await robust_click(
-        page,
-        description="Aceptar modal representante",
-        primary=aceptar,
-        secondary=aceptar_alt,
-        fallback_selector=selectors.input_aceptar_modal_persona,
-        same_screen_check=_dialogo_sigue_visible,
-        max_attempts=3,
-        retry_wait_ms=5000,
-    )
+    await page.wait_for_timeout(5000)
+    try:
+        await aceptar.click(timeout=5000)
+    except Exception:
+        if await aceptar_alt.count() > 0:
+            try:
+                await aceptar_alt.click(force=True, timeout=5000)
+            except Exception:
+                await page.evaluate(
+                    """(sel) => {
+                        const el = document.querySelector(sel);
+                        if (el) el.click();
+                    }""",
+                    selectors.input_aceptar_modal_persona,
+                )
     await page.wait_for_timeout(config.delay_ms)
     return page

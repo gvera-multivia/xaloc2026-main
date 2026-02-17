@@ -14,7 +14,6 @@ from sites.ayunta_palma.flows import (
     registrar_interesado,
     subir_documentos,
 )
-from sites.ayunta_palma.flows.common import watchdog_recover_navigation
 
 
 class AyuntaPalmaAutomation(BaseAutomation):
@@ -32,43 +31,19 @@ class AyuntaPalmaAutomation(BaseAutomation):
             await self.sync_screencast_with_page()
 
             self.logger.info("FASE 2: REGISTRAR INTERESADO")
-            await watchdog_recover_navigation(
-                self.page,
-                self.config,
-                phase="FASE 2 (pre)",
-                expected_selector=self.config.selectors.btn_nuevo_interesado,
-            )
             self.page = await registrar_interesado(self.page, self.config, datos)
             await self.sync_screencast_with_page()
 
             self.logger.info("FASE 3: INDICAR REPRESENTANTE")
-            await watchdog_recover_navigation(
-                self.page,
-                self.config,
-                phase="FASE 3 (pre)",
-                expected_selector=self.config.selectors.btn_indicar_representante,
-            )
             self.page = await indicar_representante(self.page, self.config)
             await self.sync_screencast_with_page()
 
             self.logger.info("FASE 4: COMPLETAR ALEGACIONES")
             if datos.alegaciones:
-                await watchdog_recover_navigation(
-                    self.page,
-                    self.config,
-                    phase="FASE 4 (pre)",
-                    expected_selector=self.config.selectors.btn_siguiente,
-                )
                 self.page = await completar_alegaciones(self.page, self.config, datos.alegaciones)
                 await self.sync_screencast_with_page()
 
             self.logger.info("FASE 5: SUBIR DOCUMENTOS")
-            await watchdog_recover_navigation(
-                self.page,
-                self.config,
-                phase="FASE 5 (pre)",
-                expected_selector=self.config.selectors.btn_anadir_documento,
-            )
             self.page = await subir_documentos(self.page, self.config, datos.archivos, payload=datos.payload)
             await self.sync_screencast_with_page()
 

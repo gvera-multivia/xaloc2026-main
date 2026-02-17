@@ -9,7 +9,6 @@ import logging
 from playwright.async_api import Locator, Page, TimeoutError as PlaywrightTimeoutError, expect
 
 from sites.ayunta_palma.config import AyuntaPalmaConfig, AyuntaPalmaSelectors
-from sites.ayunta_palma.flows.common import robust_click
 from sites.ayunta_palma.data_models import AyuntaPalmaTarget
 
 PALMA_CONTACT_EMAIL = "info@xvia-serviciosjuridicos.com"
@@ -33,89 +32,30 @@ async def _abrir_modal_nuevo_interesado(page: Page, selectors: AyuntaPalmaSelect
 
     boton_nuevo = page.locator(selectors.btn_nuevo_interesado_visible).first
     boton_nuevo_alt = page.locator(selectors.btn_nuevo_interesado).first
-    input_nuevo = page.locator(selectors.input_nuevo_interesado).first
 
-    async def _misma_pantalla() -> bool:
+    if await boton_nuevo.count() > 0:
+        await boton_nuevo.wait_for(state="visible", timeout=15000)
+        await page.wait_for_timeout(5000)
         try:
-            await tipo_usuario.wait_for(state="visible", timeout=900)
-            return False
-        except PlaywrightTimeoutError:
-            return True
-
-    opened = False
-    for intento in range(1, 7):
+            await boton_nuevo.click(timeout=5000)
+        except Exception:
+            await boton_nuevo.click(force=True, timeout=5000)
+    elif await boton_nuevo_alt.count() > 0:
+        await boton_nuevo_alt.wait_for(state="visible", timeout=15000)
+        await page.wait_for_timeout(5000)
         try:
-            await page.wait_for_selector(selectors.velo, state="hidden", timeout=5000)
-        except PlaywrightTimeoutError:
-            pass
-
-        try:
-            result = await page.evaluate(
-                """() => {
-                    const hidden = document.querySelector('#ctl00_ctl00_cphM_cph_btnListaInteresadosOpcionesNuevo, input[id$="btnListaInteresadosOpcionesNuevo"]');
-                    const cont = hidden ? hidden.closest('.btn-bar-horizontal-centrada-inner') : null;
-                    const visibleBtn = cont ? cont.querySelector('button.btn-icono') : document.querySelector('.btn-bar-horizontal-centrada-inner button.btn-icono');
-                    let fired = false;
-
-                    if (visibleBtn) {
-                        try { visibleBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); } catch {}
-                        try { visibleBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); } catch {}
-                        try { visibleBtn.click(); fired = true; } catch {}
-                    }
-                    if (hidden) {
-                        try { hidden.disabled = false; } catch {}
-                        try { hidden.style.display = 'block'; } catch {}
-                        try { hidden.click(); fired = true; } catch {}
-                    }
-                    try {
-                        if (window.jQuery && hidden) {
-                            window.jQuery(hidden).trigger('click');
-                            fired = true;
-                        }
-                    } catch {}
-                    try {
-                        if (typeof window.__doPostBack === 'function') {
-                            window.__doPostBack('ctl00$ctl00$cphM$cph$btnListaInteresadosOpcionesNuevo', '');
-                            fired = true;
-                        }
-                    } catch {}
-                    return { fired, hasHidden: !!hidden, hasVisibleBtn: !!visibleBtn };
-                }"""
-            )
-            logger.info(
-                "[AP-DIAG] Nuevo interesado hard-click intento %s/6 fired=%s hidden=%s visibleBtn=%s",
-                intento,
-                result.get("fired"),
-                result.get("hasHidden"),
-                result.get("hasVisibleBtn"),
-            )
-        except Exception as e:
-            logger.warning("[AP-DIAG] Nuevo interesado hard-click intento %s/6 error: %s", intento, e)
-
-        await page.wait_for_timeout(1200)
-        try:
-            await tipo_usuario.wait_for(state="visible", timeout=2500)
-            opened = True
-            break
-        except PlaywrightTimeoutError:
-            # Fallback adicional al click tradicional en cada ciclo.
-            try:
-                await robust_click(
-                    page,
-                    description="Abrir modal Nuevo/a interesado/a",
-                    primary=boton_nuevo,
-                    secondary=boton_nuevo_alt,
-                    fallback_selector=selectors.input_nuevo_interesado,
-                    same_screen_check=_misma_pantalla,
-                    max_attempts=1,
-                    retry_wait_ms=900,
-                )
-            except Exception:
-                pass
-            await page.wait_for_timeout(700)
-
-    if not opened:
-        await tipo_usuario.wait_for(state="visible", timeout=20000)
+            await boton_nuevo_alt.click(timeout=5000)
+        except Exception:
+            await boton_nuevo_alt.click(force=True, timeout=5000)
+    else:
+        await page.wait_for_timeout(5000)
+        await page.evaluate(
+            """(sel) => {
+                const el = document.querySelector(sel);
+                if (el) el.click();
+            }""",
+            selectors.input_nuevo_interesado,
+        )
 
     await tipo_usuario.wait_for(state="visible", timeout=20000)
     await page.wait_for_timeout(delay_ms)
@@ -233,22 +173,21 @@ async def registrar_interesado(
     except PlaywrightTimeoutError:
         await aceptar_alt.wait_for(state="visible", timeout=4000)
 
-    async def _modal_sigue_abierto() -> bool:
-        try:
-            return await aceptar.count() > 0 and await aceptar.is_visible()
-        except Exception:
-            return False
-
-    await robust_click(
-        page,
-        description="Aceptar modal interesado",
-        primary=aceptar,
-        secondary=aceptar_alt,
-        fallback_selector=selectors.input_aceptar_modal_persona,
-        same_screen_check=_modal_sigue_abierto,
-        max_attempts=3,
-        retry_wait_ms=5000,
-    )
+    await page.wait_for_timeout(5000)
+    try:
+        await aceptar.click(timeout=5000)
+    except Exception:
+        if await aceptar_alt.count() > 0:
+            try:
+                await aceptar_alt.click(force=True, timeout=5000)
+            except Exception:
+                await page.evaluate(
+                    """(sel) => {
+                        const el = document.querySelector(sel);
+                        if (el) el.click();
+                    }""",
+                    selectors.input_aceptar_modal_persona,
+                )
     await _wait_for_velo_to_vanish(page, selectors)
     await page.wait_for_timeout(config.delay_ms)
     return page
