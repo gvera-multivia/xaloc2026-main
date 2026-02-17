@@ -629,7 +629,27 @@ async def _click_siguiente(
     selectors = config.selectors
     btn = page.locator(selectors.btn_siguiente_visible).first
     btn_alt = page.locator(selectors.btn_siguiente).first
-    hidden_input = page.locator(selectors.input_siguiente).first
+    hidden_submit_ok = await _force_submit_with_postback(
+        page,
+        hidden_input_selector=selectors.input_siguiente,
+        event_target="ctl00$ctl00$cphM$cph$btnSiguiente",
+        description=f"{description} (intento hidden/postback)",
+    )
+    if hidden_submit_ok:
+        await page.wait_for_timeout(config.delay_ms)
+        await _esperar_velo_oculto(page, config)
+        if same_screen_check is None:
+            return
+        try:
+            if not bool(await same_screen_check()):
+                return
+            logger.warning(
+                "[AP-DIAG] %s: hidden/postback no avanzo; probando boton visible.",
+                description,
+            )
+        except Exception:
+            return
+
     try:
         await robust_click(
             page,

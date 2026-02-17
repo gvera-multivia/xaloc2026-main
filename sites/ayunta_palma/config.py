@@ -44,7 +44,10 @@ class AyuntaPalmaSelectors:
     email_confirm_input: str = "#ctl00_ctl00_cphM_cph_txtPersonaEmailNotificacion2"
     telefono_selector: str = "#ctl00_ctl00_cphM_cph_ddlPersonaTelefonoMovilSelector"
     telefono_input: str = "#ctl00_ctl00_cphM_cph_txtPersonaTelefonoMovil"
-    btn_aceptar_modal: str = ".ui-dialog:visible .btn-bar-horizontal-centrada-inner button:has-text(\"Aceptar\")"
+    btn_aceptar_modal: str = (
+        ".ui-dialog:visible .btn-bar-horizontal-centrada-inner button:has-text(\"Aceptar\"), "
+        ".ui-dialog:visible .btn-bar-horizontal-centrada-inner button:has-text(\"Acceptar\")"
+    )
     input_aceptar_modal_persona: str = "#ctl00_ctl00_cphM_cph_btnAceptarPersona"
     btn_aceptar_modal_visible: str = (
         ".ui-dialog:visible .btn-bar-horizontal-centrada-inner:has(input#ctl00_ctl00_cphM_cph_btnAceptarPersona) "
@@ -56,20 +59,25 @@ class AyuntaPalmaSelectors:
         "div.btn-bar-horizontal-centrada-inner:has(input#ctl00_ctl00_cphM_cph_repListaInteresados_ctl00_btnListaInteresadosItemNuevoRepresentante) "
         "button.btn-icono"
     )
-    btn_siguiente: str = ".btn-bar-horizontal-centrada-inner button:has-text(\"Siguiente\")"
+    btn_siguiente: str = (
+        ".btn-bar-horizontal-centrada-inner button:has-text(\"Siguiente\"), "
+        ".btn-bar-horizontal-centrada-inner button:has-text(\"Següent\"), "
+        ".btn-bar-horizontal-centrada-inner button:has-text(\"Seguent\")"
+    )
     btn_siguiente_visible: str = (
-        "div.btn-bar-horizontal-centrada-inner:has(input#ctl00_ctl00_cphM_cph_btnSiguiente) "
-        "button.btn-icono"
+        "div.btn-bar-horizontal-centrada-inner:has(input#ctl00_ctl00_cphM_cph_btnSiguiente) button.btn-icono:has-text(\"Siguiente\"), "
+        "div.btn-bar-horizontal-centrada-inner:has(input#ctl00_ctl00_cphM_cph_btnSiguiente) button.btn-icono:has-text(\"Següent\"), "
+        "div.btn-bar-horizontal-centrada-inner:has(input#ctl00_ctl00_cphM_cph_btnSiguiente) button.btn-icono:has-text(\"Seguent\")"
     )
     input_siguiente: str = "#ctl00_ctl00_cphM_cph_btnSiguiente"
     chk_proteccion_datos: str = "#ctl00_ctl00_cphM_cph_chkProteccionDatos"
-    btn_modal_aceptar: str = ".ui-dialog:visible button:has-text(\"Aceptar\")"
+    btn_modal_aceptar: str = ".ui-dialog:visible button:has-text(\"Aceptar\"), .ui-dialog:visible button:has-text(\"Acceptar\")"
     btn_modal_aceptar_visible: str = ".ui-dialog:visible .btn-bar-horizontal-centrada-inner button.btn-bl1"
     input_modal_aceptar: str = ".ui-dialog:visible input[id$='_btnAceptar']"
     btn_confirmar: str = "button:has-text(\"Confirmar\")"
     btn_confirmar_visible: str = "div.btn-bar-horizontal-centrada-inner:has(input[id$='_btnConfirmar']) button.btn-icono"
     input_confirmar: str = "input[id$='_btnConfirmar']"
-    btn_firmar: str = "button:has-text(\"Firmar\")"
+    btn_firmar: str = "button:has-text(\"Firmar\"), button:has-text(\"Signar\")"
     input_firmar: str = "#ctl00_ctl00_cphM_cph_btnFirmar"
     btn_signar_tots_documents: str = "button:has-text(\"Signar tots els documents\")"
     btn_anadir_documento: str = (
@@ -77,7 +85,7 @@ class AyuntaPalmaSelectors:
         "button.btn-icono"
     )
     input_anadir_documento: str = "#ctl00_ctl00_cphM_cph_repDocumentosAPresentar_ctl01_btnDocumentoAPresentarNuevoFichero"
-    btn_confirmar_archivo: str = ".panel-dialog button:has-text(\"Aceptar\")"
+    btn_confirmar_archivo: str = ".panel-dialog button:has-text(\"Aceptar\"), .panel-dialog button:has-text(\"Acceptar\")"
     velo: str = "#velo"
     alegaciones_frame: str = "#ventanaModal"
     alegaciones_input: str = "input[type='text'].form-control"
