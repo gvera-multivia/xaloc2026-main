@@ -24,33 +24,78 @@ async def _abrir_nueva_instancia(page: Page, config: AyuntaPalmaConfig) -> None:
     except Exception:
         pass
 
-    boton_visible = page.locator(selectors.btn_nueva_instancia_visible).first
-    boton_alt = page.locator(selectors.btn_nueva_instancia).first
-    hidden_selector = selectors.input_nueva_instancia
+    await page.wait_for_timeout(5000)
+    trigger = await page.evaluate(
+        """() => {
+            const normalize = (s) => (s || "").toLowerCase().normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").trim();
+            const candidates = Array.from(document.querySelectorAll("input[type='submit']"));
+            const target = candidates.find((el) => {
+                const id = (el.id || "").toLowerCase();
+                const name = (el.name || "").toLowerCase();
+                const value = normalize(el.value || "");
+                const isCancelar = id.includes("btnultimoborradorcancelar") || name.includes("btnultimoborradorcancelar");
+                const byValue =
+                    value.includes("nueva instancia en blanco") ||
+                    value.includes("nova instancia en blanc") ||
+                    value.includes("nova instancia en blanc");
+                return isCancelar || byValue;
+            });
+            if (!target) return { clicked: false, url: null, mode: "none" };
 
-    if await boton_visible.count() > 0:
-        await boton_visible.wait_for(state="visible", timeout=15000)
-        await page.wait_for_timeout(5000)
+            const url = target.getAttribute("data-clickable-url");
+            const wrapper = target.closest(".btn-bar-horizontal-centrada-inner");
+            const visibleButton = wrapper ? wrapper.querySelector("button.btn-icono.btn-bl1, button.btn-icono[data-icono='plus.svg']") : null;
+            if (visibleButton) {
+                try {
+                    visibleButton.click();
+                    return { clicked: true, url, mode: "button" };
+                } catch {}
+            }
+            try {
+                target.click();
+                return { clicked: true, url, mode: "hidden-input" };
+            } catch {}
+            try {
+                if (typeof window.__doPostBack === "function") {
+                    window.__doPostBack("ctl00$ctl00$cphM$cph$btnUltimoBorradorCancelar", "");
+                    return { clicked: true, url, mode: "postback" };
+                }
+            } catch {}
+            return { clicked: false, url, mode: "none" };
+        }"""
+    )
+
+    if not trigger.get("clicked"):
+        boton_visible = page.locator(selectors.btn_nueva_instancia_visible).first
+        boton_alt = page.locator(selectors.btn_nueva_instancia).first
+        hidden_selector = selectors.input_nueva_instancia
+        if await boton_visible.count() > 0:
+            await boton_visible.wait_for(state="visible", timeout=10000)
+            try:
+                await boton_visible.click(timeout=5000)
+            except Exception:
+                await boton_visible.click(force=True, timeout=5000)
+        elif await boton_alt.count() > 0:
+            await boton_alt.wait_for(state="visible", timeout=10000)
+            try:
+                await boton_alt.click(timeout=5000)
+            except Exception:
+                await boton_alt.click(force=True, timeout=5000)
+        else:
+            await page.evaluate(
+                """(sel) => {
+                    const el = document.querySelector(sel);
+                    if (el) el.click();
+                }""",
+                hidden_selector,
+            )
+
+    clickable_url = trigger.get("url") if isinstance(trigger, dict) else None
+    if clickable_url:
         try:
-            await boton_visible.click(timeout=5000)
-        except Exception:
-            await boton_visible.click(force=True, timeout=5000)
-    elif await boton_alt.count() > 0:
-        await boton_alt.wait_for(state="visible", timeout=15000)
-        await page.wait_for_timeout(5000)
-        try:
-            await boton_alt.click(timeout=5000)
-        except Exception:
-            await boton_alt.click(force=True, timeout=5000)
-    else:
-        await page.wait_for_timeout(5000)
-        await page.evaluate(
-            """(sel) => {
-                const el = document.querySelector(sel);
-                if (el) el.click();
-            }""",
-            hidden_selector,
-        )
+            await persona_tipo_usuario.wait_for(state="visible", timeout=6000)
+        except PlaywrightTimeoutError:
+            await page.goto(clickable_url, wait_until="domcontentloaded")
 
     await page.wait_for_timeout(config.delay_ms)
     await persona_tipo_usuario.wait_for(state="visible", timeout=25000)
