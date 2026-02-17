@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from playwright.async_api import Page
 
@@ -10,6 +11,82 @@ from sites.base_online.flows.firma_y_justificante import firmar_presentar_y_desc
 from sites.base_online.flows.upload import subir_archivos_por_modal
 
 DELAY_MS = 500
+
+
+def _parse_expediente_parts(raw: str) -> tuple[str | None, str | None, str | None]:
+    exp = str(raw or "").strip().upper()
+    if not exp:
+        return None, None, None
+
+    m_gim = re.match(r"^(?P<id_ens>\d{5})-(?P<any>\d{4})/(?P<num>\d{4,5})-GIM$", exp)
+    if m_gim:
+        return m_gim.group("id_ens"), m_gim.group("any"), m_gim.group("num")
+
+    m_exe = re.match(r"^(?P<id_ens>\d)-(?P<any>\d{4})[/\-](?P<num>\d{4,6})-(EXE|ECC)$", exp)
+    if m_exe:
+        return m_exe.group("id_ens"), m_exe.group("any"), m_exe.group("num")
+
+    # Fallback tolerante para variantes con separadores distintos.
+    m_fallback = re.match(r"^(?P<id_ens>\d{1,5})\D+(?P<any>\d{4})\D+(?P<num>\d{1,7})\D*[A-Z]*$", exp)
+    if m_fallback:
+        return m_fallback.group("id_ens"), m_fallback.group("any"), m_fallback.group("num")
+
+    return None, None, None
+
+
+async def _set_input_stable(page: Page, selector: str, value: str, *, label: str, retries: int = 3) -> None:
+    expected = str(value or "").strip()
+    locator = page.locator(selector).first
+    await locator.wait_for(state="visible")
+
+    for intento in range(1, retries + 1):
+        await locator.fill(expected)
+        await page.wait_for_timeout(120)
+        ok = await page.evaluate(
+            """([sel, val]) => {
+                const el = document.querySelector(sel);
+                if (!el) return false;
+                el.value = val;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                el.dispatchEvent(new Event('blur', { bubbles: true }));
+                return String(el.value || '').trim() === String(val || '').trim();
+            }""",
+            [selector, expected],
+        )
+        if ok:
+            return
+        logging.warning("[P2] Reintento %s/%s al persistir %s", intento, retries, label)
+        await page.wait_for_timeout(180)
+
+    current = await locator.input_value()
+    raise ValueError(f"[P2] No se pudo persistir {label}. esperado={expected!r} actual={current!r}")
+
+
+async def _set_input_with_onchange(page: Page, selector: str, value: str, *, label: str, retries: int = 3) -> None:
+    expected = str(value or "").strip()
+    locator = page.locator(selector).first
+    await locator.wait_for(state="visible")
+
+    for intento in range(1, retries + 1):
+        await locator.click()
+        await locator.press("Control+A")
+        await locator.type(expected, delay=45)
+        await locator.press("Tab")  # fuerza blur/onchange en JSF
+        await page.wait_for_timeout(180)
+        await page.evaluate(
+            "typeof actualitzarClauExpedientclau_expedient === 'function' && actualitzarClauExpedientclau_expedient()"
+        )
+        await page.wait_for_timeout(220)
+        current = (await locator.input_value()).strip()
+        if current == expected:
+            return
+        logging.warning("[P2] Reintento %s/%s al persistir %s tras onchange", intento, retries, label)
+
+    current = await locator.input_value()
+    raise ValueError(
+        f"[P2] No se pudo persistir {label} tras onchange. esperado={expected!r} actual={current!r}"
+    )
 
 
 async def ejecutar_p2(page: Page, data: BaseOnlineP2Data, *, payload: dict) -> None:
@@ -27,7 +104,23 @@ async def ejecutar_p2(page: Page, data: BaseOnlineP2Data, *, payload: dict) -> N
     await page.wait_for_load_state("domcontentloaded")
 
     logging.info("[P2] Aportando alegaciones (paso 2)...")
-    tiene_expediente = bool(data.expedient_id_ens or data.expedient_any or data.expedient_num)
+    exp_id_ens = (data.expedient_id_ens or "").strip() or None
+    exp_any = (data.expedient_any or "").strip() or None
+    exp_num = (data.expedient_num or "").strip() or None
+    payload_exp = (
+        str(payload.get("expediente") or "").strip()
+        or str(payload.get("num_butlleti") or "").strip()
+        or str(payload.get("expediente_raw") or "").strip()
+        or str(payload.get("expediente_base") or "").strip()
+    )
+
+    if not (exp_id_ens and exp_any and exp_num):
+        p_id_ens, p_any, p_num = _parse_expediente_parts(payload_exp)
+        exp_id_ens = exp_id_ens or p_id_ens
+        exp_any = exp_any or p_any
+        exp_num = exp_num or p_num
+
+    tiene_expediente = bool(exp_id_ens or exp_any or exp_num)
     butlleti_value = (
         (data.butlleti or "").strip()
         or str(payload.get("num_butlleti") or "").strip()
@@ -37,12 +130,31 @@ async def ejecutar_p2(page: Page, data: BaseOnlineP2Data, *, payload: dict) -> N
     if not (tiene_expediente or tiene_butlleti):
         raise ValueError("P2: es obligatorio indicar Num. Expedient o Num. Butlleti.")
 
+    if payload_exp and not (exp_id_ens and exp_any and exp_num):
+        raise ValueError(f"P2: no se pudo parsear expediente en partes (id_ens/any/num): {payload_exp!r}")
+
     if tiene_expediente:
-        await page.locator("#form\\:clau_expedient_id_ens").first.fill(data.expedient_id_ens or "")
+        logging.info("[P2] Expediente a informar: id_ens=%s any=%s num=%s", exp_id_ens, exp_any, exp_num)
+        await _set_input_with_onchange(
+            page,
+            "#form\\:clau_expedient_id_ens",
+            exp_id_ens or "",
+            label="expedient_id_ens",
+        )
         await page.wait_for_timeout(DELAY_MS)
-        await page.locator("#form\\:clau_expedient_any_exp").first.fill(data.expedient_any or "")
+        await _set_input_with_onchange(
+            page,
+            "#form\\:clau_expedient_any_exp",
+            exp_any or "",
+            label="expedient_any",
+        )
         await page.wait_for_timeout(DELAY_MS)
-        await page.locator("#form\\:clau_expedient_num_exp").first.fill(data.expedient_num or "")
+        await _set_input_with_onchange(
+            page,
+            "#form\\:clau_expedient_num_exp",
+            exp_num or "",
+            label="expedient_num",
+        )
         await page.wait_for_timeout(DELAY_MS)
         await page.evaluate(
             "typeof actualitzarClauExpedientclau_expedient === 'function' && actualitzarClauExpedientclau_expedient()"
@@ -50,21 +162,7 @@ async def ejecutar_p2(page: Page, data: BaseOnlineP2Data, *, payload: dict) -> N
         await page.wait_for_timeout(DELAY_MS)
 
     if tiene_butlleti:
-        locator_butlleti = page.locator("#form\\:butlleti").first
-        await locator_butlleti.fill(butlleti_value)
-        await page.wait_for_timeout(DELAY_MS)
-        # Some JSF variants do not persist fill() unless input/change events are dispatched.
-        await page.evaluate(
-            """([selector, value]) => {
-                const el = document.querySelector(selector);
-                if (!el) return false;
-                el.value = value;
-                el.dispatchEvent(new Event('input', { bubbles: true }));
-                el.dispatchEvent(new Event('change', { bubbles: true }));
-                return true;
-            }""",
-            ["#form\\:butlleti", butlleti_value],
-        )
+        await _set_input_stable(page, "#form\\:butlleti", butlleti_value, label="butlleti")
         await page.wait_for_timeout(DELAY_MS)
         logging.info("[P2] Butlleti informado: %s", butlleti_value)
 

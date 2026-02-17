@@ -7,7 +7,7 @@ import logging
 import decimal
 import asyncio
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
 
@@ -162,6 +162,119 @@ class SQLiteDatabase:
             ON job_runs(site_id, state)
             """
         )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS worker_runtime (
+                worker_id TEXT PRIMARY KEY,
+                run_id TEXT,
+                pid INTEGER,
+                status TEXT NOT NULL DEFAULT 'online',
+                current_job_id TEXT,
+                heartbeat_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS ix_worker_runtime_heartbeat
+            ON worker_runtime(heartbeat_at)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS ix_worker_runtime_status
+            ON worker_runtime(status)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS incidencias (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                idRecurso INTEGER,
+                nExp TEXT,
+                tipo_incidencia TEXT NOT NULL,
+                motivo TEXT,
+                site_id TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS ix_incidencias_site_tipo_time
+            ON incidencias(site_id, tipo_incidencia, timestamp)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS blocked_resources (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                site_id TEXT NOT NULL,
+                resource_id INTEGER NOT NULL,
+                reason TEXT,
+                source TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_blocked_resources_site_resource
+            ON blocked_resources(site_id, resource_id)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS ix_blocked_resources_site_time
+            ON blocked_resources(site_id, created_at)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS site_processing_pauses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                site_id TEXT NOT NULL UNIQUE,
+                reason TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS ix_site_processing_pauses_expires
+            ON site_processing_pauses(expires_at)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS resource_processing_pauses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                site_id TEXT NOT NULL,
+                resource_id INTEGER NOT NULL,
+                reason TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_resource_processing_pauses_site_resource
+            ON resource_processing_pauses(site_id, resource_id)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS ix_resource_processing_pauses_expires
+            ON resource_processing_pauses(expires_at)
+            """
+        )
 
     def get_pending_task(self) -> Optional[Tuple[int, str, str, Dict[str, Any]]]:
         """
@@ -176,13 +289,30 @@ class SQLiteDatabase:
             # Transacción inmediata para evitar condiciones de carrera
             cursor.execute("BEGIN IMMEDIATE")
 
-            cursor.execute("""
+            now_iso = datetime.now().isoformat()
+            cursor.execute(
+                """
                 SELECT id, site_id, protocol, payload
                 FROM tramite_queue
                 WHERE status = 'pending'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM site_processing_pauses spp
+                      WHERE spp.site_id = tramite_queue.site_id
+                        AND (spp.expires_at IS NULL OR spp.expires_at > ?)
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM resource_processing_pauses rpp
+                      WHERE rpp.site_id = tramite_queue.site_id
+                        AND rpp.resource_id = tramite_queue.resource_id
+                        AND (rpp.expires_at IS NULL OR rpp.expires_at > ?)
+                  )
                 ORDER BY created_at ASC
                 LIMIT 1
-            """)
+                """,
+                (now_iso, now_iso),
+            )
             row = cursor.fetchone()
 
             if row:
@@ -325,6 +455,48 @@ class SQLiteDatabase:
                 statuses,
             )
             return {str(site_id): int(c) for site_id, c in cursor.fetchall()}
+        finally:
+            conn.close()
+
+    def requeue_task(self, task_id: int, error: Optional[str] = None) -> None:
+        """Devuelve una tarea en processing a pending para reintento."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE tramite_queue
+                SET status = 'pending',
+                    processed_at = NULL,
+                    error_log = ?,
+                    attempts = COALESCE(attempts, 0) + 1
+                WHERE id = ?
+                """,
+                ((error or "").strip() or None, task_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def release_task_to_pending(self, task_id: int, error: Optional[str] = None) -> None:
+        """
+        Devuelve una tarea a pending sin incrementar intentos.
+        Uso principal: parada manual (Ctrl+C) para no penalizar el job.
+        """
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE tramite_queue
+                SET status = 'pending',
+                    processed_at = NULL,
+                    error_log = ?
+                WHERE id = ?
+                """,
+                ((error or "").strip() or None, task_id),
+            )
+            conn.commit()
         finally:
             conn.close()
 
@@ -559,9 +731,640 @@ class SQLiteDatabase:
         finally:
             conn.close()
 
+    def upsert_worker_runtime(
+        self,
+        *,
+        worker_id: str,
+        run_id: Optional[str] = None,
+        pid: Optional[int] = None,
+        status: str = "online",
+        current_job_id: Optional[str] = None,
+    ) -> None:
+        wid = (worker_id or "").strip()
+        if not wid:
+            return
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            now = datetime.now().isoformat()
+            cursor.execute(
+                """
+                INSERT INTO worker_runtime (
+                    worker_id, run_id, pid, status, current_job_id, heartbeat_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(worker_id) DO UPDATE SET
+                    run_id = COALESCE(excluded.run_id, worker_runtime.run_id),
+                    pid = COALESCE(excluded.pid, worker_runtime.pid),
+                    status = excluded.status,
+                    current_job_id = excluded.current_job_id,
+                    heartbeat_at = excluded.heartbeat_at,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    wid,
+                    (run_id or "").strip() or None,
+                    int(pid) if pid is not None else None,
+                    (status or "").strip() or "online",
+                    (current_job_id or "").strip() or None,
+                    now,
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def mark_worker_runtime_offline(self, *, worker_id: str, status: str = "offline") -> None:
+        wid = (worker_id or "").strip()
+        if not wid:
+            return
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE worker_runtime
+                SET status = ?,
+                    current_job_id = NULL,
+                    updated_at = ?
+                WHERE worker_id = ?
+                """,
+                ((status or "").strip() or "offline", datetime.now().isoformat(), wid),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def list_alive_worker_ids(self, *, heartbeat_timeout_seconds: int = 90) -> set[str]:
+        timeout = max(1, int(heartbeat_timeout_seconds))
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT worker_id, heartbeat_at
+                FROM worker_runtime
+                WHERE status = 'online'
+                """
+            )
+            now_dt = datetime.now()
+            alive: set[str] = set()
+            for row in cursor.fetchall():
+                hb = self._parse_iso_datetime(row["heartbeat_at"])
+                if hb is None:
+                    continue
+                current_now = datetime.now(hb.tzinfo) if hb.tzinfo is not None else now_dt
+                age_seconds = max(0, int((current_now - hb).total_seconds()))
+                if age_seconds <= timeout:
+                    alive.add(str(row["worker_id"]))
+            return alive
+        finally:
+            conn.close()
+
+    def reconcile_processing_with_worker_runtime(
+        self,
+        *,
+        heartbeat_timeout_seconds: int = 90,
+        limit: int = 200,
+        site_id: Optional[str] = None,
+        resource_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        timeout = max(1, int(heartbeat_timeout_seconds))
+        scan_limit = max(1, int(limit))
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            cursor.execute("BEGIN IMMEDIATE")
+            cursor.execute(
+                """
+                SELECT worker_id, heartbeat_at
+                FROM worker_runtime
+                WHERE status = 'online'
+                """
+            )
+            now_dt = datetime.now()
+            alive_worker_ids: set[str] = set()
+            for wr in cursor.fetchall():
+                hb = self._parse_iso_datetime(wr["heartbeat_at"])
+                if hb is None:
+                    continue
+                current_now = datetime.now(hb.tzinfo) if hb.tzinfo is not None else now_dt
+                age_seconds = max(0, int((current_now - hb).total_seconds()))
+                if age_seconds <= timeout:
+                    alive_worker_ids.add(str(wr["worker_id"]))
+
+            clauses = ["status = 'processing'"]
+            params: list[Any] = []
+            if site_id:
+                clauses.append("site_id = ?")
+                params.append(str(site_id))
+            if resource_id is not None:
+                clauses.append("resource_id = ?")
+                params.append(int(resource_id))
+            where_sql = " AND ".join(clauses)
+            cursor.execute(
+                f"""
+                SELECT id, site_id, resource_id, payload
+                FROM tramite_queue
+                WHERE {where_sql}
+                ORDER BY COALESCE(processed_at, created_at) ASC, id ASC
+                LIMIT ?
+                """,
+                (*params, scan_limit),
+            )
+            rows = cursor.fetchall()
+            recovered_items: list[Dict[str, Any]] = []
+            for row in rows:
+                queue_ref = int(row["id"])
+                payload_raw = row["payload"] or "{}"
+                try:
+                    payload_obj = json.loads(payload_raw)
+                except Exception:
+                    payload_obj = {}
+                job_id = str(payload_obj.get("job_id") or f"sqlite-task-{queue_ref}")
+                cursor.execute("SELECT worker_id FROM job_runs WHERE job_id = ?", (job_id,))
+                run = cursor.fetchone()
+                owner_worker_id = str(run["worker_id"]).strip() if (run and run["worker_id"]) else None
+                keep_processing = bool(owner_worker_id and owner_worker_id in alive_worker_ids)
+                if keep_processing:
+                    continue
+
+                reason = "missing_job_run_or_owner"
+                if owner_worker_id and owner_worker_id not in alive_worker_ids:
+                    reason = "owner_worker_offline_or_stale_heartbeat"
+                cursor.execute(
+                    """
+                    UPDATE tramite_queue
+                    SET status = 'pending',
+                        processed_at = NULL,
+                        error_log = ?
+                    WHERE id = ?
+                    """,
+                    (f"Recovered by UUID-runtime reconciliation: {reason}.", queue_ref),
+                )
+                if run is not None:
+                    cursor.execute(
+                        """
+                        UPDATE job_runs
+                        SET state = 'queued',
+                            queued_at = ?,
+                            error_message = ?,
+                            updated_at = ?
+                        WHERE job_id = ?
+                        """,
+                        (
+                            datetime.now().isoformat(),
+                            f"Recovered by UUID-runtime reconciliation: {reason}.",
+                            datetime.now().isoformat(),
+                            job_id,
+                        ),
+                    )
+                recovered_items.append(
+                    {
+                        "queue_ref": queue_ref,
+                        "job_id": job_id,
+                        "site_id": row["site_id"],
+                        "resource_id": row["resource_id"],
+                        "owner_worker_id": owner_worker_id,
+                        "reason": reason,
+                    }
+                )
+
+            conn.commit()
+            return {
+                "alive_workers": len(alive_worker_ids),
+                "scanned": len(rows),
+                "recovered": len(recovered_items),
+                "items": recovered_items,
+            }
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    # ==========================================================================
+    # METODOS PARA INCIDENCIAS
+    # ==========================================================================
+
+    def add_incident(
+        self,
+        *,
+        id_recurso: Optional[int],
+        n_exp: Optional[str],
+        tipo: str,
+        motivo: Optional[str],
+        site_id: Optional[str],
+    ) -> int:
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO incidencias (idRecurso, nExp, tipo_incidencia, motivo, site_id)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    int(id_recurso) if id_recurso is not None else None,
+                    (n_exp or "").strip() or None,
+                    str(tipo),
+                    (motivo or "").strip() or None,
+                    (site_id or "").strip() or None,
+                ),
+            )
+            conn.commit()
+            return int(cursor.lastrowid)
+        finally:
+            conn.close()
+
+    def list_incidents(
+        self,
+        *,
+        site_id: Optional[str] = None,
+        tipo: Optional[str] = None,
+    ) -> list[Dict[str, Any]]:
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            clauses = []
+            params: list[Any] = []
+            if site_id:
+                clauses.append("site_id = ?")
+                params.append(site_id)
+            if tipo:
+                clauses.append("tipo_incidencia = ?")
+                params.append(tipo)
+
+            where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+            cursor.execute(
+                f"""
+                SELECT id, idRecurso, nExp, tipo_incidencia, motivo, site_id, timestamp
+                FROM incidencias
+                {where_sql}
+                ORDER BY timestamp ASC, id ASC
+                """,
+                params,
+            )
+            return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    # ==========================================================================
+    # METODOS PARA RECURSOS BLOQUEADOS
+    # ==========================================================================
+
+    def block_resource(
+        self,
+        *,
+        site_id: str,
+        resource_id: int,
+        reason: Optional[str] = None,
+        source: Optional[str] = None,
+    ) -> None:
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            now = datetime.now().isoformat()
+            cursor.execute(
+                """
+                INSERT INTO blocked_resources (site_id, resource_id, reason, source, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(site_id, resource_id) DO UPDATE SET
+                    reason = excluded.reason,
+                    source = excluded.source,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    str(site_id),
+                    int(resource_id),
+                    (reason or "").strip() or None,
+                    (source or "").strip() or None,
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def is_resource_blocked(self, *, site_id: str, resource_id: int) -> bool:
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT 1
+                FROM blocked_resources
+                WHERE site_id = ?
+                  AND resource_id = ?
+                LIMIT 1
+                """,
+                (str(site_id), int(resource_id)),
+            )
+            return cursor.fetchone() is not None
+        finally:
+            conn.close()
+
+    def list_blocked_resources(self, site_id: Optional[str] = None) -> list[Dict[str, Any]]:
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            clauses = []
+            params: list[Any] = []
+            site = (site_id or "").strip()
+            if site:
+                clauses.append("site_id = ?")
+                params.append(site)
+            where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+            cursor.execute(
+                f"""
+                SELECT id, site_id, resource_id, reason, source, created_at, updated_at
+                FROM blocked_resources
+                {where_sql}
+                ORDER BY created_at DESC, id DESC
+                """,
+                params,
+            )
+            return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def unblock_resource(self, site_id: str, resource_id: int) -> bool:
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                DELETE FROM blocked_resources
+                WHERE site_id = ?
+                  AND resource_id = ?
+                """,
+                (str(site_id), int(resource_id)),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
     # ==========================================================================
     # MÉTODOS PARA ORGANISMO_CONFIG
     # ==========================================================================
+
+    def set_site_processing_pause(
+        self,
+        *,
+        site_id: str,
+        reason: Optional[str] = None,
+        expires_at: Optional[str] = None,
+    ) -> None:
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            now = datetime.now().isoformat()
+            cursor.execute(
+                """
+                INSERT INTO site_processing_pauses (site_id, reason, created_at, updated_at, expires_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(site_id) DO UPDATE SET
+                    reason = excluded.reason,
+                    updated_at = excluded.updated_at,
+                    expires_at = excluded.expires_at
+                """,
+                (
+                    str(site_id),
+                    (reason or "").strip() or None,
+                    now,
+                    now,
+                    (expires_at or "").strip() or None,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def clear_site_processing_pause(self, *, site_id: str) -> bool:
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                DELETE FROM site_processing_pauses
+                WHERE site_id = ?
+                """,
+                (str(site_id),),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def is_site_processing_paused(self, *, site_id: str) -> bool:
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            now = datetime.now().isoformat()
+            cursor.execute(
+                """
+                SELECT 1
+                FROM site_processing_pauses
+                WHERE site_id = ?
+                  AND (expires_at IS NULL OR expires_at > ?)
+                LIMIT 1
+                """,
+                (str(site_id), now),
+            )
+            return cursor.fetchone() is not None
+        finally:
+            conn.close()
+
+    def list_site_processing_pauses(self, *, active_only: bool = True) -> list[Dict[str, Any]]:
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            now = datetime.now().isoformat()
+            if active_only:
+                cursor.execute(
+                    """
+                    SELECT site_id, reason, created_at, updated_at, expires_at
+                    FROM site_processing_pauses
+                    WHERE expires_at IS NULL OR expires_at > ?
+                    ORDER BY site_id ASC
+                    """,
+                    (now,),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT site_id, reason, created_at, updated_at, expires_at
+                    FROM site_processing_pauses
+                    ORDER BY site_id ASC
+                    """
+                )
+            return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def set_resource_processing_pause(
+        self,
+        *,
+        site_id: str,
+        resource_id: int,
+        reason: Optional[str] = None,
+        expires_at: Optional[str] = None,
+    ) -> None:
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            now = datetime.now().isoformat()
+            cursor.execute(
+                """
+                INSERT INTO resource_processing_pauses (site_id, resource_id, reason, created_at, updated_at, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(site_id, resource_id) DO UPDATE SET
+                    reason = excluded.reason,
+                    updated_at = excluded.updated_at,
+                    expires_at = excluded.expires_at
+                """,
+                (
+                    str(site_id),
+                    int(resource_id),
+                    (reason or "").strip() or None,
+                    now,
+                    now,
+                    (expires_at or "").strip() or None,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def clear_resource_processing_pause(self, *, site_id: str, resource_id: int) -> bool:
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                DELETE FROM resource_processing_pauses
+                WHERE site_id = ?
+                  AND resource_id = ?
+                """,
+                (str(site_id), int(resource_id)),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def is_resource_processing_paused(self, *, site_id: str, resource_id: int) -> bool:
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            now = datetime.now().isoformat()
+            cursor.execute(
+                """
+                SELECT 1
+                FROM resource_processing_pauses
+                WHERE site_id = ?
+                  AND resource_id = ?
+                  AND (expires_at IS NULL OR expires_at > ?)
+                LIMIT 1
+                """,
+                (str(site_id), int(resource_id), now),
+            )
+            return cursor.fetchone() is not None
+        finally:
+            conn.close()
+
+    def list_resource_processing_pauses(self, *, active_only: bool = True) -> list[Dict[str, Any]]:
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            now = datetime.now().isoformat()
+            if active_only:
+                cursor.execute(
+                    """
+                    SELECT site_id, resource_id, reason, created_at, updated_at, expires_at
+                    FROM resource_processing_pauses
+                    WHERE expires_at IS NULL OR expires_at > ?
+                    ORDER BY site_id ASC, resource_id ASC
+                    """,
+                    (now,),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT site_id, resource_id, reason, created_at, updated_at, expires_at
+                    FROM resource_processing_pauses
+                    ORDER BY site_id ASC, resource_id ASC
+                    """
+                )
+            return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def remove_pending_queue_item(self, *, site_id: str, resource_id: int) -> Dict[str, Any]:
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            cursor.execute("BEGIN IMMEDIATE")
+            cursor.execute(
+                """
+                SELECT id, status, payload
+                FROM tramite_queue
+                WHERE site_id = ?
+                  AND resource_id = ?
+                  AND status IN ('pending', 'processing')
+                ORDER BY created_at ASC
+                LIMIT 1
+                """,
+                (str(site_id), int(resource_id)),
+            )
+            row = cursor.fetchone()
+            if not row:
+                conn.commit()
+                return {"removed": False, "reason": "not_found"}
+
+            status = str(row["status"])
+            if status != "pending":
+                conn.commit()
+                return {"removed": False, "reason": f"status_{status}"}
+
+            queue_ref = int(row["id"])
+            payload_raw = row["payload"] or "{}"
+            try:
+                payload_obj = json.loads(payload_raw)
+            except Exception:
+                payload_obj = {}
+            job_id = str(payload_obj.get("job_id") or f"sqlite-task-{queue_ref}")
+
+            cursor.execute("DELETE FROM tramite_queue WHERE id = ?", (queue_ref,))
+            conn.commit()
+            return {"removed": True, "queue_ref": queue_ref, "job_id": job_id}
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _parse_iso_datetime(value: Any) -> Optional[datetime]:
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        if raw.endswith("Z"):
+            raw = raw[:-1] + "+00:00"
+        try:
+            return datetime.fromisoformat(raw)
+        except Exception:
+            return None
 
     def get_active_organismo_configs(self) -> list[Dict[str, Any]]:
         """
@@ -585,6 +1388,82 @@ class SQLiteDatabase:
         finally:
             conn.close()
     
+    def get_organismo_config(self, site_id: str) -> Optional[Dict[str, Any]]:
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, site_id, query_organisme, filtro_texp, regex_expediente,
+                       login_url, recursos_url, active, last_sync_at, created_at, updated_at
+                FROM organismo_config
+                WHERE site_id = ?
+                LIMIT 1
+                """,
+                (str(site_id),),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def list_organismo_configs(self) -> list[Dict[str, Any]]:
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, site_id, query_organisme, filtro_texp, regex_expediente,
+                       login_url, recursos_url, active, last_sync_at, created_at, updated_at
+                FROM organismo_config
+                ORDER BY site_id ASC
+                """
+            )
+            return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def update_organismo_config(self, site_id: str, updates: Dict[str, Any]) -> bool:
+        allowed_fields = {
+            "query_organisme",
+            "filtro_texp",
+            "regex_expediente",
+            "login_url",
+            "recursos_url",
+            "active",
+            "last_sync_at",
+        }
+        clean_updates = {k: v for k, v in updates.items() if k in allowed_fields}
+        if not clean_updates:
+            return False
+
+        set_parts = []
+        params: list[Any] = []
+        for key, value in clean_updates.items():
+            set_parts.append(f"{key} = ?")
+            params.append(value)
+
+        set_parts.append("updated_at = ?")
+        params.append(datetime.now().isoformat())
+        params.append(str(site_id))
+
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"UPDATE organismo_config SET {', '.join(set_parts)} WHERE site_id = ?",
+                params,
+            )
+            conn.commit()
+            if cursor.rowcount > 0:
+                return True
+            cursor.execute("SELECT 1 FROM organismo_config WHERE site_id = ? LIMIT 1", (str(site_id),))
+            return cursor.fetchone() is not None
+        finally:
+            conn.close()
+
     def update_last_sync(self, site_id: str) -> None:
         """Actualiza el timestamp de última sincronización."""
         conn = self.get_connection()
@@ -829,14 +1708,23 @@ class SQLiteDatabase:
              
             site_id = row["site_id"]
             resource_id = row["resource_id"]
+            payload = json.loads(row["payload"])
+            protocol = payload.get("protocol") or payload.get("naturaleza")
+            if protocol is not None:
+                protocol = str(protocol).strip() or None
+            if site_id == "base_online" and protocol:
+                protocol = protocol.upper()
+            if site_id == "base_online" and not protocol:
+                raise ValueError(
+                    f"pending_id={pending_id}: falta protocol en payload para site_id=base_online"
+                )
             queue_backend = (os.getenv("QUEUE_BACKEND", "sqlite") or "sqlite").strip().lower()
             if queue_backend == "redis":
                 from core.queue_gateway import build_queue_gateway
 
-                payload = json.loads(row["payload"])
                 queue_gateway = build_queue_gateway(backend=queue_backend, db=self)
                 enqueued, job_id = asyncio.run(
-                    queue_gateway.enqueue(site_id=site_id, protocol=None, payload=payload)
+                    queue_gateway.enqueue(site_id=site_id, protocol=protocol, payload=payload)
                 )
                 new_task_id = -1
                 self.logger.info(
@@ -849,10 +1737,10 @@ class SQLiteDatabase:
                 try:
                     cursor.execute(
                         """
-                        INSERT INTO tramite_queue (site_id, resource_id, payload)
-                        VALUES (?, ?, ?)
+                        INSERT INTO tramite_queue (site_id, protocol, resource_id, payload)
+                        VALUES (?, ?, ?, ?)
                         """,
-                        (site_id, resource_id, row["payload"]),
+                        (site_id, protocol, resource_id, row["payload"]),
                     )
                     new_task_id = cursor.lastrowid
                 except sqlite3.IntegrityError:

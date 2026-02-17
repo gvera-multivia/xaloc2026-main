@@ -14,7 +14,7 @@ import os
 class BrowserConfig:
     """Configuración del navegador Playwright."""
 
-    headless: bool = False
+    headless: bool = field(default_factory=lambda: os.getenv("XALOC_HEADLESS", "0") == "1")
     perfil_path: Path = Path("profiles/edge")
     canal: str = "msedge"
     certificado_cn: str = os.getenv("certificado_cn", "")
@@ -57,6 +57,9 @@ class BaseConfig:
     disable_translate_ui: bool = True
     auto_select_certificate: bool = True
     auto_select_certificate_pattern: str = "*"
+    autofirma_auto_open: bool = field(default_factory=lambda: os.getenv("XALOC_AUTOFIRMA_AUTO_OPEN", "1") == "1")
+    autofirma_protocol: str = field(default_factory=lambda: os.getenv("XALOC_AUTOFIRMA_PROTOCOL", "afirma"))
+    autofirma_origin: str = field(default_factory=lambda: os.getenv("XALOC_AUTOFIRMA_ORIGIN", "https://palma.sedipualba.es"))
     stealth_disable_webdriver: bool = False
 
     # Delays (milisegundos)

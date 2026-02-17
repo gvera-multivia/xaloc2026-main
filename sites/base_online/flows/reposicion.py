@@ -1,4 +1,4 @@
-"""
+﻿"""
 Flujo para el formulario de Recurso de Reposición (P3).
 """
 
@@ -29,7 +29,7 @@ def _normalizar_tipus_objecte(raw: str) -> str:
 
 
 async def _avanzar_a_presentacion_p3(page: Page) -> None:
-    logging.info("[P3] Continuando al paso de presentación...")
+    logging.info("[P3] Continuando al paso de presentacion...")
     await page.locator("input[type='submit'][name='form0:j_id66'][value='Continuar']").first.click()
     await page.wait_for_timeout(500)
     await page.wait_for_load_state("domcontentloaded")
@@ -46,7 +46,7 @@ async def rellenar_formulario_p3(
     *,
     payload: dict,
 ) -> None:
-    logging.info("[P3] Rellenando formulario de Recurso de Reposición...")
+    logging.info("[P3] Rellenando formulario de Recurso de Reposicion...")
     delay_ms = getattr(config, "delay_ms", 500)
 
     # 1. Inputs radio: tipo de objeto
@@ -62,7 +62,7 @@ async def rellenar_formulario_p3(
     await page.wait_for_timeout(delay_ms)
 
     # 2. Dades específiques
-    logging.info("[P3] Introduciendo datos específicos...")
+    logging.info("[P3] Introduciendo datos especificos...")
     await page.locator(config.p3_textarea_dades).first.fill(data.dades_especifiques)
     await page.wait_for_timeout(delay_ms)
 
@@ -72,7 +72,7 @@ async def rellenar_formulario_p3(
     await page.wait_for_timeout(delay_ms)
 
     # 4. Exposición
-    logging.info("[P3] Introduciendo exposición...")
+    logging.info("[P3] Introduciendo exposicion...")
     await page.locator(config.p3_textarea_exposo).first.fill(data.exposo)
     await page.wait_for_timeout(delay_ms)
 
@@ -82,7 +82,7 @@ async def rellenar_formulario_p3(
     await page.wait_for_timeout(delay_ms)
 
     # 6. Botón Continuar (Página 1 -> Página Documentos)
-    logging.info("[P3] Pulsando el botón de continuar...")
+    logging.info("[P3] Pulsando el boton de continuar...")
     await page.locator(config.p3_button_continuar).first.click()
     await page.wait_for_timeout(delay_ms)
     await page.wait_for_load_state("domcontentloaded")

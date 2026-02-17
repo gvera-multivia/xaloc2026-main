@@ -34,6 +34,11 @@ SITES: dict[str, SiteDefinition] = {
         automation_path="sites.madrid.automation:MadridAutomation",
         controller_path="sites.madrid.controller:get_controller",
     ),
+    "ayunta_palma": SiteDefinition(
+        site_id="ayunta_palma",
+        automation_path="sites.ayunta_palma.automation:AyuntaPalmaAutomation",
+        controller_path="sites.ayunta_palma.controller:get_controller",
+    ),
 }
 
 

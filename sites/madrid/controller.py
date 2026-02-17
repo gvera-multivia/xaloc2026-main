@@ -155,7 +155,7 @@ class MadridController:
                 numero_documento=_require("notif_numero_documento", notif_numero_documento),
                 nombre=_require("notif_nombre", notif_nombre),
                 apellido1=_require("notif_apellido1", notif_apellido1),
-                apellido2=_require("notif_apellido2", notif_apellido2),
+                apellido2=(notif_apellido2 or "").strip(),
                 razon_social=(notif_razon_social or "").strip(),
             ),
             direccion=DireccionData(

@@ -26,7 +26,7 @@ class QueueGateway(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def reserve(self, *, timeout_seconds: int = 10) -> Optional[QueueJob]:
+    async def reserve(self, *, timeout_seconds: int = 10, worker_id: Optional[str] = None) -> Optional[QueueJob]:
         raise NotImplementedError
 
     @abstractmethod
@@ -35,6 +35,14 @@ class QueueGateway(ABC):
 
     @abstractmethod
     async def nack(self, job: QueueJob, *, error: str, retryable: bool = False) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def release(self, job: QueueJob, *, reason: str = "") -> None:
+        """
+        Devuelve un job reservado a pendiente/lista sin penalizar intentos.
+        Pensado para interrupciones manuales (Ctrl+C).
+        """
         raise NotImplementedError
 
     @abstractmethod
@@ -71,7 +79,7 @@ class SQLiteQueueGateway(QueueGateway):
         )
         return enqueued, job_id
 
-    async def reserve(self, *, timeout_seconds: int = 10) -> Optional[QueueJob]:
+    async def reserve(self, *, timeout_seconds: int = 10, worker_id: Optional[str] = None) -> Optional[QueueJob]:
         task = self.db.get_pending_task()
         if not task:
             return None
@@ -88,7 +96,13 @@ class SQLiteQueueGateway(QueueGateway):
         run = self.db.get_job_run(job_id)
         attempt = int((run or {}).get("attempt", 0))
         max_attempts = int((run or {}).get("max_attempts", 3))
-        self.db.update_job_run_state(job_id, "processing", started=True, attempt=attempt)
+        self.db.update_job_run_state(
+            job_id,
+            "processing",
+            started=True,
+            attempt=attempt,
+            worker_id=(str(worker_id).strip() if worker_id else None),
+        )
         return QueueJob(
             job_id=job_id,
             site_id=site_id,
@@ -106,11 +120,10 @@ class SQLiteQueueGateway(QueueGateway):
         self.db.update_job_run_state(job.job_id, "completed", finished=True, result_snapshot=result)
 
     async def nack(self, job: QueueJob, *, error: str, retryable: bool = False) -> None:
-        if job.queue_ref is not None:
-            self.db.update_task_status(job.queue_ref, "failed", error=error)
-
         next_attempt = int(job.attempt) + 1
         if retryable and next_attempt < int(job.max_attempts):
+            if job.queue_ref is not None:
+                self.db.requeue_task(job.queue_ref, error=error)
             self.db.update_job_run_state(
                 job.job_id,
                 "queued",
@@ -119,6 +132,9 @@ class SQLiteQueueGateway(QueueGateway):
             )
             return
 
+        if job.queue_ref is not None:
+            self.db.update_task_status(job.queue_ref, "failed", error=error)
+
         final_state = "dead" if retryable else "failed"
         self.db.update_job_run_state(
             job.job_id,
@@ -126,6 +142,16 @@ class SQLiteQueueGateway(QueueGateway):
             attempt=next_attempt,
             finished=True,
             error_message=error,
+        )
+
+    async def release(self, job: QueueJob, *, reason: str = "") -> None:
+        if job.queue_ref is not None:
+            self.db.release_task_to_pending(job.queue_ref, error=reason or "worker_interrupted_ctrl_c")
+        self.db.update_job_run_state(
+            job.job_id,
+            "queued",
+            attempt=int(job.attempt),
+            error_message=(reason or "worker_interrupted_ctrl_c"),
         )
 
     def count_ready(self, site_id: str) -> int:
@@ -139,4 +165,3 @@ def build_queue_gateway(*, backend: Optional[str], db: SQLiteDatabase):
 
         return RedisQueueGateway(db=db)
     return SQLiteQueueGateway(db=db)
-

@@ -1,5 +1,5 @@
-"""
-Automatización principal para Madrid Ayuntamiento.
+﻿"""
+AutomatizaciÃ³n principal para Madrid Ayuntamiento.
 """
 
 from __future__ import annotations
@@ -7,17 +7,17 @@ from __future__ import annotations
 from pathlib import Path
 
 from core.base_automation import BaseAutomation
-from core.errors import RestartRequiredError
+from core.errors import RestartRequiredError, RestartWithProfileResetError
 from sites.madrid.config import MadridConfig
 from sites.madrid.data_models import MadridTarget
 from sites.madrid.flows import ejecutar_navegacion_madrid, ejecutar_formulario_madrid, ejecutar_upload_madrid, ejecutar_firma_madrid
-from sites.madrid.flows.firma import MadridFirmaNonFatalError
+from sites.madrid.flows.firma import MadridFirmaNonFatalError, MadridJustificantePostEnvioNoDisponible
 
 
 class MadridAutomation(BaseAutomation):
     """
-    Clase de automatización para el sitio Madrid Ayuntamiento.
-    Extiende BaseAutomation siguiendo el patrón del proyecto.
+    Clase de automatizaciÃ³n para el sitio Madrid Ayuntamiento.
+    Extiende BaseAutomation siguiendo el patrÃ³n del proyecto.
     """
     
     def __init__(self, config: MadridConfig):
@@ -26,16 +26,16 @@ class MadridAutomation(BaseAutomation):
 
     async def ejecutar_flujo_completo(self, datos: MadridTarget) -> str:
         """
-        Ejecuta el flujo completo de automatización para Madrid.
+        Ejecuta el flujo completo de automatizaciÃ³n para Madrid.
         
         Fases implementadas:
-        - FASE 1: Navegación hasta el formulario (11 pasos)
+        - FASE 1: NavegaciÃ³n hasta el formulario (11 pasos)
         - FASE 2: Rellenado del formulario (8 secciones)
         - FASE 3: Subida de documentos (adjuntos)
-        - FASE 4: Firma y verificación de documento
+        - FASE 4: Firma y verificaciÃ³n de documento
         
         Args:
-            datos: Datos del trámite (MadridTarget)
+            datos: Datos del trÃ¡mite (MadridTarget)
             
         Returns:
             str: Ruta al screenshot final
@@ -46,16 +46,17 @@ class MadridAutomation(BaseAutomation):
         for intento in range(2):
             try:
                 # ================================================================
-                # FASE 1: NAVEGACIÓN HASTA EL FORMULARIO
+                # FASE 1: NAVEGACIÃ“N HASTA EL FORMULARIO
                 # ================================================================
                 self.logger.info("\n" + "=" * 80)
-                self.logger.info("FASE 1: NAVEGACIÓN HASTA EL FORMULARIO")
+                self.logger.info("FASE 1: NAVEGACIAN HASTA EL FORMULARIO")
                 self.logger.info("=" * 80)
 
                 self.page = await ejecutar_navegacion_madrid(self.page, self.config)
+                await self.sync_screencast_with_page()
 
                 self.logger.info("\n" + "=" * 80)
-                self.logger.info("NAVEGACIÓN COMPLETADA - Formulario alcanzado")
+                self.logger.info("NAVEGACIAN COMPLETADA - Formulario alcanzado")
                 self.logger.info("=" * 80)
 
                 # ================================================================
@@ -71,12 +72,13 @@ class MadridAutomation(BaseAutomation):
                         self.config,
                         datos.form_data,
                     )
+                    await self.sync_screencast_with_page()
 
                     self.logger.info("\n" + "=" * 80)
                     self.logger.info("FORMULARIO COMPLETADO - Pantalla de adjuntos alcanzada")
                     self.logger.info("=" * 80)
                 else:
-                    self.logger.info("\n⚠ Sin datos de formulario, saltando FASE 2")
+                    self.logger.info("\nas Sin datos de formulario, saltando FASE 2")
 
                 # ================================================================
                 # FASE 3: SUBIDA DE DOCUMENTOS (adjuntos)
@@ -86,14 +88,15 @@ class MadridAutomation(BaseAutomation):
                     self.logger.info("FASE 3: SUBIDA DE DOCUMENTOS")
                     self.logger.info("=" * 80)
                     self.page = await ejecutar_upload_madrid(self.page, self.config, datos.archivos_adjuntos)
+                    await self.sync_screencast_with_page()
                 else:
-                    self.logger.info("\nƒsÿ Sin adjuntos, saltando FASE 3")
+                    self.logger.info("\nsA Sin adjuntos, saltando FASE 3")
 
                 # ================================================================
-                # FASE 4: FIRMA Y VERIFICACIÓN DE DOCUMENTO
+                # FASE 4: FIRMA Y VERIFICACIÃ“N DE DOCUMENTO
                 # ================================================================
                 self.logger.info("\n" + "=" * 80)
-                self.logger.info("FASE 4: FIRMA Y VERIFICACIÓN DE DOCUMENTO")
+                self.logger.info("FASE 4: FIRMA Y VERIFICACIAN DE DOCUMENTO")
                 self.logger.info("=" * 80)
                 
                 # Construir ruta de destino para el documento verificado
@@ -107,12 +110,14 @@ class MadridAutomation(BaseAutomation):
                         destino_verificacion,
                         datos.payload,
                     )
+                    await self.sync_screencast_with_page()
                 except MadridFirmaNonFatalError as e:
-                    self.logger.warning("Firma/envío completado con incidencias no fatales: %s", e)
-                    self.mark_nonfatal_issue()
+                    self.logger.warning("Firma/envAo completado con incidencias no fatales: %s", e)
+                    if not isinstance(e, MadridJustificantePostEnvioNoDisponible):
+                        self.mark_nonfatal_issue()
                 
                 self.logger.info("\n" + "=" * 80)
-                self.logger.info("FIRMA Y VERIFICACIÓN COMPLETADA")
+                self.logger.info("FIRMA Y VERIFICACIAN COMPLETADA")
                 self.logger.info("=" * 80)
 
                 # ================================================================
@@ -121,25 +126,29 @@ class MadridAutomation(BaseAutomation):
                 filename = "madrid_formulario_completo.png"
                 path = self.config.dir_screenshots / filename
                 await self.page.screenshot(path=path, full_page=True)
-                self.logger.info(f"\n✓ Screenshot guardado: {path}")
+                self.logger.info(f"\nOK Screenshot guardado: {path}")
 
                 return str(Path(path))
 
             except RestartRequiredError as e:
                 self.logger.warning(
-                    f"\n↻ Reinicio requerido por 'trámite en curso': {e} (intento {intento + 1}/2)"
+                    f"\n[RESTART] Reinicio requerido por 'tramite en curso': {e} (intento {intento + 1}/2)"
                 )
                 await self.capture_error_screenshot("madrid_restart_required.png")
                 if intento >= 1:
                     raise
-                await self.restart_browser()
+                if isinstance(e, RestartWithProfileResetError):
+                    await self.restart_browser_with_clean_profile()
+                else:
+                    await self.restart_browser()
                 if not self.page:
                     raise RuntimeError("No se pudo reiniciar el navegador (page es None).") from e
                 continue
 
             except Exception as e:
-                self.logger.error(f"\n✗ Error durante la automatización: {e}")
+                self.logger.error(f"\nERROR durante la automatizacion: {e}")
                 await self.capture_error_screenshot("madrid_error.png")
                 raise
 
-        raise RuntimeError("No se pudo completar la automatización tras reiniciar el navegador.")
+        raise RuntimeError("No se pudo completar la automatizaciÃ³n tras reiniciar el navegador.")
+

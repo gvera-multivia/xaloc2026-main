@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 import re
@@ -212,25 +212,44 @@ async def _descargar_pdf_via_fetch(page: Page, url: str) -> bytes:
 
 
 async def _click_y_capturar_descarga_o_popup(page: Page, link_locator) -> tuple[Any | None, Page | None]:
-    popup_task = asyncio.create_task(page.wait_for_event("popup", timeout=15000))
-    download_task = asyncio.create_task(page.wait_for_event("download", timeout=15000))
+    # Aumentamos el timeout a 45s porque BASE puede tardar tras la firma.
+    event_timeout = 45000
+    popup_task = asyncio.create_task(page.wait_for_event("popup", timeout=event_timeout))
+    download_task = asyncio.create_task(page.wait_for_event("download", timeout=event_timeout))
+    
     try:
         try:
             await link_locator.scroll_into_view_if_needed(timeout=2000)
         except Exception:
             pass
 
+        # Pequeña pausa para asegurar estabilidad antes del click
+        await page.wait_for_timeout(2000)
+
+        # Intentar obtener info del elemento para logs
         try:
-            await link_locator.click(timeout=5000)
+            tag = await link_locator.evaluate("el => el.tagName")
+            text = await link_locator.inner_text()
+            logger.info(f"[BASE] Haciendo click en justificante ({tag}: '{text.strip()}')")
         except Exception:
-            # Fallback: dispara el click desde el DOM para esquivar overlays / pointer intercept.
+            logger.info("[BASE] Haciendo click en justificante (tag/texto no disponible)")
+
+        try:
+            await link_locator.click(timeout=10000)
+        except Exception:
+            # Fallback: dispara el click desde el DOM
             await link_locator.evaluate("(el) => el.click()")
     except Exception:
         popup_task.cancel()
         download_task.cancel()
         raise
 
-    done, pending = await asyncio.wait({popup_task, download_task}, return_when=asyncio.FIRST_COMPLETED)
+    done, pending = await asyncio.wait(
+        {popup_task, download_task}, 
+        return_when=asyncio.FIRST_COMPLETED,
+        timeout=event_timeout / 1000 + 5
+    )
+    
     for task in pending:
         task.cancel()
 
@@ -244,9 +263,12 @@ async def _click_y_capturar_descarga_o_popup(page: Page, link_locator) -> tuple[
         if result is None:
             continue
         if hasattr(result, "save_as"):
+            logger.info("[BASE] Evento DETECTADO: download")
             download = result
         else:
+            logger.info("[BASE] Evento DETECTADO: popup (nueva pestaña)")
             popup = result
+
     return download, popup
 
 
@@ -283,10 +305,13 @@ async def _find_justificante_action_locator(page: Page, *, timeout_ms: int = 600
                     frame.locator("button").filter(has_text=justificant_registre_re),
                     frame.locator("button[onclick*='justificant']"),
                 ]
-                for locator in candidates:
+                for i, locator in enumerate(candidates):
                     if await locator.count() > 0:
                         first = locator.first
                         try:
+                            # Loguear qué candidato ha funcionado para referencia futura
+                            text = await first.inner_text()
+                            logger.info(f"[BASE] Candidato justificante #{i+1} encontrado: '{text.strip()}'")
                             await first.wait_for(state="attached", timeout=2000)
                         except Exception:
                             pass
@@ -338,6 +363,62 @@ async def _descargar_desde_popup_visor(popup_doc: Page, tmp_path: Path) -> bool:
     return False
 
 
+async def _descargar_desde_modal_visor_embebido(page: Page, tmp_path: Path) -> bool:
+    """
+    BASE puede abrir el visor en modal embebido (#visorGEA) con iframe
+    #contingut_modal_visorGEA, sin popup de ventana.
+    """
+    modal = page.locator("#visorGEA").first
+    iframe_node = page.locator("#contingut_modal_visorGEA").first
+
+    try:
+        await modal.wait_for(state="visible", timeout=15000)
+        await iframe_node.wait_for(state="attached", timeout=15000)
+        await page.wait_for_function(
+            """() => {
+              const f = document.getElementById('contingut_modal_visorGEA');
+              return !!f && !!f.getAttribute('src') && f.getAttribute('src') !== 'about:blank';
+            }""",
+            timeout=15000,
+        )
+    except Exception:
+        return False
+
+    frame = page.frame_locator("#contingut_modal_visorGEA").first
+
+    # Opcion 1: click directo en enlace CSV.
+    try:
+        csv_link = frame.locator("a[onclick*='descarrega(true)']").first
+        if await csv_link.count() > 0:
+            async with page.expect_download(timeout=20000) as dl_info:
+                await csv_link.click()
+            download = await dl_info.value
+            await download.save_as(tmp_path)
+            return True
+    except Exception:
+        pass
+
+    # Opcion 2: fallback JS dentro del iframe.
+    try:
+        async with page.expect_download(timeout=20000) as dl_info:
+            await frame.evaluate(
+                """() => {
+                  if (typeof descarrega === 'function') {
+                    descarrega(true);
+                    return true;
+                  }
+                  return false;
+                }"""
+            )
+        download = await dl_info.value
+        await download.save_as(tmp_path)
+        return True
+    except Exception:
+        pass
+
+    return False
+
+
 async def _find_signar_presentar_trigger(page: Page, *, timeout_ms: int = 30000):
     candidates = [
         page.locator("input[type='button'][value='Signar i Presentar']"),
@@ -376,6 +457,7 @@ async def firmar_presentar_y_descargar_justificante(page: Page, *, payload: dict
 
     logger.info("[BASE] Abriendo popup de firma...")
     await _abrir_modal_firma(page, trigger)
+    await page.wait_for_timeout(3000)
     popup_frame = page.frame_locator("#contingut_signatura").first
 
     logger.info("[BASE] Confirmando checkbox en popup...")
@@ -385,16 +467,19 @@ async def firmar_presentar_y_descargar_justificante(page: Page, *, payload: dict
         await checkbox.check()
     except Exception:
         await checkbox.click()
+    await page.wait_for_timeout(3000)
 
     logger.info("[BASE] Click en 'Signar' dentro del popup...")
     sig_button = popup_frame.locator("#form_0\\:sig_button").first
     await sig_button.wait_for(state="visible", timeout=POPUP_TIMEOUT_MS)
     await sig_button.click()
+    await page.wait_for_timeout(3000)
 
     logger.info("[BASE] Cerrando popup (Continuar)...")
     close_button = popup_frame.locator("#form_0\\:close_button").first
     await close_button.wait_for(state="visible", timeout=POPUP_TIMEOUT_MS)
     await close_button.click()
+    await page.wait_for_timeout(3000)
 
     # Esperar a que el modal se cierre en la página principal.
     try:
@@ -412,7 +497,7 @@ async def firmar_presentar_y_descargar_justificante(page: Page, *, payload: dict
     except Exception:
         pass
 
-    logger.info("[BASE] Esperando mensaje de éxito tras cerrar popup...")
+    logger.info("[BASE] Esperando mensaje de exito tras cerrar popup...")
     success = page.locator("div.success").first
     await success.wait_for(state="visible", timeout=SUCCESS_TIMEOUT_MS)
     success_text = (await success.inner_text()).strip()
@@ -439,31 +524,34 @@ async def firmar_presentar_y_descargar_justificante(page: Page, *, payload: dict
         await download.save_as(tmp_path)
     else:
         if popup_doc is None:
-            raise TimeoutError("No se detectó ni descarga ni popup del justificante.")
-        try:
-            await popup_doc.wait_for_load_state("domcontentloaded")
-        except Exception:
-            pass
+            ok_modal_download = await _descargar_desde_modal_visor_embebido(page, tmp_path)
+            if not ok_modal_download:
+                raise TimeoutError("No se detecto descarga, popup ni modal visor del justificante.")
+        else:
+            try:
+                await popup_doc.wait_for_load_state("domcontentloaded")
+            except Exception:
+                pass
 
-        try:
-            await popup_doc.wait_for_function(
-                "() => location.href && location.href !== 'about:blank'",
-                timeout=30000,
-            )
-        except Exception:
-            pass
+            try:
+                await popup_doc.wait_for_function(
+                    "() => location.href && location.href !== 'about:blank'",
+                    timeout=30000,
+                )
+            except Exception:
+                pass
 
-        ok_popup_download = await _descargar_desde_popup_visor(popup_doc, tmp_path)
-        if not ok_popup_download:
-            url = popup_doc.url or ""
-            if not url or url == "about:blank":
-                raise RuntimeError("Popup del justificante sin URL válida (about:blank).")
-            pdf_bytes = await _descargar_pdf_via_fetch(popup_doc, url)
-            tmp_path.write_bytes(pdf_bytes)
-        try:
-            await popup_doc.close()
-        except Exception:
-            pass
+            ok_popup_download = await _descargar_desde_popup_visor(popup_doc, tmp_path)
+            if not ok_popup_download:
+                url = popup_doc.url or ""
+                if not url or url == "about:blank":
+                    raise RuntimeError("Popup del justificante sin URL valida (about:blank).")
+                pdf_bytes = await _descargar_pdf_via_fetch(popup_doc, url)
+                tmp_path.write_bytes(pdf_bytes)
+            try:
+                await popup_doc.close()
+            except Exception:
+                pass
 
     pdf_bytes = tmp_path.read_bytes()
     if not pdf_bytes.startswith(b"%PDF"):

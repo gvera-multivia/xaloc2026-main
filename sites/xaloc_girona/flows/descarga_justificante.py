@@ -1,4 +1,4 @@
-"""
+﻿"""
 Flujo de descarga del justificante de registro tras el envío del trámite.
 """
 
@@ -32,7 +32,7 @@ async def _esperar_iframe_cargado(page: Page) -> None:
     """
     Espera a que el iframe del justificante esté presente y cargado.
     """
-    logger.info("Esperando a que el iframe del justificante esté cargado...")
+    logger.info("Esperando a que el iframe del justificante este cargado...")
     
     iframe_locator = page.locator("iframe#iframeJustif")
     await iframe_locator.wait_for(state="attached", timeout=IFRAME_LOAD_TIMEOUT_MS)
@@ -71,7 +71,7 @@ async def _obtener_url_justificante(page: Page) -> str:
     if not url:
         raise ValueError("No se pudo extraer la URL del justificante desde el iframe")
     
-    logger.info(f"URL del justificante extraída: {url}")
+    logger.info(f"URL del justificante extraida: {url}")
     return str(url)
 
 
@@ -89,7 +89,7 @@ async def _descargar_pdf_desde_url(page: Page, url: str, destino: Path) -> None:
         url: URL del justificante
         destino: Ruta donde guardar el PDF temporalmente
     """
-    logger.info(f"Descargando justificante vía fetch interno desde: {url}")
+    logger.info(f"Descargando justificante via fetch interno desde: {url}")
     
     try:
         # Script JS para descargar el archivo como Base64 sin navegar
@@ -120,11 +120,11 @@ async def _descargar_pdf_desde_url(page: Page, url: str, destino: Path) -> None:
             f.write(pdf_bytes)
         
         file_size = destino.stat().st_size
-        logger.info(f"✓ Archivo recuperado con éxito ({file_size} bytes)")
+        logger.info(f"OK Archivo recuperado con exito ({file_size} bytes)")
         
         # Validación de tamaño
         if file_size < 2000:
-            logger.warning("⚠️ El archivo es sospechosamente pequeño, revisa el contenido.")
+            logger.warning("WARN El archivo es sospechosamente pequeno, revisa el contenido.")
         
     except Exception as e:
         logger.error(f"Error en la descarga por fetch: {e}")
@@ -242,13 +242,13 @@ def _find_or_create_subfolder(base_path: Path, folder_name: str) -> Path:
     if base_path.exists():
         for item in base_path.iterdir():
             if item.is_dir() and _folder_matches(item.name, folder_name):
-                logger.info(f"✓ Carpeta encontrada: {item.name}")
+                logger.info(f"OK Carpeta encontrada: {item.name}")
                 return item
     
     # No se encontró, crear con nombre estandarizado
     new_folder = base_path / folder_name
     new_folder.mkdir(parents=True, exist_ok=True)
-    logger.info(f"✓ Carpeta creada: {folder_name}")
+    logger.info(f"OK Carpeta creada: {folder_name}")
     
     return new_folder
 
@@ -286,7 +286,7 @@ def _construir_ruta_recursos_telematicos(payload: dict, fase_procedimiento: Any 
     # Si se proporciona fase_procedimiento, buscar/crear subcarpeta específica
     logger.info(f"DEBUG: fase_procedimiento recibido = '{fase_procedimiento}' (tipo: {type(fase_procedimiento).__name__})")
     if fase_procedimiento:
-        logger.info(f"DEBUG: Entrando en lógica de subcarpeta para fase_procedimiento='{fase_procedimiento}'")
+        logger.info(f"DEBUG: Entrando en logica de subcarpeta para fase_procedimiento='{fase_procedimiento}'")
         try:
             folder_name = _get_folder_name_from_fase(fase_procedimiento)
             logger.info(f"DEBUG: Nombre de carpeta determinado: '{folder_name}'")
@@ -326,24 +326,24 @@ def _renombrar_y_mover_justificante(
     
     # Eliminar archivo existente si existe
     if ruta_final.exists():
-        logger.warning(f"El archivo {ruta_final} ya existe, será sobrescrito")
+        logger.warning(f"El archivo {ruta_final} ya existe, sera sobrescrito")
         ruta_final.unlink()
     
     # Usar shutil.copy2 para copiar entre unidades diferentes
     # En Windows, rename() falla con WinError 17 al intentar mover entre unidades
     try:
         shutil.copy2(temporal, ruta_final)
-        logger.info(f"✓ Justificante copiado exitosamente")
+        logger.info(f"OK Justificante copiado exitosamente")
         
         # Eliminar el archivo temporal después de copiarlo
         temporal.unlink()
-        logger.info(f"✓ Archivo temporal eliminado")
+        logger.info(f"OK Archivo temporal eliminado")
         
     except Exception as e:
         logger.error(f"Error al copiar justificante: {e}")
         raise RuntimeError(f"No se pudo copiar el justificante a {ruta_final}: {e}") from e
     
-    logger.info(f"✓ Justificante guardado en: {ruta_final}")
+    logger.info(f"OK Justificante guardado en: {ruta_final}")
     return ruta_final
 
 
@@ -380,14 +380,14 @@ async def descargar_y_guardar_justificante(page: Page, payload: dict) -> str:
     
     # Reemplazar / y \ por guiones para que Windows no los interprete como carpetas
     num_expediente = str(raw_expediente).replace("/", "-").replace("\\", "-").strip()
-    logger.info(f"Número de expediente procesado: {num_expediente}")
+    logger.info(f"Numero de expediente procesado: {num_expediente}")
     
     # Extraer FaseProcedimiento del payload para determinar la subcarpeta
     fase_procedimiento = payload.get("fase_procedimiento")
     if not fase_procedimiento:
-        logger.warning("No se encontró 'fase_procedimiento' en el payload")
+        logger.warning("No se encontro 'fase_procedimiento' en el payload")
     else:
-        logger.info(f"fase_procedimiento extraído del payload: '{fase_procedimiento}'")
+        logger.info(f"fase_procedimiento extraido del payload: '{fase_procedimiento}'")
     
     try:
         # 1. Esperar a que el iframe esté cargado
@@ -410,7 +410,7 @@ async def descargar_y_guardar_justificante(page: Page, payload: dict) -> str:
             temporal, num_expediente, ruta_recursos
         )
         
-        logger.info(f"✓ Proceso completado: {ruta_final}")
+        logger.info(f"OK Proceso completado: {ruta_final}")
         return str(ruta_final)
         
     except Exception as e:

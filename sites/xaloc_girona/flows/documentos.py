@@ -1,4 +1,4 @@
-"""
+﻿"""
 Flujo de subida de documentos (adjuntos) vía popup uploader.
 """
 
@@ -120,7 +120,7 @@ async def _install_sta_main_hooks(page: Page) -> None:
             }"""
         )
     except Exception as e:
-        logging.warning(f"No se pudo instalar hooks STA en la página principal: {e}")
+        logging.warning(f"No se pudo instalar hooks STA en la pagina principal: {e}")
 
 
 def _sta_sanitize_filename(name: str) -> str:
@@ -312,7 +312,7 @@ async def _seleccionar_archivos(popup: Page, archivos: List[Path]) -> Page | Fra
     try:
         await target.wait_for_selector(selector, state="attached", timeout=30000)
     except TimeoutError:
-        logging.error("No se encontró el input[type='file'] en el popup/frame.")
+        logging.error("No se encontro el input[type='file'] en el popup/frame.")
         await popup.screenshot(path="error_popup_vacio.png")
         raise
 
@@ -367,7 +367,7 @@ async def _seleccionar_archivos(popup: Page, archivos: List[Path]) -> Page | Fra
             if int(files_len or 0) <= 0:
                 raise RuntimeError(f"El input[{input_index}] no retuvo el archivo tras set_input_files()")
         except Exception as e:
-            logging.error(f"Selección no confirmada en input[{input_index}]: {e}")
+            logging.error(f"Seleccion no confirmada en input[{input_index}]: {e}")
             raise
         # Espera corta entre selecciones de archivos
         await popup.wait_for_timeout(500)
@@ -387,7 +387,7 @@ async def _seleccionar_archivos(popup: Page, archivos: List[Path]) -> Page | Fra
     await popup.wait_for_timeout(2000)
     
     # Esperar confirmación de que los archivos se subieron correctamente
-    logging.info("Esperando confirmación de subida...")
+    logging.info("Esperando confirmacion de subida...")
     await _wait_upload_ok(target)
     logging.info(f"Todos los archivos ({len(archivos)}) subidos correctamente")
     await _debug_dump_popup_state(target, label="after_upload_ok", expected_files=expected_names)
@@ -464,7 +464,7 @@ async def _adjuntar_y_continuar(popup: Page, *, ctx: Page | Frame, espera_cierre
     Sincronización Multi-archivo: Convierte la lista completa a Hexadecimal y 
     actualiza el DOM para mostrar todos los adjuntos.
     """
-    logging.info("Esperando confirmación del servidor del popup...")
+    logging.info("Esperando confirmacion del servidor del popup...")
     await _wait_upload_ok(ctx)
 
     # 1. Obtener datos y convertir la LISTA COMPLETA a HEX
@@ -570,11 +570,11 @@ async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]
                 await page.evaluate("document.querySelector('a.docs').click()")
             popup = await popup_info.value
         except Exception as e:
-            logging.error(f"Fallo crítico abriendo el popup: {e}")
+            logging.error(f"Fallo critico abriendo el popup: {e}")
             raise
 
         # 3. PROCESO DE SUBIDA EN EL POPUP
-        logging.info("Popup detectado. Iniciando selección de archivos...")
+        logging.info("Popup detectado. Iniciando seleccion de archivos...")
         try:
             await popup.wait_for_load_state("domcontentloaded")
         except PlaywrightError:
@@ -587,14 +587,14 @@ async def subir_documento(page: Page, archivo: Union[None, Path, Sequence[Path]]
         await _adjuntar_y_continuar(popup, ctx=uploader_ctx, espera_cierre=True)
 
         # 4. FINALIZACIÓN Y ESPERA DE REFRESCO
-        logging.info("Handoff completado. Esperando a que la página principal procese los datos...")
+        logging.info("Handoff completado. Esperando a que la pagina principal procese los datos...")
         # Damos 3 segundos para que el JS de la página principal procese los tokens
         await page.wait_for_timeout(3000)
         
         # Screenshot de verificación final
         try:
             await page.screenshot(path="debug_after_upload_final.png")
-            logging.info("Captura de verificación guardada: debug_after_upload_final.png")
+            logging.info("Captura de verificacion guardada: debug_after_upload_final.png")
         except Exception:
             pass
 

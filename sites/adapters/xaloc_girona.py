@@ -192,7 +192,15 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         return f"ASUNTO: {asunto}\n\nEXPONE: {expone}\n\nSOLICITA: {solicita}"
 
 
-    def fetch_candidates(self, *, config: dict, conn_str: str, authenticated_user: Optional[str], limit: int) -> list[dict]:
+    def fetch_candidates(
+        self,
+        *,
+        config: dict,
+        conn_str: str,
+        authenticated_user: Optional[str],
+        limit: int,
+        on_discard: Optional[SiteAdapter.DiscardCallback] = None,
+    ) -> list[dict]:
         texp_values = [2, 3] # Hardcoded logic from xaloc_task.py
         texp_placeholders = ",".join(["?"] * len(texp_values))
         
@@ -300,6 +308,19 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                                 conn.rollback()
 
                 if not is_valid:
+                    if on_discard:
+                        try:
+                            on_discard(
+                                {
+                                    "site_id": self.site_id,
+                                    "idRecurso": rid,
+                                    "Expedient": expediente_raw,
+                                    "tipo_incidencia": "REGEX_DISCARDED",
+                                    "motivo": f"Expediente no valido para xaloc_girona: {expediente_raw}",
+                                }
+                            )
+                        except Exception:
+                            pass
                     continue  # Descartar si el formato sigue siendo inválido
 
                 # 2. Regla de usuario asignado
@@ -313,7 +334,11 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         finally:
             conn.close()
 
-    async def build_payloads(self, candidates: list[dict]) -> list[dict]:
+    async def build_payloads(
+        self,
+        candidates: list[dict],
+        on_discard: Optional[SiteAdapter.DiscardCallback] = None,
+    ) -> list[dict]:
         if not candidates:
             return []
             

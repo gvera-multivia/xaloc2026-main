@@ -1,4 +1,4 @@
-"""
+﻿"""
 Flujo de rellenado del formulario de Madrid.
 Implementa las secciones documentadas en explore-html/llenar formulario-madrid.md
 """
@@ -54,17 +54,17 @@ async def _rellenar_input(page: Page, selector: str, valor: str, nombre_campo: s
             # Verificar si está habilitado
             is_disabled = await elemento.first.is_disabled()
             if is_disabled:
-                logger.debug(f"  → Campo {nombre_campo or selector} deshabilitado, saltando")
+                logger.debug(f"  -> Campo {nombre_campo or selector} deshabilitado, saltando")
                 return False
             
             await elemento.first.fill(valor, timeout=ACTION_TIMEOUT_MS)
-            logger.debug(f"  → {nombre_campo or selector}: {valor}")
+            logger.debug(f"  -> {nombre_campo or selector}: {valor}")
             
             # Pequeño delay después de rellenar
             await _delay_humano(page)
             return True
     except Exception as e:
-        logger.warning(f"  → Error rellenando {nombre_campo or selector}: {e}")
+        logger.warning(f"  -> Error rellenando {nombre_campo or selector}: {e}")
     
     return False
 
@@ -96,12 +96,12 @@ async def _rellenar_y_validar_text_area(page: Page, selector: str, valor: str, n
         # Validar
         valor_actual = await elemento.input_value()
         if valor_actual.strip() == valor.strip():
-            logger.debug(f"  ✓ {nombre_campo or selector} validado correctamente")
+            logger.debug(f"  OK {nombre_campo or selector} validado correctamente")
             await _delay_humano(page)
             return True
         
         # Reintento si no coincide: limpiar y usar type
-        logger.warning(f"  ⚠ {nombre_campo or selector} no coincide. Reintentando con 'type'...")
+        logger.warning(f"  WARN {nombre_campo or selector} no coincide. Reintentando con 'type'...")
         await elemento.click()
         await elemento.press("Control+A")
         await elemento.press("Backspace")
@@ -111,15 +111,15 @@ async def _rellenar_y_validar_text_area(page: Page, selector: str, valor: str, n
         valor_actual = await elemento.input_value()
         
         if valor_actual.strip() == valor.strip():
-            logger.info(f"  ✓ {nombre_campo or selector} validado tras reintento")
+            logger.info(f"  OK {nombre_campo or selector} validado tras reintento")
             await _delay_humano(page)
             return True
         else:
-            logger.error(f"  ✗ Error: {nombre_campo or selector} no pudo ser validado (Actual: {len(valor_actual)}, Esperado: {len(valor)})")
+            logger.error(f"  X Error: {nombre_campo or selector} no pudo ser validado (Actual: {len(valor_actual)}, Esperado: {len(valor)})")
             return False
 
     except Exception as e:
-        logger.warning(f"  → Error rellenando/validando {nombre_campo or selector}: {e}")
+        logger.warning(f"  -> Error rellenando/validando {nombre_campo or selector}: {e}")
         return False
 
 
@@ -381,7 +381,7 @@ async def _seleccionar_sugerencia_jquery_ui(
                     await _delay_humano(page, 150, 300)
                     return True
                 except Exception as e:
-                    logger.debug(f"  → No se pudo clickar sugerencia objetivo en {nombre_campo or 'autocomplete'}: {e}")
+                    logger.debug(f"  -> No se pudo clickar sugerencia objetivo en {nombre_campo or 'autocomplete'}: {e}")
                     break
 
     if not textos:
@@ -428,7 +428,7 @@ async def _seleccionar_sugerencia_jquery_ui(
         await _delay_humano(page, 150, 300)
         return True
     except Exception as e:
-        logger.debug(f"  → No se pudo clickar sugerencia en {nombre_campo or 'autocomplete'}: {e}")
+        logger.debug(f"  -> No se pudo clickar sugerencia en {nombre_campo or 'autocomplete'}: {e}")
 
     try:
         await page.keyboard.press("ArrowDown")
@@ -493,7 +493,7 @@ async def _rellenar_input_con_autocomplete(
             return False
 
         if await elemento.first.is_disabled():
-            logger.debug(f"  → Campo {nombre_campo or selector} deshabilitado, saltando")
+            logger.debug(f"  -> Campo {nombre_campo or selector} deshabilitado, saltando")
             return False
 
         await elemento.first.click(timeout=2000)
@@ -530,7 +530,7 @@ async def _rellenar_input_con_autocomplete(
 
         return True
     except Exception as e:
-        logger.warning(f"  → Error rellenando (autocomplete) {nombre_campo or selector}: {e}")
+        logger.warning(f"  -> Error rellenando (autocomplete) {nombre_campo or selector}: {e}")
         return False
 
 
@@ -601,32 +601,32 @@ async def _seleccionar_opcion(page: Page, selector: str, valor: str, nombre_camp
         if await elemento.count() > 0:
             is_disabled = await elemento.first.is_disabled()
             if is_disabled:
-                logger.debug(f"  → Select {nombre_campo or selector} deshabilitado, saltando")
+                logger.debug(f"  -> Select {nombre_campo or selector} deshabilitado, saltando")
                 return False
             
             # Intentar primero por label
             try:
                 await elemento.first.select_option(label=valor, timeout=ACTION_TIMEOUT_MS)
-                logger.debug(f"  → {nombre_campo or selector}: {valor} (por label)")
+                logger.debug(f"  -> {nombre_campo or selector}: {valor} (por label)")
                 await _delay_humano(page, DELAY_DESPUES_SELECT, DELAY_DESPUES_SELECT + 200)
                 return True
             except:
                 # Si falla, intentar por value
                 try:
                     await elemento.first.select_option(value=valor, timeout=ACTION_TIMEOUT_MS)
-                    logger.debug(f"  → {nombre_campo or selector}: {valor} (por value)")
+                    logger.debug(f"  -> {nombre_campo or selector}: {valor} (por value)")
                     await _delay_humano(page, DELAY_DESPUES_SELECT, DELAY_DESPUES_SELECT + 200)
                     return True
                 except:
                     # Si ambos fallan, intentar por index si es numérico
                     if valor.isdigit():
                         await elemento.first.select_option(index=int(valor), timeout=ACTION_TIMEOUT_MS)
-                        logger.debug(f"  → {nombre_campo or selector}: opción {valor} (por index)")
+                        logger.debug(f"  -> {nombre_campo or selector}: opcion {valor} (por index)")
                         await _delay_humano(page, DELAY_DESPUES_SELECT, DELAY_DESPUES_SELECT + 200)
                         return True
                     raise
     except Exception as e:
-        logger.warning(f"  → Error seleccionando {nombre_campo or selector}: {e}")
+        logger.warning(f"  -> Error seleccionando {nombre_campo or selector}: {e}")
     
     return False
 
@@ -641,21 +641,21 @@ async def _marcar_checkbox(page: Page, selector: str, marcar: bool, nombre_campo
         if await elemento.count() > 0:
             is_disabled = await elemento.first.is_disabled()
             if is_disabled:
-                logger.debug(f"  → Checkbox {nombre_campo or selector} deshabilitado, saltando")
+                logger.debug(f"  -> Checkbox {nombre_campo or selector} deshabilitado, saltando")
                 return False
             
             is_checked = await elemento.first.is_checked()
             if marcar and not is_checked:
                 await elemento.first.check(timeout=ACTION_TIMEOUT_MS)
-                logger.debug(f"  → {nombre_campo or selector}: marcado")
+                logger.debug(f"  -> {nombre_campo or selector}: marcado")
                 await _delay_humano(page)
             elif not marcar and is_checked:
                 await elemento.first.uncheck(timeout=ACTION_TIMEOUT_MS)
-                logger.debug(f"  → {nombre_campo or selector}: desmarcado")
+                logger.debug(f"  -> {nombre_campo or selector}: desmarcado")
                 await _delay_humano(page)
             return True
     except Exception as e:
-        logger.warning(f"  → Error con checkbox {nombre_campo or selector}: {e}")
+        logger.warning(f"  -> Error con checkbox {nombre_campo or selector}: {e}")
     
     return False
 
@@ -669,11 +669,11 @@ async def _click_radio(page: Page, selector: str, nombre_campo: str = "") -> boo
         elemento = page.locator(selector)
         if await elemento.count() > 0:
             await elemento.first.click(timeout=ACTION_TIMEOUT_MS)
-            logger.debug(f"  → Radio {nombre_campo or selector}: seleccionado")
+            logger.debug(f"  -> Radio {nombre_campo or selector}: seleccionado")
             await _delay_humano(page)
             return True
     except Exception as e:
-        logger.warning(f"  → Error con radio {nombre_campo or selector}: {e}")
+        logger.warning(f"  -> Error con radio {nombre_campo or selector}: {e}")
     
     return False
 
@@ -736,7 +736,7 @@ async def ejecutar_formulario_madrid(
     # =========================================================================
     # SECCIÓN 1: Datos del expediente
     # =========================================================================
-    logger.info("SECCIÓN 1: Datos del expediente")
+    logger.info("SECCION 1: Datos del expediente")
     
     exp = datos.expediente
     
@@ -749,7 +749,7 @@ async def ejecutar_formulario_madrid(
         await _rellenar_input(page, config.expediente_1_nnn_selector, exp.nnn, "NNN")
         await _rellenar_input(page, config.expediente_1_exp_selector, exp.eeeeeeeee, "EEEEEEEEE")
         await _rellenar_input(page, config.expediente_1_d_selector, exp.d, "D")
-        logger.info(f"  → Expediente formato 1: {exp.nnn}/{exp.eeeeeeeee}.{exp.d}")
+        logger.info(f"  -> Expediente formato 1: {exp.nnn}/{exp.eeeeeeeee}.{exp.d}")
         
     else:
         # Seleccionar opción 2 (LLL/AAAA/EEEEEEEEE)
@@ -760,20 +760,20 @@ async def ejecutar_formulario_madrid(
         await _rellenar_input(page, config.expediente_2_lll_selector, exp.lll, "LLL")
         await _rellenar_input(page, config.expediente_2_aaaa_selector, exp.aaaa, "AAAA")
         await _rellenar_input(page, config.expediente_2_exp_selector, exp.exp_num, "EEEEEEEEE")
-        logger.info(f"  → Expediente formato 2: {exp.lll}/{exp.aaaa}/{exp.exp_num}")
+        logger.info(f"  -> Expediente formato 2: {exp.lll}/{exp.aaaa}/{exp.exp_num}")
     
     # =========================================================================
     # SECCIÓN 2: Matrícula del vehículo
     # =========================================================================
-    logger.info("SECCIÓN 2: Matrícula del vehículo")
+    logger.info("SECCION 2: Matricula del vehiculo")
     
     await _rellenar_input(page, config.matricula_selector, datos.matricula, "Matrícula")
-    logger.info(f"  → Matrícula: {datos.matricula}")
+    logger.info(f"  -> Matricula: {datos.matricula}")
     
     # =========================================================================
     # SECCIÓN 3: Datos del interesado
     # =========================================================================
-    logger.info("SECCIÓN 3: Datos del interesado")
+    logger.info("SECCION 3: Datos del interesado")
     
     inter = datos.interesado
     
@@ -784,13 +784,13 @@ async def ejecutar_formulario_madrid(
     await _marcar_checkbox(page, config.interesado_check_email_selector, inter.confirmar_email, "Email interesado")
     await _marcar_checkbox(page, config.interesado_check_sms_selector, inter.confirmar_sms, "SMS interesado")
     
-    logger.info(f"  → Teléfono: {inter.telefono or '(no modificado)'}")
-    logger.info(f"  → Confirmar email: {inter.confirmar_email}, SMS: {inter.confirmar_sms}")
+    logger.info(f"  -> Telefono: {inter.telefono or '(no modificado)'}")
+    logger.info(f"  -> Confirmar email: {inter.confirmar_email}, SMS: {inter.confirmar_sms}")
     
     # =========================================================================
     # SECCIÓN 4: Datos del representante
     # =========================================================================
-    logger.info("SECCIÓN 4: Datos del representante")
+    logger.info("SECCION 4: Datos del representante")
     
     rep = datos.representante
     rep_dir = rep.direccion
@@ -833,23 +833,23 @@ async def ejecutar_formulario_madrid(
         "Confirmar email rep.",
     )
     
-    logger.info(f"  → Dirección: {rep_dir.nombre_via or '(vacío)'}, {rep_dir.municipio or '(vacío)'}")
-    logger.info(f"  → Contacto: {rep_con.email or '(vacío)'}")
+    logger.info(f"  -> Direccion: {rep_dir.nombre_via or '(vacio)'}, {rep_dir.municipio or '(vacio)'}")
+    logger.info(f"  -> Contacto: {rep_con.email or '(vacio)'}")
     
     # =========================================================================
     # SECCIÓN 5: Datos de notificación
     # =========================================================================
-    logger.info("SECCIÓN 5: Datos de notificación")
+    logger.info("SECCION 5: Datos de notificacion")
     
     notif = datos.notificacion
     
     # Opción de copiar datos
     if notif.copiar_desde == "interesado":
-        logger.info("  → Copiando datos del interesado...")
+        logger.info("  -> Copiando datos del interesado...")
         await page.click(config.notificacion_copiar_interesado_selector)
         await _esperar_actualizacion_dom(page, 1000)
     elif notif.copiar_desde == "representante":
-        logger.info("  → Copiando datos del representante...")
+        logger.info("  -> Copiando datos del representante...")
         await page.click(config.notificacion_copiar_representante_selector)
         await _esperar_actualizacion_dom(page, 1000)
     
@@ -878,7 +878,7 @@ async def ejecutar_formulario_madrid(
     notif_dir = notif.direccion
 
     logger.info(
-        f"  → Notif dirección input: tipo_via='{notif_dir.tipo_via or ''}', nombre_via='{notif_dir.nombre_via or ''}', "
+        f"  -> Notif dirección input: tipo_via='{notif_dir.tipo_via or ''}', nombre_via='{notif_dir.nombre_via or ''}', "
         f"num='{notif_dir.numero or ''}', cp='{notif_dir.codigo_postal or ''}', muni='{notif_dir.municipio or ''}'"
     )
     
@@ -911,23 +911,23 @@ async def ejecutar_formulario_madrid(
     await _rellenar_input(page, config.notificacion_movil_selector, notif_con.movil, "Móvil notif.")
     await _rellenar_input(page, config.notificacion_telefono_selector, notif_con.telefono, "Teléfono notif.")
     
-    logger.info(f"  → Tipo doc: {tipo_doc_valor}, Núm: {notif_id.numero_documento or '(vacío)'}")
-    logger.info(f"  → Email: {notif_con.email or '(vacío)'}")
+    logger.info(f"  -> Tipo doc: {tipo_doc_valor}, Num: {notif_id.numero_documento or '(vacio)'}")
+    logger.info(f"  -> Email: {notif_con.email or '(vacio)'}")
     
     # =========================================================================
     # SECCIÓN 6: Naturaleza del escrito
     # =========================================================================
-    logger.info("SECCIÓN 6: Naturaleza del escrito")
+    logger.info("SECCION 6: Naturaleza del escrito")
     
     if datos.naturaleza == NaturalezaEscrito.ALEGACION:
         await _click_radio(page, config.naturaleza_alegacion_selector, "Alegación")
-        logger.info("  → Naturaleza: Alegación")
+        logger.info("  -> Naturaleza: Alegacion")
     elif datos.naturaleza == NaturalezaEscrito.RECURSO:
         await _click_radio(page, config.naturaleza_recurso_selector, "Recurso")
-        logger.info("  → Naturaleza: Recurso")
+        logger.info("  -> Naturaleza: Recurso")
     else:
         await _click_radio(page, config.naturaleza_identificacion_selector, "Identificación conductor")
-        logger.info("  → Naturaleza: Identificación del conductor/a")
+        logger.info("  -> Naturaleza: Identificacion del conductor/a")
     
     # Esperar actualización del DOM (hay refresh_method)
     await _esperar_actualizacion_dom(page, 1000)
@@ -935,18 +935,18 @@ async def ejecutar_formulario_madrid(
     # =========================================================================
     # SECCIÓN 7: Expone y Solicita
     # =========================================================================
-    logger.info("SECCIÓN 7: Expone y Solicita")
+    logger.info("SECCION 7: Expone y Solicita")
     
     await _rellenar_y_validar_text_area(page, config.expone_selector, datos.expone, "Expone")
     await _rellenar_y_validar_text_area(page, config.solicita_selector, datos.solicita, "Solicita")
     
-    logger.info(f"  → Expone: {datos.expone[:50] + '...' if len(datos.expone) > 50 else datos.expone}")
-    logger.info(f"  → Solicita: {datos.solicita[:50] + '...' if len(datos.solicita) > 50 else datos.solicita}")
+    logger.info(f"  -> Expone: {datos.expone[:50] + '...' if len(datos.expone) > 50 else datos.expone}")
+    logger.info(f"  -> Solicita: {datos.solicita[:50] + '...' if len(datos.solicita) > 50 else datos.solicita}")
     
     # =========================================================================
     # SECCIÓN 8: Continuar
     # =========================================================================
-    logger.info("SECCIÓN 8: Pulsando Continuar")
+    logger.info("SECCION 8: Pulsando Continuar")
     
     # Esperar a que el botón esté visible
     await page.wait_for_selector(config.continuar_formulario_selector, state="visible", timeout=config.default_timeout)
@@ -955,7 +955,7 @@ async def ejecutar_formulario_madrid(
     async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
         await page.click(config.continuar_formulario_selector)
     
-    logger.info(f"  → Navegado a pantalla de adjuntos: {page.url}")
+    logger.info(f"  -> Navegado a pantalla de adjuntos: {page.url}")
     
     # =========================================================================
     # SECCIÓN 9: Manejar popup de SweetAlert (si aparece)
@@ -965,14 +965,14 @@ async def ejecutar_formulario_madrid(
     try:
         swal_button = page.get_by_role("button", name="Aceptar dirección y continuar")
         await swal_button.wait_for(state="visible", timeout=3000)
-        logger.info("SECCIÓN 9: Popup de dirección no reconocida detectado")
+        logger.info("SECCION 9: Popup de direccion no reconocida detectado")
         await swal_button.click()
-        logger.info("  → Popup aceptado: 'Aceptar dirección y continuar'")
+        logger.info("  -> Popup aceptado: 'Aceptar direccion y continuar'")
         # Esperar un poco después del click
         await page.wait_for_timeout(500)
     except Exception:
         # No hay popup, continuar normalmente
-        logger.debug("  → No se detectó popup de dirección (OK)")
+        logger.debug("  -> No se detecto popup de direccion (OK)")
     
     logger.info("=" * 80)
     logger.info("FORMULARIO COMPLETADO EXITOSAMENTE")

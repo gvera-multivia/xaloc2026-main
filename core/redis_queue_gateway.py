@@ -3,6 +3,7 @@ import os
 import time
 import uuid
 import logging
+import asyncio
 from typing import Any, Optional
 
 from core.queue_gateway import QueueGateway, QueueJob
@@ -96,45 +97,72 @@ class RedisQueueGateway(QueueGateway):
         )
         return True, job_id
 
-    async def reserve(self, *, timeout_seconds: int = 10) -> Optional[QueueJob]:
+    async def reserve(self, *, timeout_seconds: int = 10, worker_id: Optional[str] = None) -> Optional[QueueJob]:
         await self._reap_expired_inflight()
 
-        result = await self._redis.brpop(self.ready_key, timeout=timeout_seconds)
-        if not result:
-            return None
+        deadline = time.time() + max(1, int(timeout_seconds))
+        paused_seen = 0
+        while True:
+            remaining = int(max(1, deadline - time.time()))
+            result = await self._redis.brpop(self.ready_key, timeout=remaining)
+            if not result:
+                return None
 
-        _, job_id = result
-        lease_until = int(time.time()) + self.lease_seconds
-        await self._redis.zadd(self.inflight_key, {job_id: lease_until})
+            _, job_id = result
+            lease_until = int(time.time()) + self.lease_seconds
+            await self._redis.zadd(self.inflight_key, {job_id: lease_until})
 
-        raw = await self._redis.hgetall(self._job_key(job_id))
-        if not raw:
-            await self._redis.zrem(self.inflight_key, job_id)
-            return None
+            raw = await self._redis.hgetall(self._job_key(job_id))
+            if not raw:
+                await self._redis.zrem(self.inflight_key, job_id)
+                continue
 
-        payload = json.loads(raw.get("payload") or "{}")
-        payload["job_id"] = job_id
-        site_id = raw.get("site_id") or ""
-        protocol = raw.get("protocol") or None
-        resource_value = raw.get("resource_id")
-        try:
-            resource_id = int(resource_value) if resource_value else None
-        except Exception:
-            resource_id = None
+            site_id = raw.get("site_id") or ""
+            if site_id and self.db.is_site_processing_paused(site_id=site_id):
+                await self._redis.zrem(self.inflight_key, job_id)
+                await self._redis.rpush(self.ready_key, job_id)
+                paused_seen += 1
+                if paused_seen >= 10 or time.time() >= deadline:
+                    await asyncio.sleep(0.2)
+                    return None
+                continue
 
-        attempt = int(raw.get("attempt") or 0)
-        max_attempts = int(raw.get("max_attempts") or self.max_attempts_default)
-        self.db.update_job_run_state(job_id, "processing", started=True, attempt=attempt)
-        return QueueJob(
-            job_id=job_id,
-            site_id=site_id,
-            protocol=protocol,
-            payload=payload,
-            resource_id=resource_id,
-            attempt=attempt,
-            max_attempts=max_attempts,
-            queue_ref=None,
-        )
+            payload = json.loads(raw.get("payload") or "{}")
+            payload["job_id"] = job_id
+            protocol = raw.get("protocol") or None
+            resource_value = raw.get("resource_id")
+            try:
+                resource_id = int(resource_value) if resource_value else None
+            except Exception:
+                resource_id = None
+            if site_id and resource_id is not None and self.db.is_resource_processing_paused(site_id=site_id, resource_id=resource_id):
+                await self._redis.zrem(self.inflight_key, job_id)
+                await self._redis.rpush(self.ready_key, job_id)
+                paused_seen += 1
+                if paused_seen >= 10 or time.time() >= deadline:
+                    await asyncio.sleep(0.2)
+                    return None
+                continue
+
+            attempt = int(raw.get("attempt") or 0)
+            max_attempts = int(raw.get("max_attempts") or self.max_attempts_default)
+            self.db.update_job_run_state(
+                job_id,
+                "processing",
+                started=True,
+                attempt=attempt,
+                worker_id=(str(worker_id).strip() if worker_id else None),
+            )
+            return QueueJob(
+                job_id=job_id,
+                site_id=site_id,
+                protocol=protocol,
+                payload=payload,
+                resource_id=resource_id,
+                attempt=attempt,
+                max_attempts=max_attempts,
+                queue_ref=None,
+            )
 
     async def ack(self, job: QueueJob, *, result: Optional[dict[str, Any]] = None, screenshot: Optional[str] = None) -> None:
         await self._redis.zrem(self.inflight_key, job.job_id)
@@ -196,7 +224,23 @@ class RedisQueueGateway(QueueGateway):
             error_message=error,
         )
 
+    async def release(self, job: QueueJob, *, reason: str = "") -> None:
+        await self._redis.zrem(self.inflight_key, job.job_id)
+        await self._redis.hset(
+            self._job_key(job.job_id),
+            mapping={
+                "state": "queued",
+                "last_error": (reason or "worker_interrupted_ctrl_c"),
+            },
+        )
+        await self._redis.rpush(self.ready_key, job.job_id)
+        self.db.update_job_run_state(
+            job.job_id,
+            "queued",
+            attempt=int(job.attempt),
+            error_message=(reason or "worker_interrupted_ctrl_c"),
+        )
+
     def count_ready(self, site_id: str) -> int:
         # Lightweight approximation from ledger for scheduler depth control.
         return self.db.count_job_runs(site_id, states=("queued", "processing"))
-

@@ -24,11 +24,20 @@
             "site_id": "base_online",
             "query_organisme": "%BASE%",
             "filtro_texp": "2,3",
-            "regex_expediente": "^(\\d{5}-\\d{4}/\\d{4,5}-GIM|\\d{2}-\\d{3}-\\d{3}-\\d{4}-\\d{2}-\\d{7}|\\d-\\d{4}[/\\-]\\d{4,6}-(EXE|ECC))$",
-            "login_url": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login",
+            "regex_expediente": "^(\\d{5}-\\d{4}/\\d{1,5}-GIM|\\d{2}-\\d{3}-\\d{3}-\\d{4}-\\d{2}-\\d{7}|\\d-\\d{4}[/\\-]\\d{4,6}-(EXE|ECC))$",            "login_url": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login",
             "recursos_url": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos",
             "active": true,
             "notes": "BASE Online - Trámites de multas"
+        },
+        {
+            "site_id": "ayunta_palma",
+            "query_organisme": "%AYUNTAMIENTO DE PALMA DE MALLORCA%",
+            "filtro_texp": "2,3",
+            "regex_expediente": "^([A-Z]{2}\\s?)?\\d{7,8}$",
+            "login_url": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login",
+            "recursos_url": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos",
+            "active": true,
+            "notes": "Ayuntamiento de Palma - sede sedipualba"
         }
     ]
 }

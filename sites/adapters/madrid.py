@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 import os
@@ -126,6 +126,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         conn_str: str,
         authenticated_user: Optional[str],
         limit: int,
+        on_discard: Optional[SiteAdapter.DiscardCallback] = None,
     ) -> list[dict]:
         regex_pattern = self._clean_str(config.get("regex_expediente")) or self.DEFAULT_REGEX_EXPEDIENTE
         regex = self._regex_expediente_cache.get(regex_pattern)
@@ -133,7 +134,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
             try:
                 regex = re.compile(regex_pattern)
             except re.error:
-                logger.warning(f"[madrid] Regex inválido en config.regex_expediente: {regex_pattern!r}. Usando fallback.")
+                logger.warning(f"[madrid] Regex invalido en config.regex_expediente: {regex_pattern!r}. Usando fallback.")
                 regex = self._regex_expediente_fallback
             self._regex_expediente_cache[regex_pattern] = regex
 
@@ -189,11 +190,41 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 expediente = self._clean_str(recurso.get("Expedient")).upper()
                 expediente = re.sub(r"\s+", "", expediente)
                 if not expediente or not regex.match(expediente):
+                    if on_discard:
+                        try:
+                            on_discard(
+                                {
+                                    "site_id": self.site_id,
+                                    "idRecurso": recurso.get("idRecurso"),
+                                    "Expedient": expediente,
+                                    "tipo_incidencia": "REGEX_DISCARDED",
+                                    "motivo": f"Expediente no valido para madrid: {expediente}",
+                                }
+                            )
+                        except Exception:
+                            pass
                     continue
                 recurso["Expedient"] = expediente
 
                 fase_norm = self._normalize_text(recurso.get("FaseProcedimiento"))
                 if any(x in fase_norm for x in ["reclamacion", "embargo", "apremio"]):
+                    if on_discard:
+                        try:
+                            on_discard(
+                                {
+                                    "site_id": "madrid",
+                                    "idRecurso": recurso.get("idRecurso"),
+                                    "Expedient": recurso.get("Expedient"),
+                                    "tipo_incidencia": "SITE_RULE_DISCARDED",
+                                    "motivo": (
+                                        "Madrid: trámite no reclamable por regla de sede (fase negra: "
+                                        f"{self._clean_str(recurso.get('FaseProcedimiento'))}). "
+                                        "Revisar si el trámite está mal formado o si debe tratarse manualmente."
+                                    ),
+                                }
+                            )
+                        except Exception:
+                            pass
                     continue
 
                 estado = int(recurso.get("Estado") or 0)
@@ -487,7 +518,11 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         if missing:
             raise ValueError(f"Payload Madrid inválido, faltan campos: {', '.join(sorted(set(missing)))}")
 
-    async def build_payloads(self, candidates: list[dict]) -> list[dict]:
+    async def build_payloads(
+        self,
+        candidates: list[dict],
+        on_discard: Optional[SiteAdapter.DiscardCallback] = None,
+    ) -> list[dict]:
         if not candidates:
             return []
 
@@ -509,7 +544,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
             try:
                 batch_mapping = await classify_addresses_batch_with_ai(items)
             except Exception as e:
-                logger.warning("[MADRID][IA] Falló batch LLM, usando fallback local: %s", e)
+                logger.warning("[MADRID][IA] Fallo batch LLM, usando fallback local: %s", e)
                 batch_mapping = {}
 
         payloads: list[dict] = []
@@ -536,7 +571,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 nif = nif_individual
 
             if not nif:
-                logger.warning("[MADRID] Recurso %s sin NIF válido. Saltando.", r.get("idRecurso"))
+                logger.warning("[MADRID] Recurso %s sin NIF valido. Saltando.", r.get("idRecurso"))
                 continue
 
             nif = self._normalize_document_id(nif)
