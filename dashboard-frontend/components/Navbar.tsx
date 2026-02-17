@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
@@ -15,15 +15,19 @@ import {
 } from "lucide-react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-<<<<<<< HEAD
-import { isClientView } from "@/lib/permissions";
-=======
 import { useAuth } from "@/lib/AuthContext";
->>>>>>> b2d5f2af1d9c9ebf9e4459d107739ad00436c0f1
+import { isClientView } from "@/lib/permissions";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
+
+type NavLink = {
+  href: string;
+  label: string;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  adminOnly: boolean;
+};
 
 export default function Navbar() {
   const pathname = usePathname();
@@ -38,23 +42,16 @@ export default function Navbar() {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  const navLinks = [
-<<<<<<< HEAD
-    { href: "/", label: "Estado", icon: LayoutDashboard },
-    { href: "/control", label: "Control", icon: Terminal },
-    { href: "/admin", label: "Gestión", icon: Settings },
-    { href: "/history", label: "Historial", icon: History },
-    { href: "/blacklist", label: "Bloqueos", icon: ShieldAlert },
-  ].filter((link) => !(isClientView && link.href === "/control"));
-=======
+  const navLinks: NavLink[] = [
     { href: "/", label: "Estado", icon: LayoutDashboard, adminOnly: false },
     { href: "/history", label: "Historial", icon: History, adminOnly: false },
     { href: "/admin", label: "Gestion", icon: Settings, adminOnly: true },
     { href: "/users", label: "Usuarios", icon: Users, adminOnly: true },
     { href: "/control", label: "Control", icon: Terminal, adminOnly: true },
     { href: "/blacklist", label: "Bloqueos", icon: ShieldAlert, adminOnly: true },
-  ].filter((link) => !link.adminOnly || isAdmin);
->>>>>>> b2d5f2af1d9c9ebf9e4459d107739ad00436c0f1
+  ]
+    .filter((link) => !link.adminOnly || isAdmin)
+    .filter((link) => !(isClientView && link.href === "/control"));
 
   return (
     <nav
@@ -95,7 +92,7 @@ export default function Navbar() {
         <div className="hidden lg:flex items-center gap-1 rounded border border-border/70 bg-[rgba(17,19,26,0.65)] p-0.5">
           {navLinks.map((link) => {
             const Icon = link.icon;
-            const isActive = pathname === link.href;
+            const active = pathname === link.href;
 
             return (
               <Link
@@ -106,7 +103,7 @@ export default function Navbar() {
                   "px-4 py-2 rounded-sm",
                   "text-[11px] font-black uppercase tracking-[0.15em]",
                   "transition-all duration-300",
-                  isActive
+                  active
                     ? "text-foreground bg-foreground/5 shadow-inner"
                     : "text-muted-foreground/60 hover:text-foreground hover:bg-foreground/5"
                 )}
@@ -115,14 +112,13 @@ export default function Navbar() {
                   size={14}
                   className={cn(
                     "transition-colors",
-                    isActive
+                    active
                       ? "text-foreground/90"
                       : "text-muted-foreground/50 group-hover:text-foreground/75"
                   )}
                 />
                 {link.label}
-
-                {isActive && (
+                {active && (
                   <span
                     className="absolute inset-x-2 -bottom-[1px] h-[0.5px]"
                     style={{
