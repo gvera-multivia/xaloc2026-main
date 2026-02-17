@@ -100,6 +100,30 @@ async def _abrir_nueva_instancia(page: Page, config: AyuntaPalmaConfig) -> None:
         else:
             raise click_error
 
+    # Fallback adicional: disparar el submit oculto por click/postback.
+    if not _is_post_login_url(page.url):
+        try:
+            fired = bool(
+                await page.evaluate(
+                    """() => {
+                        const hidden = document.getElementById('ctl00_ctl00_cphM_cph_btnUltimoBorradorCancelar');
+                        if (hidden) {
+                            hidden.click();
+                            return true;
+                        }
+                        if (typeof window.__doPostBack === 'function') {
+                            window.__doPostBack('ctl00$ctl00$cphM$cph$btnUltimoBorradorCancelar', '');
+                            return true;
+                        }
+                        return false;
+                    }"""
+                )
+            )
+            if fired:
+                await page.wait_for_timeout(config.delay_ms)
+        except Exception:
+            pass
+
     # Si hemos acabado en carpeta ciudadana, forzar la entrada de nuevo
     # al flujo de "nueva entrada" usando la URL base autenticada.
     if _is_carpeta_ciudadana_url(page.url):

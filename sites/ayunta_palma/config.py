@@ -14,10 +14,10 @@ class AyuntaPalmaSelectors:
     login_frame: str = "#ventanaModal"
     login_option_rows: str = "#optSsl tr"
     login_option_cert_titulo: str = "#optSsl tr:first-child .titulo-opcion"
-    btn_nueva_instancia: str = "button.redirect-url.stop-click-propagation:has-text(\"Nueva instancia en blanco\")"
+    btn_nueva_instancia: str = "button.redirect-url.stop-click-propagation.btn-icono"
     btn_nueva_instancia_visible: str = (
         "div.btn-bar-horizontal-centrada-inner:has(input#ctl00_ctl00_cphM_cph_btnUltimoBorradorCancelar) "
-        "button:has-text(\"Nueva instancia en blanco\")"
+        "button.btn-icono"
     )
     input_nueva_instancia: str = "#ctl00_ctl00_cphM_cph_btnUltimoBorradorCancelar"
     btn_nuevo_interesado: str = ".btn-bar-horizontal-centrada-inner button:has-text(\"Nuevo/a interesado/a\")"
