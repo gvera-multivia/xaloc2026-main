@@ -1,12 +1,22 @@
 export const API_BASE = '/api';
 
 async function fetcher<T>(path: string, options?: RequestInit): Promise<T> {
-    const res = await fetch(`${API_BASE}${path}`, options);
+    const res = await fetch(`${API_BASE}${path}`, {
+        credentials: 'include',
+        ...options,
+    });
     if (!res.ok) {
         const errorText = await res.text().catch(() => 'Unknown error');
         throw new Error(errorText || `HTTP error! status: ${res.status}`);
     }
-    return res.json() as Promise<T>;
+    if (res.status === 204) {
+        return {} as T;
+    }
+    const text = await res.text();
+    if (!text) {
+        return {} as T;
+    }
+    return JSON.parse(text) as T;
 }
 
 export const api = {
@@ -93,6 +103,15 @@ export const authApi = {
     getPending: (type?: string) => api.get<{ items: any[], total: number }>(`/pending-auth${type ? `?authorization_type=${type}` : ''}`),
     approve: (id: number) => api.post<any>(`/pending-auth/${id}/approve`),
     reject: (id: number, reason: string) => api.post<any>(`/pending-auth/${id}/reject`, { reason }),
+};
+
+export const sessionApi = {
+    login: (username: string, password: string) => api.post<{ ok: boolean; user: { sub: string; username: string; role: string } }>(
+        '/auth/login',
+        { username, password },
+    ),
+    me: () => api.get<{ authenticated: boolean; user: { sub: string; username: string; role: string } }>('/auth/me'),
+    logout: () => api.post<{ ok: boolean }>('/auth/logout'),
 };
 
 export const configApi = {

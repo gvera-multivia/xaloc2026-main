@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import Navbar from "@/components/Navbar";
 import { WebSocketProvider } from "@/lib/WebSocketContext";
+import { AuthProvider } from "@/lib/AuthContext";
+import AppShell from "@/components/AppShell";
 
 export const metadata: Metadata = {
   title: "Morrigan",
@@ -26,12 +27,11 @@ export default function RootLayout({
       <body
         className="antialiased min-h-screen bg-background text-foreground selection:bg-primary/30"
       >
-        <WebSocketProvider>
-          <Navbar />
-          <main className="pt-24 pb-12 container mx-auto px-4">
-            {children}
-          </main>
-        </WebSocketProvider>
+        <AuthProvider>
+          <WebSocketProvider>
+            <AppShell>{children}</AppShell>
+          </WebSocketProvider>
+        </AuthProvider>
       </body>
     </html>
   );

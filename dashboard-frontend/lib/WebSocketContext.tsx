@@ -1,6 +1,8 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useRef, useState, ReactNode } from 'react';
+import { usePathname } from 'next/navigation';
+import { useAuth } from '@/lib/AuthContext';
 
 type WebSocketContextType = {
   lastMessage: any;
@@ -14,15 +16,17 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   const [lastMessage, setLastMessage] = useState<any>(null);
   const ws = useRef<WebSocket | null>(null);
   const reconnectTimeout = useRef<NodeJS.Timeout | null>(null);
+  const pathname = usePathname();
+  const { isAuthenticated, loading } = useAuth();
 
   useEffect(() => {
+    if (loading || !isAuthenticated || pathname === '/login') {
+      return;
+    }
     const connect = () => {
-      // Logic to determine WS URL
-      // Can be configured via env var NEXT_PUBLIC_WS_URL or hardcoded fallback
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const host = window.location.hostname;
-      // Default to localhost:8000 if not specified
-      const wsUrl = process.env.NEXT_PUBLIC_WS_URL || `${protocol}//${host}:8000/ws/dashboard`;
+      const host = window.location.host;
+      const wsUrl = process.env.NEXT_PUBLIC_WS_URL || `${protocol}//${host}/ws/dashboard`;
 
       console.log('Connecting to WebSocket:', wsUrl);
       const socket = new WebSocket(wsUrl);
@@ -70,7 +74,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
           clearTimeout(reconnectTimeout.current);
       }
     };
-  }, []);
+  }, [pathname, isAuthenticated, loading]);
 
   return (
     <WebSocketContext.Provider value={{ lastMessage, isConnected }}>
