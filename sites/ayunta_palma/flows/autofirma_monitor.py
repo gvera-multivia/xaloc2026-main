@@ -47,6 +47,7 @@ $root = [System.Windows.Automation.AutomationElement]::RootElement
 $wshell = New-Object -ComObject WScript.Shell
 $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
 $seen = @{{}}
+$clickedByKey = @{{}}
 $edgeClicked = 0
 $certClicked = 0
 $afSeen = 0
@@ -118,7 +119,7 @@ function Click-ButtonByHints($win, $hints, [string]$kind) {{
   )
   $buttons = $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condBtn)
   foreach ($btn in $buttons) {{
-    $btnName = [string]$btn.Cached.Name
+    $btnName = [string]$btn.Current.Name
     $n = Norm $btnName
 
     foreach ($hint in $hints) {{
@@ -177,6 +178,7 @@ for ($i=0; $i -lt {loops}; $i++) {{
       try {{ $wshell.AppActivate($title) | Out-Null }} catch {{}}
 
       if ($kind -eq "edge_open") {{
+        if ($clickedByKey.ContainsKey($key)) {{ continue }}
         $clicked = Click-ButtonByHints $w @("obre","abrir","open") "edge_open"
         if (-not $clicked) {{
           try {{
@@ -187,8 +189,12 @@ for ($i=0; $i -lt {loops}; $i++) {{
             $clicked = $true
           }} catch {{}}
         }}
-        if ($clicked) {{ $edgeClicked += 1 }}
+        if ($clicked) {{
+          $edgeClicked += 1
+          $clickedByKey[$key] = $true
+        }}
       }} elseif ($kind -eq "windows_cert") {{
+        if ($clickedByKey.ContainsKey($key)) {{ continue }}
         $clicked = Click-ButtonByHints $w @("aceptar","accept","ok") "windows_cert"
         if (-not $clicked) {{
           try {{
@@ -199,18 +205,25 @@ for ($i=0; $i -lt {loops}; $i++) {{
             $clicked = $true
           }} catch {{}}
         }}
-        if ($clicked) {{ $certClicked += 1 }}
+        if ($clicked) {{
+          $certClicked += 1
+          $clickedByKey[$key] = $true
+        }}
       }} elseif ($kind -eq "autofirma") {{
         $afSeen += 1
+        if ($clickedByKey.ContainsKey($key)) {{ continue }}
         $clicked = Click-ButtonByHints $w @("firmar","signar","acceptar","acceptar i firmar","aceptar y firmar") "autofirma"
-        if ($clicked) {{ $afClicks += 1 }}
+        if ($clicked) {{
+          $afClicks += 1
+          $clickedByKey[$key] = $true
+        }}
       }}
     }}
   }} catch {{}}
   Start-Sleep -Milliseconds 250
 }}
 
-$timedOut = 1
+$timedOut = 0
 Write-Output ("summary edge_clicked=" + $edgeClicked + " cert_clicked=" + $certClicked + " autofirma_seen=" + $afSeen + " autofirma_clicks=" + $afClicks + " timed_out=" + $timedOut)
 """
 

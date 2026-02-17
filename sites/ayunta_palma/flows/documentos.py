@@ -903,7 +903,7 @@ async def subir_documentos(
     # 1) Avanzar tras aceptar el documento subido.
     await _click_siguiente(page, config)
 
-    # 2) Marcar protecciÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³n de datos y avanzar.
+    # 2) Marcar protección de datos y avanzar.
     await page.wait_for_timeout(config.delay_ms)
     await _marcar_proteccion_datos(page, config)
     await _click_siguiente(page, config)
