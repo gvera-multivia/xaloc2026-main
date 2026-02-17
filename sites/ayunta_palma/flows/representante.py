@@ -54,8 +54,9 @@ async def _sobrescribir_contacto_representante(page: Page, config: AyuntaPalmaCo
 async def indicar_representante(page: Page, config: AyuntaPalmaConfig) -> Page:
     selectors = config.selectors
 
-    boton = page.locator(selectors.btn_indicar_representante).first
-    await boton.wait_for(state="visible")
+    boton = page.locator(selectors.btn_indicar_representante_visible).first
+    boton_alt = page.locator(selectors.btn_indicar_representante).first
+    await boton_alt.wait_for(state="visible")
     dialog_titulo = page.locator(".ui-dialog-title", has_text="Nuevo/a representante del/de la interesado/a").first
 
     async def _dialogo_no_visible() -> bool:
@@ -68,7 +69,8 @@ async def indicar_representante(page: Page, config: AyuntaPalmaConfig) -> Page:
         page,
         description="Abrir modal representante",
         primary=boton,
-        fallback_selector=selectors.btn_indicar_representante,
+        secondary=boton_alt,
+        fallback_selector=selectors.input_indicar_representante,
         same_screen_check=_dialogo_no_visible,
         max_attempts=3,
         retry_wait_ms=5000,
@@ -78,8 +80,12 @@ async def indicar_representante(page: Page, config: AyuntaPalmaConfig) -> Page:
     await dialog_titulo.wait_for(state="visible", timeout=15000)
     await _sobrescribir_contacto_representante(page, config)
 
-    aceptar = page.locator(selectors.btn_aceptar_modal).first
-    await aceptar.wait_for(state="visible")
+    aceptar = page.locator(selectors.btn_aceptar_modal_visible).first
+    aceptar_alt = page.locator(selectors.btn_aceptar_modal).first
+    try:
+        await aceptar.wait_for(state="visible", timeout=4000)
+    except PlaywrightTimeoutError:
+        await aceptar_alt.wait_for(state="visible", timeout=4000)
 
     async def _dialogo_sigue_visible() -> bool:
         try:
@@ -91,7 +97,8 @@ async def indicar_representante(page: Page, config: AyuntaPalmaConfig) -> Page:
         page,
         description="Aceptar modal representante",
         primary=aceptar,
-        fallback_selector=selectors.btn_aceptar_modal,
+        secondary=aceptar_alt,
+        fallback_selector=selectors.input_aceptar_modal_persona,
         same_screen_check=_dialogo_sigue_visible,
         max_attempts=3,
         retry_wait_ms=5000,

@@ -122,6 +122,13 @@ async def ejecutar_login(page: Page, config: AyuntaPalmaConfig) -> Page:
     """
     Accede al portal de Palma y pulsa la opción de certificado dentro del iframe.
     """
+    # En sesiones persistentes puede estar ya autenticado aunque la URL no sea concluyente.
+    try:
+        await page.locator(config.selectors.persona_tipo_usuario).first.wait_for(state="visible", timeout=1200)
+        return page
+    except Exception:
+        pass
+
     if page.url.startswith(config.url_base) or _is_authenticated_portal_url(page.url):
         # Evitar recargar si ya estamos en la misma URL (perfil persistente)
         await page.wait_for_timeout(config.delay_ms)

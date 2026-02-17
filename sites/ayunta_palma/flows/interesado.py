@@ -178,8 +178,12 @@ async def registrar_interesado(
     await _fill_email(page, selectors, PALMA_CONTACT_EMAIL)
     await _fill_telefono(page, selectors, PALMA_CONTACT_PHONE)
 
-    aceptar = page.locator(selectors.btn_aceptar_modal).first
-    await aceptar.wait_for(state="visible")
+    aceptar = page.locator(selectors.btn_aceptar_modal_visible).first
+    aceptar_alt = page.locator(selectors.btn_aceptar_modal).first
+    try:
+        await aceptar.wait_for(state="visible", timeout=4000)
+    except PlaywrightTimeoutError:
+        await aceptar_alt.wait_for(state="visible", timeout=4000)
 
     async def _modal_sigue_abierto() -> bool:
         try:
@@ -191,7 +195,8 @@ async def registrar_interesado(
         page,
         description="Aceptar modal interesado",
         primary=aceptar,
-        fallback_selector=selectors.btn_aceptar_modal,
+        secondary=aceptar_alt,
+        fallback_selector=selectors.input_aceptar_modal_persona,
         same_screen_check=_modal_sigue_abierto,
         max_attempts=3,
         retry_wait_ms=5000,

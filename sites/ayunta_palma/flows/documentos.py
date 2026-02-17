@@ -627,14 +627,15 @@ async def _click_siguiente(
     description: str = "Click Siguiente",
 ) -> None:
     selectors = config.selectors
-    btn = page.locator(selectors.btn_siguiente).first
+    btn = page.locator(selectors.btn_siguiente_visible).first
+    btn_alt = page.locator(selectors.btn_siguiente).first
     hidden_input = page.locator(selectors.input_siguiente).first
     try:
         await robust_click(
             page,
             description=description,
             primary=btn,
-            secondary=hidden_input,
+            secondary=btn_alt,
             fallback_selector=selectors.input_siguiente,
             same_screen_check=same_screen_check,
             max_attempts=3,
@@ -661,15 +662,16 @@ async def _click_confirmar(
     description: str = "Click Confirmar",
 ) -> None:
     selectors = config.selectors
-    btn_confirmar = page.locator(selectors.btn_confirmar).first
+    btn_confirmar = page.locator(selectors.btn_confirmar_visible).first
+    btn_confirmar_alt = page.locator(selectors.btn_confirmar).first
     hidden_input = page.locator(selectors.input_siguiente).first
     try:
         await robust_click(
             page,
             description=description,
             primary=btn_confirmar,
-            secondary=hidden_input,
-            fallback_selector=selectors.input_siguiente,
+            secondary=btn_confirmar_alt,
+            fallback_selector=selectors.input_confirmar,
             same_screen_check=same_screen_check,
             max_attempts=3,
             retry_wait_ms=5000,
@@ -694,13 +696,18 @@ async def _click_modal_aceptar(
     same_screen_check=None,
     description: str = "Click Aceptar modal",
 ) -> None:
-    btn_modal_aceptar = page.locator(config.selectors.btn_modal_aceptar).first
-    await btn_modal_aceptar.wait_for(state="visible", timeout=config.timeouts.general)
+    btn_modal_aceptar = page.locator(config.selectors.btn_modal_aceptar_visible).first
+    btn_modal_aceptar_alt = page.locator(config.selectors.btn_modal_aceptar).first
+    try:
+        await btn_modal_aceptar.wait_for(state="visible", timeout=5000)
+    except PlaywrightTimeoutError:
+        await btn_modal_aceptar_alt.wait_for(state="visible", timeout=config.timeouts.general)
     await robust_click(
         page,
         description=description,
         primary=btn_modal_aceptar,
-        fallback_selector=config.selectors.btn_modal_aceptar,
+        secondary=btn_modal_aceptar_alt,
+        fallback_selector=config.selectors.input_modal_aceptar,
         same_screen_check=same_screen_check,
         max_attempts=3,
         retry_wait_ms=5000,
