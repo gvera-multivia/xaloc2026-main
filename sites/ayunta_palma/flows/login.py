@@ -4,9 +4,13 @@ Flujo de autenticacion para Ayunta Palma.
 
 from __future__ import annotations
 
+import logging
+
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
 from sites.ayunta_palma.config import AyuntaPalmaConfig
+
+logger = logging.getLogger(__name__)
 
 
 async def _abrir_nueva_instancia(page: Page, config: AyuntaPalmaConfig) -> None:
@@ -64,6 +68,13 @@ async def _abrir_nueva_instancia(page: Page, config: AyuntaPalmaConfig) -> None:
             return { clicked: false, url, mode: "none" };
         }"""
     )
+    logger.info(
+        "[AP-DIAG] Nueva instancia trigger: clicked=%s mode=%s clickable_url=%s current_url=%s",
+        trigger.get("clicked") if isinstance(trigger, dict) else None,
+        trigger.get("mode") if isinstance(trigger, dict) else None,
+        trigger.get("url") if isinstance(trigger, dict) else None,
+        page.url,
+    )
 
     if not trigger.get("clicked"):
         boton_visible = page.locator(selectors.btn_nueva_instancia_visible).first
@@ -95,10 +106,23 @@ async def _abrir_nueva_instancia(page: Page, config: AyuntaPalmaConfig) -> None:
         try:
             await persona_tipo_usuario.wait_for(state="visible", timeout=6000)
         except PlaywrightTimeoutError:
+            logger.info("[AP-DIAG] Nueva instancia: fallback goto clickable_url=%s", clickable_url)
             await page.goto(clickable_url, wait_until="domcontentloaded")
 
     await page.wait_for_timeout(config.delay_ms)
-    await persona_tipo_usuario.wait_for(state="visible", timeout=25000)
+    try:
+        await persona_tipo_usuario.wait_for(state="visible", timeout=8000)
+    except PlaywrightTimeoutError:
+        # Fallback fuerte: abrir directamente la URL de nueva instancia en blanco.
+        logger.warning(
+            "[AP-DIAG] Nueva instancia: selector persona no visible tras click. "
+            "Forzando URL directa: %s (current_url=%s)",
+            config.url_nueva_instancia_directa,
+            page.url,
+        )
+        await page.goto(config.url_nueva_instancia_directa, wait_until="domcontentloaded")
+        await page.wait_for_timeout(config.delay_ms)
+        await persona_tipo_usuario.wait_for(state="visible", timeout=20000)
     await page.wait_for_timeout(config.delay_ms)
 
 
