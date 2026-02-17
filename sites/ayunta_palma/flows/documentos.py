@@ -9,7 +9,6 @@ import logging
 import re
 import shutil
 import sys
-import time
 import unicodedata
 from pathlib import Path
 
@@ -85,29 +84,309 @@ async def _esperar_subida_completa(page: Page, config: AyuntaPalmaConfig) -> Non
 
 async def _launch_autofirma_cert_acceptor() -> None:
     """
-    Compatibilidad legacy: usa el monitor unificado sin foco/teclado.
+    Lanza en paralelo un watcher de UIAutomation que intenta:
+    1) aceptar el dialogo del navegador para abrir AutoFirma (Obre/Abrir/Open),
+    2) aceptar dialogos nativos encadenados (certificado/seguridad de Windows).
     """
     if not sys.platform.startswith("win"):
         return
-    logger.info("[AP-DIAG] Legacy watcher redirigido a monitor unificado (sin foco).")
-    asyncio.create_task(monitor_autofirma_windows(timeout_s=35))
+
+    ps_script = r"""
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+$root = [System.Windows.Automation.AutomationElement]::RootElement
+
+$buttonNames = @(
+  "Obre", "Abrir", "Open"
+)
+$checkboxHints = @(
+  "Permet sempre",
+  "Permitir siempre",
+  "Always allow",
+  "siempre permitir",
+  "always open"
+)
+$windowHints = @(
+  "afirma", "autofirma", "portafirm",
+  "protocol", "protocolo",
+  "intentant obrir", "intentando abrir", "trying to open"
+)
+
+$clicks = 0
+for ($i=0; $i -lt 180; $i++) {
+  try {
+    $condWindow = New-Object System.Windows.Automation.PropertyCondition(
+      [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+      [System.Windows.Automation.ControlType]::Window
+    )
+    $wins = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $condWindow)
+
+    foreach ($win in $wins) {
+      $wName = [string]$win.Current.Name
+      if ([string]::IsNullOrWhiteSpace($wName)) { continue }
+
+      $looksRelevant = $false
+      $wLower = $wName.ToLowerInvariant()
+      foreach ($hint in $windowHints) {
+        if ($wLower.Contains($hint)) { $looksRelevant = $true; break }
+      }
+      if (-not $looksRelevant) { continue }
+
+      # Activar "Permitir siempre" si existe.
+      $condCheck = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::CheckBox
+      )
+      $checks = $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condCheck)
+      foreach ($chk in $checks) {
+        $chkName = [string]$chk.Current.Name
+        foreach ($hint in $checkboxHints) {
+          if ($chkName -like "*$hint*") {
+            try {
+              $toggle = $chk.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+              if ($chk.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::Off) {
+                $toggle.Toggle()
+              }
+            } catch {}
+          }
+        }
+      }
+
+      # Buscar botones de abrir/aceptar.
+      $condBtn = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Button
+      )
+      $buttons = $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condBtn)
+      foreach ($btn in $buttons) {
+        $btnName = [string]$btn.Current.Name
+        foreach ($target in $buttonNames) {
+          if ($btnName -eq $target -or $btnName -like "*$target*") {
+            try {
+              $invoke = $btn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+              $invoke.Invoke()
+              Write-Output ("auto-open-click name=" + $btnName + " window=" + $wName)
+              $clicks += 1
+              Start-Sleep -Milliseconds 300
+              if ($clicks -ge 2) { return }
+            } catch {}
+          }
+        }
+      }
+    }
+  } catch {}
+  Start-Sleep -Milliseconds 500
+}
+"""
+    # No bloquear el flujo principal esperando este watcher.
+    logger.info("[AP-DIAG] Lanzando watcher autofirma_auto_open en background.")
+    asyncio.create_task(_run_ps_diagnostic("autofirma_auto_open", ps_script, timeout_s=35))
 
 
 async def _aceptar_certificado_windows() -> None:
     """
-    Compatibilidad legacy: delega en monitor unificado sin foco/teclado.
+    Acepta el dialogo nativo de certificado de Windows.
+    Estrategia: detectar ventana, llevar foco y pulsar Aceptar por UIAutomation
+    (con fallback por teclado), sin spam de detecciones.
     """
     if not sys.platform.startswith("win"):
         return
-    await monitor_autofirma_windows(timeout_s=45)
+
+    ps_script = r"""
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+$root = [System.Windows.Automation.AutomationElement]::RootElement
+$wshell = New-Object -ComObject WScript.Shell
+$logged = @{}
+
+function Is-CertWindowTitle([string]$title) {
+  if ([string]::IsNullOrWhiteSpace($title)) { return $false }
+  $t = $title.ToLowerInvariant()
+  if ($t.Contains("certificat")) { return $true }
+  if ($t.Contains("certific")) { return $true }
+  if ($t.Contains("security")) { return $true }
+  if ($t.Contains("seguridad")) { return $true }
+  if ($t.Contains("almacen windows")) { return $true }
+  if ($t.Contains("almac")) { return $true }
+  return $false
+}
+
+for ($i=0; $i -lt 420; $i++) {
+  try {
+    $condWindow = New-Object System.Windows.Automation.PropertyCondition(
+      [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+      [System.Windows.Automation.ControlType]::Window
+    )
+    $wins = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $condWindow)
+
+    foreach ($w in $wins) {
+      $title = [string]$w.Current.Name
+      if (-not (Is-CertWindowTitle $title)) { continue }
+
+      if (-not $logged.ContainsKey($title)) {
+        Write-Output ("cert-window-detected title=" + $title)
+        $logged[$title] = $true
+      }
+
+      try {
+        try { $w.SetFocus() } catch {}
+        try { $wshell.AppActivate($title) | Out-Null } catch {}
+        Start-Sleep -Milliseconds 120
+
+        $condBtn = New-Object System.Windows.Automation.PropertyCondition(
+          [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+          [System.Windows.Automation.ControlType]::Button
+        )
+        $buttons = $w.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condBtn)
+        $clicked = $false
+        foreach ($btn in $buttons) {
+          $btnName = [string]$btn.Current.Name
+          if ($btnName -eq "Aceptar" -or $btnName -eq "Accept" -or $btnName -eq "OK" -or $btnName -like "*Aceptar*") {
+            try {
+              $invoke = $btn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+              $invoke.Invoke()
+              Write-Output ("cert-accept-click name=" + $btnName + " title=" + $title)
+              $clicked = $true
+              break
+            } catch {}
+          }
+        }
+
+        if (-not $clicked) {
+          $wshell.SendKeys('%a')
+          Start-Sleep -Milliseconds 120
+          $wshell.SendKeys('{ENTER}')
+          Write-Output ("cert-accept-fallback-keys title=" + $title)
+        }
+        return
+      } catch {
+        Write-Output ("cert-accept-failed title=" + $title)
+      }
+    }
+  } catch {}
+  Start-Sleep -Milliseconds 500
+}
+Write-Output "cert-window-timeout"
+"""
+    await _run_ps_diagnostic("windows_cert_dialog", ps_script, timeout_s=220)
 
 async def _aceptar_dialogo_edge_abrir_autofirma() -> None:
     """
-    Compatibilidad legacy: delega en monitor unificado sin foco/teclado.
+    Fallback especifico para el dialogo de Edge:
+    "Aquest lloc esta intentant obrir AutoFirma".
+    Intenta clicar "Obre/Open" via UIAutomation cuando detecta ese texto.
+    Si no puede, usa atajos de teclado como fallback.
     """
     if not sys.platform.startswith("win"):
         return
-    await monitor_autofirma_windows(timeout_s=35)
+
+    ps_script = r"""
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+$root = [System.Windows.Automation.AutomationElement]::RootElement
+$wshell = New-Object -ComObject WScript.Shell
+$walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+
+function Is-EdgePromptText([string]$txt) {
+  if ([string]::IsNullOrWhiteSpace($txt)) { return $false }
+  $t = $txt.ToLowerInvariant()
+  if ($t.Contains("autofirma")) { return $true }
+  if ($t.Contains("intentant obrir")) { return $true }
+  if ($t.Contains("intentando abrir")) { return $true }
+  if ($t.Contains("trying to open")) { return $true }
+  if ($t.Contains("wants to open")) { return $true }
+  return $false
+}
+
+function Get-ParentWindow($el) {
+  $cur = $el
+  for ($k=0; $k -lt 12; $k++) {
+    if ($null -eq $cur) { return $null }
+    try {
+      if ($cur.Current.ControlType -eq [System.Windows.Automation.ControlType]::Window) {
+        return $cur
+      }
+    } catch {}
+    $cur = $walker.GetParent($cur)
+  }
+  return $null
+}
+
+for ($i=0; $i -lt 360; $i++) {
+  try {
+    $targetWindow = $null
+    $condText = New-Object System.Windows.Automation.PropertyCondition(
+      [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+      [System.Windows.Automation.ControlType]::Text
+    )
+    $texts = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condText)
+    foreach ($t in $texts) {
+      $name = [string]$t.Current.Name
+      if (-not (Is-EdgePromptText $name)) { continue }
+      $targetWindow = Get-ParentWindow $t
+      if ($null -ne $targetWindow) {
+        Write-Output ("edge-open-dialog-detected title=" + [string]$targetWindow.Current.Name)
+        break
+      }
+    }
+
+    if ($null -eq $targetWindow) {
+      Start-Sleep -Milliseconds 250
+      continue
+    }
+
+    try { $targetWindow.SetFocus() } catch {}
+    try { $wshell.AppActivate([string]$targetWindow.Current.Name) | Out-Null } catch {}
+    Start-Sleep -Milliseconds 120
+
+    $condCheck = New-Object System.Windows.Automation.PropertyCondition(
+      [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+      [System.Windows.Automation.ControlType]::CheckBox
+    )
+    $checks = $targetWindow.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condCheck)
+    foreach ($chk in $checks) {
+      $chkName = [string]$chk.Current.Name
+      if ($chkName -like "*Permet sempre*" -or $chkName -like "*Permitir siempre*" -or $chkName -like "*Always allow*") {
+        try {
+          $toggle = $chk.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+          if ($chk.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::Off) {
+            $toggle.Toggle()
+            Write-Output ("edge-open-checkbox-checked name=" + $chkName)
+          }
+        } catch {}
+      }
+    }
+
+    $condBtn = New-Object System.Windows.Automation.PropertyCondition(
+      [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+      [System.Windows.Automation.ControlType]::Button
+    )
+    $buttons = $targetWindow.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condBtn)
+    foreach ($btn in $buttons) {
+      $btnName = [string]$btn.Current.Name
+      if ($btnName -eq "Obre" -or $btnName -eq "Abrir" -or $btnName -eq "Open" -or $btnName -like "*Obre*" -or $btnName -like "*Abrir*" -or $btnName -like "*Open*") {
+        try {
+          $invoke = $btn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+          $invoke.Invoke()
+          Write-Output ("edge-open-click name=" + $btnName)
+          return
+        } catch {}
+      }
+    }
+
+    try {
+      $wshell.SendKeys("%o")
+      Start-Sleep -Milliseconds 100
+      $wshell.SendKeys("{ENTER}")
+      Write-Output "edge-open-fallback-keys"
+      return
+    } catch {}
+  } catch {}
+  Start-Sleep -Milliseconds 250
+}
+Write-Output "edge-open-timeout"
+"""
+    await _run_ps_diagnostic("edge_open_dialog", ps_script, timeout_s=95)
 
 def _normalize_text(text: str) -> str:
     if not text:
@@ -567,37 +846,6 @@ async def _click_signar_tots_documents(page: Page, config: AyuntaPalmaConfig) ->
     await _esperar_velo_oculto(page, config)
 
 
-async def _watch_retry_autofirma_modal(page: Page, watch_s: int = 35) -> int:
-    """
-    Si aparece el modal de error de AutoFirma ("No es posible conectar..."),
-    pulsa "Reintentar operación" para relanzar el protocolo.
-    """
-    end_ts = time.monotonic() + max(5, watch_s)
-    clicks = 0
-    selectors = [
-        "button:has-text('Reintentar operación')",
-        "button:has-text('Reintentar operació')",
-        "button:has-text('Reintentar operacio')",
-    ]
-    while time.monotonic() < end_ts:
-        clicked_now = False
-        for sel in selectors:
-            try:
-                btn = page.locator(sel).first
-                if await btn.count() > 0 and await btn.is_visible():
-                    await btn.click(timeout=1500)
-                    clicks += 1
-                    clicked_now = True
-                    logger.warning("[AP-DIAG] AutoFirma: pulsado '%s' (%s).", sel, clicks)
-                    await page.wait_for_timeout(1200)
-                    break
-            except Exception:
-                continue
-        if not clicked_now:
-            await page.wait_for_timeout(700)
-    return clicks
-
-
 async def _verificar_firma_realizada(page: Page, config: AyuntaPalmaConfig) -> None:
     """
     Verifica que aparezca la confirmacion de firma.
@@ -673,7 +921,6 @@ async def subir_documentos(
     await _click_firmar_con_reintentos(page, config, max_intentos=3)
     logger.info("[AP-DIAG] Arrancando monitor unificado AutoFirma/Edge/Certificado.")
     autofirma_monitor_task = asyncio.create_task(monitor_autofirma_windows(timeout_s=70))
-    retry_autofirma_task = asyncio.create_task(_watch_retry_autofirma_modal(page, watch_s=35))
     await page.wait_for_timeout(2000)
     logger.info("[AP-DIAG] Firma modal: click en 'Signar tots els documents'.")
     await _click_signar_tots_documents(page, config)
@@ -691,12 +938,6 @@ async def subir_documentos(
         )
     except Exception as e:
         logger.warning("[AP-DIAG] Monitor unificado devolvio error/timeout: %s", e)
-    try:
-        retry_clicks = await asyncio.wait_for(retry_autofirma_task, timeout=40)
-        if retry_clicks > 0:
-            logger.warning("[AP-DIAG] AutoFirma retry modal gestionado. reintentos=%s", retry_clicks)
-    except Exception:
-        pass
     logger.info("[AP-DIAG] Validando firma real.")
     await _verificar_firma_realizada(page, config)
     logger.info("[AP-DIAG] Firma validada; iniciando descarga de justificante.")

@@ -31,21 +31,22 @@ def _parse_summary_line(line: str) -> AutofirmaMonitorResult:
 
 async def monitor_autofirma_windows(timeout_s: int = 70) -> AutofirmaMonitorResult:
     """
-    Monitor unico de UIAutomation optimizado para BACKGROUND/MINIMIZADO.
-    Usa patrones (Invoke/LegacyIAccessible) en lugar de clicks fisicos o SendKeys.
+    Monitor unico de UIAutomation para:
+    - dialogo Edge de abrir AutoFirma,
+    - dialogo de certificado Windows,
+    - ventana de AutoFirma (con log de contenido y botones visibles).
     """
     if not sys.platform.startswith("win"):
         return AutofirmaMonitorResult()
 
     loops = max(40, int(timeout_s * 4))
-
-    # Script PowerShell modificado para no requerir foco visual
     ps_script = rf"""
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 $root = [System.Windows.Automation.AutomationElement]::RootElement
+$wshell = New-Object -ComObject WScript.Shell
+$walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
 $seen = @{{}}
-$acted = @{{}}
 $edgeClicked = 0
 $certClicked = 0
 $afSeen = 0
@@ -63,7 +64,6 @@ function Get-Texts($win) {{
   )
   $arr = @()
   try {{
-    # TreeScope Descendants permite ver dentro aunque no este renderizado
     $texts = $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condText)
     foreach ($t in $texts) {{
       $name = [string]$t.Current.Name
@@ -97,66 +97,19 @@ function Get-Buttons($win) {{
 
 function Kind-Window([string]$title, $texts) {{
   $all = ((Norm $title) + " " + (Norm (($texts -join " "))))
-  if ($all.Contains("intentant obrir autofirma") -or $all.Contains("intentando abrir autofirma") -or $all.Contains("trying to open autofirma") -or $all.Contains("wants to open")) {{ return "edge_open" }}
-  if ($all.Contains("dialogo de seguridad") -or $all.Contains("security dialog") -or $all.Contains("certificat") -or $all.Contains("certific") -or $all.Contains("almacen windows")) {{ return "windows_cert" }}
+  if ($all.Contains("intentant obrir autofirma") -or $all.Contains("intentando abrir autofirma") -or $all.Contains("trying to open autofirma")) {{ return "edge_open" }}
+  if ($all.Contains("dialogo de seguridad del almacen windows") -or $all.Contains("diálogo de seguridad del almacén windows") -or $all.Contains("security dialog") -or $all.Contains("certificat") -or $all.Contains("certific")) {{ return "windows_cert" }}
   if ($all.Contains("autofirma") -or $all.Contains("portafirm")) {{ return "autofirma" }}
   return ""
 }}
 
-# Funcion CLAVE: Intenta pulsar sin mover el raton y sin foco
-function Try-Click-Pattern($element) {{
-    # 1. Invoke Pattern (Estandar moderno)
-    try {{
-        $inv = $element.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-        $inv.Invoke()
-        return "invoke"
-    }} catch {{}}
-
-    # 2. LegacyIAccessible (CRITICO PARA JAVA / AUTOFIRMA / MINIMIZADO)
-    try {{
-        $leg = $element.GetCurrentPattern([System.Windows.Automation.LegacyIAccessiblePattern]::Pattern)
-        $leg.DoDefaultAction()
-        return "legacy"
-    }} catch {{}}
-
-    # 3. Toggle Pattern (A veces los botones son toggles)
-    try {{
-        $tog = $element.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
-        $tog.Toggle()
-        return "toggle"
-    }} catch {{}}
-
-    return ""
-}}
-
-function Set-EdgeCheckbox($win) {{
-  $condCheck = New-Object System.Windows.Automation.PropertyCondition(
-    [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-    [System.Windows.Automation.ControlType]::CheckBox
-  )
-  try {{
-    $checks = $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condCheck)
-    foreach ($chk in $checks) {{
-      $chkName = Norm ([string]$chk.Current.Name)
-      if ($chkName.Contains("permet sempre") -or $chkName.Contains("permitir siempre") -or $chkName.Contains("always allow")) {{
-        # Intentamos marcarlo sin foco
-        try {{
-             $toggle = $chk.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
-             if ($chk.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::Off) {{
-                $toggle.Toggle()
-                Write-Output "edge_open checkbox=checked_toggle"
-             }}
-        }} catch {{
-             # Fallback Legacy para Checkbox
-             try {{
-                $leg = $chk.GetCurrentPattern([System.Windows.Automation.LegacyIAccessiblePattern]::Pattern)
-                $leg.DoDefaultAction()
-                Write-Output "edge_open checkbox=checked_legacy"
-             }} catch {{}}
-        }}
-      }}
-    }}
-  }} catch {{}}
+function Dump-Window($kind, $title, $texts, $buttons) {{
+  $safeTitle = ($title -replace "`r|`n", " ").Trim()
+  $safeTexts = (($texts -join " | ") -replace "`r|`n", " ").Trim()
+  $safeButtons = (($buttons -join " | ") -replace "`r|`n", " ").Trim()
+  Write-Output ("window kind=" + $kind + " title=" + $safeTitle)
+  if ($safeTexts) {{ Write-Output ("window_text kind=" + $kind + " text=" + $safeTexts) }}
+  if ($safeButtons) {{ Write-Output ("window_buttons kind=" + $kind + " buttons=" + $safeButtons) }}
 }}
 
 function Click-ButtonByHints($win, $hints, [string]$kind) {{
@@ -165,23 +118,21 @@ function Click-ButtonByHints($win, $hints, [string]$kind) {{
     [System.Windows.Automation.ControlType]::Button
   )
   $buttons = $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condBtn)
-
   foreach ($btn in $buttons) {{
     $btnName = [string]$btn.Current.Name
     $n = Norm $btnName
     foreach ($hint in $hints) {{
       if ($n -eq $hint -or $n.Contains($hint)) {{
-        $method = Try-Click-Pattern $btn
-        if ($method) {{
-            Write-Output ("click kind=" + $kind + " button=" + $btnName + " method=" + $method)
-            return $btnName
-        }} else {{
-            Write-Output ("click_failed_patterns kind=" + $kind + " button=" + $btnName)
-        }}
+        try {{
+          $invoke = $btn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+          $invoke.Invoke()
+          Write-Output ("click kind=" + $kind + " button=" + $btnName)
+          return $true
+        }} catch {{}}
       }}
     }}
   }}
-  return ""
+  return $false
 }}
 
 for ($i=0; $i -lt {loops}; $i++) {{
@@ -190,54 +141,52 @@ for ($i=0; $i -lt {loops}; $i++) {{
       [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
       [System.Windows.Automation.ControlType]::Window
     )
-    # Buscamos ventanas (FindAll funciona mejor que iterar children manualmente si esta minimizado)
     $wins = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $condWindow)
-
     foreach ($w in $wins) {{
       $title = [string]$w.Current.Name
       if ([string]::IsNullOrWhiteSpace($title)) {{ continue }}
-
-      # Obtenemos textos para identificar el tipo
       $texts = Get-Texts $w
-      $buttons = Get-Buttons $w # Solo para logging
+      $buttons = Get-Buttons $w
       $kind = Kind-Window $title $texts
-
       if (-not $kind) {{ continue }}
 
       $key = $kind + "|" + $title
       if (-not $seen.ContainsKey($key)) {{
         $seen[$key] = $true
-        # Dump simplificado para log
-        Write-Output ("window_found kind=" + $kind + " title=" + $title)
+        Dump-Window $kind $title $texts $buttons
       }}
 
-      if ($acted.ContainsKey($key)) {{ continue }}
-
-      # --- AQUI ESTA EL CAMBIO IMPORTANTE ---
-      # Eliminados: SetFocus, AppActivate, SendKeys.
-      # Ahora confiamos puramente en UI Automation Patterns.
+      try {{ $w.SetFocus() }} catch {{}}
+      try {{ $wshell.AppActivate($title) | Out-Null }} catch {{}}
 
       if ($kind -eq "edge_open") {{
-        Set-EdgeCheckbox $w
-        $btnClicked = Click-ButtonByHints $w @("obre","abrir","open") "edge_open"
-        if (-not [string]::IsNullOrWhiteSpace($btnClicked)) {{
-          $edgeClicked += 1
-          $acted[$key] = $true
+        $clicked = Click-ButtonByHints $w @("obre","abrir","open") "edge_open"
+        if (-not $clicked) {{
+          try {{
+            $wshell.SendKeys("%o")
+            Start-Sleep -Milliseconds 120
+            $wshell.SendKeys("{{ENTER}}")
+            Write-Output "click kind=edge_open button=keyboard_fallback"
+            $clicked = $true
+          }} catch {{}}
         }}
+        if ($clicked) {{ $edgeClicked += 1 }}
       }} elseif ($kind -eq "windows_cert") {{
-        $btnClicked = Click-ButtonByHints $w @("aceptar","accept","ok") "windows_cert"
-        if (-not [string]::IsNullOrWhiteSpace($btnClicked)) {{
-          $certClicked += 1
-          $acted[$key] = $true
+        $clicked = Click-ButtonByHints $w @("aceptar","accept","ok") "windows_cert"
+        if (-not $clicked) {{
+          try {{
+            $wshell.SendKeys("%a")
+            Start-Sleep -Milliseconds 120
+            $wshell.SendKeys("{{ENTER}}")
+            Write-Output "click kind=windows_cert button=keyboard_fallback"
+            $clicked = $true
+          }} catch {{}}
         }}
+        if ($clicked) {{ $certClicked += 1 }}
       }} elseif ($kind -eq "autofirma") {{
         $afSeen += 1
-        # Anadidos mas hints por si acaso
-        $btnClicked = Click-ButtonByHints $w @("firmar","signar","aceptar","acceptar","yes","si") "autofirma"
-        if (-not [string]::IsNullOrWhiteSpace($btnClicked)) {{
-          $afClicks += 1
-          $acted[$key] = $true
-        }}
+        $clicked = Click-ButtonByHints $w @("firmar","signar","acceptar","acceptar i firmar","aceptar y firmar") "autofirma"
+        if ($clicked) {{ $afClicks += 1 }}
       }}
     }}
   }} catch {{}}
@@ -245,9 +194,6 @@ for ($i=0; $i -lt {loops}; $i++) {{
 }}
 
 $timedOut = 1
-if ($edgeClicked -gt 0 -or $certClicked -gt 0 -or $afClicks -gt 0) {{
-  $timedOut = 0
-}}
 Write-Output ("summary edge_clicked=" + $edgeClicked + " cert_clicked=" + $certClicked + " autofirma_seen=" + $afSeen + " autofirma_clicks=" + $afClicks + " timed_out=" + $timedOut)
 """
 
@@ -300,3 +246,4 @@ Write-Output ("summary edge_clicked=" + $edgeClicked + " cert_clicked=" + $certC
         await err_task
 
     return summary
+
