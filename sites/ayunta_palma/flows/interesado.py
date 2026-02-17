@@ -30,27 +30,19 @@ async def _abrir_modal_nuevo_interesado(page: Page, selectors: AyuntaPalmaSelect
     except PlaywrightTimeoutError:
         pass
 
-    # Importante: no usar el boton visible (redirect-url), para evitar
-    # redirecciones al mismo enlace y quedarnos en la misma pantalla.
-    # Disparamos solo el submit oculto ASP.NET del control exacto.
+    # Boton/input exactos de "Nuevo/a interesado/a" (segun HTML real):
+    # - button.btn-icono (visible)
+    # - input#ctl00_ctl00_cphM_cph_btnListaInteresadosOpcionesNuevo (hidden submit)
     await page.wait_for_timeout(5000)
     await page.evaluate(
         """() => {
-            const normalize = (s) => (s || "").toLowerCase().normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").trim();
-            const submits = Array.from(document.querySelectorAll("input[type='submit']"));
-            const hidden = submits.find((el) => {
-                const id = (el.id || "").toLowerCase();
-                const name = (el.name || "").toLowerCase();
-                const value = normalize(el.value || "");
-                return (
-                    id.includes("btnlistainteresadosopcionesnuevo") ||
-                    name.includes("btnlistainteresadosopcionesnuevo") ||
-                    value.includes("nuevo/a interesado/a") ||
-                    value.includes("nou interessat") ||
-                    value.includes("nova interessada")
-                );
-            });
+            const hidden = document.getElementById("ctl00_ctl00_cphM_cph_btnListaInteresadosOpcionesNuevo");
             if (hidden) {
+                const wrapper = hidden.closest(".btn-bar-horizontal-centrada-inner");
+                const button = wrapper ? wrapper.querySelector("button.btn-icono[data-icono='plus.svg']") : null;
+                if (button) {
+                    try { button.click(); } catch {}
+                }
                 try { hidden.click(); } catch {}
             }
             if (typeof window.__doPostBack === "function") {
