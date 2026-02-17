@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import Navbar from '@/components/Navbar';
 import { useAuth } from '@/lib/AuthContext';
 
-const ADMIN_ROUTES = ['/admin', '/control', '/blacklist'];
+const ADMIN_ROUTES = ['/admin', '/users', '/control', '/blacklist'];
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();

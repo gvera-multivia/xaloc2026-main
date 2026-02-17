@@ -11,6 +11,7 @@ import {
   User,
   Terminal,
   LayoutDashboard,
+  Users,
 } from "lucide-react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
@@ -37,6 +38,7 @@ export default function Navbar() {
     { href: "/", label: "Estado", icon: LayoutDashboard, adminOnly: false },
     { href: "/history", label: "Historial", icon: History, adminOnly: false },
     { href: "/admin", label: "Gestion", icon: Settings, adminOnly: true },
+    { href: "/users", label: "Usuarios", icon: Users, adminOnly: true },
     { href: "/control", label: "Control", icon: Terminal, adminOnly: true },
     { href: "/blacklist", label: "Bloqueos", icon: ShieldAlert, adminOnly: true },
   ].filter((link) => !link.adminOnly || isAdmin);

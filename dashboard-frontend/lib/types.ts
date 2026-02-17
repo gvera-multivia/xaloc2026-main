@@ -65,3 +65,13 @@ export interface OrganismoConfig {
     login_url?: string;
     recursos_url?: string;
 }
+
+export interface DashboardUser {
+    id?: number;
+    sub?: string;
+    username: string;
+    role: 'admin' | 'user' | string;
+    active?: number | boolean;
+    created_at?: string;
+    updated_at?: string;
+}

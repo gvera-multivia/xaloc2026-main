@@ -114,6 +114,12 @@ export const sessionApi = {
     logout: () => api.post<{ ok: boolean }>('/auth/logout'),
 };
 
+export const usersApi = {
+    list: () => api.get<{ items: any[]; total: number }>('/auth/users'),
+    create: (payload: { username: string; password: string; role: 'admin' | 'user'; active?: boolean }) =>
+        api.post<{ created: boolean; user: any }>('/auth/users', payload),
+};
+
 export const configApi = {
     list: () => api.get<{ items: any[], total: number }>('/config'),
     setSiteActive: (siteId: string, active: boolean) =>
