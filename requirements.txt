@@ -7,7 +7,6 @@ aiohttp
 requests
 openpyxl
 groq
-redis
 psycopg[binary]
 fastapi
 uvicorn

@@ -6,7 +6,6 @@ import signal
 import contextlib
 import time
 import traceback
-import json
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -19,7 +18,6 @@ from core.realtime_store import build_realtime_store
 from core.worker_logging import setup_worker_logging
 from core.xvia_auth import create_authenticated_session_in_place
 from core.xvia_deselect import deselect_resource
-from core.redis_client import get_redis_client
 
 from core.worker.processor import process_task, _extraer_n_expediente
 from core.worker.utils import int_env, purge_invalid_incidents_if_supported
@@ -65,7 +63,6 @@ async def run_worker_loop():
             pass
 
     heartbeat_task: Optional[asyncio.Task] = None
-    redis_heartbeat_task: Optional[asyncio.Task] = None
     reconcile_task: Optional[asyncio.Task] = None
 
     async def _runtime_heartbeat_loop() -> None:
@@ -85,30 +82,6 @@ async def run_worker_loop():
                 break
             except Exception as e:
                 logger.warning(f"Error en heartbeat: {e}")
-                await asyncio.sleep(5)
-
-    async def _runtime_heartbeat_redis_loop() -> None:
-        redis_client = get_redis_client()
-        if not redis_client:
-            return
-
-        while not shutdown_event.is_set():
-            try:
-                payload = json.dumps({
-                    "status": "busy" if runtime_state.get("current_job_id") else "online",
-                    "task_id": runtime_state.get("current_job_id"),
-                    "worker_id": worker_instance_id,
-                    "updated_at": datetime.now(timezone.utc).isoformat()
-                })
-                # Ex 60 seconds as per plan
-                await redis_client.set(f"worker:status:{worker_instance_id}", payload, ex=60)
-                await asyncio.wait_for(shutdown_event.wait(), timeout=30)
-            except asyncio.TimeoutError:
-                continue
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.warning(f"Error en heartbeat Redis: {e}")
                 await asyncio.sleep(5)
 
     async def _runtime_reconcile_loop() -> None:
@@ -143,7 +116,6 @@ async def run_worker_loop():
         current_job_id=None,
     )
     heartbeat_task = asyncio.create_task(_runtime_heartbeat_loop())
-    redis_heartbeat_task = asyncio.create_task(_runtime_heartbeat_redis_loop())
     reconcile_task = asyncio.create_task(_runtime_reconcile_loop())
 
     # Cargar credenciales
@@ -376,7 +348,7 @@ async def run_worker_loop():
     finally:
         shutdown_event.set()
 
-        for task in (heartbeat_task, redis_heartbeat_task, reconcile_task):
+        for task in (heartbeat_task, reconcile_task):
             if task is not None:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):

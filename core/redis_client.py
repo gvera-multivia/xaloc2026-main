@@ -19,6 +19,10 @@ def get_redis_client() -> Optional["redis.Redis"]:
     """
     global _redis_client, _redis_pool
 
+    redis_enabled = (os.getenv("REDIS_ENABLED") or "0").strip().lower() in {"1", "true", "yes", "on"}
+    if not redis_enabled:
+        return None
+
     if redis is None:
         logger.warning("Redis package not installed. Redis features will be disabled.")
         return None
@@ -26,9 +30,9 @@ def get_redis_client() -> Optional["redis.Redis"]:
     if _redis_client is not None:
         return _redis_client
 
-    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0").strip()
+    redis_url = (os.getenv("REDIS_URL") or "").strip()
     if not redis_url:
-        logger.warning("REDIS_URL is empty. Redis features will be disabled.")
+        logger.warning("REDIS_ENABLED=1 pero REDIS_URL vacío. Redis desactivado.")
         return None
 
     try:
