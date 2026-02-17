@@ -45,10 +45,10 @@ export default function Navbar() {
   const navLinks: NavLink[] = [
     { href: "/", label: "Estado", icon: LayoutDashboard, adminOnly: false },
     { href: "/history", label: "Historial", icon: History, adminOnly: false },
-    { href: "/admin", label: "Gestion", icon: Settings, adminOnly: true },
+    { href: "/admin", label: "Gestion", icon: Settings, adminOnly: false },
     { href: "/users", label: "Usuarios", icon: Users, adminOnly: true },
     { href: "/control", label: "Control", icon: Terminal, adminOnly: true },
-    { href: "/blacklist", label: "Bloqueos", icon: ShieldAlert, adminOnly: true },
+    { href: "/blacklist", label: "Bloqueos", icon: ShieldAlert, adminOnly: false },
   ]
     .filter((link) => !link.adminOnly || isAdmin)
     .filter((link) => !(isClientView && link.href === "/control"));

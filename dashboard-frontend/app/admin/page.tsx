@@ -16,7 +16,8 @@ import { queueApi, authApi, configApi, api, historyApi } from "@/lib/api";
 import { QueueItem, PendingAuth, PauseInfo, OrganismoConfig, Incident } from "@/lib/types";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { canManagePauses } from "@/lib/permissions";
+import { canManagePauses as clientViewCanManagePauses } from "@/lib/permissions";
+import { useAuth } from "@/lib/AuthContext";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -33,6 +34,8 @@ const KNOWN_SITES = ["madrid", "xaloc_girona", "base_online", "ayunta_palma"];
  * - Table is matte + terminal-native (clean dividers, minimal hover)
  */
 export default function AdminPage() {
+  const { isAdmin } = useAuth();
+  const canManagePauses = isAdmin && clientViewCanManagePauses;
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
   const [pauses, setPauses] = useState<PauseInfo[]>([]);
   const [configs, setConfigs] = useState<OrganismoConfig[]>([]);
