@@ -22,23 +22,23 @@ async def _abrir_modal_alegaciones_si_no_esta(page: Page, config: AyuntaPalmaCon
         pass
 
     boton_siguiente = page.locator(selectors.btn_siguiente).first
-    input_siguiente = page.locator(selectors.input_siguiente).first
-    await page.wait_for_timeout(5000)
-    if await boton_siguiente.count() > 0:
-        await boton_siguiente.wait_for(state="visible", timeout=15000)
-        try:
-            await boton_siguiente.click(timeout=5000)
-        except Exception:
-            await boton_siguiente.click(force=True, timeout=5000)
+    if await boton_siguiente.count() > 0 and await boton_siguiente.is_visible():
+        await boton_siguiente.click()
     else:
-        await input_siguiente.wait_for(state="attached", timeout=15000)
-        await page.evaluate(
-            """(sel) => {
-                const el = document.querySelector(sel);
-                if (el) el.click();
-            }""",
-            selectors.input_siguiente,
-        )
+        input_siguiente = page.locator(selectors.input_siguiente).first
+        if await input_siguiente.count() > 0:
+            if await input_siguiente.is_visible():
+                await input_siguiente.click()
+            else:
+                await page.evaluate(
+                    """(selector) => {
+                        const el = document.querySelector(selector);
+                        if (!el) return false;
+                        el.click();
+                        return true;
+                    }""",
+                    selectors.input_siguiente,
+                )
 
     await page.wait_for_timeout(config.delay_ms)
     await inputs.nth(0).wait_for(state="visible", timeout=30000)
@@ -62,12 +62,8 @@ async def completar_alegaciones(
     await textareas.nth(0).fill(datos.expone)
     await textareas.nth(1).fill(datos.solicita)
 
-    confirmar = frame.locator(selectors.alegaciones_confirm).first
+    confirmar = frame.locator(selectors.alegaciones_confirm)
     await confirmar.wait_for(state="visible")
-    await page.wait_for_timeout(5000)
-    try:
-        await confirmar.click(timeout=5000)
-    except Exception:
-        await confirmar.click(force=True, timeout=5000)
+    await confirmar.click()
     await page.wait_for_timeout(config.delay_ms)
     return page

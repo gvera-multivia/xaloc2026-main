@@ -1,5 +1,5 @@
-﻿"""
-ConfiguraciÃ³n del sitio Ayunta Palma.
+"""
+Configuración del sitio Ayunta Palma.
 """
 
 from __future__ import annotations
@@ -13,22 +13,9 @@ from core.base_config import BaseConfig
 class AyuntaPalmaSelectors:
     login_frame: str = "#ventanaModal"
     login_option_rows: str = "#optSsl tr"
-    login_option_cert_titulo: str = "#optSsl tr:first-child .titulo-opcion"
-    btn_nueva_instancia: str = "button.redirect-url.stop-click-propagation.btn-icono"
-    btn_nueva_instancia_visible: str = (
-        "div.btn-bar-horizontal-centrada-inner:has(input#ctl00_ctl00_cphM_cph_btnUltimoBorradorCancelar) "
-        "button.btn-icono"
-    )
+    btn_nueva_instancia: str = "button.redirect-url.stop-click-propagation:has-text(\"Nueva instancia en blanco\")"
     input_nueva_instancia: str = "#ctl00_ctl00_cphM_cph_btnUltimoBorradorCancelar"
-    btn_nuevo_interesado: str = (
-        "#ctl00_ctl00_cphM_cph_pnlListaInteresadosOpciones "
-        "div.btn-bar-horizontal-centrada-inner:has(input#ctl00_ctl00_cphM_cph_btnListaInteresadosOpcionesNuevo) "
-        "button.btn-icono"
-    )
-    btn_nuevo_interesado_visible: str = (
-        "div.btn-bar-horizontal-centrada-inner:has(input#ctl00_ctl00_cphM_cph_btnListaInteresadosOpcionesNuevo) "
-        "button:has-text(\"Nuevo/a interesado/a\")"
-    )
+    btn_nuevo_interesado: str = ".btn-bar-horizontal-centrada-inner button:has-text(\"Nuevo/a interesado/a\")"
     input_nuevo_interesado: str = "#ctl00_ctl00_cphM_cph_btnListaInteresadosOpcionesNuevo"
     persona_tipo_usuario: str = "#ctl00_ctl00_cphM_cph_ddlPersonaTipoUsuario"
     persona_tipo_personalidad: str = "#ctl00_ctl00_cphM_cph_ddlPersonaTipoPersonalidad"
@@ -44,54 +31,24 @@ class AyuntaPalmaSelectors:
     email_confirm_input: str = "#ctl00_ctl00_cphM_cph_txtPersonaEmailNotificacion2"
     telefono_selector: str = "#ctl00_ctl00_cphM_cph_ddlPersonaTelefonoMovilSelector"
     telefono_input: str = "#ctl00_ctl00_cphM_cph_txtPersonaTelefonoMovil"
-    btn_aceptar_modal: str = (
-        ".ui-dialog:visible .btn-bar-horizontal-centrada-inner button:has-text(\"Aceptar\"), "
-        ".ui-dialog:visible .btn-bar-horizontal-centrada-inner button:has-text(\"Acceptar\")"
-    )
-    input_aceptar_modal_persona: str = "#ctl00_ctl00_cphM_cph_btnAceptarPersona"
-    btn_aceptar_modal_visible: str = (
-        ".ui-dialog:visible .btn-bar-horizontal-centrada-inner:has(input#ctl00_ctl00_cphM_cph_btnAceptarPersona) "
-        "button.btn-bl1, .ui-dialog:visible .btn-bar-horizontal-centrada-inner:has(input#ctl00_ctl00_cphM_cph_btnAceptarPersona) button.btn-icono"
-    )
+    btn_aceptar_modal: str = ".ui-dialog:visible .btn-bar-horizontal-centrada-inner button:has-text(\"Aceptar\")"
     btn_indicar_representante: str = "button:has-text(\"Indicar representante\")"
-    input_indicar_representante: str = "#ctl00_ctl00_cphM_cph_repListaInteresados_ctl00_btnListaInteresadosItemNuevoRepresentante"
-    btn_indicar_representante_visible: str = (
-        "div.btn-bar-horizontal-centrada-inner:has(input#ctl00_ctl00_cphM_cph_repListaInteresados_ctl00_btnListaInteresadosItemNuevoRepresentante) "
-        "button.btn-icono"
-    )
-    btn_siguiente: str = (
-        ".btn-bar-horizontal-centrada-inner button:has-text(\"Siguiente\"), "
-        ".btn-bar-horizontal-centrada-inner button:has-text(\"Següent\"), "
-        ".btn-bar-horizontal-centrada-inner button:has-text(\"Seguent\")"
-    )
-    btn_siguiente_visible: str = (
-        "div.btn-bar-horizontal-centrada-inner:has(input#ctl00_ctl00_cphM_cph_btnSiguiente) button.btn-icono:has-text(\"Siguiente\"), "
-        "div.btn-bar-horizontal-centrada-inner:has(input#ctl00_ctl00_cphM_cph_btnSiguiente) button.btn-icono:has-text(\"Següent\"), "
-        "div.btn-bar-horizontal-centrada-inner:has(input#ctl00_ctl00_cphM_cph_btnSiguiente) button.btn-icono:has-text(\"Seguent\")"
-    )
+    btn_siguiente: str = ".btn-bar-horizontal-centrada-inner button:has-text(\"Siguiente\")"
     input_siguiente: str = "#ctl00_ctl00_cphM_cph_btnSiguiente"
     chk_proteccion_datos: str = "#ctl00_ctl00_cphM_cph_chkProteccionDatos"
-    btn_modal_aceptar: str = ".ui-dialog:visible button:has-text(\"Aceptar\"), .ui-dialog:visible button:has-text(\"Acceptar\")"
-    btn_modal_aceptar_visible: str = ".ui-dialog:visible .btn-bar-horizontal-centrada-inner button.btn-bl1"
-    input_modal_aceptar: str = ".ui-dialog:visible input[id$='_btnAceptar']"
+    btn_modal_aceptar: str = ".ui-dialog:visible button:has-text(\"Aceptar\")"
     btn_confirmar: str = "button:has-text(\"Confirmar\")"
-    btn_confirmar_visible: str = "div.btn-bar-horizontal-centrada-inner:has(input[id$='_btnConfirmar']) button.btn-icono"
-    input_confirmar: str = "input[id$='_btnConfirmar']"
-    btn_firmar: str = "button:has-text(\"Firmar\"), button:has-text(\"Signar\")"
+    btn_firmar: str = "button:has-text(\"Firmar\")"
     input_firmar: str = "#ctl00_ctl00_cphM_cph_btnFirmar"
     btn_signar_tots_documents: str = "button:has-text(\"Signar tots els documents\")"
-    btn_anadir_documento: str = (
-        "div.btn-bar-horizontal-centrada-inner:has(input#ctl00_ctl00_cphM_cph_repDocumentosAPresentar_ctl01_btnDocumentoAPresentarNuevoFichero) "
-        "button.btn-icono"
-    )
-    input_anadir_documento: str = "#ctl00_ctl00_cphM_cph_repDocumentosAPresentar_ctl01_btnDocumentoAPresentarNuevoFichero"
-    btn_confirmar_archivo: str = ".panel-dialog button:has-text(\"Aceptar\"), .panel-dialog button:has-text(\"Acceptar\")"
+    btn_anadir_documento: str = ".btn-bar-horizontal-centrada-inner button:has-text(\"Añadir\")"
+    btn_confirmar_archivo: str = ".panel-dialog button:has-text(\"Aceptar\")"
     velo: str = "#velo"
     alegaciones_frame: str = "#ventanaModal"
     alegaciones_input: str = "input[type='text'].form-control"
     alegaciones_textarea: str = "textarea.form-control"
     alegaciones_confirm: str = "button:has-text(\"Confirmar\")"
-    archivo_input: str = "#ctl00_ctl00_cphM_cph_mfuNuevoFichero_pnl input[type='file']"
+    archivo_input: str = "#ctl00_ctl00_cphM_cph_pnlNuevoFichero input[type='file']"
 
 
 @dataclass
@@ -101,8 +58,4 @@ class AyuntaPalmaConfig(BaseConfig):
         "https://palma.sedipualba.es/carpetaciudadana/login.aspx?"
         "returnUrl=https%3a%2f%2fpalma.sedipualba.es%2fcarpetaciudadana%2fnueva_entrada.aspx%3fidtramite%3d13809"
     )
-    url_nueva_instancia_directa: str = (
-        "https://palma.sedipualba.es/carpetaciudadana/nueva_entrada.aspx?idtramite=13809&recuperar=false"
-    )
     selectors: AyuntaPalmaSelectors = field(default_factory=AyuntaPalmaSelectors)
-
