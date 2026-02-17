@@ -88,10 +88,19 @@ async def _abrir_modal_nuevo_interesado(page: Page, selectors: AyuntaPalmaSelect
         if not fired:
             continue
         try:
-            await tipo_usuario.wait_for(state="visible", timeout=7000)
+            try:
+                await page.wait_for_selector(selectors.velo, state="hidden", timeout=12000)
+            except Exception:
+                pass
+            await tipo_usuario.wait_for(state="visible", timeout=15000)
             opened = True
             break
         except PlaywrightTimeoutError:
+            logger.warning(
+                "[AP-DIAG] Nuevo interesado: modo=%s fired pero no aparece selector persona a tiempo. current_url=%s",
+                mode,
+                page.url,
+            )
             continue
 
     if not opened:

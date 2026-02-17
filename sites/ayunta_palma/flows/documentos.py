@@ -962,23 +962,28 @@ async def subir_documentos(
     selectors = config.selectors
     boton_anadir = page.locator(selectors.btn_anadir_documento).first
     await boton_anadir.wait_for(state="visible")
+    modal_nuevo_fichero = page.locator("#ctl00_ctl00_cphM_cph_pnlNuevoFichero").first
 
     async def _dialogo_anadir_no_visible() -> bool:
         try:
-            file_input = page.locator(selectors.archivo_input).first
-            return not (await file_input.count() > 0 and await file_input.is_visible())
+            return not (await modal_nuevo_fichero.count() > 0 and await modal_nuevo_fichero.is_visible())
         except Exception:
             return True
 
-    await robust_click(
-        page,
-        description="Abrir dialogo Anadir documento",
-        primary=boton_anadir,
-        fallback_selector=selectors.btn_anadir_documento,
-        same_screen_check=_dialogo_anadir_no_visible,
-        max_attempts=3,
-        retry_wait_ms=5000,
-    )
+    if await _dialogo_anadir_no_visible():
+        await robust_click(
+            page,
+            description="Abrir dialogo Anadir documento",
+            primary=boton_anadir,
+            fallback_selector=selectors.input_anadir_documento,
+            same_screen_check=_dialogo_anadir_no_visible,
+            max_attempts=3,
+            retry_wait_ms=5000,
+        )
+    else:
+        logger.info("[AP-DIAG] Dialogo de anadir documento ya estaba abierto.")
+
+    await modal_nuevo_fichero.wait_for(state="visible", timeout=config.timeouts.general)
     await page.wait_for_timeout(config.delay_ms)
     logger.info("[AP-DIAG] Dialogo de anadir documento abierto.")
 

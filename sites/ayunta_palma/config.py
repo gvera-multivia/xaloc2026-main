@@ -1,5 +1,5 @@
-"""
-Configuración del sitio Ayunta Palma.
+﻿"""
+ConfiguraciÃ³n del sitio Ayunta Palma.
 """
 
 from __future__ import annotations
@@ -72,14 +72,18 @@ class AyuntaPalmaSelectors:
     btn_firmar: str = "button:has-text(\"Firmar\")"
     input_firmar: str = "#ctl00_ctl00_cphM_cph_btnFirmar"
     btn_signar_tots_documents: str = "button:has-text(\"Signar tots els documents\")"
-    btn_anadir_documento: str = ".btn-bar-horizontal-centrada-inner button:has-text(\"Añadir\")"
+    btn_anadir_documento: str = (
+        "div.btn-bar-horizontal-centrada-inner:has(input#ctl00_ctl00_cphM_cph_repDocumentosAPresentar_ctl01_btnDocumentoAPresentarNuevoFichero) "
+        "button.btn-icono"
+    )
+    input_anadir_documento: str = "#ctl00_ctl00_cphM_cph_repDocumentosAPresentar_ctl01_btnDocumentoAPresentarNuevoFichero"
     btn_confirmar_archivo: str = ".panel-dialog button:has-text(\"Aceptar\")"
     velo: str = "#velo"
     alegaciones_frame: str = "#ventanaModal"
     alegaciones_input: str = "input[type='text'].form-control"
     alegaciones_textarea: str = "textarea.form-control"
     alegaciones_confirm: str = "button:has-text(\"Confirmar\")"
-    archivo_input: str = "#ctl00_ctl00_cphM_cph_pnlNuevoFichero input[type='file']"
+    archivo_input: str = "#ctl00_ctl00_cphM_cph_mfuNuevoFichero_pnl input[type='file']"
 
 
 @dataclass
@@ -93,3 +97,4 @@ class AyuntaPalmaConfig(BaseConfig):
         "https://palma.sedipualba.es/carpetaciudadana/nueva_entrada.aspx?idtramite=13809&recuperar=false"
     )
     selectors: AyuntaPalmaSelectors = field(default_factory=AyuntaPalmaSelectors)
+
