@@ -16,6 +16,7 @@ from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
 from core.client_documentation import client_identity_from_payload, get_ruta_cliente_documentacion
 from sites.ayunta_palma.config import AyuntaPalmaConfig
+from sites.ayunta_palma.flows.common import robust_click
 
 logger = logging.getLogger(__name__)
 
@@ -585,59 +586,72 @@ async def _esperar_velo_oculto(page: Page, config: AyuntaPalmaConfig) -> None:
         pass
 
 
-async def _click_siguiente(page: Page, config: AyuntaPalmaConfig) -> None:
+async def _click_siguiente(
+    page: Page,
+    config: AyuntaPalmaConfig,
+    *,
+    same_screen_check=None,
+    description: str = "Click Siguiente",
+) -> None:
     selectors = config.selectors
     btn = page.locator(selectors.btn_siguiente).first
-    if await btn.count() > 0 and await btn.is_visible():
-        await btn.click()
-    else:
-        hidden_input = page.locator(selectors.input_siguiente).first
-        if await hidden_input.count() > 0:
-            if await hidden_input.is_visible():
-                await hidden_input.click()
-            else:
-                await page.evaluate(
-                    """(selector) => {
-                        const el = document.querySelector(selector);
-                        if (!el) return false;
-                        el.click();
-                        return true;
-                    }""",
-                    selectors.input_siguiente,
-                )
+    hidden_input = page.locator(selectors.input_siguiente).first
+    await robust_click(
+        page,
+        description=description,
+        primary=btn,
+        secondary=hidden_input,
+        fallback_selector=selectors.input_siguiente,
+        same_screen_check=same_screen_check,
+        max_attempts=3,
+        retry_wait_ms=5000,
+    )
     await page.wait_for_timeout(config.delay_ms)
     await _esperar_velo_oculto(page, config)
 
 
-async def _click_confirmar(page: Page, config: AyuntaPalmaConfig) -> None:
+async def _click_confirmar(
+    page: Page,
+    config: AyuntaPalmaConfig,
+    *,
+    same_screen_check=None,
+    description: str = "Click Confirmar",
+) -> None:
     selectors = config.selectors
     btn_confirmar = page.locator(selectors.btn_confirmar).first
-    if await btn_confirmar.count() > 0 and await btn_confirmar.is_visible():
-        await btn_confirmar.click()
-    else:
-        # En esta pantalla "Confirmar" puede reutilizar el input hidden de btnSiguiente.
-        hidden_input = page.locator(selectors.input_siguiente).first
-        if await hidden_input.count() > 0:
-            if await hidden_input.is_visible():
-                await hidden_input.click()
-            else:
-                await page.evaluate(
-                    """(selector) => {
-                        const el = document.querySelector(selector);
-                        if (!el) return false;
-                        el.click();
-                        return true;
-                    }""",
-                    selectors.input_siguiente,
-                )
+    hidden_input = page.locator(selectors.input_siguiente).first
+    await robust_click(
+        page,
+        description=description,
+        primary=btn_confirmar,
+        secondary=hidden_input,
+        fallback_selector=selectors.input_siguiente,
+        same_screen_check=same_screen_check,
+        max_attempts=3,
+        retry_wait_ms=5000,
+    )
     await page.wait_for_timeout(config.delay_ms)
     await _esperar_velo_oculto(page, config)
 
 
-async def _click_modal_aceptar(page: Page, config: AyuntaPalmaConfig) -> None:
+async def _click_modal_aceptar(
+    page: Page,
+    config: AyuntaPalmaConfig,
+    *,
+    same_screen_check=None,
+    description: str = "Click Aceptar modal",
+) -> None:
     btn_modal_aceptar = page.locator(config.selectors.btn_modal_aceptar).first
     await btn_modal_aceptar.wait_for(state="visible", timeout=config.timeouts.general)
-    await btn_modal_aceptar.click()
+    await robust_click(
+        page,
+        description=description,
+        primary=btn_modal_aceptar,
+        fallback_selector=config.selectors.btn_modal_aceptar,
+        same_screen_check=same_screen_check,
+        max_attempts=3,
+        retry_wait_ms=5000,
+    )
     await page.wait_for_timeout(config.delay_ms)
     await _esperar_velo_oculto(page, config)
 
@@ -886,9 +900,25 @@ async def subir_documentos(
         return page
 
     selectors = config.selectors
-    boton_anadir = page.locator(selectors.btn_anadir_documento)
+    boton_anadir = page.locator(selectors.btn_anadir_documento).first
     await boton_anadir.wait_for(state="visible")
-    await boton_anadir.click()
+
+    async def _dialogo_anadir_no_visible() -> bool:
+        try:
+            file_input = page.locator(selectors.archivo_input).first
+            return not (await file_input.count() > 0 and await file_input.is_visible())
+        except Exception:
+            return True
+
+    await robust_click(
+        page,
+        description="Abrir dialogo Anadir documento",
+        primary=boton_anadir,
+        fallback_selector=selectors.btn_anadir_documento,
+        same_screen_check=_dialogo_anadir_no_visible,
+        max_attempts=3,
+        retry_wait_ms=5000,
+    )
     await page.wait_for_timeout(config.delay_ms)
     logger.info("[AP-DIAG] Dialogo de anadir documento abierto.")
 
@@ -897,24 +927,91 @@ async def subir_documentos(
     await _esperar_subida_completa(page, config)
     logger.info("[AP-DIAG] Upload de archivos completado.")
 
-    confirmar = page.locator(selectors.btn_confirmar_archivo)
+    confirmar = page.locator(selectors.btn_confirmar_archivo).first
     await confirmar.wait_for(state="visible", timeout=config.timeouts.general)
-    await confirmar.click(timeout=config.timeouts.subida_archivo)
+
+    async def _confirmar_archivo_sigue_visible() -> bool:
+        try:
+            return await confirmar.count() > 0 and await confirmar.is_visible()
+        except Exception:
+            return False
+
+    await robust_click(
+        page,
+        description="Confirmar archivo subido",
+        primary=confirmar,
+        fallback_selector=selectors.btn_confirmar_archivo,
+        same_screen_check=_confirmar_archivo_sigue_visible,
+        max_attempts=3,
+        retry_wait_ms=5000,
+    )
     await page.wait_for_timeout(config.delay_ms)
     logger.info("[AP-DIAG] Confirmacion de archivo subida pulsada.")
 
     # 1) Avanzar tras aceptar el documento subido.
-    await _click_siguiente(page, config)
+    async def _proteccion_no_visible() -> bool:
+        try:
+            chk = page.locator(selectors.chk_proteccion_datos).first
+            return not (await chk.count() > 0 and await chk.is_visible())
+        except Exception:
+            return True
+
+    await _click_siguiente(
+        page,
+        config,
+        same_screen_check=_proteccion_no_visible,
+        description="Siguiente tras subida documento",
+    )
 
     # 2) Marcar protecciÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³n de datos y avanzar.
     await page.wait_for_timeout(config.delay_ms)
     await _marcar_proteccion_datos(page, config)
-    await _click_siguiente(page, config)
+    async def _modal_intermedio_no_visible() -> bool:
+        try:
+            modal_btn = page.locator(selectors.btn_modal_aceptar).first
+            return not (await modal_btn.count() > 0 and await modal_btn.is_visible())
+        except Exception:
+            return True
+
+    await _click_siguiente(
+        page,
+        config,
+        same_screen_check=_modal_intermedio_no_visible,
+        description="Siguiente tras proteccion de datos",
+    )
 
     # 3) Aceptar modal intermedio y confirmar.
     await page.wait_for_timeout(config.delay_ms)
-    await _click_modal_aceptar(page, config)
-    await _click_confirmar(page, config)
+    async def _modal_aceptar_sigue_visible() -> bool:
+        try:
+            modal_btn = page.locator(selectors.btn_modal_aceptar).first
+            return await modal_btn.count() > 0 and await modal_btn.is_visible()
+        except Exception:
+            return False
+
+    await _click_modal_aceptar(
+        page,
+        config,
+        same_screen_check=_modal_aceptar_sigue_visible,
+        description="Aceptar modal intermedio",
+    )
+
+    async def _prefirma_no_visible() -> bool:
+        try:
+            btn = page.locator(selectors.btn_firmar).first
+            hidden = page.locator(selectors.input_firmar).first
+            btn_ok = await btn.count() > 0 and await btn.is_visible()
+            hidden_ok = await hidden.count() > 0 and await hidden.is_visible()
+            return not (btn_ok or hidden_ok)
+        except Exception:
+            return True
+
+    await _click_confirmar(
+        page,
+        config,
+        same_screen_check=_prefirma_no_visible,
+        description="Confirmar previo a firma",
+    )
     logger.info("[AP-DIAG] Navegacion previa a firma completada.")
 
     # 4) Ir a firma y lanzar firma de todos los documentos.

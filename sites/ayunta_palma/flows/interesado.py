@@ -7,6 +7,7 @@ from __future__ import annotations
 from playwright.async_api import Locator, Page, TimeoutError as PlaywrightTimeoutError, expect
 
 from sites.ayunta_palma.config import AyuntaPalmaConfig, AyuntaPalmaSelectors
+from sites.ayunta_palma.flows.common import robust_click
 from sites.ayunta_palma.data_models import AyuntaPalmaTarget
 
 PALMA_CONTACT_EMAIL = "info@xvia-serviciosjuridicos.com"
@@ -21,43 +22,32 @@ async def _abrir_modal_nuevo_interesado(page: Page, selectors: AyuntaPalmaSelect
     except PlaywrightTimeoutError:
         pass
 
-    async def _try_open_once() -> None:
-        # Evitar clics durante cargas parciales.
-        try:
-            await page.wait_for_selector(selectors.velo, state="hidden", timeout=6000)
-        except PlaywrightTimeoutError:
-            pass
+    # Evitar clics durante cargas parciales.
+    try:
+        await page.wait_for_selector(selectors.velo, state="hidden", timeout=6000)
+    except PlaywrightTimeoutError:
+        pass
 
-        boton_nuevo = page.locator(selectors.btn_nuevo_interesado).first
-        if await boton_nuevo.count() > 0 and await boton_nuevo.is_visible():
-            try:
-                await boton_nuevo.click()
-            except Exception:
-                await boton_nuevo.click(force=True)
-        else:
-            input_nuevo = page.locator(selectors.input_nuevo_interesado).first
-            if await input_nuevo.count() > 0:
-                if await input_nuevo.is_visible():
-                    await input_nuevo.click()
-                else:
-                    await page.evaluate(
-                        """(selector) => {
-                            const el = document.querySelector(selector);
-                            if (!el) return false;
-                            el.click();
-                            return true;
-                        }""",
-                        selectors.input_nuevo_interesado,
-                    )
+    boton_nuevo = page.locator(selectors.btn_nuevo_interesado).first
+    input_nuevo = page.locator(selectors.input_nuevo_interesado).first
 
-    for _ in range(3):
-        await _try_open_once()
+    async def _misma_pantalla() -> bool:
         try:
-            await tipo_usuario.wait_for(state="visible", timeout=7000)
-            await page.wait_for_timeout(delay_ms)
-            return
+            await tipo_usuario.wait_for(state="visible", timeout=900)
+            return False
         except PlaywrightTimeoutError:
-            await page.wait_for_timeout(800)
+            return True
+
+    await robust_click(
+        page,
+        description="Abrir modal Nuevo/a interesado/a",
+        primary=boton_nuevo,
+        secondary=input_nuevo,
+        fallback_selector=selectors.input_nuevo_interesado,
+        same_screen_check=_misma_pantalla,
+        max_attempts=3,
+        retry_wait_ms=5000,
+    )
 
     await tipo_usuario.wait_for(state="visible", timeout=20000)
     await page.wait_for_timeout(delay_ms)
@@ -168,9 +158,24 @@ async def registrar_interesado(
     await _fill_email(page, selectors, PALMA_CONTACT_EMAIL)
     await _fill_telefono(page, selectors, PALMA_CONTACT_PHONE)
 
-    aceptar = page.locator(selectors.btn_aceptar_modal)
+    aceptar = page.locator(selectors.btn_aceptar_modal).first
     await aceptar.wait_for(state="visible")
-    await aceptar.click()
+
+    async def _modal_sigue_abierto() -> bool:
+        try:
+            return await aceptar.count() > 0 and await aceptar.is_visible()
+        except Exception:
+            return False
+
+    await robust_click(
+        page,
+        description="Aceptar modal interesado",
+        primary=aceptar,
+        fallback_selector=selectors.btn_aceptar_modal,
+        same_screen_check=_modal_sigue_abierto,
+        max_attempts=3,
+        retry_wait_ms=5000,
+    )
     await _wait_for_velo_to_vanish(page, selectors)
     await page.wait_for_timeout(config.delay_ms)
     return page

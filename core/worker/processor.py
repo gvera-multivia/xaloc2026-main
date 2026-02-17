@@ -319,7 +319,7 @@ async def process_task(
         logger.info(f"Iniciando automatización para {site_id}...")
         if site_id in ["madrid", "base_online", "ayunta_palma"]:
             os.environ["XALOC_KEEP_BROWSER_OPEN"] = "1"
-            os.environ["XALOC_KEEP_TAB_OPEN"] = "1"
+            os.environ["XALOC_KEEP_TAB_OPEN"] = "0" if site_id == "ayunta_palma" else "1"
 
         async with AutomationCls(config) as bot:
             # Iniciar screencast en vivo para el dashboard (CDP).
@@ -382,11 +382,8 @@ async def process_task(
                 # --- MARCAR COMO COMPLETADO EN XVIA ---
                 if not getattr(bot, "_exit_has_nonfatal_issues", False):
                     is_base_p1 = site_id == "base_online" and (protocol or "").upper() == "P1"
-                    is_ayunta_palma = site_id == "ayunta_palma"
                     if is_base_p1:
                         logger.info("Saltando marcado autom. en XVIA para base_online P1.")
-                    elif is_ayunta_palma:
-                        logger.info("Saltando marcado autom. en XVIA para ayunta_palma.")
                     elif payload.get("idRecurso") and not payload.get("skip_auto_complete"):
                         logger.info(f"Intentando marcar recurso {payload['idRecurso']} como completado en la web...")
                         success_mark = await mark_resource_complete(auth_session, payload)

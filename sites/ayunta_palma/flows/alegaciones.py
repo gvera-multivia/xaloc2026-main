@@ -7,6 +7,7 @@ from __future__ import annotations
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
 from sites.ayunta_palma.config import AyuntaPalmaConfig
+from sites.ayunta_palma.flows.common import robust_click
 from sites.ayunta_palma.data_models import AyuntaPalmaAlegaciones
 
 
@@ -22,23 +23,25 @@ async def _abrir_modal_alegaciones_si_no_esta(page: Page, config: AyuntaPalmaCon
         pass
 
     boton_siguiente = page.locator(selectors.btn_siguiente).first
-    if await boton_siguiente.count() > 0 and await boton_siguiente.is_visible():
-        await boton_siguiente.click()
-    else:
-        input_siguiente = page.locator(selectors.input_siguiente).first
-        if await input_siguiente.count() > 0:
-            if await input_siguiente.is_visible():
-                await input_siguiente.click()
-            else:
-                await page.evaluate(
-                    """(selector) => {
-                        const el = document.querySelector(selector);
-                        if (!el) return false;
-                        el.click();
-                        return true;
-                    }""",
-                    selectors.input_siguiente,
-                )
+    input_siguiente = page.locator(selectors.input_siguiente).first
+
+    async def _inputs_no_visibles() -> bool:
+        try:
+            await inputs.nth(0).wait_for(state="visible", timeout=900)
+            return False
+        except PlaywrightTimeoutError:
+            return True
+
+    await robust_click(
+        page,
+        description="Abrir modal alegaciones (Siguiente)",
+        primary=boton_siguiente,
+        secondary=input_siguiente,
+        fallback_selector=selectors.input_siguiente,
+        same_screen_check=_inputs_no_visibles,
+        max_attempts=3,
+        retry_wait_ms=5000,
+    )
 
     await page.wait_for_timeout(config.delay_ms)
     await inputs.nth(0).wait_for(state="visible", timeout=30000)
@@ -62,8 +65,22 @@ async def completar_alegaciones(
     await textareas.nth(0).fill(datos.expone)
     await textareas.nth(1).fill(datos.solicita)
 
-    confirmar = frame.locator(selectors.alegaciones_confirm)
+    confirmar = frame.locator(selectors.alegaciones_confirm).first
     await confirmar.wait_for(state="visible")
-    await confirmar.click()
+
+    async def _confirmar_sigue_visible() -> bool:
+        try:
+            return await confirmar.count() > 0 and await confirmar.is_visible()
+        except Exception:
+            return False
+
+    await robust_click(
+        page,
+        description="Confirmar alegaciones",
+        primary=confirmar,
+        same_screen_check=_confirmar_sigue_visible,
+        max_attempts=3,
+        retry_wait_ms=5000,
+    )
     await page.wait_for_timeout(config.delay_ms)
     return page

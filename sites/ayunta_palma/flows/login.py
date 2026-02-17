@@ -4,9 +4,12 @@ Flujo de autenticación para Ayunta Palma.
 
 from __future__ import annotations
 
+import asyncio
+
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
 from sites.ayunta_palma.config import AyuntaPalmaConfig
+from sites.ayunta_palma.flows.common import robust_click
 
 
 def _is_nueva_entrada_url(url: str) -> bool:
@@ -33,21 +36,25 @@ async def _abrir_nueva_instancia(page: Page, config: AyuntaPalmaConfig) -> None:
         pass
 
     boton_visible = page.locator(selectors.btn_nueva_instancia).first
-    if await boton_visible.count() > 0 and await boton_visible.is_visible():
-        await boton_visible.click()
-        await page.wait_for_timeout(config.delay_ms)
-        return
-
     input_submit = page.locator(selectors.input_nueva_instancia).first
-    if await input_submit.count() == 0:
-        return
 
-    if await input_submit.is_visible():
-        await input_submit.click()
-    else:
-        clickable_url = await input_submit.get_attribute("data-clickable-url")
-        if clickable_url:
-            await page.goto(clickable_url, wait_until="networkidle")
+    async def _misma_pantalla() -> bool:
+        try:
+            await persona_tipo_usuario.wait_for(state="visible", timeout=900)
+            return False
+        except PlaywrightTimeoutError:
+            return True
+
+    await robust_click(
+        page,
+        description="Nueva instancia",
+        primary=boton_visible,
+        secondary=input_submit,
+        fallback_selector=selectors.input_nueva_instancia,
+        same_screen_check=_misma_pantalla,
+        max_attempts=3,
+        retry_wait_ms=5000,
+    )
     await page.wait_for_timeout(config.delay_ms)
 
 
@@ -77,7 +84,18 @@ async def ejecutar_login(page: Page, config: AyuntaPalmaConfig) -> Page:
             await _abrir_nueva_instancia(page, config)
             return page
         raise
-    await opcion.click()
+    async def _sigue_en_login() -> bool:
+        await asyncio.sleep(0)
+        return not _is_post_login_url(page.url)
+
+    await robust_click(
+        page,
+        description="Login certificado (fila #optSsl)",
+        primary=opcion,
+        same_screen_check=_sigue_en_login,
+        max_attempts=3,
+        retry_wait_ms=5000,
+    )
     await page.wait_for_timeout(config.delay_ms)
     await _abrir_nueva_instancia(page, config)
     return page

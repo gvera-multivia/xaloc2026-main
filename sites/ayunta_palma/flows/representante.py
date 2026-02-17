@@ -7,6 +7,7 @@ from __future__ import annotations
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
 from sites.ayunta_palma.config import AyuntaPalmaConfig
+from sites.ayunta_palma.flows.common import robust_click
 
 REPRESENTANTE_EMAIL = "info@xvia-serviciosjuridicos.com"
 REPRESENTANTE_TELEFONO = "722761154"
@@ -53,18 +54,47 @@ async def _sobrescribir_contacto_representante(page: Page, config: AyuntaPalmaCo
 async def indicar_representante(page: Page, config: AyuntaPalmaConfig) -> Page:
     selectors = config.selectors
 
-    boton = page.locator(selectors.btn_indicar_representante)
+    boton = page.locator(selectors.btn_indicar_representante).first
     await boton.wait_for(state="visible")
-    await boton.click()
+    dialog_titulo = page.locator(".ui-dialog-title", has_text="Nuevo/a representante del/de la interesado/a").first
+
+    async def _dialogo_no_visible() -> bool:
+        try:
+            return not (await dialog_titulo.count() > 0 and await dialog_titulo.is_visible())
+        except Exception:
+            return True
+
+    await robust_click(
+        page,
+        description="Abrir modal representante",
+        primary=boton,
+        fallback_selector=selectors.btn_indicar_representante,
+        same_screen_check=_dialogo_no_visible,
+        max_attempts=3,
+        retry_wait_ms=5000,
+    )
     await page.wait_for_timeout(config.delay_ms)
 
-    dialog_titulo = page.locator(".ui-dialog-title", has_text="Nuevo/a representante del/de la interesado/a")
     await dialog_titulo.wait_for(state="visible", timeout=15000)
     await _sobrescribir_contacto_representante(page, config)
 
-    aceptar = page.locator(selectors.btn_aceptar_modal)
+    aceptar = page.locator(selectors.btn_aceptar_modal).first
     await aceptar.wait_for(state="visible")
-    await aceptar.scroll_into_view_if_needed()
-    await aceptar.click()
+
+    async def _dialogo_sigue_visible() -> bool:
+        try:
+            return await dialog_titulo.count() > 0 and await dialog_titulo.is_visible()
+        except Exception:
+            return False
+
+    await robust_click(
+        page,
+        description="Aceptar modal representante",
+        primary=aceptar,
+        fallback_selector=selectors.btn_aceptar_modal,
+        same_screen_check=_dialogo_sigue_visible,
+        max_attempts=3,
+        retry_wait_ms=5000,
+    )
     await page.wait_for_timeout(config.delay_ms)
     return page
