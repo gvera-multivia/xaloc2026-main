@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { isClientView } from "@/lib/permissions";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -44,7 +45,7 @@ export default function Navbar() {
     { href: "/admin", label: "Gestión", icon: Settings },
     { href: "/history", label: "Historial", icon: History },
     { href: "/blacklist", label: "Bloqueos", icon: ShieldAlert },
-  ];
+  ].filter((link) => !(isClientView && link.href === "/control"));
 
   return (
     <nav
