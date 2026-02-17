@@ -20,7 +20,11 @@ class AyuntaPalmaSelectors:
         "button.btn-icono"
     )
     input_nueva_instancia: str = "#ctl00_ctl00_cphM_cph_btnUltimoBorradorCancelar"
-    btn_nuevo_interesado: str = ".btn-bar-horizontal-centrada-inner button:has-text(\"Nuevo/a interesado/a\")"
+    btn_nuevo_interesado: str = (
+        "#ctl00_ctl00_cphM_cph_pnlListaInteresadosOpciones "
+        "div.btn-bar-horizontal-centrada-inner:has(input#ctl00_ctl00_cphM_cph_btnListaInteresadosOpcionesNuevo) "
+        "button.btn-icono"
+    )
     btn_nuevo_interesado_visible: str = (
         "div.btn-bar-horizontal-centrada-inner:has(input#ctl00_ctl00_cphM_cph_btnListaInteresadosOpcionesNuevo) "
         "button:has-text(\"Nuevo/a interesado/a\")"

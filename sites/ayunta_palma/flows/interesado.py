@@ -32,6 +32,7 @@ async def _abrir_modal_nuevo_interesado(page: Page, selectors: AyuntaPalmaSelect
 
     boton_nuevo = page.locator(selectors.btn_nuevo_interesado_visible).first
     boton_nuevo_alt = page.locator(selectors.btn_nuevo_interesado).first
+    hidden_submit_id = "ctl00_ctl00_cphM_cph_btnListaInteresadosOpcionesNuevo"
 
     if await boton_nuevo.count() > 0:
         await boton_nuevo.wait_for(state="visible", timeout=15000)
@@ -56,6 +57,21 @@ async def _abrir_modal_nuevo_interesado(page: Page, selectors: AyuntaPalmaSelect
             }""",
             selectors.input_nuevo_interesado,
         )
+
+    # Este control usa submit oculto ASP.NET; dispararlo de forma explicita evita
+    # quedarse en un click visual sin postback real.
+    await page.evaluate(
+        """(hiddenId) => {
+            const hidden = document.getElementById(hiddenId);
+            if (hidden) {
+                try { hidden.click(); } catch {}
+            }
+            if (typeof window.__doPostBack === "function") {
+                try { window.__doPostBack("ctl00$ctl00$cphM$cph$btnListaInteresadosOpcionesNuevo", ""); } catch {}
+            }
+        }""",
+        hidden_submit_id,
+    )
 
     await tipo_usuario.wait_for(state="visible", timeout=20000)
     await page.wait_for_timeout(delay_ms)
