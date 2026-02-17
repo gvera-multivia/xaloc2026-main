@@ -664,7 +664,6 @@ async def _click_confirmar(
     selectors = config.selectors
     btn_confirmar = page.locator(selectors.btn_confirmar_visible).first
     btn_confirmar_alt = page.locator(selectors.btn_confirmar).first
-    hidden_input = page.locator(selectors.input_siguiente).first
     try:
         await robust_click(
             page,
@@ -679,8 +678,8 @@ async def _click_confirmar(
     except PlaywrightTimeoutError:
         ok = await _force_submit_with_postback(
             page,
-            hidden_input_selector=selectors.input_siguiente,
-            event_target="ctl00$ctl00$cphM$cph$btnSiguiente",
+            hidden_input_selector=selectors.input_confirmar,
+            event_target="ctl00$ctl00$cphM$cph$btnConfirmar",
             description=description,
         )
         if not ok:

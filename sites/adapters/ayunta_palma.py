@@ -338,7 +338,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
 
             # Minimos para controller/worker
             if not payload.get("matricula"):
-                payload["matricula"] = "0000ZZZ"
+                payload["matricula"] = "."
             if tipo_persona == "PersonaFisica" and not payload.get("documento"):
                 if on_discard:
                     on_discard(
