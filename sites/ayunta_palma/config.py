@@ -85,4 +85,7 @@ class AyuntaPalmaConfig(BaseConfig):
         "https://palma.sedipualba.es/carpetaciudadana/login.aspx?"
         "returnUrl=https%3a%2f%2fpalma.sedipualba.es%2fcarpetaciudadana%2fnueva_entrada.aspx%3fidtramite%3d13809"
     )
+    url_nueva_instancia_directa: str = (
+        "https://palma.sedipualba.es/carpetaciudadana/nueva_entrada.aspx?idtramite=13809&recuperar=false"
+    )
     selectors: AyuntaPalmaSelectors = field(default_factory=AyuntaPalmaSelectors)

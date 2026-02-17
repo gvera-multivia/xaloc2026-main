@@ -5,11 +5,14 @@ Flujo de autenticación para Ayunta Palma.
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
 from sites.ayunta_palma.config import AyuntaPalmaConfig
 from sites.ayunta_palma.flows.common import robust_click
+
+logger = logging.getLogger(__name__)
 
 
 def _is_nueva_entrada_url(url: str) -> bool:
@@ -47,82 +50,90 @@ async def _abrir_nueva_instancia(page: Page, config: AyuntaPalmaConfig) -> None:
     boton_visible = page.locator(selectors.btn_nueva_instancia_visible).first
     boton_visible_alt = page.locator(selectors.btn_nueva_instancia).first
 
-    # En Palma el input oculto contiene la URL real de navegación.
-    # Priorizamos esta ruta para evitar clics ambiguos en botones duplicados.
-    try:
-        if await input_submit.count() > 0:
-            clickable_url = await input_submit.get_attribute("data-clickable-url")
-            if clickable_url:
-                await page.goto(clickable_url, wait_until="domcontentloaded")
-                await page.wait_for_timeout(config.delay_ms)
-    except Exception:
-        pass
-
-    async def _misma_pantalla() -> bool:
-        # Si ya hemos salido de login hacia cualquier pantalla autenticada,
-        # no insistir con reintentos de click.
-        if _is_authenticated_portal_url(page.url):
-            return False
+    async def _persona_visible(timeout_ms: int = 1500) -> bool:
         try:
-            await persona_tipo_usuario.wait_for(state="visible", timeout=900)
-            return False
-        except PlaywrightTimeoutError:
+            await persona_tipo_usuario.wait_for(state="visible", timeout=timeout_ms)
             return True
-
-    click_error: Exception | None = None
-    try:
-        await robust_click(
-            page,
-            description="Nueva instancia",
-            primary=boton_visible,
-            secondary=boton_visible_alt,
-            fallback_selector=selectors.input_nueva_instancia,
-            same_screen_check=_misma_pantalla,
-            max_attempts=3,
-            retry_wait_ms=5000,
-        )
-    except PlaywrightTimeoutError as e:
-        click_error = e
-
-    if click_error:
-        clickable_url = None
-        try:
-            clickable_url = await input_submit.get_attribute("data-clickable-url")
         except Exception:
-            clickable_url = None
-        if clickable_url:
-            await page.goto(clickable_url, wait_until="domcontentloaded")
-            await page.wait_for_timeout(config.delay_ms)
-        elif _is_carpeta_ciudadana_url(page.url):
-            # Fallback: ya autenticado pero atrapado en la carpeta.
-            await page.goto(config.url_base, wait_until="domcontentloaded")
-            await page.wait_for_timeout(config.delay_ms)
-        else:
-            raise click_error
+            return False
 
-    # Fallback adicional: disparar el submit oculto por click/postback.
-    if not _is_post_login_url(page.url):
+    async def _force_hidden_submit() -> bool:
         try:
-            fired = bool(
+            return bool(
                 await page.evaluate(
                     """() => {
-                        const hidden = document.getElementById('ctl00_ctl00_cphM_cph_btnUltimoBorradorCancelar');
+                        const hidden = document.querySelector('#ctl00_ctl00_cphM_cph_btnUltimoBorradorCancelar, input[id$="btnUltimoBorradorCancelar"]');
+                        const cont = hidden ? hidden.closest('.btn-bar-horizontal-centrada-inner') : null;
+                        const visibleBtn = cont ? cont.querySelector('button.btn-icono') : document.querySelector('button.redirect-url.stop-click-propagation.btn-icono');
+                        let fired = false;
+                        if (visibleBtn) {
+                            try { visibleBtn.click(); fired = true; } catch {}
+                        }
                         if (hidden) {
-                            hidden.click();
-                            return true;
+                            try { hidden.disabled = false; } catch {}
+                            try { hidden.style.display = 'block'; } catch {}
+                            try { hidden.click(); fired = true; } catch {}
                         }
-                        if (typeof window.__doPostBack === 'function') {
-                            window.__doPostBack('ctl00$ctl00$cphM$cph$btnUltimoBorradorCancelar', '');
-                            return true;
-                        }
-                        return false;
+                        try {
+                            if (window.jQuery && hidden) {
+                                window.jQuery(hidden).trigger('click');
+                                fired = true;
+                            }
+                        } catch {}
+                        try {
+                            if (typeof window.__doPostBack === 'function') {
+                                window.__doPostBack('ctl00$ctl00$cphM$cph$btnUltimoBorradorCancelar', '');
+                                fired = true;
+                            }
+                        } catch {}
+                        return fired;
                     }"""
                 )
             )
-            if fired:
-                await page.wait_for_timeout(config.delay_ms)
+        except Exception:
+            return False
+
+    # Secuencia agresiva: URL directa + clickable-url + submit hidden/postback.
+    for intento in range(1, 7):
+        if await _persona_visible(timeout_ms=1200):
+            return
+
+        clickable_url = None
+        try:
+            if await input_submit.count() > 0:
+                clickable_url = await input_submit.get_attribute("data-clickable-url")
+        except Exception:
+            clickable_url = None
+
+        urls = [u for u in [clickable_url, config.url_nueva_instancia_directa, config.url_base] if u]
+        for u in urls:
+            try:
+                await page.goto(u, wait_until="domcontentloaded")
+                await page.wait_for_timeout(900)
+                if await _persona_visible(timeout_ms=1200):
+                    return
+            except Exception:
+                continue
+
+        try:
+            await robust_click(
+                page,
+                description="Nueva instancia",
+                primary=boton_visible,
+                secondary=boton_visible_alt,
+                fallback_selector=selectors.input_nueva_instancia,
+                same_screen_check=lambda: asyncio.sleep(0, result=True),
+                max_attempts=1,
+                retry_wait_ms=900,
+            )
         except Exception:
             pass
+
+        fired = await _force_hidden_submit()
+        logger.info("[AP-DIAG] Nueva instancia hard intento %s/6 fired=%s url=%s", intento, fired, page.url)
+        await page.wait_for_timeout(1200)
+        if await _persona_visible(timeout_ms=1800):
+            return
 
     # Si hemos acabado en carpeta ciudadana, forzar la entrada de nuevo
     # al flujo de "nueva entrada" usando la URL base autenticada.
@@ -134,7 +145,7 @@ async def _abrir_nueva_instancia(page: Page, config: AyuntaPalmaConfig) -> None:
         await persona_tipo_usuario.wait_for(state="visible", timeout=10000)
     except PlaywrightTimeoutError:
         if _is_post_login_url(page.url):
-            await page.goto(config.url_base, wait_until="domcontentloaded")
+            await page.goto(config.url_nueva_instancia_directa, wait_until="domcontentloaded")
             await page.wait_for_timeout(config.delay_ms)
             await persona_tipo_usuario.wait_for(state="visible", timeout=12000)
         else:
@@ -191,6 +202,16 @@ async def ejecutar_login(page: Page, config: AyuntaPalmaConfig) -> Page:
         max_attempts=3,
         retry_wait_ms=5000,
     )
+    # Esperar transición de estado tras cert (puede tardar varios segundos o pasar por carpeta).
+    for _ in range(20):
+        if _is_authenticated_portal_url(page.url):
+            break
+        try:
+            if await page.locator(config.selectors.input_nueva_instancia).first.count() > 0:
+                break
+        except Exception:
+            pass
+        await page.wait_for_timeout(500)
     await page.wait_for_timeout(config.delay_ms)
     await _abrir_nueva_instancia(page, config)
     return page

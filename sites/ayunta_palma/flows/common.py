@@ -24,13 +24,16 @@ async def robust_click(
     same_screen_check: Callable[[], Awaitable[bool]] | None = None,
     max_attempts: int = 3,
     retry_wait_ms: int = 5000,
+    pre_click_wait_ms: int = 5000,
+    post_click_extra_wait_ms: int = 5000,
 ) -> None:
     """
     Click robusto:
     - valida existencia/visibilidad antes de click normal,
     - usa force como fallback,
     - opcionalmente intenta JS click por selector,
-    - si tras 5s seguimos en la misma pantalla, reintenta.
+    - espera adicional antes de pulsar para estabilizar el DOM,
+    - si tras la espera seguimos en la misma pantalla, reintenta.
     """
 
     async def _try_click_locator(locator: Locator | None) -> bool:
@@ -39,6 +42,8 @@ async def robust_click(
         try:
             if await locator.count() == 0 or not await locator.is_visible():
                 return False
+            if pre_click_wait_ms > 0:
+                await page.wait_for_timeout(pre_click_wait_ms)
             await locator.scroll_into_view_if_needed()
             try:
                 await locator.click(timeout=4000)
@@ -52,6 +57,8 @@ async def robust_click(
         if not selector:
             return False
         try:
+            if pre_click_wait_ms > 0:
+                await page.wait_for_timeout(pre_click_wait_ms)
             return bool(
                 await page.evaluate(
                     """(sel) => {
@@ -89,7 +96,8 @@ async def robust_click(
             await page.wait_for_timeout(350)
             continue
 
-        await page.wait_for_timeout(retry_wait_ms)
+        wait_after_click_ms = retry_wait_ms + post_click_extra_wait_ms if clicked else retry_wait_ms
+        await page.wait_for_timeout(wait_after_click_ms)
         still_same = False
         try:
             still_same = bool(await same_screen_check())
@@ -102,7 +110,7 @@ async def robust_click(
         logger.warning(
             "[AP-DIAG] %s: seguimos en la misma pantalla tras %sms (intento %s/%s).",
             description,
-            retry_wait_ms,
+            wait_after_click_ms,
             attempt,
             max_attempts,
         )
