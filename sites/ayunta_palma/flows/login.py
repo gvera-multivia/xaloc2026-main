@@ -20,6 +20,14 @@ def _is_preguntar_entrada_url(url: str) -> bool:
     return "/carpetaciudadana/preguntar_entrada_anterior.aspx" in (url or "")
 
 
+def _is_carpeta_ciudadana_url(url: str) -> bool:
+    return "/carpetaciudadana/carpeta_ciudadana.aspx" in (url or "")
+
+
+def _is_authenticated_portal_url(url: str) -> bool:
+    return _is_nueva_entrada_url(url) or _is_preguntar_entrada_url(url) or _is_carpeta_ciudadana_url(url)
+
+
 def _is_post_login_url(url: str) -> bool:
     return _is_nueva_entrada_url(url) or _is_preguntar_entrada_url(url)
 
@@ -39,22 +47,62 @@ async def _abrir_nueva_instancia(page: Page, config: AyuntaPalmaConfig) -> None:
     input_submit = page.locator(selectors.input_nueva_instancia).first
 
     async def _misma_pantalla() -> bool:
+        # Si ya hemos salido de login hacia cualquier pantalla autenticada,
+        # no insistir con reintentos de click.
+        if _is_authenticated_portal_url(page.url):
+            return False
         try:
             await persona_tipo_usuario.wait_for(state="visible", timeout=900)
             return False
         except PlaywrightTimeoutError:
             return True
 
-    await robust_click(
-        page,
-        description="Nueva instancia",
-        primary=boton_visible,
-        secondary=input_submit,
-        fallback_selector=selectors.input_nueva_instancia,
-        same_screen_check=_misma_pantalla,
-        max_attempts=3,
-        retry_wait_ms=5000,
-    )
+    click_error: Exception | None = None
+    try:
+        await robust_click(
+            page,
+            description="Nueva instancia",
+            primary=boton_visible,
+            secondary=input_submit,
+            fallback_selector=selectors.input_nueva_instancia,
+            same_screen_check=_misma_pantalla,
+            max_attempts=3,
+            retry_wait_ms=5000,
+        )
+    except PlaywrightTimeoutError as e:
+        click_error = e
+
+    if click_error:
+        clickable_url = None
+        try:
+            clickable_url = await input_submit.get_attribute("data-clickable-url")
+        except Exception:
+            clickable_url = None
+        if clickable_url:
+            await page.goto(clickable_url, wait_until="domcontentloaded")
+            await page.wait_for_timeout(config.delay_ms)
+        elif _is_carpeta_ciudadana_url(page.url):
+            # Fallback: ya autenticado pero atrapado en la carpeta.
+            await page.goto(config.url_base, wait_until="domcontentloaded")
+            await page.wait_for_timeout(config.delay_ms)
+        else:
+            raise click_error
+
+    # Si hemos acabado en carpeta ciudadana, forzar la entrada de nuevo
+    # al flujo de "nueva entrada" usando la URL base autenticada.
+    if _is_carpeta_ciudadana_url(page.url):
+        await page.goto(config.url_base, wait_until="domcontentloaded")
+        await page.wait_for_timeout(config.delay_ms)
+
+    try:
+        await persona_tipo_usuario.wait_for(state="visible", timeout=10000)
+    except PlaywrightTimeoutError:
+        if _is_post_login_url(page.url):
+            await page.goto(config.url_base, wait_until="domcontentloaded")
+            await page.wait_for_timeout(config.delay_ms)
+            await persona_tipo_usuario.wait_for(state="visible", timeout=12000)
+        else:
+            raise
     await page.wait_for_timeout(config.delay_ms)
 
 
@@ -62,7 +110,7 @@ async def ejecutar_login(page: Page, config: AyuntaPalmaConfig) -> Page:
     """
     Accede al portal de Palma y pulsa la opción de certificado dentro del iframe.
     """
-    if page.url.startswith(config.url_base) or _is_post_login_url(page.url):
+    if page.url.startswith(config.url_base) or _is_authenticated_portal_url(page.url):
         # Evitar recargar si ya estamos en la misma URL (perfil persistente)
         await page.wait_for_timeout(config.delay_ms)
         await _abrir_nueva_instancia(page, config)
@@ -70,7 +118,7 @@ async def ejecutar_login(page: Page, config: AyuntaPalmaConfig) -> Page:
 
     await page.goto(config.url_base, wait_until="networkidle")
     await page.wait_for_timeout(config.delay_ms)
-    if _is_post_login_url(page.url):
+    if _is_authenticated_portal_url(page.url):
         await _abrir_nueva_instancia(page, config)
         return page
 
@@ -80,13 +128,13 @@ async def ejecutar_login(page: Page, config: AyuntaPalmaConfig) -> Page:
         await opcion.wait_for(state="visible", timeout=10000)
     except PlaywrightTimeoutError:
         # Si durante la espera ya hemos navegado a nueva_entrada, seguimos flujo.
-        if _is_post_login_url(page.url):
+        if _is_authenticated_portal_url(page.url):
             await _abrir_nueva_instancia(page, config)
             return page
         raise
     async def _sigue_en_login() -> bool:
         await asyncio.sleep(0)
-        return not _is_post_login_url(page.url)
+        return not _is_authenticated_portal_url(page.url)
 
     await robust_click(
         page,

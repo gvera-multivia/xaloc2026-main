@@ -91,10 +91,8 @@ SITE_PRIORITIES: dict[str, int] = {
 }
 
 # Limites por sitio para recursos reclamados/encolados por tick.
-# Temporalmente en Palma solo se procesa 1 recurso por ciclo.
-SITE_CLAIM_LIMIT_PER_TICK: dict[str, int] = {
-    "ayunta_palma": 1,
-}
+# Vacio => sin limites especificos por sitio.
+SITE_CLAIM_LIMIT_PER_TICK: dict[str, int] = {}
 
 def _parse_enabled_sites(csv_value: str) -> Optional[set[str]]:
     value = (csv_value or "").strip()

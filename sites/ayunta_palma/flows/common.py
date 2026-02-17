@@ -9,6 +9,8 @@ from collections.abc import Awaitable, Callable
 
 from playwright.async_api import Locator, Page, TimeoutError as PlaywrightTimeoutError
 
+from sites.ayunta_palma.config import AyuntaPalmaConfig
+
 logger = logging.getLogger(__name__)
 
 
@@ -106,3 +108,64 @@ async def robust_click(
         )
 
     raise PlaywrightTimeoutError(f"{description}: agotados reintentos de click sin salir de la pantalla esperada.")
+
+
+def _is_nueva_entrada_url(url: str) -> bool:
+    return "/carpetaciudadana/nueva_entrada.aspx" in (url or "")
+
+
+def _is_preguntar_entrada_url(url: str) -> bool:
+    return "/carpetaciudadana/preguntar_entrada_anterior.aspx" in (url or "")
+
+
+def _is_carpeta_ciudadana_url(url: str) -> bool:
+    return "/carpetaciudadana/carpeta_ciudadana.aspx" in (url or "")
+
+
+def _is_login_url(url: str) -> bool:
+    return "/carpetaciudadana/login.aspx" in (url or "")
+
+
+async def watchdog_recover_navigation(
+    page: Page,
+    config: AyuntaPalmaConfig,
+    *,
+    phase: str,
+    expected_selector: str | None = None,
+) -> None:
+    """
+    Watchdog de navegación para Palma:
+    - detecta desvíos a carpeta/login,
+    - reabre el flujo en url_base,
+    - opcionalmente valida selector esperado de la fase.
+    """
+    if page.is_closed():
+        raise PlaywrightTimeoutError(f"[{phase}] watchdog: la pestaña está cerrada.")
+
+    if expected_selector:
+        try:
+            await page.locator(expected_selector).first.wait_for(state="visible", timeout=1200)
+            return
+        except Exception:
+            pass
+
+    current = page.url or ""
+    in_expected_flow = _is_nueva_entrada_url(current) or _is_preguntar_entrada_url(current)
+    must_recover = _is_carpeta_ciudadana_url(current) or _is_login_url(current) or (not in_expected_flow)
+
+    if not must_recover:
+        return
+
+    logger.warning("[AP-WATCHDOG] %s: URL inesperada '%s'. Reenganchando flujo...", phase, current)
+    await page.goto(config.url_base, wait_until="domcontentloaded")
+    await page.wait_for_timeout(config.delay_ms)
+
+    if expected_selector:
+        try:
+            await page.locator(expected_selector).first.wait_for(state="visible", timeout=15000)
+        except Exception:
+            logger.warning(
+                "[AP-WATCHDOG] %s: selector esperado no visible tras recuperación: %s",
+                phase,
+                expected_selector,
+            )
