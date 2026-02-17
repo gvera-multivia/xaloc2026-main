@@ -1,12 +1,22 @@
 export const API_BASE = '/api';
 
 async function fetcher<T>(path: string, options?: RequestInit): Promise<T> {
-    const res = await fetch(`${API_BASE}${path}`, options);
+    const res = await fetch(`${API_BASE}${path}`, {
+        credentials: 'include',
+        ...options,
+    });
     if (!res.ok) {
         const errorText = await res.text().catch(() => 'Unknown error');
         throw new Error(errorText || `HTTP error! status: ${res.status}`);
     }
-    return res.json() as Promise<T>;
+    if (res.status === 204) {
+        return {} as T;
+    }
+    const text = await res.text();
+    if (!text) {
+        return {} as T;
+    }
+    return JSON.parse(text) as T;
 }
 
 export const api = {
@@ -95,8 +105,30 @@ export const authApi = {
     reject: (id: number, reason: string) => api.post<any>(`/pending-auth/${id}/reject`, { reason }),
 };
 
+export const sessionApi = {
+    login: (username: string, password: string) => api.post<{ ok: boolean; user: { sub: string; username: string; role: string } }>(
+        '/auth/login',
+        { username, password },
+    ),
+    me: () => api.get<{ authenticated: boolean; user: { sub: string; username: string; role: string } }>('/auth/me'),
+    logout: () => api.post<{ ok: boolean }>('/auth/logout'),
+};
+
+export const usersApi = {
+    list: () => api.get<{ items: any[]; total: number }>('/auth/users'),
+    create: (payload: { username: string; password: string; role: 'admin' | 'user'; active?: boolean }) =>
+        api.post<{ created: boolean; user: any }>('/auth/users', payload),
+};
+
 export const configApi = {
     list: () => api.get<{ items: any[], total: number }>('/config'),
     setSiteActive: (siteId: string, active: boolean) =>
         api.post<any>(`/config/${encodeURIComponent(siteId)}/active`, { active }),
+};
+
+export const incidentsApi = {
+    getPending: (page = 1, pageSize = 200) =>
+        api.get<{ items: any[], total: number }>(`/incidents?page=${page}&page_size=${pageSize}`),
+    claim: (id: string) => api.post<any>(`/incidents/${id}/claim`),
+    release: (id: string) => api.post<any>(`/incidents/${id}/release`),
 };

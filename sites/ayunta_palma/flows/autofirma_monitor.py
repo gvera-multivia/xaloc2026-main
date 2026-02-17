@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 import logging
@@ -62,7 +62,6 @@ function Get-Texts($win) {{
     [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
     [System.Windows.Automation.ControlType]::Text
   )
-  $arr = @()
   try {{
     $texts = $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condText)
     foreach ($t in $texts) {{
@@ -119,8 +118,9 @@ function Click-ButtonByHints($win, $hints, [string]$kind) {{
   )
   $buttons = $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condBtn)
   foreach ($btn in $buttons) {{
-    $btnName = [string]$btn.Current.Name
+    $btnName = [string]$btn.Cached.Name
     $n = Norm $btnName
+
     foreach ($hint in $hints) {{
       if ($n -eq $hint -or $n.Contains($hint)) {{
         try {{
@@ -133,6 +133,23 @@ function Click-ButtonByHints($win, $hints, [string]$kind) {{
     }}
   }}
   return $false
+}}
+
+function Set-EdgeCheckbox($win) {{
+  $condCheck = New-Object System.Windows.Automation.PropertyCondition(
+    [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+    [System.Windows.Automation.ControlType]::CheckBox
+  )
+  try {{
+    $checks = $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condCheck)
+    foreach ($chk in $checks) {{
+      $chkName = Norm ([string]$chk.Current.Name)
+      if ($chkName.Contains("permet sempre") -or $chkName.Contains("permitir siempre") -or $chkName.Contains("always allow")) {{
+        Try-Click-Pattern $chk | Out-Null
+        Write-Output "edge_open checkbox=attempted"
+      }}
+    }}
+  }} catch {{}}
 }}
 
 for ($i=0; $i -lt {loops}; $i++) {{

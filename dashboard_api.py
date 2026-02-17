@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import Any
+import json
+import logging
+from typing import Any, Optional
 from pathlib import Path
 
 import aiohttp
-from fastapi import FastAPI, Query, HTTPException, Body, Request
+import jwt
+from fastapi import FastAPI, Query, HTTPException, Body, Request, WebSocket, WebSocketDisconnect, Header, Depends, status
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -14,16 +17,41 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from dashboard import DashboardService
+from dashboard.auth import (
+    DashboardAuthStore,
+    JwtManager,
+    ROLE_ADMIN,
+    ROLE_USER,
+    VALID_ROLES,
+    resolve_secret_key,
+)
 from dashboard.process_manager import ProcessManager
 from core.xvia_auth import create_authenticated_session_in_place
 from core.xvia_deselect import deselect_resource
 from core.process_launcher import get_npm_command, start_async_process, terminate_process_tree
+from core.redis_client import get_redis_client
 
 app = FastAPI(title="Xaloc Realtime Dashboard", version="2.0.0")
 
+SQLITE_DB_PATH = (os.getenv("SQLITE_DB_PATH") or "db/xaloc_database.db").strip() or "db/xaloc_database.db"
+AUTH_COOKIE_NAME = "dashboard_access_token"
+AUTH_ROLE_COOKIE_NAME = "dashboard_role"
+TOKEN_EXPIRE_MINUTES = max(5, int((os.getenv("DASHBOARD_TOKEN_EXPIRE_MINUTES") or "480").strip() or "480"))
+JWT_SECRET_KEY = resolve_secret_key()
+JWT_ISSUER = (os.getenv("DASHBOARD_JWT_ISSUER") or "xaloc-dashboard").strip() or "xaloc-dashboard"
+JWT_AUDIENCE = (os.getenv("DASHBOARD_JWT_AUDIENCE") or "xaloc-dashboard-clients").strip() or "xaloc-dashboard-clients"
+AUTH_COOKIE_SECURE = (os.getenv("DASHBOARD_AUTH_COOKIE_SECURE") or "0").strip().lower() in {"1", "true", "yes", "on"}
+ENABLE_WS_REALTIME = (os.getenv("DASHBOARD_ENABLE_WS") or "0").strip().lower() in {"1", "true", "yes", "on"}
+
+cors_origins_raw = (os.getenv("DASHBOARD_CORS_ORIGINS") or "").strip()
+if cors_origins_raw:
+    cors_origins = [o.strip() for o in cors_origins_raw.split(",") if o.strip()]
+else:
+    cors_origins = ["http://127.0.0.1:3000", "http://localhost:3000"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -31,6 +59,16 @@ app.add_middleware(
 
 service = DashboardService()
 process_manager = ProcessManager(base_dir=".", logs_dir="logs")
+logger = logging.getLogger("dashboard_api")
+auth_store = DashboardAuthStore(db_path=SQLITE_DB_PATH)
+jwt_manager = JwtManager(
+    secret_key=JWT_SECRET_KEY,
+    issuer=JWT_ISSUER,
+    audience=JWT_AUDIENCE,
+    access_token_minutes=TOKEN_EXPIRE_MINUTES,
+)
+if not (os.getenv("SECRET_KEY") or "").strip():
+    logger.warning("SECRET_KEY no definido; usando clave efimera solo para la sesion actual.")
 
 FRONTEND_HOST = os.getenv("DASHBOARD_FRONTEND_HOST", "127.0.0.1").strip() or "127.0.0.1"
 FRONTEND_PORT = int((os.getenv("DASHBOARD_FRONTEND_PORT") or "3000").strip() or "3000")
@@ -173,6 +211,17 @@ async def app_startup() -> None:
     loop = asyncio.get_running_loop()
     _prev_loop_exception_handler = loop.get_exception_handler()
     loop.set_exception_handler(_loop_exception_handler)
+    bootstrap_admin_user = (os.getenv("DASHBOARD_ADMIN_USERNAME") or "").strip().lower()
+    bootstrap_admin_password = (os.getenv("DASHBOARD_ADMIN_PASSWORD") or "").strip()
+    if bootstrap_admin_user and bootstrap_admin_password:
+        try:
+            auth_store.ensure_bootstrap_admin(
+                username=bootstrap_admin_user,
+                password=bootstrap_admin_password,
+            )
+            logger.info("Usuario admin bootstrap verificado: %s", bootstrap_admin_user)
+        except Exception as exc:
+            logger.error("No se pudo inicializar usuario admin bootstrap: %s", exc)
     await _start_frontend_server()
 
 
@@ -188,12 +237,274 @@ async def app_shutdown() -> None:
     _proxy_session = None
     await _stop_frontend_server()
 
+# ==========================================================================
+# AUTH & REDIS
+# ==========================================================================
+
+def _extract_bearer_from_authorization(authorization: Optional[str]) -> Optional[str]:
+    if not authorization:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return None
+    return token
+
+
+def _extract_token_from_websocket(websocket: WebSocket) -> Optional[str]:
+    token = websocket.query_params.get("token")
+    if token:
+        return token
+    auth_header = websocket.headers.get("authorization")
+    header_token = _extract_bearer_from_authorization(auth_header)
+    if header_token:
+        return header_token
+    cookie_token = websocket.cookies.get(AUTH_COOKIE_NAME)
+    if cookie_token:
+        return cookie_token
+    return None
+
+
+def _extract_token_from_request(request: Request, authorization: Optional[str]) -> Optional[str]:
+    header_token = _extract_bearer_from_authorization(authorization)
+    if header_token:
+        return header_token
+    cookie_token = request.cookies.get(AUTH_COOKIE_NAME)
+    if cookie_token:
+        return cookie_token
+    return None
+
+
+def _decode_token_or_401(token: str) -> dict[str, Any]:
+    try:
+        payload = jwt_manager.decode_access_token(token)
+    except jwt.ExpiredSignatureError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired") from exc
+    except jwt.InvalidTokenError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
+    role = str(payload.get("role") or "").strip().lower()
+    if role not in VALID_ROLES:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token role invalid")
+    return payload
+
+
+def _ensure_user_is_active(payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        user_id = int(str(payload.get("sub") or ""))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token subject invalid") from exc
+    user = auth_store.get_user_by_id(user_id)
+    if user is None or not user.active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
+    return {
+        "sub": str(user.id),
+        "username": user.username,
+        "role": user.role,
+    }
+
+
+def get_current_user(request: Request, authorization: Optional[str] = Header(None)) -> dict[str, Any]:
+    token = _extract_token_from_request(request, authorization)
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing auth token")
+    payload = _decode_token_or_401(token)
+    return _ensure_user_is_active(payload)
+
+
+def require_user(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+    return user
+
+
+def require_admin(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+    if str(user.get("role") or "").strip().lower() != ROLE_ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
+    return user
+
+
+@app.post("/api/auth/login")
+async def api_auth_login(payload: dict[str, Any] = Body(...)) -> Response:
+    username = str(payload.get("username") or "").strip()
+    password = str(payload.get("password") or "")
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="username y password son obligatorios.")
+    user = auth_store.authenticate(username=username, password=password)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenciales invalidas.")
+
+    token = jwt_manager.create_access_token(user)
+    response = Response(
+        content=json.dumps({"ok": True, "user": user.to_claims()}),
+        media_type="application/json",
+    )
+    response.set_cookie(
+        key=AUTH_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=AUTH_COOKIE_SECURE,
+        samesite="lax",
+        max_age=TOKEN_EXPIRE_MINUTES * 60,
+        path="/",
+    )
+    response.set_cookie(
+        key=AUTH_ROLE_COOKIE_NAME,
+        value=user.role,
+        httponly=False,
+        secure=AUTH_COOKIE_SECURE,
+        samesite="lax",
+        max_age=TOKEN_EXPIRE_MINUTES * 60,
+        path="/",
+    )
+    return response
+
+
+@app.get("/api/auth/me")
+async def api_auth_me(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
+    return {"authenticated": True, "user": user}
+
+
+@app.post("/api/auth/logout")
+async def api_auth_logout() -> Response:
+    response = Response(content=json.dumps({"ok": True}), media_type="application/json")
+    response.delete_cookie(AUTH_COOKIE_NAME, path="/")
+    response.delete_cookie(AUTH_ROLE_COOKIE_NAME, path="/")
+    return response
+
+
+@app.get("/api/auth/users")
+async def api_auth_list_users(_admin: dict[str, Any] = Depends(require_admin)) -> dict[str, Any]:
+    items = auth_store.list_users()
+    return {"items": items, "total": len(items)}
+
+
+@app.post("/api/auth/users")
+async def api_auth_create_user(
+    payload: dict[str, Any] = Body(...),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    username = str(payload.get("username") or "").strip()
+    password = str(payload.get("password") or "")
+    role = str(payload.get("role") or ROLE_USER).strip().lower()
+    active = bool(payload.get("active", True))
+    try:
+        user = auth_store.create_user(
+            username=username,
+            password=password,
+            role=role,
+            active=active,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"created": True, "user": user.to_claims() | {"active": user.active}}
+
+
+@app.websocket("/ws/dashboard")
+async def websocket_dashboard(websocket: WebSocket):
+    if not ENABLE_WS_REALTIME:
+        await websocket.close(code=1008, reason="Realtime disabled")
+        return
+
+    token = _extract_token_from_websocket(websocket)
+    if not token:
+        await websocket.close(code=4401, reason="Missing auth token")
+        return
+    try:
+        payload = _decode_token_or_401(token)
+        _ensure_user_is_active(payload)
+    except HTTPException:
+        await websocket.close(code=4401, reason="Invalid auth token")
+        return
+
+    redis = get_redis_client()
+    if not redis:
+        await websocket.close(code=1013, reason="Realtime backend unavailable")
+        return
+
+    pubsub = None
+    try:
+        pubsub = redis.pubsub()
+        await pubsub.subscribe("channel:ui_updates")
+    except Exception as exc:
+        logger.warning("WebSocket realtime disabled: Redis unavailable (%s)", exc)
+        if pubsub is not None:
+            try:
+                await pubsub.close()
+            except Exception:
+                pass
+        await websocket.close(code=1013, reason="Realtime backend unavailable")
+        return
+
+    await websocket.accept()
+
+    try:
+        async for message in pubsub.listen():
+            if message["type"] == "message":
+                await websocket.send_text(message["data"])
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+    finally:
+        if pubsub is not None:
+            try:
+                await pubsub.unsubscribe("channel:ui_updates")
+            except Exception:
+                pass
+            try:
+                await pubsub.close()
+            except Exception:
+                pass
+
+@app.post("/api/incidents/{id}/claim")
+async def api_claim_incident(id: str, user: dict = Depends(require_user)):
+    user_id = str(user.get("sub", "unknown"))
+    username = user.get("username", "Unknown")
+    try:
+        lock_result = service.db.acquire_incident_lock(
+            incident_id=id,
+            user_id=user_id,
+            username=username,
+            ttl_seconds=1800,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if not bool(lock_result.get("acquired")):
+        owner = lock_result.get("owner_username") or lock_result.get("owner_id") or "otro usuario"
+        raise HTTPException(status_code=409, detail=f"Incident already locked by {owner}")
+
+    return {
+        "status": "locked",
+        "incident_id": id,
+        "user_id": user_id,
+        "username": username,
+        "expires_at": lock_result.get("expires_at"),
+    }
+
+@app.post("/api/incidents/{id}/release")
+async def api_release_incident(id: str, user: dict = Depends(require_user)):
+    user_id = str(user.get("sub", "unknown"))
+    role = user.get("role", ROLE_USER)
+    release_result = service.db.release_incident_lock(
+        incident_id=id,
+        user_id=user_id,
+        is_admin=(str(role).strip().lower() == ROLE_ADMIN),
+    )
+    reason = str(release_result.get("reason") or "")
+    if reason == "not_owner":
+        raise HTTPException(status_code=403, detail="You do not own this lock")
+    if reason == "not_locked":
+        return {"status": "unlocked", "message": "Was not locked"}
+    return {"status": "unlocked", "incident_id": id}
+
+# ==========================================================================
+# EXISTING ROUTES
+# ==========================================================================
 
 @app.get("/api/history/days")
 async def api_history_days(
     source: str = Query("all"),
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
+    _user: dict = Depends(require_user),
 ) -> dict:
     return service.list_history_days(source=source, page=page, page_size=page_size)
 
@@ -203,8 +514,37 @@ async def api_history_incidents(
     day: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(200, ge=1, le=1000),
+    _user: dict = Depends(require_user),
 ) -> dict:
     return service.list_history_incidents(day=day, page=page, page_size=page_size)
+
+
+@app.get("/api/incidents")
+async def api_incidents_pending(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(200, ge=1, le=1000),
+    _user: dict = Depends(require_user),
+) -> dict:
+    # For now, return incidents from today as "pending" list
+    result = service.list_history_incidents(day=None, page=page, page_size=page_size)
+    items = list(result.get("items") or [])
+    incident_ids = [f"{it.get('site_id')}:{it.get('resource_id')}" for it in items]
+    locks = service.db.get_incident_locks(incident_ids=incident_ids)
+    for item in items:
+        incident_id = f"{item.get('site_id')}:{item.get('resource_id')}"
+        lock_info = locks.get(incident_id)
+        if lock_info:
+            item["locked"] = True
+            item["lock_user_id"] = lock_info.get("user_id")
+            item["lock_username"] = lock_info.get("username")
+            item["lock_expires_at"] = lock_info.get("expires_at")
+        else:
+            item["locked"] = False
+            item["lock_user_id"] = None
+            item["lock_username"] = None
+            item["lock_expires_at"] = None
+    result["items"] = items
+    return result
 
 
 @app.get("/api/history/successes")
@@ -212,6 +552,7 @@ async def api_history_successes(
     day: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(200, ge=1, le=1000),
+    _user: dict = Depends(require_user),
 ) -> dict:
     return service.list_history_successes(day=day, page=page, page_size=page_size)
 
@@ -220,6 +561,7 @@ async def api_history_successes(
 async def api_queue_days(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
+    _user: dict = Depends(require_user),
 ) -> dict:
     return service.list_queue_days(page=page, page_size=page_size)
 
@@ -229,6 +571,7 @@ async def api_queue_current(
     day: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(200, ge=1, le=1000),
+    _user: dict = Depends(require_user),
 ) -> dict:
     return service.list_queue_current(day=day, page=page, page_size=page_size)
 
@@ -236,6 +579,7 @@ async def api_queue_current(
 @app.get("/api/queue/live")
 async def api_queue_live(
     day: str | None = Query(None),
+    _user: dict = Depends(require_user),
 ) -> dict:
     item = service.get_queue_live(day=day)
     if not item:
@@ -246,6 +590,7 @@ async def api_queue_live(
 @app.get("/api/queue/completion-marker")
 async def api_queue_completion_marker(
     day: str | None = Query(None),
+    _user: dict = Depends(require_user),
 ) -> dict:
     return service.get_queue_completion_marker(day=day)
 
@@ -256,7 +601,7 @@ _LIVE_FRAME_PATH = _Path(__file__).parent.absolute() / "screenshots" / "live_fra
 
 
 @app.get("/api/queue/live-screenshot")
-async def api_queue_live_screenshot():
+async def api_queue_live_screenshot(_user: dict = Depends(require_user)):
     """Devuelve el ultimo frame JPEG del screencast CDP del worker."""
     if not _LIVE_FRAME_PATH.exists():
         raise HTTPException(status_code=404, detail="No hay frame en vivo")
@@ -277,12 +622,12 @@ async def api_queue_live_screenshot():
         },
     )
 @app.get("/api/control/status")
-async def api_control_status() -> dict:
+async def api_control_status(_admin: dict = Depends(require_admin)) -> dict:
     return process_manager.get_all_status()
 
 
 @app.post("/api/control/{process_name}/start")
-async def api_control_start(process_name: str) -> dict:
+async def api_control_start(process_name: str, _admin: dict = Depends(require_admin)) -> dict:
     try:
         return await process_manager.start_process(process_name)
     except ValueError as exc:
@@ -292,7 +637,7 @@ async def api_control_start(process_name: str) -> dict:
 
 
 @app.post("/api/control/{process_name}/stop")
-async def api_control_stop(process_name: str) -> dict:
+async def api_control_stop(process_name: str, _admin: dict = Depends(require_admin)) -> dict:
     try:
         return await process_manager.stop_process(process_name)
     except ValueError as exc:
@@ -300,7 +645,7 @@ async def api_control_stop(process_name: str) -> dict:
 
 
 @app.post("/api/control/{process_name}/restart")
-async def api_control_restart(process_name: str) -> dict:
+async def api_control_restart(process_name: str, _admin: dict = Depends(require_admin)) -> dict:
     try:
         return await process_manager.restart_process(process_name)
     except ValueError as exc:
@@ -313,6 +658,7 @@ async def api_control_restart(process_name: str) -> dict:
 async def api_logs_process(
     process_name: str,
     lines: int = Query(100, ge=1, le=2000),
+    _admin: dict = Depends(require_admin),
 ) -> dict:
     try:
         return process_manager.get_logs(process_name, lines=lines)
@@ -323,6 +669,7 @@ async def api_logs_process(
 @app.get("/api/queue/pauses")
 async def api_queue_pauses(
     active_only: bool = Query(True),
+    _admin: dict = Depends(require_admin),
 ) -> dict:
     items = service.list_processing_pauses(active_only=active_only)
     return {"items": items, "total": len(items)}
@@ -333,6 +680,7 @@ async def api_pause_site_processing(
     site_id: str,
     minutes: int | None = Query(None, ge=1),
     reason: str | None = Query(None),
+    _admin: dict = Depends(require_admin),
 ) -> dict:
     try:
         return service.pause_site_processing(site_id=site_id, reason=reason, minutes=minutes)
@@ -341,7 +689,7 @@ async def api_pause_site_processing(
 
 
 @app.delete("/api/queue/pauses/{site_id}")
-async def api_unpause_site_processing(site_id: str) -> dict:
+async def api_unpause_site_processing(site_id: str, _admin: dict = Depends(require_admin)) -> dict:
     try:
         return service.unpause_site_processing(site_id=site_id)
     except ValueError as exc:
@@ -351,6 +699,7 @@ async def api_unpause_site_processing(site_id: str) -> dict:
 @app.get("/api/queue/item-pauses")
 async def api_queue_item_pauses(
     active_only: bool = Query(True),
+    _admin: dict = Depends(require_admin),
 ) -> dict:
     items = service.list_item_processing_pauses(active_only=active_only)
     return {"items": items, "total": len(items)}
@@ -362,6 +711,7 @@ async def api_pause_queue_item(
     resource_id: int,
     minutes: int | None = Query(None, ge=1),
     reason: str | None = Query(None),
+    _admin: dict = Depends(require_admin),
 ) -> dict:
     try:
         return service.pause_queue_item_processing(
@@ -375,7 +725,7 @@ async def api_pause_queue_item(
 
 
 @app.delete("/api/queue/items/{site_id}/{resource_id}/pause")
-async def api_unpause_queue_item(site_id: str, resource_id: int) -> dict:
+async def api_unpause_queue_item(site_id: str, resource_id: int, _admin: dict = Depends(require_admin)) -> dict:
     try:
         return service.unpause_queue_item_processing(site_id=site_id, resource_id=resource_id)
     except ValueError as exc:
@@ -383,7 +733,7 @@ async def api_unpause_queue_item(site_id: str, resource_id: int) -> dict:
 
 
 @app.delete("/api/queue/items/{site_id}/{resource_id}")
-async def api_delete_queue_item(site_id: str, resource_id: int) -> dict:
+async def api_delete_queue_item(site_id: str, resource_id: int, _admin: dict = Depends(require_admin)) -> dict:
     try:
         result = service.remove_queue_item(site_id=site_id, resource_id=resource_id)
     except ValueError as exc:
@@ -435,6 +785,7 @@ async def api_recover_queue_item(
     site_id: str,
     resource_id: int,
     heartbeat_timeout_seconds: int | None = Query(None, ge=1),
+    _admin: dict = Depends(require_admin),
 ) -> dict:
     try:
         return service.recover_queue_item_processing(
@@ -452,6 +803,7 @@ async def api_recover_stuck_queue_items(
     limit: int = Query(100, ge=1, le=2000),
     site_id: str | None = Query(None),
     resource_id: int | None = Query(None),
+    _admin: dict = Depends(require_admin),
 ) -> dict:
     try:
         return service.recover_stuck_queue_items(
@@ -465,13 +817,13 @@ async def api_recover_stuck_queue_items(
 
 
 @app.get("/api/blacklist")
-async def api_blacklist(site_id: str | None = Query(None)) -> dict:
+async def api_blacklist(site_id: str | None = Query(None), _admin: dict = Depends(require_admin)) -> dict:
     items = service.list_blacklist(site_id=site_id)
     return {"items": items, "total": len(items)}
 
 
 @app.post("/api/blacklist")
-async def api_blacklist_block(payload: dict[str, Any] = Body(...)) -> dict:
+async def api_blacklist_block(payload: dict[str, Any] = Body(...), _admin: dict = Depends(require_admin)) -> dict:
     try:
         site_id = str(payload.get("site_id") or "").strip()
         resource_id = int(payload.get("resource_id"))
@@ -490,7 +842,7 @@ async def api_blacklist_block(payload: dict[str, Any] = Body(...)) -> dict:
 
 
 @app.delete("/api/blacklist/{site_id}/{resource_id}")
-async def api_blacklist_unblock(site_id: str, resource_id: int) -> dict:
+async def api_blacklist_unblock(site_id: str, resource_id: int, _admin: dict = Depends(require_admin)) -> dict:
     try:
         return service.unblock_blacklist(site_id=site_id, resource_id=resource_id)
     except ValueError as exc:
@@ -498,13 +850,17 @@ async def api_blacklist_unblock(site_id: str, resource_id: int) -> dict:
 
 
 @app.get("/api/config")
-async def api_config_list() -> dict:
+async def api_config_list(_admin: dict = Depends(require_admin)) -> dict:
     items = service.list_organismo_configs()
     return {"items": items, "total": len(items)}
 
 
 @app.put("/api/config/{site_id}")
-async def api_config_update(site_id: str, payload: dict[str, Any] = Body(...)) -> dict:
+async def api_config_update(
+    site_id: str,
+    payload: dict[str, Any] = Body(...),
+    _admin: dict = Depends(require_admin),
+) -> dict:
     try:
         updates = dict(payload or {})
         return service.update_organismo_config(site_id=site_id, updates=updates)
@@ -513,7 +869,11 @@ async def api_config_update(site_id: str, payload: dict[str, Any] = Body(...)) -
 
 
 @app.post("/api/config/{site_id}/active")
-async def api_config_set_active(site_id: str, payload: dict[str, Any] = Body(...)) -> dict:
+async def api_config_set_active(
+    site_id: str,
+    payload: dict[str, Any] = Body(...),
+    _admin: dict = Depends(require_admin),
+) -> dict:
     if "active" not in payload:
         raise HTTPException(status_code=400, detail="Campo 'active' obligatorio.")
     try:
@@ -531,14 +891,21 @@ async def api_config_set_active(site_id: str, payload: dict[str, Any] = Body(...
 @app.get("/api/pending-auth")
 async def api_pending_auth_list(
     authorization_type: str | None = Query(None),
+    _admin: dict = Depends(require_admin),
 ) -> dict:
     return service.list_pending_authorizations(authorization_type=authorization_type)
 
 
 @app.post("/api/pending-auth/{pending_id}/approve")
-async def api_pending_auth_approve(pending_id: int) -> dict:
+async def api_pending_auth_approve(
+    pending_id: int,
+    user: dict[str, Any] = Depends(require_admin),
+) -> dict:
     try:
-        return service.approve_pending_authorization(pending_id=pending_id)
+        return service.approve_pending_authorization(
+            pending_id=pending_id,
+            authorized_by=str(user.get("username") or "admin"),
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -547,6 +914,7 @@ async def api_pending_auth_approve(pending_id: int) -> dict:
 async def api_pending_auth_reject(
     pending_id: int,
     payload: dict[str, Any] = Body(...),
+    user: dict[str, Any] = Depends(require_admin),
 ) -> dict:
     reason = str(payload.get("reason") or "").strip()
     if not reason:
@@ -555,6 +923,7 @@ async def api_pending_auth_reject(
         return service.reject_pending_authorization(
             pending_id=pending_id,
             reason=reason,
+            rejected_by=str(user.get("username") or "admin"),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -566,7 +935,7 @@ async def api_pending_auth_reject(
 
 
 @app.post("/api/client-folder")
-async def api_client_folder(payload: dict[str, Any] = Body(...)) -> dict:
+async def api_client_folder(payload: dict[str, Any] = Body(...), _user: dict = Depends(require_user)) -> dict:
     """Calcula la ruta de la carpeta del cliente.
 
     Por defecto devuelve la ruta para que el frontend intente abrirla en el cliente.

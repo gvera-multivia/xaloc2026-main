@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
@@ -11,24 +11,23 @@ import {
   User,
   Terminal,
   LayoutDashboard,
+  Users,
 } from "lucide-react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+<<<<<<< HEAD
 import { isClientView } from "@/lib/permissions";
+=======
+import { useAuth } from "@/lib/AuthContext";
+>>>>>>> b2d5f2af1d9c9ebf9e4459d107739ad00436c0f1
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-/**
- * MORRIGAN NAVBAR
- * - Surfaces: Raven/Obsidian (matte)
- * - Violet: only as transition (hover/focus/edge), never as big filled pills
- * - Fate Crimson: only for â€œactiveâ€ marker (underline / thin rail), not full backgrounds
- * - Terminal harmony: restrained chips, no neon greens
- */
 export default function Navbar() {
   const pathname = usePathname();
+  const { user, isAdmin, logout } = useAuth();
   const [scrolled, setScrolled] = useState(false);
   const [quickSearch, setQuickSearch] = useState("");
 
@@ -40,12 +39,22 @@ export default function Navbar() {
   }, []);
 
   const navLinks = [
+<<<<<<< HEAD
     { href: "/", label: "Estado", icon: LayoutDashboard },
     { href: "/control", label: "Control", icon: Terminal },
     { href: "/admin", label: "Gestión", icon: Settings },
     { href: "/history", label: "Historial", icon: History },
     { href: "/blacklist", label: "Bloqueos", icon: ShieldAlert },
   ].filter((link) => !(isClientView && link.href === "/control"));
+=======
+    { href: "/", label: "Estado", icon: LayoutDashboard, adminOnly: false },
+    { href: "/history", label: "Historial", icon: History, adminOnly: false },
+    { href: "/admin", label: "Gestion", icon: Settings, adminOnly: true },
+    { href: "/users", label: "Usuarios", icon: Users, adminOnly: true },
+    { href: "/control", label: "Control", icon: Terminal, adminOnly: true },
+    { href: "/blacklist", label: "Bloqueos", icon: ShieldAlert, adminOnly: true },
+  ].filter((link) => !link.adminOnly || isAdmin);
+>>>>>>> b2d5f2af1d9c9ebf9e4459d107739ad00436c0f1
 
   return (
     <nav
@@ -59,9 +68,7 @@ export default function Navbar() {
       )}
     >
       <div className="container mx-auto px-4 flex items-center justify-between">
-        {/* Brand */}
         <Link href="/" className="flex items-center gap-3 group">
-          {/* Replace 'M' with your raven side logo later; keep as sigil placeholder */}
           <div
             className={cn(
               "w-10 h-10 rounded border",
@@ -80,12 +87,11 @@ export default function Navbar() {
               Morrigan
             </h1>
             <p className="text-xs text-muted-foreground/70 leading-none mt-1">
-              Monitor & Control
+              Monitor and Control
             </p>
           </div>
         </Link>
 
-        {/* Nav links (desktop) */}
         <div className="hidden lg:flex items-center gap-1 rounded border border-border/70 bg-[rgba(17,19,26,0.65)] p-0.5">
           {navLinks.map((link) => {
             const Icon = link.icon;
@@ -116,7 +122,6 @@ export default function Navbar() {
                 />
                 {link.label}
 
-                {/* Active = Fate rail (extremely thin, inevitable) */}
                 {isActive && (
                   <span
                     className="absolute inset-x-2 -bottom-[1px] h-[0.5px]"
@@ -130,9 +135,7 @@ export default function Navbar() {
           })}
         </div>
 
-        {/* Right controls */}
         <div className="flex items-center gap-4">
-          {/* Quick search */}
           <div className="relative hidden md:block group">
             <Search
               className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground/70 group-focus-within:text-[rgba(108,77,255,0.75)] transition-colors"
@@ -140,7 +143,7 @@ export default function Navbar() {
             />
             <input
               type="text"
-              placeholder="Buscar trámite…"
+              placeholder="Buscar tramite..."
               value={quickSearch}
               onChange={(e) => setQuickSearch(e.target.value)}
               className={cn(
@@ -156,9 +159,7 @@ export default function Navbar() {
             />
           </div>
 
-          {/* Status chip + user */}
           <div className="flex items-center gap-3">
-            {/* Worker status (terminal-like, not neon) */}
             <div className="flex items-center gap-2 rounded-full border border-border/70 bg-[rgba(17,19,26,0.55)] px-3 py-2">
               <span
                 className="w-2 h-2 rounded-full"
@@ -172,23 +173,32 @@ export default function Navbar() {
               </span>
             </div>
 
-            <button
-              className={cn(
-                "morr-focus",
-                "w-10 h-10 rounded-full",
-                "bg-[rgba(17,19,26,0.55)]",
-                "border border-border/70",
-                "flex items-center justify-center",
-                "hover:border-[rgba(108,77,255,0.22)] transition"
-              )}
-              aria-label="Usuario"
-            >
-              <User size={18} className="text-foreground/80" />
-            </button>
+            <div className="flex items-center gap-2">
+              <div
+                className={cn(
+                  "h-10 rounded-full",
+                  "bg-[rgba(17,19,26,0.55)]",
+                  "border border-border/70",
+                  "flex items-center gap-2 px-3",
+                  "hover:border-[rgba(108,77,255,0.22)] transition"
+                )}
+                aria-label="Usuario"
+              >
+                <User size={18} className="text-foreground/80" />
+                <span className="text-[10px] uppercase tracking-[0.16em] font-black text-foreground/85">
+                  {user?.username || "Usuario"}
+                </span>
+              </div>
+              <button
+                onClick={() => void logout()}
+                className="text-[10px] uppercase tracking-[0.16em] font-black rounded-full border border-border/70 bg-[rgba(17,19,26,0.55)] px-3 py-2 text-foreground/80 hover:text-foreground hover:border-[rgba(108,77,255,0.22)] transition"
+              >
+                Salir
+              </button>
+            </div>
           </div>
         </div>
       </div>
     </nav>
   );
 }
-

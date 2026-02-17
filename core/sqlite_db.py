@@ -275,6 +275,24 @@ class SQLiteDatabase:
             ON resource_processing_pauses(expires_at)
             """
         )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS incident_locks (
+                incident_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                username TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS ix_incident_locks_expires
+            ON incident_locks(expires_at)
+            """
+        )
 
     def get_pending_task(self) -> Optional[Tuple[int, str, str, Dict[str, Any]]]:
         """
@@ -1010,6 +1028,199 @@ class SQLiteDatabase:
                 params,
             )
             return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def _cleanup_expired_incident_locks(self, conn: sqlite3.Connection) -> None:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            DELETE FROM incident_locks
+            WHERE expires_at <= ?
+            """,
+            (datetime.now().isoformat(),),
+        )
+
+    def acquire_incident_lock(
+        self,
+        *,
+        incident_id: str,
+        user_id: str,
+        username: Optional[str] = None,
+        ttl_seconds: int = 1800,
+    ) -> Dict[str, Any]:
+        incident_key = str(incident_id or "").strip()
+        if not incident_key:
+            raise ValueError("incident_id es obligatorio.")
+        user_key = str(user_id or "").strip()
+        if not user_key:
+            raise ValueError("user_id es obligatorio.")
+
+        ttl = max(30, int(ttl_seconds))
+        now_iso = datetime.now().isoformat()
+        expires_at = (datetime.now() + timedelta(seconds=ttl)).isoformat()
+
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            cursor.execute("BEGIN IMMEDIATE")
+            self._cleanup_expired_incident_locks(conn)
+            cursor.execute(
+                """
+                SELECT incident_id, user_id, username, expires_at
+                FROM incident_locks
+                WHERE incident_id = ?
+                LIMIT 1
+                """,
+                (incident_key,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                cursor.execute(
+                    """
+                    INSERT INTO incident_locks (incident_id, user_id, username, created_at, updated_at, expires_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (incident_key, user_key, (username or "").strip() or None, now_iso, now_iso, expires_at),
+                )
+                conn.commit()
+                return {
+                    "acquired": True,
+                    "incident_id": incident_key,
+                    "user_id": user_key,
+                    "username": (username or "").strip() or None,
+                    "expires_at": expires_at,
+                }
+
+            owner_id = str(row["user_id"] or "").strip()
+            owner_username = (str(row["username"] or "").strip() or None)
+            if owner_id == user_key:
+                cursor.execute(
+                    """
+                    UPDATE incident_locks
+                    SET username = ?, updated_at = ?, expires_at = ?
+                    WHERE incident_id = ?
+                    """,
+                    ((username or "").strip() or owner_username, now_iso, expires_at, incident_key),
+                )
+                conn.commit()
+                return {
+                    "acquired": True,
+                    "incident_id": incident_key,
+                    "user_id": user_key,
+                    "username": (username or "").strip() or owner_username,
+                    "expires_at": expires_at,
+                }
+
+            conn.commit()
+            return {
+                "acquired": False,
+                "incident_id": incident_key,
+                "owner_id": owner_id,
+                "owner_username": owner_username,
+                "expires_at": str(row["expires_at"] or "").strip() or None,
+            }
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def release_incident_lock(
+        self,
+        *,
+        incident_id: str,
+        user_id: str,
+        is_admin: bool = False,
+    ) -> Dict[str, Any]:
+        incident_key = str(incident_id or "").strip()
+        user_key = str(user_id or "").strip()
+        if not incident_key:
+            raise ValueError("incident_id es obligatorio.")
+        if not user_key:
+            raise ValueError("user_id es obligatorio.")
+
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            cursor.execute("BEGIN IMMEDIATE")
+            self._cleanup_expired_incident_locks(conn)
+            cursor.execute(
+                """
+                SELECT incident_id, user_id, username
+                FROM incident_locks
+                WHERE incident_id = ?
+                LIMIT 1
+                """,
+                (incident_key,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                conn.commit()
+                return {"released": False, "reason": "not_locked", "incident_id": incident_key}
+
+            owner_id = str(row["user_id"] or "").strip()
+            if owner_id != user_key and not bool(is_admin):
+                conn.commit()
+                return {
+                    "released": False,
+                    "reason": "not_owner",
+                    "incident_id": incident_key,
+                    "owner_id": owner_id,
+                    "owner_username": (str(row["username"] or "").strip() or None),
+                }
+
+            cursor.execute(
+                """
+                DELETE FROM incident_locks
+                WHERE incident_id = ?
+                """,
+                (incident_key,),
+            )
+            conn.commit()
+            return {"released": True, "incident_id": incident_key}
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def get_incident_locks(self, *, incident_ids: Optional[list[str]] = None) -> Dict[str, Dict[str, Any]]:
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            cursor.execute("BEGIN IMMEDIATE")
+            self._cleanup_expired_incident_locks(conn)
+            conn.commit()
+
+            clauses = []
+            params: list[Any] = []
+            ids = [str(x).strip() for x in (incident_ids or []) if str(x).strip()]
+            if ids:
+                placeholders = ",".join(["?"] * len(ids))
+                clauses.append(f"incident_id IN ({placeholders})")
+                params.extend(ids)
+            where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+            cursor.execute(
+                f"""
+                SELECT incident_id, user_id, username, expires_at
+                FROM incident_locks
+                {where_sql}
+                """,
+                params,
+            )
+            out: Dict[str, Dict[str, Any]] = {}
+            for row in cursor.fetchall():
+                key = str(row["incident_id"] or "").strip()
+                out[key] = {
+                    "user_id": str(row["user_id"] or "").strip(),
+                    "username": (str(row["username"] or "").strip() or None),
+                    "expires_at": (str(row["expires_at"] or "").strip() or None),
+                }
+            return out
         finally:
             conn.close()
 
