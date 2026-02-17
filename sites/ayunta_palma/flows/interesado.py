@@ -30,47 +30,33 @@ async def _abrir_modal_nuevo_interesado(page: Page, selectors: AyuntaPalmaSelect
     except PlaywrightTimeoutError:
         pass
 
-    boton_nuevo = page.locator(selectors.btn_nuevo_interesado_visible).first
-    boton_nuevo_alt = page.locator(selectors.btn_nuevo_interesado).first
-    hidden_submit_id = "ctl00_ctl00_cphM_cph_btnListaInteresadosOpcionesNuevo"
-
-    if await boton_nuevo.count() > 0:
-        await boton_nuevo.wait_for(state="visible", timeout=15000)
-        await page.wait_for_timeout(5000)
-        try:
-            await boton_nuevo.click(timeout=5000)
-        except Exception:
-            await boton_nuevo.click(force=True, timeout=5000)
-    elif await boton_nuevo_alt.count() > 0:
-        await boton_nuevo_alt.wait_for(state="visible", timeout=15000)
-        await page.wait_for_timeout(5000)
-        try:
-            await boton_nuevo_alt.click(timeout=5000)
-        except Exception:
-            await boton_nuevo_alt.click(force=True, timeout=5000)
-    else:
-        await page.wait_for_timeout(5000)
-        await page.evaluate(
-            """(sel) => {
-                const el = document.querySelector(sel);
-                if (el) el.click();
-            }""",
-            selectors.input_nuevo_interesado,
-        )
-
-    # Este control usa submit oculto ASP.NET; dispararlo de forma explicita evita
-    # quedarse en un click visual sin postback real.
+    # Importante: no usar el boton visible (redirect-url), para evitar
+    # redirecciones al mismo enlace y quedarnos en la misma pantalla.
+    # Disparamos solo el submit oculto ASP.NET del control exacto.
+    await page.wait_for_timeout(5000)
     await page.evaluate(
-        """(hiddenId) => {
-            const hidden = document.getElementById(hiddenId);
+        """() => {
+            const normalize = (s) => (s || "").toLowerCase().normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").trim();
+            const submits = Array.from(document.querySelectorAll("input[type='submit']"));
+            const hidden = submits.find((el) => {
+                const id = (el.id || "").toLowerCase();
+                const name = (el.name || "").toLowerCase();
+                const value = normalize(el.value || "");
+                return (
+                    id.includes("btnlistainteresadosopcionesnuevo") ||
+                    name.includes("btnlistainteresadosopcionesnuevo") ||
+                    value.includes("nuevo/a interesado/a") ||
+                    value.includes("nou interessat") ||
+                    value.includes("nova interessada")
+                );
+            });
             if (hidden) {
                 try { hidden.click(); } catch {}
             }
             if (typeof window.__doPostBack === "function") {
                 try { window.__doPostBack("ctl00$ctl00$cphM$cph$btnListaInteresadosOpcionesNuevo", ""); } catch {}
             }
-        }""",
-        hidden_submit_id,
+        }"""
     )
 
     await tipo_usuario.wait_for(state="visible", timeout=20000)
