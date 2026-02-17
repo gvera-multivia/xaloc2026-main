@@ -13,6 +13,15 @@ from sites.ayunta_palma.config import AyuntaPalmaConfig
 logger = logging.getLogger(__name__)
 
 
+def _is_authenticated_portal_url(url: str) -> bool:
+    u = (url or "").lower()
+    return (
+        "/carpetaciudadana/nueva_entrada.aspx" in u
+        or "/carpetaciudadana/preguntar_entrada_anterior.aspx" in u
+        or "/carpetaciudadana/carpeta_ciudadana.aspx" in u
+    )
+
+
 async def _abrir_nueva_instancia(page: Page, config: AyuntaPalmaConfig) -> None:
     selectors = config.selectors
     persona_tipo_usuario = page.locator(selectors.persona_tipo_usuario).first
@@ -136,9 +145,28 @@ async def ejecutar_login(page: Page, config: AyuntaPalmaConfig) -> Page:
     except Exception:
         pass
 
+    # En sesiones persistentes ya podemos estar autenticados, pero sin modal de certificado.
+    if _is_authenticated_portal_url(page.url):
+        await page.wait_for_timeout(config.delay_ms)
+        await _abrir_nueva_instancia(page, config)
+        return page
+
     if not page.url.startswith(config.url_base):
         await page.goto(config.url_base, wait_until="domcontentloaded")
     await page.wait_for_timeout(config.delay_ms)
+
+    # Tras goto también puede quedar autenticado sin mostrar #ventanaModal.
+    if _is_authenticated_portal_url(page.url):
+        await _abrir_nueva_instancia(page, config)
+        return page
+
+    # Si existe boton de nueva instancia, saltar login de certificado.
+    try:
+        if await page.locator(config.selectors.input_nueva_instancia).first.count() > 0:
+            await _abrir_nueva_instancia(page, config)
+            return page
+    except Exception:
+        pass
 
     frame = page.frame_locator(config.selectors.login_frame)
     opcion_titulo = frame.locator(config.selectors.login_option_cert_titulo).first
@@ -152,7 +180,19 @@ async def ejecutar_login(page: Page, config: AyuntaPalmaConfig) -> Page:
         except Exception:
             await opcion_titulo.click(force=True, timeout=5000)
     else:
-        await opcion_fila.wait_for(state="visible", timeout=20000)
+        try:
+            await opcion_fila.wait_for(state="visible", timeout=12000)
+        except PlaywrightTimeoutError:
+            # Fallback: si no aparece el iframe de login, reintentamos flujo autenticado.
+            if _is_authenticated_portal_url(page.url):
+                await _abrir_nueva_instancia(page, config)
+                return page
+            await page.goto(config.url_base, wait_until="domcontentloaded")
+            await page.wait_for_timeout(config.delay_ms)
+            if _is_authenticated_portal_url(page.url):
+                await _abrir_nueva_instancia(page, config)
+                return page
+            raise
         await page.wait_for_timeout(5000)
         try:
             await opcion_fila.click(timeout=5000)
