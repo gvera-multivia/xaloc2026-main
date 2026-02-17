@@ -1,14 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import {
-    AlertCircle,
-    CheckCircle2,
-    Lock,
-    Unlock,
-    RefreshCw,
-    Play
-} from 'lucide-react';
+import { Lock, Unlock, RefreshCw } from 'lucide-react';
 import { useWebSocket } from '@/lib/WebSocketContext';
 import { incidentsApi } from '@/lib/api';
 
@@ -22,6 +15,10 @@ type Incident = {
     started_at: string;
     ended_at: string;
     payload: any;
+    locked?: boolean;
+    lock_user_id?: string | null;
+    lock_username?: string | null;
+    lock_expires_at?: string | null;
 };
 
 export default function IncidentsPage() {
@@ -34,7 +31,18 @@ export default function IncidentsPage() {
         setLoading(true);
         try {
             const res = await incidentsApi.getPending();
-            setIncidents(res.items || []);
+            const nextItems = res.items || [];
+            setIncidents(nextItems);
+            const nextLocks: Record<string, string> = {};
+            for (const item of nextItems) {
+                const incidentId = `${item.site_id}:${item.resource_id}`;
+                const locked = Boolean(item.locked);
+                if (locked) {
+                    const lockedBy = item.lock_username || item.lock_user_id || 'unknown';
+                    nextLocks[incidentId] = String(lockedBy);
+                }
+            }
+            setLocks(nextLocks);
         } catch (e) {
             console.error(e);
         } finally {
@@ -44,6 +52,8 @@ export default function IncidentsPage() {
 
     useEffect(() => {
         fetchIncidents();
+        const timer = setInterval(fetchIncidents, 5000);
+        return () => clearInterval(timer);
     }, []);
 
     useEffect(() => {

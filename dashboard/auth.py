@@ -30,7 +30,7 @@ def _normalize_username(value: str) -> str:
 def hash_password(password: str, iterations: int = 200_000) -> str:
     password_text = str(password or "")
     if len(password_text) < 4:
-        raise ValueError("La contraseña debe tener al menos 8 caracteres.")
+        raise ValueError("La contraseña debe tener al menos 4 caracteres.")
     salt = secrets.token_bytes(16)
     digest = hashlib.pbkdf2_hmac("sha256", password_text.encode("utf-8"), salt, iterations)
     return "pbkdf2_sha256${}${}${}".format(

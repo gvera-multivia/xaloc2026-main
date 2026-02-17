@@ -408,14 +408,26 @@ async def websocket_dashboard(websocket: WebSocket):
         await websocket.close(code=4401, reason="Invalid auth token")
         return
 
-    await websocket.accept()
     redis = get_redis_client()
     if not redis:
-        await websocket.close(code=1011, reason="Redis not available")
+        await websocket.close(code=1013, reason="Realtime backend unavailable")
         return
 
-    pubsub = redis.pubsub()
-    await pubsub.subscribe("channel:ui_updates")
+    pubsub = None
+    try:
+        pubsub = redis.pubsub()
+        await pubsub.subscribe("channel:ui_updates")
+    except Exception as exc:
+        logger.warning("WebSocket realtime disabled: Redis unavailable (%s)", exc)
+        if pubsub is not None:
+            try:
+                await pubsub.close()
+            except Exception:
+                pass
+        await websocket.close(code=1013, reason="Realtime backend unavailable")
+        return
+
+    await websocket.accept()
 
     try:
         async for message in pubsub.listen():
@@ -426,73 +438,57 @@ async def websocket_dashboard(websocket: WebSocket):
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
     finally:
-        await pubsub.unsubscribe("channel:ui_updates")
-        await pubsub.close()
+        if pubsub is not None:
+            try:
+                await pubsub.unsubscribe("channel:ui_updates")
+            except Exception:
+                pass
+            try:
+                await pubsub.close()
+            except Exception:
+                pass
 
 @app.post("/api/incidents/{id}/claim")
 async def api_claim_incident(id: str, user: dict = Depends(require_user)):
-    redis = get_redis_client()
-    if not redis:
-        raise HTTPException(status_code=503, detail="Redis not available")
-
-    lock_key = f"lock:incident:{id}"
     user_id = str(user.get("sub", "unknown"))
     username = user.get("username", "Unknown")
-
-    # Try to acquire lock
-    # NX: Set if Not Exists
-    # EX: Expire in 1800 seconds (30 min)
-    acquired = await redis.set(lock_key, user_id, nx=True, ex=1800)
-
-    if acquired:
-        event = {
-            "event": "INCIDENT_LOCKED",
-            "data": {
-                "incident_id": id,
-                "user_id": user_id,
-                "username": username,
-                "expires_at": (asyncio.get_running_loop().time() + 1800) # approximate
-            }
-        }
-        await redis.publish("channel:ui_updates", json.dumps(event))
-        return {"status": "locked", "user_id": user_id}
-    else:
-        # Get current owner
-        owner_id = await redis.get(lock_key)
-        # We could fetch user details if we had a user store
-        raise HTTPException(
-            status_code=409,
-            detail=f"Incident already locked by user {owner_id}"
+    try:
+        lock_result = service.db.acquire_incident_lock(
+            incident_id=id,
+            user_id=user_id,
+            username=username,
+            ttl_seconds=1800,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if not bool(lock_result.get("acquired")):
+        owner = lock_result.get("owner_username") or lock_result.get("owner_id") or "otro usuario"
+        raise HTTPException(status_code=409, detail=f"Incident already locked by {owner}")
+
+    return {
+        "status": "locked",
+        "incident_id": id,
+        "user_id": user_id,
+        "username": username,
+        "expires_at": lock_result.get("expires_at"),
+    }
 
 @app.post("/api/incidents/{id}/release")
 async def api_release_incident(id: str, user: dict = Depends(require_user)):
-    redis = get_redis_client()
-    if not redis:
-        raise HTTPException(status_code=503, detail="Redis not available")
-
-    lock_key = f"lock:incident:{id}"
     user_id = str(user.get("sub", "unknown"))
     role = user.get("role", ROLE_USER)
-
-    owner_id = await redis.get(lock_key)
-
-    if not owner_id:
-        return {"status": "unlocked", "message": "Was not locked"}
-
-    if owner_id != user_id and role != "admin":
+    release_result = service.db.release_incident_lock(
+        incident_id=id,
+        user_id=user_id,
+        is_admin=(str(role).strip().lower() == ROLE_ADMIN),
+    )
+    reason = str(release_result.get("reason") or "")
+    if reason == "not_owner":
         raise HTTPException(status_code=403, detail="You do not own this lock")
-
-    await redis.delete(lock_key)
-
-    event = {
-        "event": "INCIDENT_UNLOCKED",
-        "data": {
-            "incident_id": id
-        }
-    }
-    await redis.publish("channel:ui_updates", json.dumps(event))
-    return {"status": "unlocked"}
+    if reason == "not_locked":
+        return {"status": "unlocked", "message": "Was not locked"}
+    return {"status": "unlocked", "incident_id": id}
 
 # ==========================================================================
 # EXISTING ROUTES
@@ -525,7 +521,25 @@ async def api_incidents_pending(
     _user: dict = Depends(require_user),
 ) -> dict:
     # For now, return incidents from today as "pending" list
-    return service.list_history_incidents(day=None, page=page, page_size=page_size)
+    result = service.list_history_incidents(day=None, page=page, page_size=page_size)
+    items = list(result.get("items") or [])
+    incident_ids = [f"{it.get('site_id')}:{it.get('resource_id')}" for it in items]
+    locks = service.db.get_incident_locks(incident_ids=incident_ids)
+    for item in items:
+        incident_id = f"{item.get('site_id')}:{item.get('resource_id')}"
+        lock_info = locks.get(incident_id)
+        if lock_info:
+            item["locked"] = True
+            item["lock_user_id"] = lock_info.get("user_id")
+            item["lock_username"] = lock_info.get("username")
+            item["lock_expires_at"] = lock_info.get("expires_at")
+        else:
+            item["locked"] = False
+            item["lock_user_id"] = None
+            item["lock_username"] = None
+            item["lock_expires_at"] = None
+    result["items"] = items
+    return result
 
 
 @app.get("/api/history/successes")

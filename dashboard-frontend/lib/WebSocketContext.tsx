@@ -49,9 +49,13 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
         }
       };
 
-      socket.onclose = () => {
+      socket.onclose = (event) => {
         console.log('WebSocket Disconnected');
         setIsConnected(false);
+        // Do not retry when backend explicitly indicates service unavailable/auth required.
+        if (event.code === 1013 || event.code === 4401) {
+          return;
+        }
         // Reconnect logic
         reconnectTimeout.current = setTimeout(connect, 3000);
       };
