@@ -16,6 +16,7 @@ from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
 from core.client_documentation import client_identity_from_payload, get_ruta_cliente_documentacion
 from sites.ayunta_palma.config import AyuntaPalmaConfig
+from sites.ayunta_palma.flows.autofirma_monitor import monitor_autofirma_windows
 
 logger = logging.getLogger(__name__)
 
@@ -725,7 +726,6 @@ async def _click_firmar_con_reintentos(page: Page, config: AyuntaPalmaConfig, ma
         logger.info("[AP-DIAG] Pre-firma: modal de firma ya lista, se omite click en 'Firmar'.")
         return
 
-    edge_hint_task: asyncio.Task | None = None
     for intento in range(1, max_intentos + 1):
         logger.info("[AP-DIAG] Pre-firma intento %s/%s: click en Firmar.", intento, max_intentos)
         await _click_firmar(page, config)
@@ -746,9 +746,6 @@ async def _click_firmar_con_reintentos(page: Page, config: AyuntaPalmaConfig, ma
             return
 
         logger.warning("[AP-DIAG] Pre-firma: boton Firmar sigue visible tras intento %s.", intento)
-        if edge_hint_task is None or edge_hint_task.done():
-            logger.info("[AP-DIAG] Pre-firma: lanzando watcher Edge en background (no bloqueante).")
-            edge_hint_task = asyncio.create_task(_aceptar_dialogo_edge_abrir_autofirma())
         await page.wait_for_timeout(1200)
 
     logger.warning("[AP-DIAG] Pre-firma: agotados reintentos; continuamos con flujo y watchers.")
@@ -922,27 +919,25 @@ async def subir_documentos(
     await page.wait_for_timeout(2000)
     logger.info("[AP-DIAG] Pre-firma: click/reintentos en boton Firmar.")
     await _click_firmar_con_reintentos(page, config, max_intentos=3)
-    logger.info("[AP-DIAG] Lanzando watcher edge_open_dialog en background.")
-    edge_task = asyncio.create_task(_aceptar_dialogo_edge_abrir_autofirma())
-    await _launch_autofirma_cert_acceptor()
-    logger.info("[AP-DIAG] Arrancando watcher de certificado Windows en paralelo.")
-    cert_task = asyncio.create_task(_aceptar_certificado_windows())
+    logger.info("[AP-DIAG] Arrancando monitor unificado AutoFirma/Edge/Certificado.")
+    autofirma_monitor_task = asyncio.create_task(monitor_autofirma_windows(timeout_s=70))
     await page.wait_for_timeout(2000)
     logger.info("[AP-DIAG] Firma modal: click en 'Signar tots els documents'.")
     await _click_signar_tots_documents(page, config)
-    if not edge_task.done():
-        logger.info("[AP-DIAG] edge_open_dialog sigue activo en background.")
-    logger.info("[AP-DIAG] Esperando resultado del watcher de certificado Windows.")
+
+    logger.info("[AP-DIAG] Esperando resultado del monitor unificado.")
     try:
-        await cert_task
+        monitor_result = await asyncio.wait_for(autofirma_monitor_task, timeout=80)
+        logger.info(
+            "[AP-DIAG] Monitor AutoFirma: edge_clicked=%s cert_clicked=%s autofirma_seen=%s autofirma_clicks=%s timed_out=%s",
+            monitor_result.edge_clicked,
+            monitor_result.cert_clicked,
+            monitor_result.autofirma_windows_seen,
+            monitor_result.autofirma_clicks,
+            monitor_result.timed_out,
+        )
     except Exception as e:
-        logger.warning("[AP-DIAG] Watcher certificado devolvio error: %s", e)
-    if not edge_task.done():
-        logger.info("[AP-DIAG] edge_open_dialog no ha terminado; esperamos 3s finales.")
-        try:
-            await asyncio.wait_for(edge_task, timeout=3)
-        except Exception:
-            logger.warning("[AP-DIAG] edge_open_dialog sigue pendiente tras 3s; continuamos.")
+        logger.warning("[AP-DIAG] Monitor unificado devolvio error/timeout: %s", e)
     logger.info("[AP-DIAG] Validando firma real.")
     await _verificar_firma_realizada(page, config)
     logger.info("[AP-DIAG] Firma validada; iniciando descarga de justificante.")

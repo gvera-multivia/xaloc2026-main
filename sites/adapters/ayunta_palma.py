@@ -32,8 +32,13 @@ SELECT
     rs.FaseProcedimiento,
     rs.UsuarioAsignado,
     rs.cif,
+    rs.notas,
+    rs.matricula AS rs_matricula,
 
     e.matricula,
+    e.Idpublic AS exp_idpublic,
+
+    pe.publicación AS pub_publicacion,
 
     c.tipodecliente AS cliente_tipo,
     c.nif AS cliente_nif,
@@ -51,6 +56,7 @@ SELECT
 FROM Recursos.RecursosExp rs
 INNER JOIN clientes c ON rs.numclient = c.numerocliente
 INNER JOIN expedientes e ON rs.idExp = e.idexpediente
+LEFT JOIN pubExp pe ON pe.Idpublic = e.Idpublic
 LEFT JOIN attachments_resource_documents att ON rs.automatic_id = att.automatic_id
 WHERE {organisme_like_clause}
   AND rs.TExp IN ({texp_list})
@@ -81,6 +87,40 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
     def _normalize_plate(v: Any) -> str:
         txt = str(v or "").strip().upper()
         return re.sub(r"\s+", "", txt)
+
+    @staticmethod
+    def _resolve_plate_number(recurso: dict) -> tuple[str, str]:
+        # 1) Prioridad: Recursos.RecursosExp.matricula
+        plate_rs = AyuntaPalmaAdapter._clean_str(recurso.get("rs_matricula"))
+        if plate_rs:
+            return re.sub(r"\s+", "", plate_rs).upper(), "Recursos.RecursosExp.matricula"
+
+        # 2) Prioridad: expedientes.matricula
+        plate_exp = AyuntaPalmaAdapter._clean_str(recurso.get("matricula"))
+        if plate_exp:
+            return re.sub(r"\s+", "", plate_exp).upper(), "expedientes.matricula"
+
+        # 3) Regex en publicación / notas
+        regex = r"\b([0-9]{4}[\s-]*[A-Z]{3}|[A-Z]{1,2}[\s-]*[0-9]{4}[\s-]*[A-Z]{1,2})\b"
+
+        def _try_extract(text: str, source_name: str) -> tuple[str, str] | None:
+            if not text:
+                return None
+            m = re.search(regex, text.upper())
+            if not m:
+                return None
+            clean_plate = m.group(1).replace(" ", "").replace("-", "")
+            return clean_plate, source_name
+
+        res_pub = _try_extract(AyuntaPalmaAdapter._clean_str(recurso.get("pub_publicacion")), "pubExp.publicación")
+        if res_pub:
+            return res_pub
+
+        res_notas = _try_extract(AyuntaPalmaAdapter._clean_str(recurso.get("notas")), "rs.notas")
+        if res_notas:
+            return res_notas
+
+        return "", ""
 
     @staticmethod
     def _convert_value(v: Any) -> Any:
@@ -301,13 +341,15 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
             nif_empresa = self._normalize_document_id(self._clean_str(r.get("cliente_nif_empresa")) or self._clean_str(r.get("cif")))
             razon_social = self._clean_str(r.get("cliente_razon_social")) or sujeto
             doc_fisica = self._normalize_document_id(self._clean_str(r.get("cliente_nif")))
+            plate_number, plate_src = self._resolve_plate_number(r)
 
             payload = {
                 "idRecurso": self._convert_value(r.get("idRecurso")),
                 "idExp": self._convert_value(r.get("idExp")),
                 "numclient": self._convert_value(r.get("numclient")),
                 "expediente": expediente,
-                "matricula": self._normalize_plate(r.get("matricula")),
+                "matricula": plate_number,
+                "matricula_source": plate_src,
                 "sujeto_recurso": sujeto,
                 "fase_procedimiento": fase,
                 "tipo_persona": tipo_persona,
