@@ -725,6 +725,7 @@ async def _click_firmar_con_reintentos(page: Page, config: AyuntaPalmaConfig, ma
         logger.info("[AP-DIAG] Pre-firma: modal de firma ya lista, se omite click en 'Firmar'.")
         return
 
+    edge_hint_task: asyncio.Task | None = None
     for intento in range(1, max_intentos + 1):
         logger.info("[AP-DIAG] Pre-firma intento %s/%s: click en Firmar.", intento, max_intentos)
         await _click_firmar(page, config)
@@ -745,13 +746,27 @@ async def _click_firmar_con_reintentos(page: Page, config: AyuntaPalmaConfig, ma
             return
 
         logger.warning("[AP-DIAG] Pre-firma: boton Firmar sigue visible tras intento %s.", intento)
-        await _aceptar_dialogo_edge_abrir_autofirma()
+        if edge_hint_task is None or edge_hint_task.done():
+            logger.info("[AP-DIAG] Pre-firma: lanzando watcher Edge en background (no bloqueante).")
+            edge_hint_task = asyncio.create_task(_aceptar_dialogo_edge_abrir_autofirma())
         await page.wait_for_timeout(1200)
 
     logger.warning("[AP-DIAG] Pre-firma: agotados reintentos; continuamos con flujo y watchers.")
 
 
 async def _click_signar_tots_documents(page: Page, config: AyuntaPalmaConfig) -> None:
+    async def _get_ventana_modal_frame():
+        try:
+            iframe = page.locator("#ventanaModal").first
+            if await iframe.count() == 0:
+                return None
+            handle = await iframe.element_handle()
+            if handle is None:
+                return None
+            return await handle.content_frame()
+        except Exception:
+            return None
+
     async def _try_click_in_frame(frame) -> bool:
         candidates = [
             frame.locator("button.btnFirmar").first,
@@ -762,20 +777,44 @@ async def _click_signar_tots_documents(page: Page, config: AyuntaPalmaConfig) ->
         for locator in candidates:
             try:
                 if await locator.count() > 0 and await locator.is_visible():
-                    await locator.click()
+                    await locator.scroll_into_view_if_needed()
+                    await locator.click(timeout=4000)
                     return True
             except Exception:
                 try:
-                    await locator.click(force=True)
+                    await locator.click(force=True, timeout=4000)
                     return True
                 except Exception:
                     continue
+        try:
+            return bool(
+                await frame.evaluate(
+                    """() => {
+                        const byClass = document.querySelector('button.btnFirmar');
+                        if (byClass) { byClass.click(); return true; }
+                        const buttons = Array.from(document.querySelectorAll('button'));
+                        const target = buttons.find((b) => {
+                            const t = (b.textContent || '').toLowerCase();
+                            return t.includes('signar tots els documents') || t.includes('firmar todos los documentos');
+                        });
+                        if (target) { target.click(); return true; }
+                        return false;
+                    }"""
+                )
+            )
+        except Exception:
+            return False
         return False
 
     deadline_ms = config.timeouts.general
     waited = 0
     step = 1000
     while waited < deadline_ms:
+        modal_frame = await _get_ventana_modal_frame()
+        if modal_frame is not None and await _try_click_in_frame(modal_frame):
+            await page.wait_for_timeout(config.delay_ms)
+            await _esperar_velo_oculto(page, config)
+            return
         if await _try_click_in_frame(page):
             await page.wait_for_timeout(config.delay_ms)
             await _esperar_velo_oculto(page, config)
