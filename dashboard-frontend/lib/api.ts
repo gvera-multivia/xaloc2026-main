@@ -118,6 +118,9 @@ export const usersApi = {
     list: () => api.get<{ items: any[]; total: number }>('/auth/users'),
     create: (payload: { username: string; password: string; role: 'admin' | 'user'; active?: boolean }) =>
         api.post<{ created: boolean; user: any }>('/auth/users', payload),
+    update: (id: number, payload: { username?: string; role?: string; active?: boolean; password?: string }) =>
+        api.put<{ updated: boolean }>(`/auth/users/${id}`, payload),
+    delete: (id: number) => api.delete<{ deleted: boolean }>(`/auth/users/${id}`),
 };
 
 export const configApi = {

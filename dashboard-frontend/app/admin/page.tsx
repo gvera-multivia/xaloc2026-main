@@ -11,9 +11,14 @@ import {
   AlertTriangle,
   Check,
   X,
+  UserPlus,
+  Users,
+  Edit2,
+  Trash2,
+  Lock,
 } from "lucide-react";
-import { queueApi, authApi, configApi, api } from "@/lib/api";
-import { QueueItem, PendingAuth, PauseInfo, OrganismoConfig } from "@/lib/types";
+import { queueApi, authApi, configApi, api, usersApi } from "@/lib/api";
+import { QueueItem, PendingAuth, PauseInfo, OrganismoConfig, DashboardUser } from "@/lib/types";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { canManagePauses as clientViewCanManagePauses } from "@/lib/permissions";
@@ -45,25 +50,38 @@ export default function AdminPage() {
   const [pauses, setPauses] = useState<PauseInfo[]>([]);
   const [configs, setConfigs] = useState<OrganismoConfig[]>([]);
   const [pendingAuth, setPendingAuth] = useState<PendingAuth[]>([]);
+  const [users, setUsers] = useState<DashboardUser[]>([]);
   const [globalReason, setGlobalReason] = useState("");
   const [globalMinutes, setGlobalMinutes] = useState("120");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
 
+  // User form state
+  const [showUserForm, setShowUserForm] = useState(false);
+  const [editingUser, setEditingUser] = useState<DashboardUser | null>(null);
+  const [userForm, setUserForm] = useState({
+    username: "",
+    password: "",
+    role: "user" as "admin" | "user",
+    active: true,
+  });
+
   const refresh = async () => {
     try {
-      const [queueRes, pausesRes, authRes, configRes] = await Promise.all([
+      const [queueRes, pausesRes, authRes, configRes, usersRes] = await Promise.all([
         queueApi.getCurrent(1, 1000),
         api.get<{ items: PauseInfo[] }>("/queue/pauses?active_only=true"),
         authApi.getPending(),
         configApi.list(),
+        usersApi.list(),
       ]);
 
       setQueueItems(queueRes.items || []);
       setPauses(pausesRes.items || []);
       setPendingAuth(authRes.items || []);
       setConfigs((configRes.items || []) as OrganismoConfig[]);
+      setUsers(usersRes.items || []);
       setError("");
     } catch {
       setError("Error al cargar datos administrativos.");
@@ -185,6 +203,73 @@ export default function AdminPage() {
     } finally {
       setBusy(null);
     }
+  };
+
+  const handleCreateUser = async () => {
+    if (!userForm.username || !userForm.password) {
+      sileo.error({ title: "Username y Password requeridos" });
+      return;
+    }
+    setBusy("create-user");
+    try {
+      await usersApi.create(userForm as any);
+      sileo.success({ title: "Usuario creado", description: `Usuario ${userForm.username} añadido.` });
+      setUserForm({ username: "", password: "", role: "user", active: true });
+      setShowUserForm(false);
+      await refresh();
+    } catch (err: any) {
+      sileo.error({ title: "Error al crear usuario", description: err.message });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleUpdateUser = async (userId: number) => {
+    setBusy(`update-user-${userId}`);
+    try {
+      const payload: any = {
+        role: userForm.role,
+        active: userForm.active,
+      };
+      if (userForm.username) payload.username = userForm.username;
+      if (userForm.password) payload.password = userForm.password;
+
+      await usersApi.update(userId, payload);
+      sileo.success({ title: "Usuario actualizado" });
+      setEditingUser(null);
+      setUserForm({ username: "", password: "", role: "user", active: true });
+      setShowUserForm(false);
+      await refresh();
+    } catch (err: any) {
+      sileo.error({ title: "Error al actualizar", description: err.message });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleDeleteUser = async (userId: number, username: string) => {
+    if (!confirm(`¿Estás seguro de eliminar al usuario ${username}?`)) return;
+    setBusy(`delete-user-${userId}`);
+    try {
+      await usersApi.delete(userId);
+      sileo.success({ title: "Usuario eliminado" });
+      await refresh();
+    } catch (err: any) {
+      sileo.error({ title: "Error al eliminar", description: err.message });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const startEditUser = (user: DashboardUser) => {
+    setEditingUser(user);
+    setUserForm({
+      username: user.username,
+      password: "",
+      role: user.role as "admin" | "user",
+      active: !!user.active,
+    });
+    setShowUserForm(true);
   };
 
   return (
@@ -598,6 +683,222 @@ export default function AdminPage() {
           </div>
         </section>
       )}
+
+      {/* =========================
+          User Management
+         ========================= */}
+      <section className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg border border-border/70 bg-[rgba(17,19,26,0.55)] flex items-center justify-center">
+              <Users size={18} className="text-[rgba(108,77,255,0.75)]" />
+            </div>
+            <h3 className="text-xl font-black uppercase tracking-tight text-foreground/90">
+              Gestión de Usuarios
+            </h3>
+          </div>
+
+          <button
+            onClick={() => {
+              setEditingUser(null);
+              setUserForm({ username: "", password: "", role: "user", active: true });
+              setShowUserForm(!showUserForm);
+            }}
+            className={cn(
+              "morr-focus px-4 py-2 rounded-xl",
+              "text-[10px] font-black uppercase tracking-[0.18em]",
+              "bg-[rgba(108,77,255,0.10)] text-foreground/95 border border-[rgba(108,77,255,0.28)] hover:bg-[rgba(108,77,255,0.16)]",
+              "transition active:scale-[0.99] flex items-center gap-2"
+            )}
+          >
+            <UserPlus size={14} />
+            Nuevo Usuario
+          </button>
+        </div>
+
+        {showUserForm && (
+          <div className="morr-card rounded-2xl p-6 border border-[rgba(108,77,255,0.2)] bg-[rgba(108,77,255,0.02)] space-y-6 animate-in slide-in-from-top-4 duration-500">
+            <div className="flex items-center justify-between">
+              <h4 className="font-black uppercase tracking-tight text-foreground/90">
+                {editingUser ? "Editar Usuario" : "Añadir Nuevo Usuario"}
+              </h4>
+              <button onClick={() => setShowUserForm(false)} className="text-muted-foreground hover:text-foreground">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/80">Username</label>
+                <input
+                  type="text"
+                  value={userForm.username}
+                  onChange={(e) => setUserForm({ ...userForm, username: e.target.value })}
+                  className="w-full bg-[rgba(17,19,26,0.55)] border border-border/70 rounded-xl px-4 py-2 text-sm text-foreground/90 focus:border-[rgba(108,77,255,0.3)] outline-none transition"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/80">
+                  {editingUser ? "Nueva Password (dejar vacío para no cambiar)" : "Password"}
+                </label>
+                <div className="relative">
+                  <Lock size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground/50" />
+                  <input
+                    type="password"
+                    value={userForm.password}
+                    onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
+                    className="w-full bg-[rgba(17,19,26,0.55)] border border-border/70 rounded-xl pl-9 pr-4 py-2 text-sm text-foreground/90 focus:border-[rgba(108,77,255,0.3)] outline-none transition"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/80">Role</label>
+                <select
+                  value={userForm.role}
+                  onChange={(e) => setUserForm({ ...userForm, role: e.target.value as any })}
+                  className="w-full bg-[rgba(17,19,26,0.55)] border border-border/70 rounded-xl px-4 py-2 text-sm text-foreground/90 focus:border-[rgba(108,77,255,0.3)] outline-none transition"
+                >
+                  <option value="user">User</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/80">Estado</label>
+                <div className="flex items-center gap-4 py-2">
+                  <label className="flex items-center gap-2 cursor-pointer group">
+                    <input
+                      type="radio"
+                      checked={userForm.active}
+                      onChange={() => setUserForm({ ...userForm, active: true })}
+                      className="sr-only"
+                    />
+                    <div className={cn(
+                      "w-4 h-4 rounded-full border border-border flex items-center justify-center transition",
+                      userForm.active ? "bg-[rgba(108,77,255,0.8)] border-[rgba(108,77,255,0.8)]" : "bg-transparent"
+                    )}>
+                      {userForm.active && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
+                    </div>
+                    <span className="text-sm font-bold uppercase tracking-widest text-foreground/80 hover:text-foreground">Activo</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer group">
+                    <input
+                      type="radio"
+                      checked={!userForm.active}
+                      onChange={() => setUserForm({ ...userForm, active: false })}
+                      className="sr-only"
+                    />
+                    <div className={cn(
+                      "w-4 h-4 rounded-full border border-border flex items-center justify-center transition",
+                      !userForm.active ? "bg-[rgba(255,60,80,0.8)] border-[rgba(255,60,80,0.8)]" : "bg-transparent"
+                    )}>
+                      {!userForm.active && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
+                    </div>
+                    <span className="text-sm font-bold uppercase tracking-widest text-foreground/80 hover:text-foreground">Inactivo</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                onClick={() => setShowUserForm(false)}
+                className="px-6 py-2 text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground hover:text-foreground transition"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => editingUser ? handleUpdateUser(editingUser.id!) : handleCreateUser()}
+                disabled={!!busy}
+                className={cn(
+                  "morr-focus px-8 py-2 rounded-xl",
+                  "text-[10px] font-black uppercase tracking-[0.2em]",
+                  "bg-[color:var(--morr-fate)] text-white shadow-[0_0_20px_rgba(122,15,30,0.2)]",
+                  "hover:shadow-[0_0_25px_rgba(122,15,30,0.3)] hover:scale-[1.02]",
+                  "transition-all duration-300 active:scale-[0.98] disabled:opacity-50"
+                )}
+              >
+                {editingUser ? "Guardar Cambios" : "Crear Usuario"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="morr-card rounded overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-[rgba(17,19,26,0.55)] border-b border-border/70">
+                  <th className="px-6 py-4 text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground/80">ID / Usuario</th>
+                  <th className="px-6 py-4 text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground/80">Role</th>
+                  <th className="px-6 py-4 text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground/80">Estado</th>
+                  <th className="px-6 py-4 text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground/80">Creado</th>
+                  <th className="px-6 py-4 text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground/80 text-right">Acciones</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[rgba(255,255,255,0.06)]">
+                {users.map((user) => (
+                  <tr key={user.id} className="hover:bg-[rgba(255,255,255,0.03)] transition-colors">
+                    <td className="px-6 py-4">
+                      <div className="flex flex-col">
+                        <span className="font-black text-sm tracking-tight text-foreground/90">{user.username}</span>
+                        <span className="text-[10px] text-muted-foreground/60 font-mono">UID: #{user.id}</span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className={cn(
+                        "text-[10px] font-black uppercase tracking-[0.2em] px-2 py-0.5 rounded border",
+                        user.role === 'admin'
+                          ? "border-[rgba(108,77,255,0.3)] bg-[rgba(108,77,255,0.08)] text-[rgba(108,77,255,0.95)]"
+                          : "border-border/50 bg-[rgba(255,255,255,0.03)] text-muted-foreground/80"
+                      )}>
+                        {user.role}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em]">
+                        <div className={cn(
+                          "w-1.5 h-1.5 rounded-full",
+                          user.active ? "bg-[rgba(108,77,255,0.9)]" : "bg-[rgba(255,60,80,0.8)]"
+                        )} />
+                        {user.active ? "Activo" : "Inactivo"}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="text-xs text-muted-foreground/80 font-mono">
+                        {user.created_at ? new Date(user.created_at).toLocaleDateString() : '-'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => startEditUser(user)}
+                          disabled={!!busy}
+                          className="p-2 rounded-lg border border-border/70 hover:border-[rgba(108,77,255,0.3)] hover:bg-[rgba(108,77,255,0.05)] text-muted-foreground hover:text-[rgba(108,77,255,0.9)] transition"
+                          title="Editar"
+                        >
+                          <Edit2 size={16} />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteUser(user.id!, user.username)}
+                          disabled={!!busy || user.username === 'admin'}
+                          className="p-2 rounded-lg border border-border/70 hover:border-[rgba(255,60,80,0.3)] hover:bg-[rgba(255,60,80,0.05)] text-muted-foreground hover:text-[rgba(255,60,80,0.9)] transition"
+                          title="Eliminar"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
 
       {/* Optional: show loading quietly if you want */}
       {loading && (

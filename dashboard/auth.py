@@ -177,6 +177,55 @@ class DashboardAuthStore:
             user_id = int(cur.lastrowid)
         return AuthUser(id=user_id, username=username_norm, role=role_norm, active=bool(active))
 
+    def update_user(self, user_id: int, *, username: Optional[str] = None, role: Optional[str] = None, active: Optional[bool] = None, password: Optional[str] = None) -> bool:
+        updates = []
+        params = []
+        now_iso = _utc_now().isoformat()
+
+        if username is not None:
+            username_norm = _normalize_username(username)
+            if not username_norm:
+                raise ValueError("username no puede estar vacio.")
+            updates.append("username = ?")
+            params.append(username_norm)
+
+        if role is not None:
+            role_norm = str(role).strip().lower()
+            if role_norm not in VALID_ROLES:
+                raise ValueError("role invalido.")
+            updates.append("role = ?")
+            params.append(role_norm)
+
+        if active is not None:
+            updates.append("active = ?")
+            params.append(1 if active else 0)
+
+        if password is not None:
+            updates.append("password_hash = ?")
+            params.append(hash_password(password))
+
+        if not updates:
+            return False
+
+        updates.append("updated_at = ?")
+        params.append(now_iso)
+        params.append(user_id)
+
+        with self._conn() as conn:
+            try:
+                cur = conn.execute(
+                    f"UPDATE dashboard_users SET {', '.join(updates)} WHERE id = ?",
+                    tuple(params),
+                )
+                return cur.rowcount > 0
+            except sqlite3.IntegrityError as exc:
+                raise ValueError("El username ya existe.") from exc
+
+    def delete_user(self, user_id: int) -> bool:
+        with self._conn() as conn:
+            cur = conn.execute("DELETE FROM dashboard_users WHERE id = ?", (user_id,))
+            return cur.rowcount > 0
+
     def set_password(self, *, username: str, password: str) -> bool:
         username_norm = _normalize_username(username)
         if not username_norm:

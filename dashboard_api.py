@@ -396,6 +396,38 @@ async def api_auth_create_user(
     return {"created": True, "user": user.to_claims() | {"active": user.active}}
 
 
+@app.put("/api/auth/users/{user_id}")
+async def api_auth_update_user(
+    user_id: int,
+    payload: dict[str, Any] = Body(...),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    username = payload.get("username")
+    role = payload.get("role")
+    active = payload.get("active")
+    password = payload.get("password")
+    try:
+        ok = auth_store.update_user(
+            user_id,
+            username=username,
+            role=role,
+            active=active,
+            password=password,
+        )
+        return {"updated": ok}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/auth/users/{user_id}")
+async def api_auth_delete_user(
+    user_id: int,
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    ok = auth_store.delete_user(user_id)
+    return {"deleted": ok}
+
+
 @app.websocket("/ws/dashboard")
 async def websocket_dashboard(websocket: WebSocket):
     if not ENABLE_WS_REALTIME:
