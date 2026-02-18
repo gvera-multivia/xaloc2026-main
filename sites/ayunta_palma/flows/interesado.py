@@ -145,9 +145,18 @@ async def registrar_interesado(
 
         await page.locator(selectors.persona_documento).fill(fisica.documento)
         await page.locator(selectors.persona_nombre).fill(fisica.nombre)
-        await page.locator(selectors.persona_apellido1).fill(fisica.apellido1)
-        if fisica.apellido2:
-            await page.locator(selectors.persona_apellido2).fill(fisica.apellido2)
+
+        apellido1 = (fisica.apellido1 or "").strip()
+        apellido2 = (fisica.apellido2 or "").strip() if fisica.apellido2 else ""
+        if not apellido1 and apellido2:
+            apellido1, apellido2 = apellido2, ""
+        if not apellido1:
+            raise ValueError("Ayunta Palma: PersonaFisica requiere al menos un apellido.")
+
+        await page.locator(selectors.persona_apellido1).fill(apellido1)
+        apellido2_loc = page.locator(selectors.persona_apellido2).first
+        if await apellido2_loc.count() > 0:
+            await apellido2_loc.fill(apellido2)
         if fisica.pais:
             pais_selector = page.locator(selectors.persona_pais)
             await pais_selector.select_option(fisica.pais)

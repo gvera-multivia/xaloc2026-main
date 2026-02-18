@@ -52,6 +52,15 @@ class AyuntaPalmaController:
                 raise ValueError(f"ayunta_palma: falta '{name}'.")
             return v
 
+        def _normalize_surnames(ap1: str | None, ap2: str | None) -> tuple[str, str | None]:
+            a1 = (ap1 or "").strip()
+            a2 = (ap2 or "").strip()
+            if not a1 and a2:
+                a1, a2 = a2, ""
+            if not a1:
+                raise ValueError("ayunta_palma: falta al menos un apellido (apellido1/apellido2).")
+            return a1, (a2 or None)
+
         persona_tipo_norm = _require("tipo_persona", tipo_persona)
         if persona_tipo_norm not in {"PersonaFisica", "PersonaJuridica"}:
             raise ValueError("ayunta_palma: 'tipo_persona' debe ser PersonaFisica o PersonaJuridica.")
@@ -64,12 +73,13 @@ class AyuntaPalmaController:
         fisica = None
         juridica = None
         if persona_tipo_norm == "PersonaFisica":
+            apellido1_norm, apellido2_norm = _normalize_surnames(apellido1, apellido2)
             fisica = AyuntaPalmaPersonaFisica(
                 tipo_documento=_require("tipo_documento", tipo_documento),
                 documento=_require("documento", documento),
                 nombre=_require("nombre", nombre),
-                apellido1=_require("apellido1", apellido1),
-                apellido2=(apellido2 or "").strip() or None,
+                apellido1=apellido1_norm,
+                apellido2=apellido2_norm,
                 pais=(pais or "").strip() or None,
             )
         else:
@@ -100,13 +110,25 @@ class AyuntaPalmaController:
     create_target = create_target_strict
 
     def map_data(self, data: dict) -> dict:
+        apellido1 = data.get("apellido1") or data.get("primer_apellido") or data.get("apellido")
+        apellido2 = data.get("apellido2") or data.get("segundo_apellido")
+        if not apellido1:
+            apellidos = (data.get("apellidos") or "").strip()
+            if apellidos:
+                parts = [p for p in apellidos.split() if p]
+                if len(parts) >= 2:
+                    apellido1 = parts[0]
+                    apellido2 = " ".join(parts[1:])
+                else:
+                    apellido1 = apellidos
+
         return {
             "tipo_persona": data.get("tipo_persona") or data.get("persona_tipo"),
             "tipo_documento": data.get("tipo_documento"),
             "documento": data.get("documento") or data.get("identificacion"),
             "nombre": data.get("nombre"),
-            "apellido1": data.get("apellido1"),
-            "apellido2": data.get("apellido2"),
+            "apellido1": apellido1,
+            "apellido2": apellido2,
             "pais": data.get("pais"),
             "nif_empresa": data.get("nif_empresa"),
             "razon_social": data.get("razon_social"),
