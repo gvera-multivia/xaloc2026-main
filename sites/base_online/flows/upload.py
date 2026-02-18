@@ -2,6 +2,7 @@
 
 import logging
 import re
+import time
 from pathlib import Path
 
 from playwright.async_api import Page
@@ -9,11 +10,77 @@ from playwright.async_api import Page
 DELAY_MS = 1000
 
 
+def _is_pdf_file(path: Path) -> bool:
+    try:
+        with path.open("rb") as fh:
+            return fh.read(4) == b"%PDF"
+    except Exception:
+        return False
+
+
+def _load_pdf_merger():
+    try:
+        from pypdf import PdfMerger  # type: ignore
+
+        return PdfMerger()
+    except Exception:
+        pass
+    try:
+        from PyPDF2 import PdfMerger  # type: ignore
+
+        return PdfMerger()
+    except Exception as e:
+        raise RuntimeError("No hay backend PDF para fusionar adjuntos (pypdf/PyPDF2).") from e
+
+
+def _bundle_files_if_needed(
+    archivos: list[Path],
+    *,
+    max_archivos: int,
+    output_dir: Path = Path("tmp/base_online/bundles"),
+) -> list[Path]:
+    if len(archivos) <= max_archivos:
+        return archivos
+
+    non_pdf = [str(p) for p in archivos if not _is_pdf_file(p)]
+    if non_pdf:
+        raise ValueError(
+            f"BASE admite max {max_archivos} adjuntos y hay {len(archivos)}. "
+            f"No se puede auto-fusionar porque hay no-PDF: {', '.join(non_pdf)}"
+        )
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    out_path = output_dir / f"base_online_bundle_{int(time.time())}.pdf"
+
+    merger = _load_pdf_merger()
+    try:
+        for pdf in archivos:
+            merger.append(str(pdf))
+        with out_path.open("wb") as fh:
+            merger.write(fh)
+    finally:
+        try:
+            merger.close()
+        except Exception:
+            pass
+
+    if not out_path.exists() or not _is_pdf_file(out_path):
+        raise RuntimeError(f"No se genero bundle PDF valido: {out_path}")
+
+    logging.info(
+        "Detectados %s adjuntos (> %s). Se fusionan en bundle unico: %s",
+        len(archivos),
+        max_archivos,
+        out_path.name,
+    )
+    return [out_path]
+
+
 async def subir_archivos_por_modal(
     page: Page,
     archivos: list[Path],
     *,
-    max_archivos: int = 10,
+    max_archivos: int = 5,
     boton_abrir_regex: str = r"Carregar\s+fitxer",
 ) -> None:
     """
@@ -27,7 +94,8 @@ async def subir_archivos_por_modal(
     - click #continuar y esperar que el modal se cierre
     """
 
-    archivos_a_subir = [a for a in archivos if a][: max(0, max_archivos)]
+    archivos_a_subir = [a for a in archivos if a]
+    archivos_a_subir = _bundle_files_if_needed(archivos_a_subir, max_archivos=max_archivos)
     if not archivos_a_subir:
         logging.info("No hay archivos para subir.")
         return

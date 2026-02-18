@@ -8,6 +8,7 @@ from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 from sites.base_online.config import BaseOnlineConfig
 from sites.base_online.data_models import BaseOnlineAddressData, BaseOnlineP1Data
 from sites.base_online.flows.common import rellenar_contacto
+from sites.base_online.flows.firma_y_justificante import firmar_presentar_y_descargar_justificante
 from sites.base_online.flows.upload import subir_archivos_por_modal
 
 _SIGLES_PERMESES = {
@@ -594,7 +595,13 @@ async def _rellenar_contacto(page: Page, data: BaseOnlineP1Data, config: BaseOnl
     await page.wait_for_load_state("domcontentloaded")
 
 
-async def _rellenar_identificacion_conductor(page: Page, data: BaseOnlineP1Data, config: BaseOnlineConfig) -> None:
+async def _rellenar_identificacion_conductor(
+    page: Page,
+    data: BaseOnlineP1Data,
+    config: BaseOnlineConfig,
+    *,
+    payload: dict,
+) -> None:
     info = data.identificacio
 
     await page.locator(config.selectors.p1_expedient_id_ens).first.fill(info.expedient_id_ens)
@@ -626,18 +633,23 @@ async def _rellenar_identificacion_conductor(page: Page, data: BaseOnlineP1Data,
     await _wait_ajax_idle(page)
     await page.wait_for_load_state("domcontentloaded")
 
-    boton_firma = page.locator(config.selectors.p1_btn_signar_presentar).first
-    if await boton_firma.count() > 0:
-        logging.info("[P1] Pantalla 'Signar i Presentar' detectada (no se pulsa en modo demo).")
+    logging.info("[P1] Preparando firma y presentacion...")
+    await firmar_presentar_y_descargar_justificante(page, payload=payload or {})
 
 
-async def ejecutar_p1(page: Page, data: BaseOnlineP1Data, config: BaseOnlineConfig | None = None) -> None:
+async def ejecutar_p1(
+    page: Page,
+    data: BaseOnlineP1Data,
+    config: BaseOnlineConfig | None = None,
+    *,
+    payload: dict | None = None,
+) -> None:
     cfg = config or BaseOnlineConfig()
     logging.info("[P1] Rellenando pantalla 1 (contacto)...")
     await _rellenar_contacto(page, data, cfg)
     logging.info("[P1] Rellenando pantalla 2 (identificacion conductor + direccion robusta)...")
     try:
-        await _rellenar_identificacion_conductor(page, data, cfg)
+        await _rellenar_identificacion_conductor(page, data, cfg, payload=payload or {})
     except PlaywrightTimeoutError as e:
         raise ValueError(f"P1 timeout en flujo de direccion/continuar: {e}") from e
 
