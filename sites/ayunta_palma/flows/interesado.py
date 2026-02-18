@@ -1,4 +1,4 @@
-﻿"""
+"""
 Flujo para registrar al interesado en Ayunta Palma.
 """
 
@@ -145,18 +145,9 @@ async def registrar_interesado(
 
         await page.locator(selectors.persona_documento).fill(fisica.documento)
         await page.locator(selectors.persona_nombre).fill(fisica.nombre)
-
-        apellido1 = (fisica.apellido1 or "").strip()
-        apellido2 = (fisica.apellido2 or "").strip() if fisica.apellido2 else ""
-        if not apellido1 and apellido2:
-            apellido1, apellido2 = apellido2, ""
-        if not apellido1:
-            raise ValueError("Ayunta Palma: PersonaFisica requiere al menos un apellido.")
-
-        await page.locator(selectors.persona_apellido1).fill(apellido1)
-        apellido2_loc = page.locator(selectors.persona_apellido2).first
-        if await apellido2_loc.count() > 0:
-            await apellido2_loc.fill(apellido2)
+        await page.locator(selectors.persona_apellido1).fill(fisica.apellido1)
+        if fisica.apellido2:
+            await page.locator(selectors.persona_apellido2).fill(fisica.apellido2)
         if fisica.pais:
             pais_selector = page.locator(selectors.persona_pais)
             await pais_selector.select_option(fisica.pais)
@@ -177,106 +168,10 @@ async def registrar_interesado(
     await _fill_email(page, selectors, PALMA_CONTACT_EMAIL)
     await _fill_telefono(page, selectors, PALMA_CONTACT_PHONE)
 
-    aceptar = page.locator(selectors.btn_aceptar_modal).first
-    aceptar_input_real = page.locator("#ctl00_ctl00_cphM_cph_btnAceptarPersona").first
-    boton_rep = page.locator(selectors.btn_indicar_representante).first
+    aceptar = page.locator(selectors.btn_aceptar_modal)
+    await aceptar.wait_for(state="visible")
+    await aceptar.click()
+    await _wait_for_velo_to_vanish(page, selectors)
+    await page.wait_for_timeout(config.delay_ms)
+    return page
 
-    async def _estado_ok_post_aceptar(timeout_ms: int = 8000) -> bool:
-        end = timeout_ms
-        waited = 0
-        step = 400
-        while waited < end:
-            try:
-                if await boton_rep.count() > 0 and await boton_rep.is_visible():
-                    return True
-            except Exception:
-                pass
-
-            try:
-                hidden_rep = page.locator("input[id*='btnListaInteresadosItemNuevoRepresentante']").first
-                if await hidden_rep.count() > 0:
-                    return True
-            except Exception:
-                pass
-
-            try:
-                panel_lista = page.locator("#ctl00_ctl00_cphM_cph_pnlListaInteresados").first
-                if await panel_lista.count() > 0 and await panel_lista.is_visible():
-                    return True
-            except Exception:
-                pass
-
-            try:
-                modal_tipo_usuario = page.locator(selectors.persona_tipo_usuario).first
-                if await modal_tipo_usuario.count() > 0 and not await modal_tipo_usuario.is_visible():
-                    return True
-            except Exception:
-                pass
-
-            await page.wait_for_timeout(step)
-            waited += step
-        return False
-
-    # 1) Prioridad absoluta: submit real ASP.NET (aunque este hidden).
-    try:
-        clicked = await page.evaluate(
-            """() => {
-                const el = document.querySelector('#ctl00_ctl00_cphM_cph_btnAceptarPersona');
-                if (!el) return false;
-                el.click();
-                return true;
-            }"""
-        )
-        if clicked:
-            await _wait_for_velo_to_vanish(page, selectors, timeout=15000)
-            await page.wait_for_timeout(config.delay_ms)
-            if await _estado_ok_post_aceptar():
-                return page
-    except Exception:
-        pass
-
-    # 2) Fallback: boton visible del modal activo.
-    try:
-        await aceptar.wait_for(state="visible", timeout=3000)
-        await aceptar.click()
-        await _wait_for_velo_to_vanish(page, selectors, timeout=15000)
-        await page.wait_for_timeout(config.delay_ms)
-        if await _estado_ok_post_aceptar():
-            return page
-    except Exception:
-        pass
-
-    # 3) Fallback generico por texto.
-    try:
-        aceptar_generico = page.locator("button:has-text('Aceptar')").first
-        if await aceptar_generico.count() > 0 and await aceptar_generico.is_visible():
-            await aceptar_generico.click()
-            await _wait_for_velo_to_vanish(page, selectors, timeout=15000)
-            await page.wait_for_timeout(config.delay_ms)
-            if await _estado_ok_post_aceptar():
-                return page
-    except Exception:
-        pass
-
-    # 4) Ultimo intento al submit real (por si aparecio tras postback parcial).
-    try:
-        if await aceptar_input_real.count() > 0:
-            if await aceptar_input_real.is_visible():
-                await aceptar_input_real.click()
-            else:
-                await page.evaluate(
-                    """() => {
-                        const el = document.querySelector('#ctl00_ctl00_cphM_cph_btnAceptarPersona');
-                        if (el) el.click();
-                    }"""
-                )
-            await _wait_for_velo_to_vanish(page, selectors, timeout=15000)
-            await page.wait_for_timeout(config.delay_ms)
-            if await _estado_ok_post_aceptar(timeout_ms=15000):
-                return page
-    except Exception:
-        pass
-
-    raise PlaywrightTimeoutError(
-        "No se pudo confirmar 'Nuevo/a interesado/a': no aparecio el estado post-aceptar esperado."
-    )

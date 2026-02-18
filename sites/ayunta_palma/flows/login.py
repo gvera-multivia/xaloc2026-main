@@ -1,5 +1,5 @@
 """
-Flujo de autenticación para Ayunta Palma.
+Flujo de autenticaci?n para Ayunta Palma.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 from sites.ayunta_palma.config import AyuntaPalmaConfig
 
 logger = logging.getLogger(__name__)
+
 
 def _is_nueva_entrada_url(url: str) -> bool:
     return "/carpetaciudadana/nueva_entrada.aspx" in (url or "")
@@ -25,8 +26,6 @@ def _is_post_login_url(url: str) -> bool:
 
 
 async def _forzar_idioma_es(page: Page, config: AyuntaPalmaConfig) -> None:
-    if str(config.lang or "").lower() != "es":
-        return
     if not _is_post_login_url(page.url):
         return
     try:
@@ -72,7 +71,7 @@ async def _abrir_nueva_instancia(page: Page, config: AyuntaPalmaConfig) -> None:
 
 async def ejecutar_login(page: Page, config: AyuntaPalmaConfig) -> Page:
     """
-    Accede al portal de Palma y pulsa la opción de certificado dentro del iframe.
+    Accede al portal de Palma y pulsa la opci?n de certificado dentro del iframe.
     """
     if page.url.startswith(config.url_base) or _is_post_login_url(page.url):
         # Evitar recargar si ya estamos en la misma URL (perfil persistente)
@@ -103,3 +102,4 @@ async def ejecutar_login(page: Page, config: AyuntaPalmaConfig) -> Page:
     await _forzar_idioma_es(page, config)
     await _abrir_nueva_instancia(page, config)
     return page
+
