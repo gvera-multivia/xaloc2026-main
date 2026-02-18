@@ -80,10 +80,22 @@ async def indicar_representante(page: Page, config: AyuntaPalmaConfig) -> Page:
     if not clicked:
         raise PlaywrightTimeoutError("No se encontro accion para abrir 'Indicar representante'.")
     await page.wait_for_timeout(config.delay_ms)
+    try:
+        await page.wait_for_selector(selectors.velo, state="hidden", timeout=12000)
+    except Exception:
+        pass
 
-    dialog_titulo = page.locator(".ui-dialog-title", has_text="Nuevo/a representante del/de la interesado/a")
-    await dialog_titulo.wait_for(state="visible", timeout=15000)
-    await _sobrescribir_contacto_representante(page, config)
+    try:
+        await _sobrescribir_contacto_representante(page, config)
+    except PlaywrightTimeoutError as e:
+        titulos = []
+        try:
+            titulos = await page.locator(".ui-dialog-title").all_inner_texts()
+        except Exception:
+            pass
+        raise PlaywrightTimeoutError(
+            f"No se abrio el popup de representante (campos no visibles). Titulos detectados: {titulos}"
+        ) from e
 
     aceptar = page.locator(selectors.btn_aceptar_modal).first
     aceptar_input_real = page.locator("#ctl00_ctl00_cphM_cph_btnAceptarPersona").first
