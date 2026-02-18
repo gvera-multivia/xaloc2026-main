@@ -17,7 +17,7 @@ logger = logging.getLogger("brain")
 
 
 class BaseOnlineAdapter(SiteAdapter):
-    DEFAULT_REGEX_EXPEDIENTE = r"^(\d{5}-\d{4}/\d{4,5}-GIM|\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{7}|\d-\d{4}[/\-]\d{4,6}-(EXE|ECC))$"
+    DEFAULT_REGEX_EXPEDIENTE = r"^(\d{5}-\d{4}[/\-]\d{4,5}-GIM|\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{7}|\d-\d{4}[/\-]\d{4,6}-(EXE|ECC))$"
     SQL_FETCH_RECURSOS_BASE = """
 SELECT
     rs.idRecurso,
@@ -207,7 +207,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
     @classmethod
     def _valida_expediente_base(cls, expediente: str) -> bool:
         exp = cls._clean_str(expediente).upper()
-        if re.match(r"^\d{5}-\d{4}/\d{4,5}-GIM$", exp):
+        if re.match(r"^\d{5}-\d{4}[/\-]\d{4,5}-GIM$", exp):
             return True
         if re.match(r"^\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{7}$", exp):
             return True
@@ -218,11 +218,11 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
     @classmethod
     def _valida_expediente_gim(cls, expediente: str) -> bool:
         exp = cls._clean_str(expediente).upper()
-        return bool(re.match(r"^\d{5}-\d{4}/\d{4,5}-GIM$", exp))
+        return bool(re.match(r"^\d{5}-\d{4}[/\-]\d{4,5}-GIM$", exp))
 
     def _parse_expediente_base(self, expediente: str) -> dict:
         exp = self._clean_str(expediente).upper()
-        m_gim = re.match(r"^(?P<id_ens>\d{5})-(?P<any>\d{4})/(?P<num>\d{4,5})-GIM$", exp)
+        m_gim = re.match(r"^(?P<id_ens>\d{5})-(?P<any>\d{4})[/\-](?P<num>\d{4,5})-GIM$", exp)
         if m_gim:
             return {
                 "expediente_id_ens": m_gim.group("id_ens"),
