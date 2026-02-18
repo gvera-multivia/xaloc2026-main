@@ -4,12 +4,15 @@ Flujo para indicar representante dentro del sitio Ayunta Palma.
 
 from __future__ import annotations
 
+import logging
+
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
 from sites.ayunta_palma.config import AyuntaPalmaConfig
 
 REPRESENTANTE_EMAIL = "info@xvia-serviciosjuridicos.com"
 REPRESENTANTE_TELEFONO = "722761154"
+logger = logging.getLogger(__name__)
 
 
 def _resolver_pagina_activa(page: Page) -> Page:
@@ -25,46 +28,25 @@ def _resolver_pagina_activa(page: Page) -> Page:
 async def _sobrescribir_contacto_representante(page: Page, config: AyuntaPalmaConfig) -> Page:
     page = _resolver_pagina_activa(page)
     selectors = config.selectors
-
-    email_selector = page.locator(selectors.email_selector).first
-    if await email_selector.count() > 0:
-        try:
-            await email_selector.wait_for(state="visible", timeout=3000)
-            try:
-                await email_selector.select_option(label="[Otro]")
-            except Exception:
-                pass
-        except PlaywrightTimeoutError:
-            pass
-
+    # Evitar select_option en combos autopostback del popup de representante:
+    # en producción está provocando cierres/rotaciones de target.
     email_input = page.locator(selectors.email_input).first
     email_confirm = page.locator(selectors.email_confirm_input).first
-    telefono_selector = page.locator(selectors.telefono_selector).first
     telefono_input = page.locator(selectors.telefono_input).first
 
-    await email_input.wait_for(state="visible", timeout=20000)
-    await email_confirm.wait_for(state="visible", timeout=20000)
-    await email_input.fill(REPRESENTANTE_EMAIL)
-    await email_confirm.fill(REPRESENTANTE_EMAIL)
-
-    if await telefono_selector.count() > 0:
-        try:
-            await telefono_selector.wait_for(state="visible", timeout=3000)
-            try:
-                await telefono_selector.select_option(label="[Otro]")
-            except Exception:
-                pass
-        except PlaywrightTimeoutError:
-            pass
-
-    await telefono_input.wait_for(state="visible", timeout=20000)
-    await telefono_input.fill(REPRESENTANTE_TELEFONO)
+    if await email_input.count() > 0 and await email_input.is_visible():
+        await email_input.fill(REPRESENTANTE_EMAIL)
+    if await email_confirm.count() > 0 and await email_confirm.is_visible():
+        await email_confirm.fill(REPRESENTANTE_EMAIL)
+    if await telefono_input.count() > 0 and await telefono_input.is_visible():
+        await telefono_input.fill(REPRESENTANTE_TELEFONO)
     return page
 
 
 async def indicar_representante(page: Page, config: AyuntaPalmaConfig) -> Page:
     page = _resolver_pagina_activa(page)
     selectors = config.selectors
+    logger.info("[AP-REP] Inicio indicar_representante.")
 
     boton = page.locator(selectors.btn_indicar_representante).first
     hidden_boton = page.locator("input[id*='btnListaInteresadosItemNuevoRepresentante']").first
@@ -92,6 +74,7 @@ async def indicar_representante(page: Page, config: AyuntaPalmaConfig) -> Page:
             pass
     if not clicked:
         raise PlaywrightTimeoutError("No se encontro accion para abrir 'Indicar representante'.")
+    logger.info("[AP-REP] Accion de apertura de representante ejecutada.")
     await page.wait_for_timeout(config.delay_ms)
     try:
         await page.wait_for_selector(selectors.velo, state="hidden", timeout=12000)
@@ -100,11 +83,13 @@ async def indicar_representante(page: Page, config: AyuntaPalmaConfig) -> Page:
 
     try:
         page = await _sobrescribir_contacto_representante(page, config)
+        logger.info("[AP-REP] Contacto representante revisado (sin select_option autopostback).")
     except Exception:
         # Si justo en esta fase el sitio cierra/rota target, reenganchar y reintentar una vez.
         page = _resolver_pagina_activa(page)
         try:
             page = await _sobrescribir_contacto_representante(page, config)
+            logger.info("[AP-REP] Reintento de contacto representante OK tras reenganche.")
         except PlaywrightTimeoutError as e:
             titulos = []
             try:
@@ -143,12 +128,14 @@ async def indicar_representante(page: Page, config: AyuntaPalmaConfig) -> Page:
             }"""
         )
         if clicked:
+            logger.info("[AP-REP] Click en btnAceptarPersona (hidden submit) ejecutado.")
             try:
                 await page.wait_for_selector(selectors.velo, state="hidden", timeout=12000)
             except Exception:
                 pass
             await page.wait_for_timeout(config.delay_ms)
             if await _post_ok():
+                logger.info("[AP-REP] Representante confirmado correctamente.")
                 return page
     except Exception:
         pass
@@ -157,12 +144,14 @@ async def indicar_representante(page: Page, config: AyuntaPalmaConfig) -> Page:
         await aceptar.wait_for(state="visible", timeout=3000)
         await aceptar.scroll_into_view_if_needed()
         await aceptar.click()
+        logger.info("[AP-REP] Fallback click en boton visible 'Aceptar'.")
         try:
             await page.wait_for_selector(selectors.velo, state="hidden", timeout=12000)
         except Exception:
             pass
         await page.wait_for_timeout(config.delay_ms)
         if await _post_ok():
+            logger.info("[AP-REP] Representante confirmado tras fallback boton visible.")
             return page
     except Exception:
         pass
@@ -178,12 +167,14 @@ async def indicar_representante(page: Page, config: AyuntaPalmaConfig) -> Page:
                         if (el) el.click();
                     }"""
                 )
+            logger.info("[AP-REP] Fallback final en btnAceptarPersona ejecutado.")
             try:
                 await page.wait_for_selector(selectors.velo, state="hidden", timeout=12000)
             except Exception:
                 pass
             await page.wait_for_timeout(config.delay_ms)
             if await _post_ok():
+                logger.info("[AP-REP] Representante confirmado tras fallback final.")
                 return page
     except Exception:
         pass
