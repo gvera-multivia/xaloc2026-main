@@ -561,6 +561,8 @@ async def firmar_presentar_y_descargar_justificante(page: Page, *, payload: dict
 
     destino_dir = _construir_ruta_recursos_telematicos(payload, fase)
     final_path = await _mover_a_destino(tmp_path, destino_dir=destino_dir)
+    payload["base_justificante_descargado"] = True
+    payload["base_justificante_path"] = str(final_path)
     logger.info("[BASE] Justificante guardado en: %s", final_path)
     return final_path
 

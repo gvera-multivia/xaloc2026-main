@@ -381,9 +381,11 @@ async def process_task(
 
                 # --- MARCAR COMO COMPLETADO EN XVIA ---
                 if not getattr(bot, "_exit_has_nonfatal_issues", False):
-                    is_base_p1 = site_id == "base_online" and (protocol or "").upper() == "P1"
-                    if is_base_p1:
-                        logger.info("Saltando marcado autom. en XVIA para base_online P1.")
+                    if site_id == "base_online" and not payload.get("base_justificante_descargado"):
+                        logger.warning(
+                            "Flujo BASE finalizado sin constancia de justificante descargado. "
+                            "NO se marcara como completado en XVIA."
+                        )
                     elif payload.get("idRecurso") and not payload.get("skip_auto_complete"):
                         logger.info(f"Intentando marcar recurso {payload['idRecurso']} como completado en la web...")
                         success_mark = await mark_resource_complete(auth_session, payload)
