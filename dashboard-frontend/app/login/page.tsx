@@ -3,24 +3,24 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/AuthContext';
+import { sileo } from 'sileo';
 
 export default function LoginPage() {
   const router = useRouter();
   const { login } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    setError('');
     setSubmitting(true);
     try {
       await login(username, password);
+      sileo.success({ title: 'Acceso concedido', description: `Bienvenido de nuevo, ${username}.` });
       router.replace('/');
     } catch {
-      setError('Credenciales invalidas.');
+      sileo.error({ title: 'Error de acceso', description: 'Credenciales inválidas o anomalía en el servidor.' });
     } finally {
       setSubmitting(false);
     }
@@ -57,8 +57,6 @@ export default function LoginPage() {
               className="w-full rounded-xl border border-border/70 bg-[rgba(17,19,26,0.55)] px-4 py-2.5 outline-none focus:border-[rgba(108,77,255,0.35)] transition"
             />
           </div>
-
-          {error && <div className="text-sm text-red-400">{error}</div>}
 
           <button
             type="submit"

@@ -4,6 +4,8 @@ import React, { useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import Navbar from '@/components/Navbar';
 import { useAuth } from '@/lib/AuthContext';
+import NotificationManager from '@/components/NotificationManager';
+
 
 const ADMIN_ROUTES = ['/users', '/control'];
 
@@ -13,7 +15,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const { loading, isAuthenticated, isAdmin } = useAuth();
 
   const isLoginPage = pathname === '/login';
-  const requiresAdmin = ADMIN_ROUTES.some((prefix) => pathname?.startsWith(prefix));
+  const requiresAdmin = ADMIN_ROUTES.some((prefix: string) => pathname?.startsWith(prefix));
 
   useEffect(() => {
     if (loading) return;
@@ -44,6 +46,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <>
+      <NotificationManager />
       {!isLoginPage && <Navbar />}
       <main className={isLoginPage ? 'min-h-screen' : 'pt-24 pb-12 container mx-auto px-4'}>
         {children}

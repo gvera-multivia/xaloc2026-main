@@ -12,7 +12,7 @@ import {
     Trash2,
     RefreshCw
 } from 'lucide-react';
-import { api, queueApi } from '@/lib/api';
+import { blacklistApi, queueApi } from '@/lib/api';
 import { sileo } from 'sileo';
 
 interface BlacklistItem {
@@ -37,7 +37,7 @@ export default function BlacklistPage() {
     const fetchBlacklist = async () => {
         setLoading(true);
         try {
-            const res = await api.get<{ items: BlacklistItem[] }>('/blacklist');
+            const res = await blacklistApi.list();
             setItems(res.items || []);
         } catch {
             setError('Error al cargar la lista negra.');
@@ -53,7 +53,7 @@ export default function BlacklistPage() {
     const handleUnblock = async (siteId: string, resourceId: number) => {
         setBusy(`unblock-${siteId}-${resourceId}`);
         try {
-            await api.delete<Record<string, unknown>>(`/blacklist/${encodeURIComponent(siteId)}/${resourceId}`);
+            await blacklistApi.unblock(siteId, resourceId);
             sileo.success({ title: 'Recurso desbloqueado', description: `${siteId} #${resourceId}` });
             await fetchBlacklist();
         } catch {
@@ -69,7 +69,7 @@ export default function BlacklistPage() {
         setBusy(`retry-${siteId}-${resourceId}`);
         try {
             // First, remove from blacklist
-            await api.delete<Record<string, unknown>>(`/blacklist/${encodeURIComponent(siteId)}/${resourceId}`);
+            await blacklistApi.unblock(siteId, resourceId);
             // Then, trigger recovery
             await queueApi.recoverItem(siteId, resourceId);
             sileo.success({ title: 'Reintento lanzado', description: `${siteId} #${resourceId} — Desbloqueado y en cola de recuperación` });
@@ -95,12 +95,12 @@ export default function BlacklistPage() {
 
         setBusy(`new-${newSiteId}-${resourceId}`);
         try {
-            await api.post<Record<string, unknown>>('/blacklist', {
-                site_id: newSiteId.trim(),
-                resource_id: resourceId,
-                reason: newReason.trim() || 'Bloqueo manual desde dashboard',
-                source: 'manual',
-            });
+            await blacklistApi.block(
+                newSiteId.trim(),
+                resourceId,
+                newReason.trim() || 'Bloqueo manual desde dashboard',
+                'manual'
+            );
             sileo.success({ title: 'Bloqueo creado', description: `${newSiteId} #${resourceId}` });
             setShowAddForm(false);
             setNewResourceId('');

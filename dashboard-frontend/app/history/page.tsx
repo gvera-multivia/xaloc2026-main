@@ -15,6 +15,7 @@ import {
 import { historyApi } from '@/lib/api';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { sileo } from 'sileo';
 
 function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs));
@@ -39,7 +40,7 @@ export default function HistoryPage() {
                 setSelectedDay(first);
             }
         } catch (e) {
-            console.error('Error fetching days', e);
+            sileo.error({ title: 'Error al cargar fechas', description: 'No se pudo obtener el listado de días del historial.' });
         }
     };
 
@@ -50,7 +51,7 @@ export default function HistoryPage() {
             const res = await historyApi.getSuccesses(selectedDay, page, 50);
             setItems(res.items || []);
         } catch (e) {
-            console.error('Error fetching history', e);
+            sileo.error({ title: 'Error al cargar historial', description: `No se pudo obtener el historial para el día ${selectedDay}.` });
         } finally {
             setLoading(false);
         }

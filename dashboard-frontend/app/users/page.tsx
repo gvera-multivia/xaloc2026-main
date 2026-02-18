@@ -3,13 +3,12 @@
 import React, { useEffect, useState } from 'react';
 import { usersApi } from '@/lib/api';
 import { DashboardUser } from '@/lib/types';
+import { sileo } from 'sileo';
 
 export default function UsersPage() {
   const [items, setItems] = useState<DashboardUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -21,9 +20,8 @@ export default function UsersPage() {
     try {
       const res = await usersApi.list();
       setItems((res.items || []) as DashboardUser[]);
-      setError('');
     } catch {
-      setError('No se pudo cargar la lista de usuarios.');
+      sileo.error({ title: 'Error al cargar usuarios' });
     } finally {
       setLoading(false);
     }
@@ -35,8 +33,6 @@ export default function UsersPage() {
 
   const handleCreate = async (event: React.FormEvent) => {
     event.preventDefault();
-    setSuccess('');
-    setError('');
     setBusy(true);
     try {
       await usersApi.create({
@@ -45,15 +41,15 @@ export default function UsersPage() {
         role,
         active,
       });
-      setSuccess('Usuario creado correctamente.');
+      sileo.success({ title: 'Usuario creado', description: `Usuario ${username} añadido.` });
       setUsername('');
       setPassword('');
       setRole('user');
       setActive(true);
       await refresh();
     } catch (e: any) {
-      const msg = String(e?.message || '').trim();
-      setError(msg || 'No se pudo crear el usuario.');
+      const msg = String(e?.message || '').trim() || 'No se pudo crear el usuario.';
+      sileo.error({ title: 'Error al crear', description: msg });
     } finally {
       setBusy(false);
     }
@@ -104,9 +100,6 @@ export default function UsersPage() {
             {busy ? 'Creando...' : 'Crear'}
           </button>
         </form>
-
-        {error && <div className="mt-3 text-sm text-red-400">{error}</div>}
-        {success && <div className="mt-3 text-sm text-emerald-400">{success}</div>}
       </section>
 
       <section className="morr-card rounded-2xl border border-border/70 overflow-hidden">

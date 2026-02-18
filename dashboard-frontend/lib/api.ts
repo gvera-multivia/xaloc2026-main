@@ -135,3 +135,11 @@ export const incidentsApi = {
     claim: (id: string) => api.post<any>(`/incidents/${id}/claim`),
     release: (id: string) => api.post<any>(`/incidents/${id}/release`),
 };
+
+export const blacklistApi = {
+    list: (siteId?: string) => api.get<{ items: any[], total: number }>(`/blacklist${siteId ? `?site_id=${siteId}` : ''}`),
+    block: (siteId: string, resourceId: number | string, reason?: string, source?: string) =>
+        api.post<any>('/blacklist', { site_id: siteId, resource_id: resourceId, reason, source }),
+    unblock: (siteId: string, resourceId: number | string) =>
+        api.delete<any>(`/blacklist/${encodeURIComponent(siteId)}/${resourceId}`),
+};

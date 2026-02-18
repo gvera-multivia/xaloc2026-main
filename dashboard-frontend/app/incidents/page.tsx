@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Lock, Unlock, RefreshCw } from 'lucide-react';
 import { useWebSocket } from '@/lib/WebSocketContext';
 import { incidentsApi } from '@/lib/api';
+import { sileo } from 'sileo';
 
 type Incident = {
     site_id: string;
@@ -44,7 +45,7 @@ export default function IncidentsPage() {
             }
             setLocks(nextLocks);
         } catch (e) {
-            console.error(e);
+            sileo.error({ title: 'Error al cargar incidencias' });
         } finally {
             setLoading(false);
         }
@@ -73,24 +74,26 @@ export default function IncidentsPage() {
     const handleClaim = async (incident: Incident) => {
         const id = `${incident.site_id}:${incident.resource_id}`;
         try {
-             await incidentsApi.claim(id);
-        } catch (e) {
-             alert("Error claiming: " + e);
+            await incidentsApi.claim(id);
+            sileo.success({ title: 'Incidencia capturada', description: 'Has tomado el control de la incidencia.' });
+        } catch (e: any) {
+            sileo.error({ title: 'Error al capturar', description: e.message });
         }
     };
 
     const handleRelease = async (incident: Incident) => {
         const id = `${incident.site_id}:${incident.resource_id}`;
         try {
-             await incidentsApi.release(id);
-        } catch (e) {
-             alert("Error releasing: " + e);
+            await incidentsApi.release(id);
+            sileo.success({ title: 'Incidencia liberada', description: 'La incidencia vuelve a estar disponible.' });
+        } catch (e: any) {
+            sileo.error({ title: 'Error al liberar', description: e.message });
         }
     };
 
     return (
         <div className="space-y-10 animate-in fade-in duration-700">
-             <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
                 <div>
                     <h2 className="text-2xl font-black uppercase tracking-tight">
                         Incidencias Pendientes
@@ -118,7 +121,7 @@ export default function IncidentsPage() {
                             <th className="px-6 py-4 text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground/80">Acciones</th>
                         </tr>
                     </thead>
-                     <tbody className="divide-y divide-[rgba(255,255,255,0.06)]">
+                    <tbody className="divide-y divide-[rgba(255,255,255,0.06)]">
                         {incidents.map((inc, i) => {
                             const id = `${inc.site_id}:${inc.resource_id}`;
                             const lockedBy = locks[id];
@@ -156,7 +159,7 @@ export default function IncidentsPage() {
                                             </button>
                                         )}
                                         {lockedBy && (
-                                             <button
+                                            <button
                                                 onClick={() => handleRelease(inc)}
                                                 className="px-3 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-500 rounded text-[10px] font-bold uppercase hover:bg-amber-500/20 transition-colors"
                                             >
@@ -167,7 +170,7 @@ export default function IncidentsPage() {
                                 </tr>
                             );
                         })}
-                     </tbody>
+                    </tbody>
                 </table>
             </div>
         </div>

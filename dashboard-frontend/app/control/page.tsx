@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { controlApi } from '@/lib/api';
 import { ProcessStatus } from '@/lib/types';
+import { sileo } from 'sileo';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -26,7 +27,6 @@ export default function ControlPage() {
     const [status, setStatus] = useState<{ worker: string; brain: string }>({ worker: 'stopped', brain: 'stopped' });
     const [logs, setLogs] = useState<{ worker: string[]; brain: string[] }>({ worker: [], brain: [] });
     const [busy, setBusy] = useState<string | null>(null);
-    const [error, setError] = useState('');
     const [autoScroll, setAutoScroll] = useState(true);
 
     const workerLogRef = useRef<HTMLDivElement>(null);
@@ -44,9 +44,8 @@ export default function ControlPage() {
                 worker: workerLogs.stdout || [],
                 brain: brainLogs.stdout || [],
             });
-            setError('');
         } catch (e) {
-            setError('Error al conectar con el servicio de control.');
+            sileo.error({ title: 'Error de conexión', description: 'No se pudo conectar con el servicio de control.' });
         }
     };
 
@@ -68,9 +67,10 @@ export default function ControlPage() {
             if (action === 'start') await controlApi.start(name);
             else if (action === 'stop') await controlApi.stop(name);
             else if (action === 'restart') await controlApi.restart(name);
+            sileo.success({ title: `Servicio ${name}`, description: `Acción [${action}] ejecutada correctamente.` });
             await refresh();
         } catch (e) {
-            setError(`Error al ${action} ${name}.`);
+            sileo.error({ title: 'Error de control', description: `No se pudo ${action} el servicio ${name}.` });
         } finally {
             setBusy(null);
         }
@@ -175,12 +175,6 @@ export default function ControlPage() {
                     <h2 className="text-3xl font-black tracking-tighter">Control de Procesos</h2>
                     <p className="text-muted-foreground">Orquestación de servicios y depuración en tiempo real.</p>
                 </div>
-                {error && (
-                    <div className="flex items-center gap-2 bg-destructive/10 text-destructive px-4 py-2 rounded-xl text-xs font-medium border border-destructive/20 animate-pulse">
-                        <AlertCircle size={14} />
-                        {error}
-                    </div>
-                )}
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 flex-1 min-h-0">

@@ -817,7 +817,7 @@ async def api_recover_queue_item(
     site_id: str,
     resource_id: int,
     heartbeat_timeout_seconds: int | None = Query(None, ge=1),
-    _admin: dict = Depends(require_admin),
+    _user: dict = Depends(require_user),
 ) -> dict:
     try:
         return service.recover_queue_item_processing(
@@ -849,13 +849,13 @@ async def api_recover_stuck_queue_items(
 
 
 @app.get("/api/blacklist")
-async def api_blacklist(site_id: str | None = Query(None), _admin: dict = Depends(require_admin)) -> dict:
+async def api_blacklist(site_id: str | None = Query(None), _user: dict = Depends(require_user)) -> dict:
     items = service.list_blacklist(site_id=site_id)
     return {"items": items, "total": len(items)}
 
 
 @app.post("/api/blacklist")
-async def api_blacklist_block(payload: dict[str, Any] = Body(...), _admin: dict = Depends(require_admin)) -> dict:
+async def api_blacklist_block(payload: dict[str, Any] = Body(...), _user: dict = Depends(require_user)) -> dict:
     try:
         site_id = str(payload.get("site_id") or "").strip()
         resource_id = int(payload.get("resource_id"))
@@ -874,7 +874,7 @@ async def api_blacklist_block(payload: dict[str, Any] = Body(...), _admin: dict 
 
 
 @app.delete("/api/blacklist/{site_id}/{resource_id}")
-async def api_blacklist_unblock(site_id: str, resource_id: int, _admin: dict = Depends(require_admin)) -> dict:
+async def api_blacklist_unblock(site_id: str, resource_id: int, _user: dict = Depends(require_user)) -> dict:
     try:
         return service.unblock_blacklist(site_id=site_id, resource_id=resource_id)
     except ValueError as exc:
@@ -923,7 +923,7 @@ async def api_config_set_active(
 @app.get("/api/pending-auth")
 async def api_pending_auth_list(
     authorization_type: str | None = Query(None),
-    _admin: dict = Depends(require_admin),
+    _user: dict = Depends(require_user),
 ) -> dict:
     return service.list_pending_authorizations(authorization_type=authorization_type)
 
@@ -931,7 +931,7 @@ async def api_pending_auth_list(
 @app.post("/api/pending-auth/{pending_id}/approve")
 async def api_pending_auth_approve(
     pending_id: int,
-    user: dict[str, Any] = Depends(require_admin),
+    user: dict[str, Any] = Depends(require_user),
 ) -> dict:
     try:
         return service.approve_pending_authorization(
@@ -946,7 +946,7 @@ async def api_pending_auth_approve(
 async def api_pending_auth_reject(
     pending_id: int,
     payload: dict[str, Any] = Body(...),
-    user: dict[str, Any] = Depends(require_admin),
+    user: dict[str, Any] = Depends(require_user),
 ) -> dict:
     reason = str(payload.get("reason") or "").strip()
     if not reason:
