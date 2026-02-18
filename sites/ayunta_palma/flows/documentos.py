@@ -22,7 +22,6 @@ from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
 from core.client_documentation import client_identity_from_payload, get_ruta_cliente_documentacion
 from sites.ayunta_palma.config import AyuntaPalmaConfig
-from sites.ayunta_palma.flows.autofirma_monitor import monitor_autofirma_windows
 
 logger = logging.getLogger(__name__)
 
@@ -1130,36 +1129,10 @@ async def subir_documentos(
     await page.wait_for_timeout(2000)
     logger.info("[AP-DIAG] Pre-firma: click/reintentos en boton Firmar.")
     await _click_firmar_con_reintentos(page, config, max_intentos=3)
-    firma_cli_ok = False
-    if config.autofirma_cli_intercept:
-        logger.info("[AP-DIAG] Firma CLI por intercepcion activada (XALOC_AUTOFIRMA_CLI_INTERCEPT=1).")
-        try:
-            firma_cli_ok = await _firmar_por_intercepcion_cli(page, config)
-        except Exception as e:
-            logger.warning("[AP-DIAG] Firma CLI lanzo excepcion; aplicando fallback monitor UI: %s", e)
-
+    logger.info("[AP-DIAG] Firma invisible: intercepcion de protocolo + AutoFirma CLI.")
+    firma_cli_ok = await _firmar_por_intercepcion_cli(page, config)
     if not firma_cli_ok:
-        logger.info("[AP-DIAG] Arrancando monitor unificado AutoFirma/Edge/Certificado.")
-        autofirma_monitor_task = asyncio.create_task(monitor_autofirma_windows(timeout_s=70))
-        await page.wait_for_timeout(2000)
-        logger.info("[AP-DIAG] Firma modal: click en 'Signar tots els documents'.")
-        await _click_signar_tots_documents(page, config)
-
-        logger.info("[AP-DIAG] Esperando resultado del monitor unificado.")
-        try:
-            monitor_result = await asyncio.wait_for(autofirma_monitor_task, timeout=80)
-            logger.info(
-                "[AP-DIAG] Monitor AutoFirma: edge_clicked=%s cert_clicked=%s autofirma_seen=%s autofirma_clicks=%s timed_out=%s",
-                monitor_result.edge_clicked,
-                monitor_result.cert_clicked,
-                monitor_result.autofirma_windows_seen,
-                monitor_result.autofirma_clicks,
-                monitor_result.timed_out,
-            )
-        except Exception as e:
-            logger.warning("[AP-DIAG] Monitor unificado devolvio error/timeout: %s", e)
-    else:
-        logger.info("[AP-DIAG] Firma completada por intercepcion CLI; no se usa monitor UI.")
+        raise RuntimeError("Fallo en firma invisible por intercepcion/CLI; no se usa fallback UI.")
     logger.info("[AP-DIAG] Validando firma real.")
     await _verificar_firma_realizada(page, config)
     logger.info("[AP-DIAG] Firma validada; iniciando descarga de justificante.")
