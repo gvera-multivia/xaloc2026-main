@@ -182,7 +182,7 @@ class BaseOnlineController:
             "p1_data_denuncia": data.get("p1_data_denuncia") or data.get("data_denuncia"),
             "p1_identificacio": data.get("p1_identificacio") or data.get("nif"),
             "p1_llicencia_conduccio": data.get("p1_llicencia_conduccio") or data.get("llicencia_conduccio"),
-            "p1_nom_complet": data.get("p1_nom_complet") or data.get("name"),
+            "p1_nom_complet": data.get("p1_nom_complet"),
             "p1_adreca": data.get("p1_adreca"),
             "p1_address_sigla": data.get("p1_address_sigla") or data.get("address_sigla"),
             "p1_address_street": data.get("p1_address_street") or data.get("address_street"),

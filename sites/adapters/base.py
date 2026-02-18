@@ -494,6 +494,18 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                             }
                         )
                     continue
+                if not conductor_name:
+                    if on_discard:
+                        on_discard(
+                            {
+                                "site_id": self.site_id,
+                                "idRecurso": r.get("idRecurso"),
+                                "Expedient": expediente_raw,
+                                "tipo_incidencia": "SITE_RULE_DISCARDED",
+                                "motivo": "P1 descartado: falta nombre completo del conductor",
+                            }
+                        )
+                    continue
 
             expone, solicita = self._get_motivos_base(fase_raw, expediente_raw, r.get("SujetoRecurso"))
             data_denuncia = self._format_date_ddmmyyyy(r.get("dia_denuncia")) or self._format_date_ddmmyyyy(r.get("FAlta"))
@@ -511,6 +523,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 "data_denuncia": data_denuncia,
                 "nif": nif,
                 "name": self._clean_str(r.get("SujetoRecurso")).upper(),
+                "sujeto_recurso": self._clean_str(r.get("SujetoRecurso")).upper(),
                 "cliente_nombre": self._clean_str(r.get("cliente_nombre")),
                 "cliente_apellido1": self._clean_str(r.get("cliente_apellido1")),
                 "cliente_apellido2": self._clean_str(r.get("cliente_apellido2")),
@@ -539,14 +552,13 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 payload["archivos"] = []
 
             if protocolo == "P1":
-                p1_name = conductor_name or payload["name"]
+                p1_name = conductor_name
                 payload.update(
                     {
                         "p1_identificacio": conductor_dni,
                         "p1_llicencia_conduccio": conductor_dni,
                         "llicencia_conduccio": conductor_dni,
                         "p1_nom_complet": p1_name,
-                        "name": p1_name,
                     }
                 )
                 required = [
