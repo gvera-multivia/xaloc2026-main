@@ -62,9 +62,77 @@ async def indicar_representante(page: Page, config: AyuntaPalmaConfig) -> Page:
     await dialog_titulo.wait_for(state="visible", timeout=15000)
     await _sobrescribir_contacto_representante(page, config)
 
-    aceptar = page.locator(selectors.btn_aceptar_modal)
-    await aceptar.wait_for(state="visible")
-    await aceptar.scroll_into_view_if_needed()
-    await aceptar.click()
-    await page.wait_for_timeout(config.delay_ms)
-    return page
+    aceptar = page.locator(selectors.btn_aceptar_modal).first
+    aceptar_input_real = page.locator("#ctl00_ctl00_cphM_cph_btnAceptarPersona").first
+
+    async def _post_ok() -> bool:
+        boton_siguiente = page.locator(selectors.btn_siguiente).first
+        input_siguiente = page.locator(selectors.input_siguiente).first
+        try:
+            if await boton_siguiente.count() > 0 and await boton_siguiente.is_visible():
+                return True
+        except Exception:
+            pass
+        try:
+            if await input_siguiente.count() > 0:
+                return True
+        except Exception:
+            pass
+        return False
+
+    try:
+        clicked = await page.evaluate(
+            """() => {
+                const el = document.querySelector('#ctl00_ctl00_cphM_cph_btnAceptarPersona');
+                if (!el) return false;
+                el.click();
+                return true;
+            }"""
+        )
+        if clicked:
+            try:
+                await page.wait_for_selector(selectors.velo, state="hidden", timeout=12000)
+            except Exception:
+                pass
+            await page.wait_for_timeout(config.delay_ms)
+            if await _post_ok():
+                return page
+    except Exception:
+        pass
+
+    try:
+        await aceptar.wait_for(state="visible", timeout=3000)
+        await aceptar.scroll_into_view_if_needed()
+        await aceptar.click()
+        try:
+            await page.wait_for_selector(selectors.velo, state="hidden", timeout=12000)
+        except Exception:
+            pass
+        await page.wait_for_timeout(config.delay_ms)
+        if await _post_ok():
+            return page
+    except Exception:
+        pass
+
+    try:
+        if await aceptar_input_real.count() > 0:
+            if await aceptar_input_real.is_visible():
+                await aceptar_input_real.click()
+            else:
+                await page.evaluate(
+                    """() => {
+                        const el = document.querySelector('#ctl00_ctl00_cphM_cph_btnAceptarPersona');
+                        if (el) el.click();
+                    }"""
+                )
+            try:
+                await page.wait_for_selector(selectors.velo, state="hidden", timeout=12000)
+            except Exception:
+                pass
+            await page.wait_for_timeout(config.delay_ms)
+            if await _post_ok():
+                return page
+    except Exception:
+        pass
+
+    raise PlaywrightTimeoutError("No se pudo confirmar el representante (Aceptar).")

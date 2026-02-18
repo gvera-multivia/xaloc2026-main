@@ -179,62 +179,75 @@ async def registrar_interesado(
 
     aceptar = page.locator(selectors.btn_aceptar_modal).first
     aceptar_input_real = page.locator("#ctl00_ctl00_cphM_cph_btnAceptarPersona").first
+    boton_rep = page.locator(selectors.btn_indicar_representante).first
+
+    async def _estado_ok_post_aceptar(timeout_ms: int = 8000) -> bool:
+        try:
+            await boton_rep.wait_for(state="visible", timeout=timeout_ms)
+            return True
+        except Exception:
+            return False
+
+    # 1) Prioridad absoluta: submit real ASP.NET (aunque este hidden).
     try:
-        await aceptar.wait_for(state="visible", timeout=10000)
-        await aceptar.click()
-        await _wait_for_velo_to_vanish(page, selectors)
-        await page.wait_for_timeout(config.delay_ms)
-        return page
-    except PlaywrightTimeoutError as e:
-        # En algunos casos Sedipualba hace postback/navegacion y el dialogo desaparece
-        # antes de exponer el boton de "Aceptar" en el selector estricto.
-        await _wait_for_velo_to_vanish(page, selectors, timeout=15000)
-        boton_rep = page.locator(selectors.btn_indicar_representante).first
-        try:
-            if await boton_rep.count() > 0 and await boton_rep.is_visible():
-                await page.wait_for_timeout(config.delay_ms)
-                return page
-        except Exception:
-            pass
-
-        # Fallback robusto: usar el submit real de ASP.NET aunque este oculto.
-        try:
-            if await aceptar_input_real.count() > 0:
-                if await aceptar_input_real.is_visible():
-                    await aceptar_input_real.click()
-                else:
-                    await page.evaluate(
-                        """(selector) => {
-                            const el = document.querySelector(selector);
-                            if (!el) return false;
-                            el.click();
-                            return true;
-                        }""",
-                        "#ctl00_ctl00_cphM_cph_btnAceptarPersona",
-                    )
-                await _wait_for_velo_to_vanish(page, selectors, timeout=15000)
-                await page.wait_for_timeout(config.delay_ms)
-                try:
-                    if await boton_rep.count() > 0 and await boton_rep.is_visible():
-                        return page
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-        aceptar_generico = page.locator("button:has-text('Aceptar')").first
-        try:
-            if await aceptar_generico.count() > 0 and await aceptar_generico.is_visible():
-                await aceptar_generico.click()
-                await _wait_for_velo_to_vanish(page, selectors)
-                await page.wait_for_timeout(config.delay_ms)
-                return page
-        except Exception:
-            pass
-
-        try:
-            await boton_rep.wait_for(state="visible", timeout=15000)
+        clicked = await page.evaluate(
+            """() => {
+                const el = document.querySelector('#ctl00_ctl00_cphM_cph_btnAceptarPersona');
+                if (!el) return false;
+                el.click();
+                return true;
+            }"""
+        )
+        if clicked:
+            await _wait_for_velo_to_vanish(page, selectors, timeout=15000)
             await page.wait_for_timeout(config.delay_ms)
+            if await _estado_ok_post_aceptar():
+                return page
+    except Exception:
+        pass
+
+    # 2) Fallback: boton visible del modal activo.
+    try:
+        await aceptar.wait_for(state="visible", timeout=3000)
+        await aceptar.click()
+        await _wait_for_velo_to_vanish(page, selectors, timeout=15000)
+        await page.wait_for_timeout(config.delay_ms)
+        if await _estado_ok_post_aceptar():
             return page
-        except Exception:
-            raise e
+    except Exception:
+        pass
+
+    # 3) Fallback generico por texto.
+    try:
+        aceptar_generico = page.locator("button:has-text('Aceptar')").first
+        if await aceptar_generico.count() > 0 and await aceptar_generico.is_visible():
+            await aceptar_generico.click()
+            await _wait_for_velo_to_vanish(page, selectors, timeout=15000)
+            await page.wait_for_timeout(config.delay_ms)
+            if await _estado_ok_post_aceptar():
+                return page
+    except Exception:
+        pass
+
+    # 4) Ultimo intento al submit real (por si aparecio tras postback parcial).
+    try:
+        if await aceptar_input_real.count() > 0:
+            if await aceptar_input_real.is_visible():
+                await aceptar_input_real.click()
+            else:
+                await page.evaluate(
+                    """() => {
+                        const el = document.querySelector('#ctl00_ctl00_cphM_cph_btnAceptarPersona');
+                        if (el) el.click();
+                    }"""
+                )
+            await _wait_for_velo_to_vanish(page, selectors, timeout=15000)
+            await page.wait_for_timeout(config.delay_ms)
+            if await _estado_ok_post_aceptar(timeout_ms=15000):
+                return page
+    except Exception:
+        pass
+
+    raise PlaywrightTimeoutError(
+        "No se pudo confirmar 'Nuevo/a interesado/a': no aparecio el estado post-aceptar esperado."
+    )
