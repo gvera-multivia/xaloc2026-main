@@ -1,5 +1,6 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 
@@ -43,6 +44,18 @@ def _load_pdf_backend():
         ) from e
 
 
+def _bundle_with_pdftk(files: list[Path], out_path: Path) -> bool:
+    pdftk = Path(r"C:\Program Files (x86)\PDFtk\bin\pdftk.exe")
+    if not pdftk.exists():
+        return False
+    cmd = [str(pdftk), *[str(p) for p in files], "cat", "output", str(out_path)]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True)
+    except Exception:
+        return False
+    return out_path.exists() and _is_pdf_file(out_path)
+
+
 def bundle_documents_to_single_pdf_for_palma(
     files: list[Path],
     *,
@@ -50,40 +63,44 @@ def bundle_documents_to_single_pdf_for_palma(
     output_dir: Path = Path("tmp/ayunta_palma"),
 ) -> Path:
     """
-    Fusiona todos los PDFs de entrada en un único PDF listo para subir a Palma.
+    Fusiona todos los PDFs de entrada en un único PDF.
+
+    Nota: se mantiene el nombre histórico de la función para compatibilidad,
+    pero puede reutilizarse en otros sites.
     """
     normalized = [Path(p) for p in (files or []) if p]
     if not normalized:
-        raise ValueError("No hay archivos para fusionar en ayunta_palma.")
+        raise ValueError("No hay archivos para fusionar.")
 
     missing = [str(p) for p in normalized if not p.exists()]
     if missing:
-        raise FileNotFoundError(f"Archivos no encontrados para ayunta_palma: {', '.join(missing)}")
+        raise FileNotFoundError(f"Archivos no encontrados para fusionar: {', '.join(missing)}")
 
     non_pdf = [str(p) for p in normalized if not _is_pdf_file(p)]
     if non_pdf:
-        raise ValueError(
-            "ayunta_palma solo admite un PDF final y se detectaron adjuntos no PDF: "
-            + ", ".join(non_pdf)
-        )
+        raise ValueError("Solo se pueden fusionar PDFs: " + ", ".join(non_pdf))
 
     if len(normalized) == 1:
         return normalized[0]
 
-    backend_kind, backend_cls = _load_pdf_backend()
-    merger = backend_cls()
-    try:
-        for pdf in normalized:
-            merger.append(str(pdf))
+    output_dir.mkdir(parents=True, exist_ok=True)
+    rid = str(id_recurso or "unknown").strip()
+    out_path = output_dir / f"ayunta_palma_{rid}_bundle.pdf"
 
-        output_dir.mkdir(parents=True, exist_ok=True)
-        rid = str(id_recurso or "unknown").strip()
-        out_path = output_dir / f"ayunta_palma_{rid}_bundle.pdf"
-        with out_path.open("wb") as out_fh:
-            merger.write(out_fh)
-    finally:
-        if backend_kind == "merger" and hasattr(merger, "close"):
-            merger.close()
+    try:
+        backend_kind, backend_cls = _load_pdf_backend()
+        merger = backend_cls()
+        try:
+            for pdf in normalized:
+                merger.append(str(pdf))
+            with out_path.open("wb") as out_fh:
+                merger.write(out_fh)
+        finally:
+            if backend_kind == "merger" and hasattr(merger, "close"):
+                merger.close()
+    except Exception:
+        if not _bundle_with_pdftk(normalized, out_path):
+            raise
 
     if not out_path.exists() or not _is_pdf_file(out_path):
         raise RuntimeError(f"No se generó un PDF válido tras la fusión: {out_path}")

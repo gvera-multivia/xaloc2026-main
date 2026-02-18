@@ -2,10 +2,11 @@
 
 import logging
 import re
-import time
 from pathlib import Path
 
 from playwright.async_api import Page
+
+from core.pdf_bundle import bundle_documents_to_single_pdf_for_palma
 
 DELAY_MS = 1000
 
@@ -16,21 +17,6 @@ def _is_pdf_file(path: Path) -> bool:
             return fh.read(4) == b"%PDF"
     except Exception:
         return False
-
-
-def _load_pdf_merger():
-    try:
-        from pypdf import PdfMerger  # type: ignore
-
-        return PdfMerger()
-    except Exception:
-        pass
-    try:
-        from PyPDF2 import PdfMerger  # type: ignore
-
-        return PdfMerger()
-    except Exception as e:
-        raise RuntimeError("No hay backend PDF para fusionar adjuntos (pypdf/PyPDF2).") from e
 
 
 def _bundle_files_if_needed(
@@ -49,23 +35,11 @@ def _bundle_files_if_needed(
             f"No se puede auto-fusionar porque hay no-PDF: {', '.join(non_pdf)}"
         )
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    out_path = output_dir / f"base_online_bundle_{int(time.time())}.pdf"
-
-    merger = _load_pdf_merger()
-    try:
-        for pdf in archivos:
-            merger.append(str(pdf))
-        with out_path.open("wb") as fh:
-            merger.write(fh)
-    finally:
-        try:
-            merger.close()
-        except Exception:
-            pass
-
-    if not out_path.exists() or not _is_pdf_file(out_path):
-        raise RuntimeError(f"No se genero bundle PDF valido: {out_path}")
+    out_path = bundle_documents_to_single_pdf_for_palma(
+        archivos,
+        id_recurso="base_online",
+        output_dir=output_dir,
+    )
 
     logging.info(
         "Detectados %s adjuntos (> %s). Se fusionan en bundle unico: %s",
