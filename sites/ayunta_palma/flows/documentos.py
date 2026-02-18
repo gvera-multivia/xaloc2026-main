@@ -1190,6 +1190,69 @@ async def _verificar_firma_realizada(page: Page, config: AyuntaPalmaConfig) -> N
         )
 
 
+async def _abrir_dialogo_anadir_documento(page: Page, config: AyuntaPalmaConfig) -> None:
+    selectors = config.selectors
+    boton_anadir = page.locator(selectors.btn_anadir_documento).first
+    hidden_anadir = page.locator("input[id*='btnDocumentoAPresentarNuevoFichero']").first
+    archivo_input = page.locator(selectors.archivo_input).first
+
+    async def _dialogo_abierto() -> bool:
+        try:
+            return await archivo_input.count() > 0 and await archivo_input.is_visible()
+        except Exception:
+            return False
+
+    for intento in range(1, 5):
+        if await _dialogo_abierto():
+            return
+
+        clicked = False
+        try:
+            if await boton_anadir.count() > 0 and await boton_anadir.is_visible():
+                await boton_anadir.click()
+                clicked = True
+        except Exception:
+            pass
+
+        if not clicked:
+            try:
+                if await hidden_anadir.count() > 0:
+                    if await hidden_anadir.is_visible():
+                        await hidden_anadir.click()
+                    else:
+                        await page.evaluate(
+                            """() => {
+                                const el = document.querySelector("input[id*='btnDocumentoAPresentarNuevoFichero']");
+                                if (el) el.click();
+                            }"""
+                        )
+                    clicked = True
+            except Exception:
+                pass
+
+        await page.wait_for_timeout(config.delay_ms)
+        if await _dialogo_abierto():
+            return
+
+        # Si seguimos en el paso anterior, intentar avanzar una vez y reintentar abrir.
+        try:
+            await _click_siguiente(page, config)
+            await page.wait_for_timeout(config.delay_ms)
+        except Exception:
+            pass
+
+        logger.info("[AP-DIAG] Reintento abrir dialogo de subida (%s/4).", intento)
+
+    step_val = ""
+    try:
+        step_val = await page.locator("#ctl00_ctl00_cphM_cph_hfStep").first.input_value()
+    except Exception:
+        pass
+    raise PlaywrightTimeoutError(
+        f"No se pudo abrir el dialogo de añadir documentos. url={page.url} hfStep={step_val}"
+    )
+
+
 async def subir_documentos(
     page: Page,
     config: AyuntaPalmaConfig,
@@ -1202,10 +1265,7 @@ async def subir_documentos(
         return page
 
     selectors = config.selectors
-    boton_anadir = page.locator(selectors.btn_anadir_documento)
-    await boton_anadir.wait_for(state="visible")
-    await boton_anadir.click()
-    await page.wait_for_timeout(config.delay_ms)
+    await _abrir_dialogo_anadir_documento(page, config)
     logger.info("[AP-DIAG] Dialogo de anadir documento abierto.")
 
     ruta = [str(p) for p in archivos]
