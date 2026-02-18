@@ -392,6 +392,18 @@ class SQLiteDatabase:
         finally:
             conn.close()
 
+    def delete_task(self, task_id: int) -> None:
+        """Elimina definitivamente una tarea de tramite_queue."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM tramite_queue WHERE id = ?", (task_id,))
+            conn.commit()
+        except Exception as e:
+            self.logger.error(f"Error eliminando tarea {task_id}: {e}")
+        finally:
+            conn.close()
+
     def insert_task(self, site_id: str, protocol: Optional[str], payload: Dict[str, Any]) -> int:
         """
         Inserta una nueva tarea en la cola.

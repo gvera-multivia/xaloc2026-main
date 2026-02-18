@@ -631,16 +631,28 @@ class SqliteQueueRepository:
                     (day,),
                 ).fetchone()
             else:
-                row = conn.execute(
-                    """
-                    SELECT COUNT(*) AS finished_count,
-                           MAX(processed_at) AS last_finished_at
-                    FROM tramite_queue
-                    WHERE status IN ('completed', 'failed')
-                      AND substr(COALESCE(processed_at, created_at), 1, 10) = ?
-                    """,
-                    (day,),
-                ).fetchone()
+                try:
+                    row = conn.execute(
+                        """
+                        SELECT COUNT(*) AS finished_count,
+                               MAX(finished_at) AS last_finished_at
+                        FROM job_runs
+                        WHERE state IN ('completed', 'succeeded', 'failed', 'dead', 'cancelled')
+                          AND substr(COALESCE(finished_at, updated_at, created_at), 1, 10) = ?
+                        """,
+                        (day,),
+                    ).fetchone()
+                except Exception:
+                    row = conn.execute(
+                        """
+                        SELECT COUNT(*) AS finished_count,
+                               MAX(processed_at) AS last_finished_at
+                        FROM tramite_queue
+                        WHERE status IN ('completed', 'failed')
+                          AND substr(COALESCE(processed_at, created_at), 1, 10) = ?
+                        """,
+                        (day,),
+                    ).fetchone()
 
             finished_count = int(row["finished_count"] if row and row["finished_count"] is not None else 0)
             last_finished_at = row["last_finished_at"] if row else None

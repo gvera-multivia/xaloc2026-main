@@ -4,6 +4,7 @@ Configuración del sitio Ayunta Palma.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 
 from core.base_config import BaseConfig
@@ -59,3 +60,13 @@ class AyuntaPalmaConfig(BaseConfig):
         "returnUrl=https%3a%2f%2fpalma.sedipualba.es%2fcarpetaciudadana%2fnueva_entrada.aspx%3fidtramite%3d13809"
     )
     selectors: AyuntaPalmaSelectors = field(default_factory=AyuntaPalmaSelectors)
+    autofirma_cli_intercept: bool = field(default_factory=lambda: os.getenv("XALOC_AUTOFIRMA_CLI_INTERCEPT", "0") == "1")
+    autofirma_cli_path: str = field(
+        default_factory=lambda: os.getenv(
+            "XALOC_AUTOFIRMA_CLI_PATH",
+            r"C:\Program Files\AutoFirma\AutoFirma\AutoFirmaCommandLine.exe",
+        )
+    )
+    autofirma_cli_alias: str = field(
+        default_factory=lambda: os.getenv("XALOC_AUTOFIRMA_CLI_ALIAS", os.getenv("certificado_cn", ""))
+    )

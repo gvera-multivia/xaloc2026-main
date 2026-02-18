@@ -29,7 +29,6 @@ load_dotenv()
 SYNC_INTERVAL_SECONDS = int(os.getenv("BRAIN_SYNC_INTERVAL", 500))
 TICK_INTERVAL_SECONDS = int(os.getenv("BRAIN_TICK_SECONDS", 5))
 MAX_CLAIMS_PER_CYCLE = int(os.getenv("BRAIN_MAX_CLAIMS", 999999))
-BRAIN_TARGET_QUEUE_DEPTH = int(os.getenv("BRAIN_TARGET_QUEUE_DEPTH", 50))
 ENABLED_SITES_CSV = os.getenv("BRAIN_ENABLED_SITES", "").strip()
 QUEUE_BACKEND = (os.getenv("QUEUE_BACKEND", "sqlite") or "sqlite").strip().lower()
 
@@ -82,13 +81,6 @@ SELECT TExp, UsuarioAsignado
 FROM Recursos.RecursosExp
 WHERE idRecurso = ?
 """
-
-SITE_PRIORITIES: dict[str, int] = {
-    "madrid": 0,
-    "xaloc_girona": 1,
-    "base_online": 2,
-    "ayunta_palma": 3,
-}
 
 # Limites por sitio para recursos reclamados/encolados por tick.
 # Vacio => sin limites especificos por sitio.
@@ -648,51 +640,6 @@ class BrainOrchestrator:
         adapters.sort(key=lambda a: (a.priority, a.site_id))
         return adapters, configs
 
-    async def _choose_site_to_refill(self, adapters: list[SiteAdapter], configs: dict[str, dict]) -> Optional[str]:
-        priorities = dict(SITE_PRIORITIES)
-        for a in adapters:
-            priorities[a.site_id] = a.priority
-
-        if self.queue_backend == "redis":
-            counts = self.db.count_job_runs_any(states=("queued", "processing"))
-            candidates = [s for s, c in counts.items() if c > 0]
-            locked = sorted(candidates, key=lambda s: (priorities.get(s, 999), s))[0] if candidates else None
-        else:
-            locked = self.db.get_locked_site_by_priority(priorities)
-        if locked:
-            return locked
-
-        for adapter in adapters:
-            if adapter.site_id not in configs:
-                continue
-            try:
-                def _on_discard(item: dict) -> None:
-                    try:
-                        self._record_incident_once(
-                            site_id=str(item.get("site_id") or adapter.site_id),
-                            incident_type=str(item.get("tipo_incidencia") or "SITE_RULE_DISCARDED"),
-                            reason=str(item.get("motivo") or ""),
-                            resource_id=item.get("idRecurso"),
-                            expediente=str(item.get("Expedient") or item.get("expediente") or ""),
-                            payload=item,
-                        )
-                    except Exception:
-                        return
-
-                candidates = adapter.fetch_candidates(
-                    config=configs[adapter.site_id],
-                    conn_str=self.sqlserver_conn_str,
-                    authenticated_user=self.authenticated_user,
-                    limit=9999,
-                    on_discard=_on_discard,
-                )
-                if candidates:
-                    return adapter.site_id
-            except Exception as e:
-                self.logger.error(f"[{adapter.site_id}] Error consultando candidatos remotos: {e}")
-
-        return None
-
     async def run_tick(self) -> dict:
         stats = {"claimed": 0, "enqueued": 0, "errors": 0, "per_site": {}}
 
@@ -714,31 +661,26 @@ class BrainOrchestrator:
                 break
 
             site_id = adapter.site_id
-            self.logger.info(f"[{site_id}] Evaluando site para refill/claim.")
+            self.logger.info(f"[{site_id}] Evaluando site para claim.")
             config = configs.get(site_id)
             if not config:
                 self.logger.warning(f"[{site_id}] Sin config activa; saltando.")
                 continue
 
-            current_depth = self.db.count_job_runs(site_id=site_id, states=("queued", "processing"))
-
-            target_depth = int(os.getenv(f"BRAIN_TARGET_QUEUE_DEPTH_{site_id.upper()}", BRAIN_TARGET_QUEUE_DEPTH))
-
-            refill_amount = target_depth - current_depth
-            if refill_amount <= 0:
-                self.logger.info(f"[{site_id}] Cola llena (depth={current_depth}/{target_depth}). Saltando refill.")
-                continue
-
             site_claim_limit = SITE_CLAIM_LIMIT_PER_TICK.get(site_id)
             site_claims_done = 0
 
-            fetch_limit = min(refill_amount, 9999)
+            fetch_limit = min(remaining_claim_budget, 9999)
             if site_claim_limit is not None:
                 fetch_limit = min(fetch_limit, max(0, site_claim_limit))
                 if fetch_limit <= 0:
                     self.logger.info(f"[{site_id}] Limite por sitio agotado para este tick.")
                     continue
-            self.logger.info(f"[{site_id}] Refill: depth={current_depth}/{target_depth} -> fetch_limit={fetch_limit}")
+            self.logger.info(
+                f"[{site_id}] Claim: budget_restante={remaining_claim_budget}, "
+                f"limite_site={site_claim_limit if site_claim_limit is not None else 'sin_limite'} "
+                f"-> fetch_limit={fetch_limit}"
+            )
 
             try:
                 await self.init_session(config["login_url"])
@@ -825,7 +767,7 @@ class BrainOrchestrator:
                         per_site["errors"] += 1
 
             except Exception as e:
-                self.logger.exception(f"[{site_id}] Error en ciclo de reposicion: {e}")
+                self.logger.exception(f"[{site_id}] Error en ciclo de claim: {e}")
                 stats["errors"] += 1
             finally:
                 await self.close_session()

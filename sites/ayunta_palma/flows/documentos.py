@@ -5,11 +5,17 @@ Subida de documentos en el flujo de Ayunta Palma.
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 import logging
+import os
 import re
 import shutil
+import subprocess
 import sys
+import tempfile
 import unicodedata
+import urllib.parse
 from pathlib import Path
 
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
@@ -482,6 +488,211 @@ def _extraer_n_expediente(payload: dict | None) -> str:
     return "UNKNOWN"
 
 
+def _b64decode_loose(value: str) -> bytes:
+    value = (value or "").strip()
+    if not value:
+        return b""
+    padded = value + ("=" * ((4 - len(value) % 4) % 4))
+    return base64.b64decode(padded)
+
+
+def _firmar_localmente_cli(afirma_url: str, config: AyuntaPalmaConfig) -> str | None:
+    cli_path = str(config.autofirma_cli_path or "").strip()
+    alias = str(config.autofirma_cli_alias or config.navegador.certificado_cn or "").strip()
+    if not cli_path or not os.path.exists(cli_path):
+        logger.error("[AP-DIAG] AutoFirma CLI no encontrado: %s", cli_path)
+        return None
+    if not alias:
+        logger.error("[AP-DIAG] Alias de certificado vacio (XALOC_AUTOFIRMA_CLI_ALIAS/certificado_cn).")
+        return None
+
+    input_file = None
+    output_file = None
+    try:
+        url_body = afirma_url.replace("afirma://sign?", "").replace("afirma://", "")
+        parsed = urllib.parse.parse_qs(url_body)
+        encoded_params = parsed.get("params", [None])[0]
+        if not encoded_params:
+            logger.error("[AP-DIAG] URL afirma:// interceptada sin parametro 'params'.")
+            return None
+
+        params_json = _b64decode_loose(encoded_params).decode("utf-8", errors="replace")
+        params_dict = json.loads(params_json)
+        content_b64 = params_dict.get("content") or params_dict.get("data")
+        formato = str(params_dict.get("format") or "CAdES")
+        if not content_b64:
+            logger.error("[AP-DIAG] Parametros de firma sin campo content/data.")
+            return None
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".dat") as tmp_in:
+            tmp_in.write(_b64decode_loose(str(content_b64)))
+            input_file = tmp_in.name
+        output_file = input_file + ".sig"
+
+        cmd = [
+            cli_path,
+            "sign",
+            "-i",
+            input_file,
+            "-o",
+            output_file,
+            "-store",
+            "WINDOWS",
+            "-alias",
+            alias,
+            "-format",
+            formato,
+            "-algorithm",
+            "SHA256withRSA",
+            "-config",
+            "mode=implicit",
+        ]
+        creationflags = 0x08000000 if sys.platform.startswith("win") else 0
+        res = subprocess.run(cmd, capture_output=True, text=True, creationflags=creationflags)
+        if res.returncode != 0:
+            logger.error("[AP-DIAG] Error firmando con AutoFirma CLI (code=%s): %s", res.returncode, (res.stderr or "").strip())
+            return None
+        if not os.path.exists(output_file):
+            logger.error("[AP-DIAG] AutoFirma CLI no genero archivo de salida.")
+            return None
+        with open(output_file, "rb") as f:
+            return base64.b64encode(f.read()).decode("utf-8")
+    except Exception as e:
+        logger.error("[AP-DIAG] Excepcion en firma CLI: %s", e)
+        return None
+    finally:
+        try:
+            if input_file and os.path.exists(input_file):
+                os.remove(input_file)
+            if output_file and os.path.exists(output_file):
+                os.remove(output_file)
+        except Exception:
+            pass
+
+
+async def _get_sedipualba_firma_frame(page: Page, timeout_ms: int = 20000):
+    waited = 0
+    step = 400
+    while waited < timeout_ms:
+        for fr in page.frames:
+            try:
+                if "firmar.aspx" in (fr.url or "").lower():
+                    return fr
+            except Exception:
+                continue
+        await page.wait_for_timeout(step)
+        waited += step
+    return None
+
+
+async def _firmar_por_intercepcion_cli(page: Page, config: AyuntaPalmaConfig) -> bool:
+    logger.info("[AP-DIAG] Firma CLI: esperando modal/iframe de firma.")
+    try:
+        await page.locator("#ventanaModal").first.wait_for(state="visible", timeout=20000)
+    except Exception:
+        logger.warning("[AP-DIAG] Firma CLI: modal #ventanaModal no visible.")
+        return False
+
+    firma_frame = await _get_sedipualba_firma_frame(page, timeout_ms=20000)
+    if firma_frame is None:
+        logger.warning("[AP-DIAG] Firma CLI: no se encontro iframe firmar.aspx.")
+        return False
+
+    try:
+        await firma_frame.evaluate(
+            """() => {
+                window.__apCapturedAfirmaUrl = null;
+                const originalOpen = window.open ? window.open.bind(window) : null;
+                window.open = function(url, name, features) {
+                    if (url && String(url).startsWith('afirma://')) {
+                        window.__apCapturedAfirmaUrl = String(url);
+                        return null;
+                    }
+                    return originalOpen ? originalOpen(url, name, features) : null;
+                };
+                document.addEventListener('click', (e) => {
+                    const link = e.target && e.target.closest ? e.target.closest('a') : null;
+                    if (link && link.href && link.href.startsWith('afirma://')) {
+                        e.preventDefault();
+                        window.__apCapturedAfirmaUrl = link.href;
+                    }
+                }, true);
+            }"""
+        )
+    except Exception as e:
+        logger.warning("[AP-DIAG] Firma CLI: no se pudo inyectar interceptor: %s", e)
+        return False
+
+    logger.info("[AP-DIAG] Firma CLI: disparando 'Signar tots els documents'.")
+    await _click_signar_tots_documents(page, config)
+
+    try:
+        handle = await firma_frame.wait_for_function("() => window.__apCapturedAfirmaUrl", timeout=30000)
+        afirma_url = await handle.json_value()
+    except Exception:
+        logger.warning("[AP-DIAG] Firma CLI: no se capturo protocolo afirma://.")
+        return False
+    if not afirma_url:
+        logger.warning("[AP-DIAG] Firma CLI: URL afirma:// vacia.")
+        return False
+
+    logger.info("[AP-DIAG] Firma CLI: ejecutando AutoFirmaCommandLine.")
+    firma_b64 = await asyncio.to_thread(_firmar_localmente_cli, str(afirma_url), config)
+    if not firma_b64:
+        return False
+
+    try:
+        await firma_frame.evaluate(
+            """(sig) => {
+                const candidates = [
+                    'ctl00_ctl01_cphM_cph_hfFirma',
+                    'ctl00_ctl01_hfFirma',
+                    'signature',
+                    'sign'
+                ];
+                let target = null;
+                for (const id of candidates) {
+                    const el = document.getElementById(id);
+                    if (el) { target = el; break; }
+                }
+                if (!target) {
+                    const hiddens = document.querySelectorAll('input[type="hidden"]');
+                    for (const h of hiddens) {
+                        const id = (h.id || '').toUpperCase();
+                        if (!id.includes('VIEWSTATE') && !id.includes('EVENTVALIDATION') && (h.value || '') === '') {
+                            target = h;
+                            break;
+                        }
+                    }
+                }
+                if (!target && document.forms && document.forms[0]) {
+                    target = document.createElement('input');
+                    target.type = 'hidden';
+                    target.id = 'ctl00_ctl01_cphM_cph_hfFirma';
+                    target.name = 'ctl00$ctl01$cphM$cph$hfFirma';
+                    document.forms[0].appendChild(target);
+                }
+                if (!target || !document.forms || !document.forms[0]) {
+                    return 'ERR_NO_TARGET_OR_FORM';
+                }
+                target.value = sig;
+                document.forms[0].submit();
+                return 'OK_SUBMIT';
+            }""",
+            firma_b64,
+        )
+    except Exception as e:
+        logger.warning("[AP-DIAG] Firma CLI: error inyectando firma en iframe: %s", e)
+        return False
+
+    try:
+        await page.locator("#ventanaModal").first.wait_for(state="hidden", timeout=20000)
+        logger.info("[AP-DIAG] Firma CLI: modal cerrado tras inyeccion.")
+    except Exception:
+        logger.info("[AP-DIAG] Firma CLI: modal no cerro en timeout; se valida estado igualmente.")
+    return True
+
+
 async def _esperar_exito_firma_o_refrescar(page: Page, config: AyuntaPalmaConfig) -> None:
     """
     Espera el texto de exito de firma.
@@ -919,25 +1130,36 @@ async def subir_documentos(
     await page.wait_for_timeout(2000)
     logger.info("[AP-DIAG] Pre-firma: click/reintentos en boton Firmar.")
     await _click_firmar_con_reintentos(page, config, max_intentos=3)
-    logger.info("[AP-DIAG] Arrancando monitor unificado AutoFirma/Edge/Certificado.")
-    autofirma_monitor_task = asyncio.create_task(monitor_autofirma_windows(timeout_s=70))
-    await page.wait_for_timeout(2000)
-    logger.info("[AP-DIAG] Firma modal: click en 'Signar tots els documents'.")
-    await _click_signar_tots_documents(page, config)
+    firma_cli_ok = False
+    if config.autofirma_cli_intercept:
+        logger.info("[AP-DIAG] Firma CLI por intercepcion activada (XALOC_AUTOFIRMA_CLI_INTERCEPT=1).")
+        try:
+            firma_cli_ok = await _firmar_por_intercepcion_cli(page, config)
+        except Exception as e:
+            logger.warning("[AP-DIAG] Firma CLI lanzo excepcion; aplicando fallback monitor UI: %s", e)
 
-    logger.info("[AP-DIAG] Esperando resultado del monitor unificado.")
-    try:
-        monitor_result = await asyncio.wait_for(autofirma_monitor_task, timeout=80)
-        logger.info(
-            "[AP-DIAG] Monitor AutoFirma: edge_clicked=%s cert_clicked=%s autofirma_seen=%s autofirma_clicks=%s timed_out=%s",
-            monitor_result.edge_clicked,
-            monitor_result.cert_clicked,
-            monitor_result.autofirma_windows_seen,
-            monitor_result.autofirma_clicks,
-            monitor_result.timed_out,
-        )
-    except Exception as e:
-        logger.warning("[AP-DIAG] Monitor unificado devolvio error/timeout: %s", e)
+    if not firma_cli_ok:
+        logger.info("[AP-DIAG] Arrancando monitor unificado AutoFirma/Edge/Certificado.")
+        autofirma_monitor_task = asyncio.create_task(monitor_autofirma_windows(timeout_s=70))
+        await page.wait_for_timeout(2000)
+        logger.info("[AP-DIAG] Firma modal: click en 'Signar tots els documents'.")
+        await _click_signar_tots_documents(page, config)
+
+        logger.info("[AP-DIAG] Esperando resultado del monitor unificado.")
+        try:
+            monitor_result = await asyncio.wait_for(autofirma_monitor_task, timeout=80)
+            logger.info(
+                "[AP-DIAG] Monitor AutoFirma: edge_clicked=%s cert_clicked=%s autofirma_seen=%s autofirma_clicks=%s timed_out=%s",
+                monitor_result.edge_clicked,
+                monitor_result.cert_clicked,
+                monitor_result.autofirma_windows_seen,
+                monitor_result.autofirma_clicks,
+                monitor_result.timed_out,
+            )
+        except Exception as e:
+            logger.warning("[AP-DIAG] Monitor unificado devolvio error/timeout: %s", e)
+    else:
+        logger.info("[AP-DIAG] Firma completada por intercepcion CLI; no se usa monitor UI.")
     logger.info("[AP-DIAG] Validando firma real.")
     await _verificar_firma_realizada(page, config)
     logger.info("[AP-DIAG] Firma validada; iniciando descarga de justificante.")

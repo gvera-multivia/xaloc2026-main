@@ -117,6 +117,7 @@ class SQLiteQueueGateway(QueueGateway):
     async def ack(self, job: QueueJob, *, result: Optional[dict[str, Any]] = None, screenshot: Optional[str] = None) -> None:
         if job.queue_ref is not None:
             self.db.update_task_status(job.queue_ref, "completed", result=result, screenshot=screenshot)
+            self.db.delete_task(job.queue_ref)
         self.db.update_job_run_state(job.job_id, "completed", finished=True, result_snapshot=result)
 
     async def nack(self, job: QueueJob, *, error: str, retryable: bool = False) -> None:
