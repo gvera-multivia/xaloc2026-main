@@ -348,10 +348,20 @@ async def _set_address_hidden_fields_strategy_a(page: Page, address: dict[str, s
             fire(el);
           }
 
-          const adNodes = document.querySelectorAll('#form\\:adreca');
-          for (const n of adNodes) {
-            n.value = adrecaText || '';
-            fire(n);
+          // En BASE hay dos nodos con name/id 'form:adreca' (textarea + hidden).
+          // Evitamos querySelector con ':' para no romper por escape CSS.
+          const adNodesByName = Array.from(document.getElementsByName('form:adreca') || []);
+          if (adNodesByName.length > 0) {
+            for (const n of adNodesByName) {
+              n.value = adrecaText || '';
+              fire(n);
+            }
+          } else {
+            const single = document.getElementById('form:adreca');
+            if (single) {
+              single.value = adrecaText || '';
+              fire(single);
+            }
           }
         }
         """,
@@ -362,6 +372,8 @@ async def _set_address_hidden_fields_strategy_a(page: Page, address: dict[str, s
 
 async def _open_address_popup(page: Page, config: BaseOnlineConfig) -> bool:
     selectors = [
+        "#imgBuscar",
+        "img[onclick*='assistentAdreca']",
         "a[onclick*='popup'][onclick*='adre']",
         "a[onclick*='obr'][onclick*='adre']",
         "input[onclick*='popup'][onclick*='adre']",
@@ -503,12 +515,25 @@ async def _try_strategy_b(page: Page, address: dict[str, str], adreca_text: str,
     await page.evaluate(
         """
         (value) => {
-          const nodes = document.querySelectorAll('#form\\:adreca');
-          for (const el of nodes) {
-            try { el.removeAttribute('readonly'); } catch (e) {}
-            el.value = value;
+          const fire = (el) => {
             el.dispatchEvent(new Event('input', { bubbles: true }));
             el.dispatchEvent(new Event('change', { bubbles: true }));
+            el.dispatchEvent(new Event('blur', { bubbles: true }));
+          };
+          const nodes = Array.from(document.getElementsByName('form:adreca') || []);
+          if (nodes.length > 0) {
+            for (const el of nodes) {
+              try { el.removeAttribute('readonly'); } catch (e) {}
+              el.value = value || '';
+              fire(el);
+            }
+          } else {
+            const single = document.getElementById('form:adreca');
+            if (single) {
+              try { single.removeAttribute('readonly'); } catch (e) {}
+              single.value = value || '';
+              fire(single);
+            }
           }
         }
         """,
