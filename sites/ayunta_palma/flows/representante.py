@@ -12,7 +12,18 @@ REPRESENTANTE_EMAIL = "info@xvia-serviciosjuridicos.com"
 REPRESENTANTE_TELEFONO = "722761154"
 
 
-async def _sobrescribir_contacto_representante(page: Page, config: AyuntaPalmaConfig) -> None:
+def _resolver_pagina_activa(page: Page) -> Page:
+    if not page.is_closed():
+        return page
+    ctx = page.context
+    abiertas = [p for p in ctx.pages if not p.is_closed()]
+    if not abiertas:
+        raise PlaywrightTimeoutError("No hay pestañas activas en el contexto para continuar.")
+    return abiertas[-1]
+
+
+async def _sobrescribir_contacto_representante(page: Page, config: AyuntaPalmaConfig) -> Page:
+    page = _resolver_pagina_activa(page)
     selectors = config.selectors
 
     email_selector = page.locator(selectors.email_selector).first
@@ -22,7 +33,7 @@ async def _sobrescribir_contacto_representante(page: Page, config: AyuntaPalmaCo
             try:
                 await email_selector.select_option(label="[Otro]")
             except Exception:
-                await email_selector.select_option(value="")
+                pass
         except PlaywrightTimeoutError:
             pass
 
@@ -42,15 +53,17 @@ async def _sobrescribir_contacto_representante(page: Page, config: AyuntaPalmaCo
             try:
                 await telefono_selector.select_option(label="[Otro]")
             except Exception:
-                await telefono_selector.select_option(value="")
+                pass
         except PlaywrightTimeoutError:
             pass
 
     await telefono_input.wait_for(state="visible", timeout=20000)
     await telefono_input.fill(REPRESENTANTE_TELEFONO)
+    return page
 
 
 async def indicar_representante(page: Page, config: AyuntaPalmaConfig) -> Page:
+    page = _resolver_pagina_activa(page)
     selectors = config.selectors
 
     boton = page.locator(selectors.btn_indicar_representante).first
@@ -86,16 +99,21 @@ async def indicar_representante(page: Page, config: AyuntaPalmaConfig) -> Page:
         pass
 
     try:
-        await _sobrescribir_contacto_representante(page, config)
-    except PlaywrightTimeoutError as e:
-        titulos = []
+        page = await _sobrescribir_contacto_representante(page, config)
+    except Exception:
+        # Si justo en esta fase el sitio cierra/rota target, reenganchar y reintentar una vez.
+        page = _resolver_pagina_activa(page)
         try:
-            titulos = await page.locator(".ui-dialog-title").all_inner_texts()
-        except Exception:
-            pass
-        raise PlaywrightTimeoutError(
-            f"No se abrio el popup de representante (campos no visibles). Titulos detectados: {titulos}"
-        ) from e
+            page = await _sobrescribir_contacto_representante(page, config)
+        except PlaywrightTimeoutError as e:
+            titulos = []
+            try:
+                titulos = await page.locator(".ui-dialog-title").all_inner_texts()
+            except Exception:
+                pass
+            raise PlaywrightTimeoutError(
+                f"No se abrio el popup de representante (campos no visibles). Titulos detectados: {titulos}"
+            ) from e
 
     aceptar = page.locator(selectors.btn_aceptar_modal).first
     aceptar_input_real = page.locator("#ctl00_ctl00_cphM_cph_btnAceptarPersona").first
