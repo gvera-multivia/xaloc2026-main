@@ -585,7 +585,8 @@ async def _get_sedipualba_firma_frame(page: Page, timeout_ms: int = 20000):
 
 
 async def _firmar_por_intercepcion_cli(page: Page, config: AyuntaPalmaConfig) -> bool:
-    logger.info("[AP-DIAG] Firma CLI: esperando modal/iframe de firma.")
+    logger.info("[AP-DIAG] Firma CLI: Preparando trampa de protocolo...")
+
     try:
         await page.locator("#ventanaModal").first.wait_for(state="visible", timeout=20000)
     except Exception:
@@ -601,95 +602,195 @@ async def _firmar_por_intercepcion_cli(page: Page, config: AyuntaPalmaConfig) ->
         await firma_frame.evaluate(
             """() => {
                 window.__apCapturedAfirmaUrl = null;
-                const originalOpen = window.open ? window.open.bind(window) : null;
+
+                const captureAfirma = (value, source) => {
+                    const s = String(value || '');
+                    if (s.startsWith('afirma://')) {
+                        console.log('INTERCEPTADO: ' + source);
+                        window.__apCapturedAfirmaUrl = s;
+                        return true;
+                    }
+                    return false;
+                };
+
+                const originalOpen = window.open;
                 window.open = function(url, name, features) {
-                    if (url && String(url).startsWith('afirma://')) {
-                        window.__apCapturedAfirmaUrl = String(url);
+                    if (captureAfirma(url, 'window.open')) {
                         return null;
                     }
-                    return originalOpen ? originalOpen(url, name, features) : null;
+                    return originalOpen ? originalOpen.apply(this, arguments) : null;
                 };
+
+                try {
+                    let _lastUrl = String(window.location && window.location.href ? window.location.href : '');
+                    Object.defineProperty(window, 'location', {
+                        set: function(val) {
+                            if (captureAfirma(val, 'window.location=')) {
+                                return;
+                            }
+                            _lastUrl = String(val || '');
+                        },
+                        get: function() { return _lastUrl; },
+                        configurable: true
+                    });
+                } catch (e) {
+                    console.error('No se pudo parchear window.location', e);
+                }
+
+                try {
+                    Object.defineProperty(document, 'location', {
+                        set: function(val) {
+                            if (captureAfirma(val, 'document.location=')) {
+                                return;
+                            }
+                        },
+                        get: function() {
+                            return window.location;
+                        },
+                        configurable: true
+                    });
+                } catch (e) {
+                    console.error('No se pudo parchear document.location', e);
+                }
+
+                try {
+                    const locProto = Object.getPrototypeOf(window.location);
+                    if (locProto) {
+                        const hrefDesc = Object.getOwnPropertyDescriptor(locProto, 'href');
+                        if (hrefDesc && hrefDesc.set) {
+                            const origHrefSetter = hrefDesc.set;
+                            const origHrefGetter = hrefDesc.get;
+                            Object.defineProperty(locProto, 'href', {
+                                get: function() {
+                                    return origHrefGetter ? origHrefGetter.call(this) : '';
+                                },
+                                set: function(v) {
+                                    if (captureAfirma(v, 'location.href=')) {
+                                        return;
+                                    }
+                                    return origHrefSetter.call(this, v);
+                                },
+                                configurable: true
+                            });
+                        }
+                    }
+                } catch (e) {
+                    console.error('No se pudo parchear location.href', e);
+                }
+
                 document.addEventListener('click', (e) => {
                     const link = e.target && e.target.closest ? e.target.closest('a') : null;
                     if (link && link.href && link.href.startsWith('afirma://')) {
+                        console.log('INTERCEPTADO: click en enlace');
                         e.preventDefault();
+                        e.stopPropagation();
+                        if (typeof e.stopImmediatePropagation === 'function') {
+                            e.stopImmediatePropagation();
+                        }
                         window.__apCapturedAfirmaUrl = link.href;
                     }
                 }, true);
+
+                console.log('Trampa de firma activada.');
             }"""
         )
     except Exception as e:
-        logger.warning("[AP-DIAG] Firma CLI: no se pudo inyectar interceptor: %s", e)
+        logger.warning("[AP-DIAG] Error inyectando trampa JS: %s", e)
         return False
 
-    logger.info("[AP-DIAG] Firma CLI: disparando 'Signar tots els documents'.")
+    logger.info("[AP-DIAG] Firma CLI: disparando boton de firma...")
     await _click_signar_tots_documents(page, config)
 
-    try:
-        handle = await firma_frame.wait_for_function("() => window.__apCapturedAfirmaUrl", timeout=30000)
-        afirma_url = await handle.json_value()
-    except Exception:
-        logger.warning("[AP-DIAG] Firma CLI: no se capturo protocolo afirma://.")
-        return False
+    afirma_url = None
+    for _ in range(60):
+        try:
+            afirma_url = await firma_frame.evaluate("window.__apCapturedAfirmaUrl")
+            if afirma_url:
+                logger.info("[AP-DIAG] CAPTURA EXITOSA: URL afirma:// detectada.")
+                break
+
+            input_val = await firma_frame.evaluate(
+                """() => {
+                    const inputs = document.querySelectorAll('input[type="hidden"]');
+                    for (const i of inputs) {
+                        if (i.value && i.value.startsWith('afirma://')) {
+                            return i.value;
+                        }
+                    }
+                    return null;
+                }"""
+            )
+            if input_val:
+                afirma_url = input_val
+                logger.info("[AP-DIAG] CAPTURA EXITOSA: URL encontrada en input oculto (Plan B).")
+                break
+        except Exception:
+            pass
+        await asyncio.sleep(0.5)
+
     if not afirma_url:
-        logger.warning("[AP-DIAG] Firma CLI: URL afirma:// vacia.")
+        logger.warning("[AP-DIAG] Firma CLI: Timeout. No se capturo el protocolo afirma://.")
         return False
 
     logger.info("[AP-DIAG] Firma CLI: ejecutando AutoFirmaCommandLine.")
     firma_b64 = await asyncio.to_thread(_firmar_localmente_cli, str(afirma_url), config)
     if not firma_b64:
+        logger.error("[AP-DIAG] Fallo al generar firma con CLI.")
         return False
 
     try:
-        await firma_frame.evaluate(
+        res_inject = await firma_frame.evaluate(
             """(sig) => {
-                const candidates = [
-                    'ctl00_ctl01_cphM_cph_hfFirma',
-                    'ctl00_ctl01_hfFirma',
-                    'signature',
-                    'sign'
-                ];
+                const candidates = ['ctl00_ctl01_cphM_cph_hfFirma', 'hfFirma', 'signature', 'sign'];
                 let target = null;
+
                 for (const id of candidates) {
                     const el = document.getElementById(id);
                     if (el) { target = el; break; }
                 }
+
                 if (!target) {
                     const hiddens = document.querySelectorAll('input[type="hidden"]');
                     for (const h of hiddens) {
                         const id = (h.id || '').toUpperCase();
-                        if (!id.includes('VIEWSTATE') && !id.includes('EVENTVALIDATION') && (h.value || '') === '') {
+                        if (!id.includes('VIEWSTATE') && !id.includes('EVENTVALIDATION') && h.value === '') {
                             target = h;
                             break;
                         }
                     }
                 }
-                if (!target && document.forms && document.forms[0]) {
+
+                if (!target && document.forms[0]) {
                     target = document.createElement('input');
                     target.type = 'hidden';
                     target.id = 'ctl00_ctl01_cphM_cph_hfFirma';
                     target.name = 'ctl00$ctl01$cphM$cph$hfFirma';
                     document.forms[0].appendChild(target);
                 }
-                if (!target || !document.forms || !document.forms[0]) {
-                    return 'ERR_NO_TARGET_OR_FORM';
+
+                if (target) {
+                    target.value = sig;
+                    if (document.forms[0]) {
+                        document.forms[0].submit();
+                        return 'SUBMIT_OK';
+                    }
                 }
-                target.value = sig;
-                document.forms[0].submit();
-                return 'OK_SUBMIT';
+                return 'ERROR_NO_TARGET';
             }""",
             firma_b64,
         )
+        logger.info("[AP-DIAG] Resultado inyeccion JS: %s", res_inject)
     except Exception as e:
-        logger.warning("[AP-DIAG] Firma CLI: error inyectando firma en iframe: %s", e)
+        logger.warning("[AP-DIAG] Error inyectando firma: %s", e)
         return False
 
     try:
-        await page.locator("#ventanaModal").first.wait_for(state="hidden", timeout=20000)
-        logger.info("[AP-DIAG] Firma CLI: modal cerrado tras inyeccion.")
+        await page.locator("#ventanaModal").first.wait_for(state="hidden", timeout=30000)
+        logger.info("[AP-DIAG] Firma CLI: modal cerrado. Exito.")
+        return True
     except Exception:
-        logger.info("[AP-DIAG] Firma CLI: modal no cerro en timeout; se valida estado igualmente.")
-    return True
+        logger.warning("[AP-DIAG] Firma CLI: modal no se cerro tras submit.")
+        return False
 
 
 async def _esperar_exito_firma_o_refrescar(page: Page, config: AyuntaPalmaConfig) -> None:
