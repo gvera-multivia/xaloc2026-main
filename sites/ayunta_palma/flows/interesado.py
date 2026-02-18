@@ -178,6 +178,7 @@ async def registrar_interesado(
     await _fill_telefono(page, selectors, PALMA_CONTACT_PHONE)
 
     aceptar = page.locator(selectors.btn_aceptar_modal).first
+    aceptar_input_real = page.locator("#ctl00_ctl00_cphM_cph_btnAceptarPersona").first
     try:
         await aceptar.wait_for(state="visible", timeout=10000)
         await aceptar.click()
@@ -193,6 +194,31 @@ async def registrar_interesado(
             if await boton_rep.count() > 0 and await boton_rep.is_visible():
                 await page.wait_for_timeout(config.delay_ms)
                 return page
+        except Exception:
+            pass
+
+        # Fallback robusto: usar el submit real de ASP.NET aunque este oculto.
+        try:
+            if await aceptar_input_real.count() > 0:
+                if await aceptar_input_real.is_visible():
+                    await aceptar_input_real.click()
+                else:
+                    await page.evaluate(
+                        """(selector) => {
+                            const el = document.querySelector(selector);
+                            if (!el) return false;
+                            el.click();
+                            return true;
+                        }""",
+                        "#ctl00_ctl00_cphM_cph_btnAceptarPersona",
+                    )
+                await _wait_for_velo_to_vanish(page, selectors, timeout=15000)
+                await page.wait_for_timeout(config.delay_ms)
+                try:
+                    if await boton_rep.count() > 0 and await boton_rep.is_visible():
+                        return page
+                except Exception:
+                    pass
         except Exception:
             pass
 
