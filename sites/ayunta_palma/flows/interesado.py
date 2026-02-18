@@ -168,9 +168,38 @@ async def registrar_interesado(
     await _fill_email(page, selectors, PALMA_CONTACT_EMAIL)
     await _fill_telefono(page, selectors, PALMA_CONTACT_PHONE)
 
-    aceptar = page.locator(selectors.btn_aceptar_modal)
-    await aceptar.wait_for(state="visible")
-    await aceptar.click()
-    await _wait_for_velo_to_vanish(page, selectors)
-    await page.wait_for_timeout(config.delay_ms)
-    return page
+    aceptar = page.locator(selectors.btn_aceptar_modal).first
+    try:
+        await aceptar.wait_for(state="visible", timeout=10000)
+        await aceptar.click()
+        await _wait_for_velo_to_vanish(page, selectors)
+        await page.wait_for_timeout(config.delay_ms)
+        return page
+    except PlaywrightTimeoutError as e:
+        # En algunos casos Sedipualba hace postback/navegacion y el dialogo desaparece
+        # antes de exponer el boton de "Aceptar" en el selector estricto.
+        await _wait_for_velo_to_vanish(page, selectors, timeout=15000)
+        boton_rep = page.locator(selectors.btn_indicar_representante).first
+        try:
+            if await boton_rep.count() > 0 and await boton_rep.is_visible():
+                await page.wait_for_timeout(config.delay_ms)
+                return page
+        except Exception:
+            pass
+
+        aceptar_generico = page.locator("button:has-text('Aceptar')").first
+        try:
+            if await aceptar_generico.count() > 0 and await aceptar_generico.is_visible():
+                await aceptar_generico.click()
+                await _wait_for_velo_to_vanish(page, selectors)
+                await page.wait_for_timeout(config.delay_ms)
+                return page
+        except Exception:
+            pass
+
+        try:
+            await boton_rep.wait_for(state="visible", timeout=15000)
+            await page.wait_for_timeout(config.delay_ms)
+            return page
+        except Exception:
+            raise e
