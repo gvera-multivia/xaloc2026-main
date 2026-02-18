@@ -4,10 +4,13 @@ Flujo de autenticación para Ayunta Palma.
 
 from __future__ import annotations
 
+import logging
+
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
 from sites.ayunta_palma.config import AyuntaPalmaConfig
 
+logger = logging.getLogger(__name__)
 
 def _is_nueva_entrada_url(url: str) -> bool:
     return "/carpetaciudadana/nueva_entrada.aspx" in (url or "")
@@ -19,6 +22,22 @@ def _is_preguntar_entrada_url(url: str) -> bool:
 
 def _is_post_login_url(url: str) -> bool:
     return _is_nueva_entrada_url(url) or _is_preguntar_entrada_url(url)
+
+
+async def _forzar_idioma_es(page: Page, config: AyuntaPalmaConfig) -> None:
+    if str(config.lang or "").lower() != "es":
+        return
+    if not _is_post_login_url(page.url):
+        return
+    try:
+        link_es = page.locator("a[href*='cambiaridioma=es']").first
+        if await link_es.count() > 0 and await link_es.is_visible():
+            logger.info("[AP-LOGIN] Forzando idioma a castellano...")
+            await link_es.click()
+            await page.wait_for_load_state("domcontentloaded")
+            await page.wait_for_timeout(config.delay_ms)
+    except Exception:
+        pass
 
 
 async def _abrir_nueva_instancia(page: Page, config: AyuntaPalmaConfig) -> None:
@@ -58,12 +77,14 @@ async def ejecutar_login(page: Page, config: AyuntaPalmaConfig) -> Page:
     if page.url.startswith(config.url_base) or _is_post_login_url(page.url):
         # Evitar recargar si ya estamos en la misma URL (perfil persistente)
         await page.wait_for_timeout(config.delay_ms)
+        await _forzar_idioma_es(page, config)
         await _abrir_nueva_instancia(page, config)
         return page
 
     await page.goto(config.url_base, wait_until="networkidle")
     await page.wait_for_timeout(config.delay_ms)
     if _is_post_login_url(page.url):
+        await _forzar_idioma_es(page, config)
         await _abrir_nueva_instancia(page, config)
         return page
 
@@ -79,5 +100,6 @@ async def ejecutar_login(page: Page, config: AyuntaPalmaConfig) -> Page:
         raise
     await opcion.click()
     await page.wait_for_timeout(config.delay_ms)
+    await _forzar_idioma_es(page, config)
     await _abrir_nueva_instancia(page, config)
     return page

@@ -1062,6 +1062,40 @@ async def _click_firmar_con_reintentos(page: Page, config: AyuntaPalmaConfig, ma
     logger.warning("[AP-DIAG] Pre-firma: agotados reintentos; continuamos con flujo y watchers.")
 
 
+async def _abrir_dialogo_anadir_documento(page: Page, config: AyuntaPalmaConfig) -> None:
+    selectors = config.selectors
+    boton = page.locator(selectors.btn_anadir_documento).first
+    hidden = page.locator("input[id*='btnDocumentoAPresentarNuevoFichero']").first
+
+    try:
+        if await boton.count() > 0 and await boton.is_visible():
+            await boton.click()
+            await page.wait_for_timeout(config.delay_ms)
+            logger.info("[AP-DIAG] Boton visible 'Añadir/Afegir' pulsado.")
+            return
+    except Exception:
+        pass
+
+    try:
+        if await hidden.count() > 0:
+            if await hidden.is_visible():
+                await hidden.click()
+            else:
+                await page.evaluate(
+                    """() => {
+                        const el = document.querySelector("input[id*='btnDocumentoAPresentarNuevoFichero']");
+                        if (el) el.click();
+                    }"""
+                )
+            await page.wait_for_timeout(config.delay_ms)
+            logger.info("[AP-DIAG] Hidden submit 'btnDocumentoAPresentarNuevoFichero' pulsado.")
+            return
+    except Exception:
+        pass
+
+    raise PlaywrightTimeoutError("No se pudo abrir el dialogo de añadir documentos.")
+
+
 async def _click_signar_tots_documents(page: Page, config: AyuntaPalmaConfig) -> None:
     async def _get_ventana_modal_frame():
         try:
@@ -1194,10 +1228,7 @@ async def subir_documentos(
         return page
 
     selectors = config.selectors
-    boton_anadir = page.locator(selectors.btn_anadir_documento)
-    await boton_anadir.wait_for(state="visible")
-    await boton_anadir.click()
-    await page.wait_for_timeout(config.delay_ms)
+    await _abrir_dialogo_anadir_documento(page, config)
     logger.info("[AP-DIAG] Dialogo de anadir documento abierto.")
 
     ruta = [str(p) for p in archivos]
