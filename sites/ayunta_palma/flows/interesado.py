@@ -182,11 +182,40 @@ async def registrar_interesado(
     boton_rep = page.locator(selectors.btn_indicar_representante).first
 
     async def _estado_ok_post_aceptar(timeout_ms: int = 8000) -> bool:
-        try:
-            await boton_rep.wait_for(state="visible", timeout=timeout_ms)
-            return True
-        except Exception:
-            return False
+        end = timeout_ms
+        waited = 0
+        step = 400
+        while waited < end:
+            try:
+                if await boton_rep.count() > 0 and await boton_rep.is_visible():
+                    return True
+            except Exception:
+                pass
+
+            try:
+                hidden_rep = page.locator("input[id*='btnListaInteresadosItemNuevoRepresentante']").first
+                if await hidden_rep.count() > 0:
+                    return True
+            except Exception:
+                pass
+
+            try:
+                panel_lista = page.locator("#ctl00_ctl00_cphM_cph_pnlListaInteresados").first
+                if await panel_lista.count() > 0 and await panel_lista.is_visible():
+                    return True
+            except Exception:
+                pass
+
+            try:
+                modal_tipo_usuario = page.locator(selectors.persona_tipo_usuario).first
+                if await modal_tipo_usuario.count() > 0 and not await modal_tipo_usuario.is_visible():
+                    return True
+            except Exception:
+                pass
+
+            await page.wait_for_timeout(step)
+            waited += step
+        return False
 
     # 1) Prioridad absoluta: submit real ASP.NET (aunque este hidden).
     try:

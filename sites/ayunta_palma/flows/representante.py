@@ -53,9 +53,32 @@ async def _sobrescribir_contacto_representante(page: Page, config: AyuntaPalmaCo
 async def indicar_representante(page: Page, config: AyuntaPalmaConfig) -> Page:
     selectors = config.selectors
 
-    boton = page.locator(selectors.btn_indicar_representante)
-    await boton.wait_for(state="visible")
-    await boton.click()
+    boton = page.locator(selectors.btn_indicar_representante).first
+    hidden_boton = page.locator("input[id*='btnListaInteresadosItemNuevoRepresentante']").first
+    clicked = False
+    try:
+        if await boton.count() > 0 and await boton.is_visible():
+            await boton.click()
+            clicked = True
+    except Exception:
+        pass
+    if not clicked:
+        try:
+            if await hidden_boton.count() > 0:
+                if await hidden_boton.is_visible():
+                    await hidden_boton.click()
+                else:
+                    await page.evaluate(
+                        """() => {
+                            const el = document.querySelector("input[id*='btnListaInteresadosItemNuevoRepresentante']");
+                            if (el) el.click();
+                        }"""
+                    )
+                clicked = True
+        except Exception:
+            pass
+    if not clicked:
+        raise PlaywrightTimeoutError("No se encontro accion para abrir 'Indicar representante'.")
     await page.wait_for_timeout(config.delay_ms)
 
     dialog_titulo = page.locator(".ui-dialog-title", has_text="Nuevo/a representante del/de la interesado/a")
