@@ -320,7 +320,7 @@ async def _find_justificante_action_locator(page: Page, *, timeout_ms: int = 600
                 last_error = e
                 continue
 
-        await page.wait_for_timeout(500)
+        await page.wait_for_timeout(1000)
 
     if last_error is not None:
         raise TimeoutError(
@@ -441,7 +441,7 @@ async def _find_signar_presentar_trigger(page: Page, *, timeout_ms: int = 30000)
                         continue
             except Exception:
                 continue
-        await page.wait_for_timeout(300)
+        await page.wait_for_timeout(1000)
     raise TimeoutError("No se encontro el boton de firma 'Signar i Presentar/presentar' dentro del timeout.")
 
 

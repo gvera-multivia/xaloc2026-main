@@ -4,7 +4,7 @@ from playwright.async_api import Page
 
 from sites.base_online.data_models import BaseOnlineP1ContactData
 
-DELAY_MS = 500
+DELAY_MS = 1000
 
 
 async def rellenar_contacto(page: Page, contacto: BaseOnlineP1ContactData) -> None:

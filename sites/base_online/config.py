@@ -91,6 +91,7 @@ class BaseOnlineConfig(BaseConfig):
     selectors: BaseOnlineSelectors = field(default_factory=BaseOnlineSelectors)
     scripts: BaseOnlineScripts = field(default_factory=BaseOnlineScripts)
     defaults: BaseOnlineDefaults = field(default_factory=BaseOnlineDefaults)
+    delay_ms: int = 1000
 
     # Landing
     base_online_link_selector: str = "a.logo_text[href*='/sav/valid'], a.logo_text[href*='base.cat/sav/valid']"

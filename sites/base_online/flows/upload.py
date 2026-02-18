@@ -6,7 +6,7 @@ from pathlib import Path
 
 from playwright.async_api import Page
 
-DELAY_MS = 2000
+DELAY_MS = 1000
 
 
 async def subir_archivos_por_modal(

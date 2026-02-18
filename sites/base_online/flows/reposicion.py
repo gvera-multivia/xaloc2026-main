@@ -31,12 +31,65 @@ def _normalizar_tipus_objecte(raw: str) -> str:
 async def _avanzar_a_presentacion_p3(page: Page) -> None:
     logging.info("[P3] Continuando al paso de presentacion...")
     await page.locator("input[type='submit'][name='form0:j_id66'][value='Continuar']").first.click()
-    await page.wait_for_timeout(500)
+    await page.wait_for_timeout(1000)
     await page.wait_for_load_state("domcontentloaded")
 
     boton_firma = page.locator("input[type='button'][value='Signar i Presentar']").first
     await boton_firma.wait_for(state="visible", timeout=20000)
     logging.info("[P3] Pantalla 'Signar i Presentar' detectada.")
+
+
+async def _set_textarea_stable(
+    page: Page,
+    selector: str,
+    value: str | None,
+    *,
+    label: str,
+    wait_ms: int,
+    retries: int = 3,
+) -> None:
+    expected = str(value or "").strip()
+    locator = page.locator(selector).first
+    await locator.wait_for(state="visible", timeout=20000)
+    await locator.scroll_into_view_if_needed()
+
+    for intento in range(1, retries + 1):
+        await locator.click()
+        await locator.fill("")
+        if expected:
+            await locator.type(expected, delay=20)
+
+        ok = await page.evaluate(
+            """([sel, val]) => {
+                const el = document.querySelector(sel);
+                if (!el) return false;
+                const expected = String(val || '').trim();
+                const current = String(el.value || '').trim();
+                if (current !== expected) {
+                    el.value = expected;
+                }
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                el.dispatchEvent(new Event('blur', { bubbles: true }));
+                return String(el.value || '').trim() === expected;
+            }""",
+            [selector, expected],
+        )
+        current = (await locator.input_value()).strip()
+        if ok and current == expected:
+            return
+
+        logging.warning(
+            "[P3] Reintento %s/%s al persistir %s (actual=%r esperado=%r)",
+            intento,
+            retries,
+            label,
+            current,
+            expected,
+        )
+        await page.wait_for_timeout(wait_ms)
+
+    raise ValueError(f"[P3] No se pudo persistir el campo {label}.")
 
 
 async def rellenar_formulario_p3(
@@ -47,7 +100,7 @@ async def rellenar_formulario_p3(
     payload: dict,
 ) -> None:
     logging.info("[P3] Rellenando formulario de Recurso de Reposicion...")
-    delay_ms = getattr(config, "delay_ms", 500)
+    delay_ms = getattr(config, "delay_ms", 1000)
 
     # 1. Inputs radio: tipo de objeto
     tipus_objecte = _normalizar_tipus_objecte(data.tipus_objecte)
@@ -63,7 +116,13 @@ async def rellenar_formulario_p3(
 
     # 2. Dades específiques
     logging.info("[P3] Introduciendo datos especificos...")
-    await page.locator(config.p3_textarea_dades).first.fill(data.dades_especifiques)
+    await _set_textarea_stable(
+        page,
+        config.p3_textarea_dades,
+        data.dades_especifiques,
+        label="dades_especifiques",
+        wait_ms=delay_ms,
+    )
     await page.wait_for_timeout(delay_ms)
 
     # 3. Tipo de solicitud
@@ -73,12 +132,24 @@ async def rellenar_formulario_p3(
 
     # 4. Exposición
     logging.info("[P3] Introduciendo exposicion...")
-    await page.locator(config.p3_textarea_exposo).first.fill(data.exposo)
+    await _set_textarea_stable(
+        page,
+        config.p3_textarea_exposo,
+        data.exposo,
+        label="exposo",
+        wait_ms=delay_ms,
+    )
     await page.wait_for_timeout(delay_ms)
 
     # 5. Solicitud
     logging.info("[P3] Introduciendo solicitud...")
-    await page.locator(config.p3_textarea_solicito).first.fill(data.solicito)
+    await _set_textarea_stable(
+        page,
+        config.p3_textarea_solicito,
+        data.solicito,
+        label="solicito",
+        wait_ms=delay_ms,
+    )
     await page.wait_for_timeout(delay_ms)
 
     # 6. Botón Continuar (Página 1 -> Página Documentos)

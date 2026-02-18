@@ -10,7 +10,7 @@ from sites.base_online.flows.common import rellenar_contacto
 from sites.base_online.flows.firma_y_justificante import firmar_presentar_y_descargar_justificante
 from sites.base_online.flows.upload import subir_archivos_por_modal
 
-DELAY_MS = 500
+DELAY_MS = 1000
 
 
 def _parse_expediente_parts(raw: str) -> tuple[str | None, str | None, str | None]:

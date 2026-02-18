@@ -6,7 +6,7 @@ from playwright.async_api import Page
 
 from sites.base_online.data_models import BaseOnlineTarget
 
-DELAY_MS = 500
+DELAY_MS = 1000
 
 
 _PROTOCOL_TO_URL = {

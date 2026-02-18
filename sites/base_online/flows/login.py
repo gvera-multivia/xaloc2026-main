@@ -26,7 +26,7 @@ async def _aceptar_cookies_si_aparece(page: Page) -> None:
         try:
             if await boton.count() > 0:
                 await boton.first.click(timeout=1500)
-                await page.wait_for_timeout(500)
+                await page.wait_for_timeout(1000)
                 return
         except Exception:
             continue
@@ -95,7 +95,7 @@ async def _click_enlace_robusto(page: Page, enlace, url_destino: str, config: Ba
 
     try:
         await enlace.scroll_into_view_if_needed()
-        await page.wait_for_timeout(500)
+        await page.wait_for_timeout(config.delay_ms)
     except Exception:
         pass
 
