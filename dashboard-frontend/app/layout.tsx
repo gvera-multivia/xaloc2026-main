@@ -3,6 +3,7 @@ import "./globals.css";
 import { WebSocketProvider } from "@/lib/WebSocketContext";
 import { AuthProvider } from "@/lib/AuthContext";
 import AppShell from "@/components/AppShell";
+import { Toaster } from "sileo";
 
 export const metadata: Metadata = {
   title: "Morrigan",
@@ -30,6 +31,19 @@ export default function RootLayout({
         <AuthProvider>
           <WebSocketProvider>
             <AppShell>{children}</AppShell>
+            <Toaster
+              position="top-right"
+              options={{
+                fill: "#171717",
+                roundness: 16,
+                styles: {
+                  title: "text-white!",
+                  description: "text-white/75!",
+                  badge: "bg-white/10!",
+                  button: "bg-white/10! hover:bg-white/15!",
+                },
+              }}
+            />
           </WebSocketProvider>
         </AuthProvider>
       </body>

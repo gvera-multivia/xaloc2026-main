@@ -8,9 +8,12 @@ import {
     AlertCircle,
     FileText,
     Clock,
-    Unlock
+    Unlock,
+    Trash2,
+    RefreshCw
 } from 'lucide-react';
-import { api } from '@/lib/api';
+import { api, queueApi } from '@/lib/api';
+import { sileo } from 'sileo';
 
 interface BlacklistItem {
     site_id: string;
@@ -46,13 +49,34 @@ export default function BlacklistPage() {
     useEffect(() => { fetchBlacklist(); }, []);
     const knownSites = ['madrid', 'xaloc_girona', 'base_online', 'ayunta_palma'];
 
+    // Action 1 & 2: Delete/Unblock (Functionally the same for now)
     const handleUnblock = async (siteId: string, resourceId: number) => {
-        setBusy(`${siteId}-${resourceId}`);
+        setBusy(`unblock-${siteId}-${resourceId}`);
         try {
             await api.delete<Record<string, unknown>>(`/blacklist/${encodeURIComponent(siteId)}/${resourceId}`);
+            sileo.success({ title: 'Recurso desbloqueado', description: `${siteId} #${resourceId}` });
             await fetchBlacklist();
         } catch {
+            sileo.error({ title: 'Error al desbloquear recurso' });
             setError('Error al desbloquear recurso.');
+        } finally {
+            setBusy(null);
+        }
+    };
+
+    // Action 3: Retry (Delete + Recover)
+    const handleRetry = async (siteId: string, resourceId: number) => {
+        setBusy(`retry-${siteId}-${resourceId}`);
+        try {
+            // First, remove from blacklist
+            await api.delete<Record<string, unknown>>(`/blacklist/${encodeURIComponent(siteId)}/${resourceId}`);
+            // Then, trigger recovery
+            await queueApi.recoverItem(siteId, resourceId);
+            sileo.success({ title: 'Reintento lanzado', description: `${siteId} #${resourceId} — Desbloqueado y en cola de recuperación` });
+            await fetchBlacklist();
+        } catch {
+            sileo.error({ title: 'Error al reintentar recurso' });
+            setError('Error al reintentar recurso.');
         } finally {
             setBusy(null);
         }
@@ -77,12 +101,14 @@ export default function BlacklistPage() {
                 reason: newReason.trim() || 'Bloqueo manual desde dashboard',
                 source: 'manual',
             });
+            sileo.success({ title: 'Bloqueo creado', description: `${newSiteId} #${resourceId}` });
             setShowAddForm(false);
             setNewResourceId('');
             setNewReason('');
             setError('');
             await fetchBlacklist();
         } catch {
+            sileo.error({ title: 'Error al crear el bloqueo manual' });
             setError('Error al crear el bloqueo manual.');
         } finally {
             setBusy(null);
@@ -223,13 +249,39 @@ export default function BlacklistPage() {
                                     </div>
                                 </div>
 
-                                <button
-                                    onClick={() => handleUnblock(item.site_id, item.resource_id)}
-                                    disabled={busy === `${item.site_id}-${item.resource_id}`}
-                                    className="w-full py-3 bg-secondary text-foreground rounded-2xl text-xs font-bold hover:bg-primary hover:text-primary-foreground transition-all flex items-center justify-center gap-2 group-hover:shadow-lg disabled:opacity-50"
-                                >
-                                    <Unlock size={14} /> Desbloquear Recurso
-                                </button>
+                                <div className="flex flex-col gap-2">
+                                    {/* Opción 1: Eliminar (Olvido) */}
+                                    <button
+                                        onClick={() => handleUnblock(item.site_id, item.resource_id)}
+                                        disabled={busy === `unblock-${item.site_id}-${item.resource_id}`}
+                                        className="w-full py-2 bg-secondary/80 text-foreground border border-border rounded-xl text-xs font-bold hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                                        title="Eliminar de la lista negra (Olvido)"
+                                    >
+                                        <Trash2 size={14} /> Eliminar
+                                    </button>
+
+                                    <div className="flex gap-2">
+                                        {/* Opción 2: Desbloquear (Standard) */}
+                                        <button
+                                            onClick={() => handleUnblock(item.site_id, item.resource_id)}
+                                            disabled={busy === `unblock-${item.site_id}-${item.resource_id}`}
+                                            className="flex-1 py-2 bg-secondary text-foreground rounded-xl text-xs font-bold hover:bg-primary hover:text-primary-foreground transition-all flex items-center justify-center gap-2 group-hover:shadow-lg disabled:opacity-50"
+                                            title="Desbloquear para que continúe la ejecución normal"
+                                        >
+                                            <Unlock size={14} /> Desbloquear
+                                        </button>
+
+                                        {/* Opción 3: Reintentar (Desbloquear + Recover) */}
+                                        <button
+                                            onClick={() => handleRetry(item.site_id, item.resource_id)}
+                                            disabled={busy === `retry-${item.site_id}-${item.resource_id}`}
+                                            className="flex-1 py-2 bg-primary text-primary-foreground rounded-xl text-xs font-bold hover:brightness-110 transition-all flex items-center justify-center gap-2 group-hover:shadow-lg disabled:opacity-50"
+                                            title="Desbloquear y forzar reintento inmediato"
+                                        >
+                                            <RefreshCw size={14} /> Reintentar
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         ))
                     )}

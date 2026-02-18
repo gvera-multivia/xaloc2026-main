@@ -12,12 +12,13 @@ import {
   Check,
   X,
 } from "lucide-react";
-import { queueApi, authApi, configApi, api, historyApi } from "@/lib/api";
-import { QueueItem, PendingAuth, PauseInfo, OrganismoConfig, Incident } from "@/lib/types";
+import { queueApi, authApi, configApi, api } from "@/lib/api";
+import { QueueItem, PendingAuth, PauseInfo, OrganismoConfig } from "@/lib/types";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { canManagePauses as clientViewCanManagePauses } from "@/lib/permissions";
 import { useAuth } from "@/lib/AuthContext";
+import { sileo } from "sileo";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -30,8 +31,12 @@ const KNOWN_SITES = ["madrid", "xaloc_girona", "base_online", "ayunta_palma"];
  * - Surfaces: raven/obsidian
  * - Violet: transitions/edges only
  * - Fate crimson: active decisions (approve/resume), but never loud
- * - Avoid neon greens/yellows; use restrained “status” colors
+ * - Avoid neon greens/yellows; use restrained "status" colors
  * - Table is matte + terminal-native (clean dividers, minimal hover)
+ *
+ * Non-admin users can see queue status and manage authorizations,
+ * but pause/unpause/activate buttons are hidden.
+ * "Incidencias Recientes" section removed (viewed on separate page).
  */
 export default function AdminPage() {
   const { isAdmin } = useAuth();
@@ -40,7 +45,6 @@ export default function AdminPage() {
   const [pauses, setPauses] = useState<PauseInfo[]>([]);
   const [configs, setConfigs] = useState<OrganismoConfig[]>([]);
   const [pendingAuth, setPendingAuth] = useState<PendingAuth[]>([]);
-  const [recentIncidents, setRecentIncidents] = useState<Incident[]>([]);
   const [globalReason, setGlobalReason] = useState("");
   const [globalMinutes, setGlobalMinutes] = useState("120");
   const [loading, setLoading] = useState(true);
@@ -49,19 +53,17 @@ export default function AdminPage() {
 
   const refresh = async () => {
     try {
-      const [queueRes, pausesRes, authRes, configRes, incidentsRes] = await Promise.all([
+      const [queueRes, pausesRes, authRes, configRes] = await Promise.all([
         queueApi.getCurrent(1, 1000),
         api.get<{ items: PauseInfo[] }>("/queue/pauses?active_only=true"),
         authApi.getPending(),
         configApi.list(),
-        historyApi.getIncidents(undefined, 1, 10),
       ]);
 
       setQueueItems(queueRes.items || []);
       setPauses(pausesRes.items || []);
       setPendingAuth(authRes.items || []);
       setConfigs((configRes.items || []) as OrganismoConfig[]);
-      setRecentIncidents(incidentsRes.items || []);
       setError("");
     } catch {
       setError("Error al cargar datos administrativos.");
@@ -117,8 +119,10 @@ export default function AdminPage() {
     setBusy(`pause-${siteId}`);
     try {
       await queueApi.pauseSite(siteId, minutes, globalReason);
+      sileo.success({ title: `${siteId} pausado`, description: minutes ? `Pausa de ${minutes} minutos` : "Pausa indefinida" });
       await refresh();
     } catch {
+      sileo.error({ title: `Error al pausar ${siteId}` });
       setError(`Error al pausar ${siteId}`);
     } finally {
       setBusy(null);
@@ -129,8 +133,10 @@ export default function AdminPage() {
     setBusy(`unpause-${siteId}`);
     try {
       await queueApi.unpauseSite(siteId);
+      sileo.success({ title: `${siteId} reanudado` });
       await refresh();
     } catch {
+      sileo.error({ title: `Error al reanudar ${siteId}` });
       setError(`Error al reanudar ${siteId}`);
     } finally {
       setBusy(null);
@@ -141,8 +147,10 @@ export default function AdminPage() {
     setBusy(`active-${siteId}`);
     try {
       await configApi.setSiteActive(siteId, active);
+      sileo.success({ title: `${siteId} ${active ? "activado" : "desactivado"}` });
       await refresh();
     } catch {
+      sileo.error({ title: `Error al ${active ? "activar" : "desactivar"} ${siteId}` });
       setError(`Error al ${active ? "activar" : "desactivar"} ${siteId}`);
     } finally {
       setBusy(null);
@@ -153,8 +161,10 @@ export default function AdminPage() {
     setBusy(`auth-${id}`);
     try {
       await authApi.approve(id);
+      sileo.success({ title: "Autorización aprobada", description: `Solicitud #${id} autorizada` });
       await refresh();
     } catch {
+      sileo.error({ title: "Error al aprobar autorización" });
       setError("Error al aprobar autorización");
     } finally {
       setBusy(null);
@@ -167,8 +177,10 @@ export default function AdminPage() {
     setBusy(`auth-${id}`);
     try {
       await authApi.reject(id, reason);
+      sileo.success({ title: "Autorización rechazada", description: `Solicitud #${id} rechazada` });
       await refresh();
     } catch {
+      sileo.error({ title: "Error al rechazar autorización" });
       setError("Error al rechazar autorización");
     } finally {
       setBusy(null);
@@ -184,7 +196,7 @@ export default function AdminPage() {
             Panel de Gestión
           </h2>
           <p className="text-xs text-muted-foreground/60 uppercase tracking-widest mt-1">
-            Control de sitios, autorizaciones e incidencias operativas.
+            Control de sitios y autorizaciones operativas.
           </p>
         </div>
       </div>
@@ -296,50 +308,6 @@ export default function AdminPage() {
                     <X size={14} /> Rechazar
                   </button>
                 </div>
-              </div>
-            ))
-          )}
-        </div>
-      </section>
-
-      {/* =========================
-          Incidents
-         ========================= */}
-      <section className="space-y-4">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg border border-border/70 bg-[rgba(17,19,26,0.55)] flex items-center justify-center">
-            <AlertTriangle size={18} className="text-[rgba(255,60,80,0.75)]" />
-          </div>
-          <h3 className="text-xl font-black uppercase tracking-tight text-foreground/90">
-            Incidencias Recientes
-          </h3>
-          <span className="px-2 py-1 rounded-full text-[10px] font-black uppercase tracking-[0.22em] border border-border/70 bg-[rgba(17,19,26,0.55)] text-muted-foreground/80">
-            {recentIncidents.length}
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {recentIncidents.length === 0 ? (
-            <div className="col-span-full py-10 text-center morr-card rounded-2xl border border-dashed border-border/70 text-muted-foreground/80">
-              <p className="text-sm italic">No hay incidencias recientes.</p>
-            </div>
-          ) : (
-            recentIncidents.slice(0, 6).map((inc, idx) => (
-              <div
-                key={`${inc.site_id}-${inc.resource_id}-${inc.started_at}-${idx}`}
-                className="morr-card morr-edge rounded p-5 space-y-3 transition-all duration-500"
-              >
-                <div className="flex justify-between items-start gap-3">
-                  <h4 className="font-black text-sm uppercase tracking-[0.10em] truncate">
-                    {inc.site_id}
-                  </h4>
-                  <span className="text-[10px] px-2 py-1 rounded-md border border-border/70 bg-[rgba(17,19,26,0.55)] text-muted-foreground/80 font-mono">
-                    #{inc.resource_id}
-                  </span>
-                </div>
-                <p className="text-sm leading-relaxed text-foreground/90">
-                  {inc.reason || "Error en flujo de automatizacion"}
-                </p>
               </div>
             ))
           )}
@@ -486,72 +454,80 @@ export default function AdminPage() {
 
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          {canManagePauses && (isPaused ? (
-                            <button
-                              onClick={() => handleUnpause(site)}
-                              disabled={!!busy}
-                              className={cn(
-                                "morr-focus px-4 py-2 rounded-xl",
-                                "text-[11px] font-black uppercase tracking-[0.18em]",
-                                "bg-[color:var(--morr-fate)] text-white",
-                                "border border-transparent hover:border-[rgba(108,77,255,0.28)]",
-                                "transition active:scale-[0.99] disabled:opacity-50",
-                                "inline-flex items-center gap-2"
-                              )}
-                            >
-                              <Play size={14} fill="currentColor" /> Reanudar
-                            </button>
-                          ) : (
+                          {canManagePauses ? (
                             <>
-                              <button
-                                onClick={() => handlePause(site, parseInt(globalMinutes))}
-                                disabled={!!busy}
-                                className={cn(
-                                  "morr-focus px-4 py-2 rounded-xl",
-                                  "text-[11px] font-black uppercase tracking-[0.18em]",
-                                  "bg-[rgba(17,19,26,0.55)] text-foreground/90",
-                                  "border border-border/70",
-                                  "hover:border-[rgba(108,77,255,0.22)] hover:bg-[rgba(255,255,255,0.03)]",
-                                  "transition active:scale-[0.99] disabled:opacity-50",
-                                  "inline-flex items-center gap-2"
-                                )}
-                              >
-                                <Pause size={14} fill="currentColor" /> {globalMinutes}m
-                              </button>
+                              {isPaused ? (
+                                <button
+                                  onClick={() => handleUnpause(site)}
+                                  disabled={!!busy}
+                                  className={cn(
+                                    "morr-focus px-4 py-2 rounded-xl",
+                                    "text-[11px] font-black uppercase tracking-[0.18em]",
+                                    "bg-[color:var(--morr-fate)] text-white",
+                                    "border border-transparent hover:border-[rgba(108,77,255,0.28)]",
+                                    "transition active:scale-[0.99] disabled:opacity-50",
+                                    "inline-flex items-center gap-2"
+                                  )}
+                                >
+                                  <Play size={14} fill="currentColor" /> Reanudar
+                                </button>
+                              ) : (
+                                <>
+                                  <button
+                                    onClick={() => handlePause(site, parseInt(globalMinutes))}
+                                    disabled={!!busy}
+                                    className={cn(
+                                      "morr-focus px-4 py-2 rounded-xl",
+                                      "text-[11px] font-black uppercase tracking-[0.18em]",
+                                      "bg-[rgba(17,19,26,0.55)] text-foreground/90",
+                                      "border border-border/70",
+                                      "hover:border-[rgba(108,77,255,0.22)] hover:bg-[rgba(255,255,255,0.03)]",
+                                      "transition active:scale-[0.99] disabled:opacity-50",
+                                      "inline-flex items-center gap-2"
+                                    )}
+                                  >
+                                    <Pause size={14} fill="currentColor" /> {globalMinutes}m
+                                  </button>
 
+                                  <button
+                                    onClick={() => handlePause(site)}
+                                    disabled={!!busy}
+                                    className={cn(
+                                      "morr-focus px-4 py-2 rounded-xl",
+                                      "text-[11px] font-black uppercase tracking-[0.18em]",
+                                      "bg-[rgba(17,19,26,0.55)] text-foreground/90",
+                                      "border border-border/70",
+                                      "hover:border-[rgba(108,77,255,0.22)] hover:bg-[rgba(255,255,255,0.03)]",
+                                      "transition active:scale-[0.99] disabled:opacity-50",
+                                      "inline-flex items-center gap-2"
+                                    )}
+                                  >
+                                    <Pause size={14} fill="currentColor" /> ∞
+                                  </button>
+                                </>
+                              )}
                               <button
-                                onClick={() => handlePause(site)}
+                                onClick={() => handleSetSiteActive(site, !isActiveConfig)}
                                 disabled={!!busy}
                                 className={cn(
                                   "morr-focus px-4 py-2 rounded-xl",
                                   "text-[11px] font-black uppercase tracking-[0.18em]",
-                                  "bg-[rgba(17,19,26,0.55)] text-foreground/90",
-                                  "border border-border/70",
-                                  "hover:border-[rgba(108,77,255,0.22)] hover:bg-[rgba(255,255,255,0.03)]",
+                                  isActiveConfig
+                                    ? "bg-[rgba(255,60,80,0.08)] text-foreground/90 border border-[rgba(255,60,80,0.25)] hover:bg-[rgba(255,60,80,0.14)]"
+                                    : "bg-[rgba(108,77,255,0.10)] text-foreground/95 border border-[rgba(108,77,255,0.28)] hover:bg-[rgba(108,77,255,0.16)]",
                                   "transition active:scale-[0.99] disabled:opacity-50",
                                   "inline-flex items-center gap-2"
                                 )}
                               >
-                                <Pause size={14} fill="currentColor" /> ∞
+                                <Power size={14} />
+                                {isActiveConfig ? "Desactivar" : "Activar"}
                               </button>
                             </>
-                          ))}
-                          <button
-                            onClick={() => handleSetSiteActive(site, !isActiveConfig)}
-                            disabled={!!busy}
-                            className={cn(
-                              "morr-focus px-4 py-2 rounded-xl",
-                              "text-[11px] font-black uppercase tracking-[0.18em]",
-                              isActiveConfig
-                                ? "bg-[rgba(255,60,80,0.08)] text-foreground/90 border border-[rgba(255,60,80,0.25)] hover:bg-[rgba(255,60,80,0.14)]"
-                                : "bg-[rgba(108,77,255,0.10)] text-foreground/95 border border-[rgba(108,77,255,0.28)] hover:bg-[rgba(108,77,255,0.16)]",
-                              "transition active:scale-[0.99] disabled:opacity-50",
-                              "inline-flex items-center gap-2"
-                            )}
-                          >
-                            <Power size={14} />
-                            {isActiveConfig ? "Desactivar" : "Activar"}
-                          </button>
+                          ) : (
+                            <span className="text-[10px] text-muted-foreground/50 border border-border/30 px-2 py-1 rounded uppercase tracking-widest">
+                              Read Only
+                            </span>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -568,58 +544,58 @@ export default function AdminPage() {
          ========================= */}
       {canManagePauses && (
         <section className="morr-card rounded-2xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-        <div className="space-y-1">
-          <h4 className="font-black uppercase tracking-tight text-foreground/90">
-            Acción Global
-          </h4>
-          <p className="text-sm text-muted-foreground/80">
-            Configura los parámetros para pausas automáticas.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3">
-          {/* Minutes */}
-          <div className="flex items-center rounded-xl border border-border/70 bg-[rgba(17,19,26,0.55)] px-3">
-            <Clock size={16} className="text-muted-foreground/80" />
-            <input
-              type="number"
-              value={globalMinutes}
-              onChange={(e) => setGlobalMinutes(e.target.value)}
-              className="bg-transparent border-none outline-none py-2 px-2 text-sm w-20 font-mono text-foreground/90"
-            />
-            <span className="text-[10px] font-black text-muted-foreground/80 uppercase tracking-[0.22em]">
-              min
-            </span>
+          <div className="space-y-1">
+            <h4 className="font-black uppercase tracking-tight text-foreground/90">
+              Acción Global
+            </h4>
+            <p className="text-sm text-muted-foreground/80">
+              Configura los parámetros para pausas automáticas.
+            </p>
           </div>
 
-          {/* Reason */}
-          <input
-            type="text"
-            placeholder="Motivo de la pausa…"
-            value={globalReason}
-            onChange={(e) => setGlobalReason(e.target.value)}
-            className={cn(
-              "morr-focus flex-1 min-w-[220px] rounded-xl",
-              "bg-[rgba(17,19,26,0.55)] text-foreground/90",
-              "border border-border/70",
-              "focus:border-[rgba(108,77,255,0.30)]",
-              "px-4 py-2 text-sm transition"
-            )}
-          />
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Minutes */}
+            <div className="flex items-center rounded-xl border border-border/70 bg-[rgba(17,19,26,0.55)] px-3">
+              <Clock size={16} className="text-muted-foreground/80" />
+              <input
+                type="number"
+                value={globalMinutes}
+                onChange={(e) => setGlobalMinutes(e.target.value)}
+                className="bg-transparent border-none outline-none py-2 px-2 text-sm w-20 font-mono text-foreground/90"
+              />
+              <span className="text-[10px] font-black text-muted-foreground/80 uppercase tracking-[0.22em]">
+                min
+              </span>
+            </div>
 
-          {/* Pause all (FATE) */}
-          <button
-            className={cn(
-              "morr-focus px-6 py-2 rounded-xl",
-              "text-[11px] font-black uppercase tracking-[0.18em]",
-              "bg-[color:var(--morr-fate)] text-white",
-              "border border-transparent hover:border-[rgba(108,77,255,0.28)]",
-              "transition active:scale-[0.99]"
-            )}
-          >
-            Pausar Todos
-          </button>
-        </div>
+            {/* Reason */}
+            <input
+              type="text"
+              placeholder="Motivo de la pausa…"
+              value={globalReason}
+              onChange={(e) => setGlobalReason(e.target.value)}
+              className={cn(
+                "morr-focus flex-1 min-w-[220px] rounded-xl",
+                "bg-[rgba(17,19,26,0.55)] text-foreground/90",
+                "border border-border/70",
+                "focus:border-[rgba(108,77,255,0.30)]",
+                "px-4 py-2 text-sm transition"
+              )}
+            />
+
+            {/* Pause all (FATE) */}
+            <button
+              className={cn(
+                "morr-focus px-6 py-2 rounded-xl",
+                "text-[11px] font-black uppercase tracking-[0.18em]",
+                "bg-[color:var(--morr-fate)] text-white",
+                "border border-transparent hover:border-[rgba(108,77,255,0.28)]",
+                "transition active:scale-[0.99]"
+              )}
+            >
+              Pausar Todos
+            </button>
+          </div>
         </section>
       )}
 
