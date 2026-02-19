@@ -96,7 +96,6 @@ services:
       QUEUE_MODE: redis_streams
       DASHBOARD_HISTORY_SOURCE: ${DASHBOARD_HISTORY_SOURCE:-pg}
       REPORT_PG_DSN: ${REPORT_PG_DSN:-postgresql://xaloc:xaloc_dev_password@postgres:5432/xaloc}
-      SQLITE_WRITES_ENABLED: "0"
       CLIENT_DOCS_BASE_PATH: /mnt/clientes
     volumes:
       - ../../:/app
@@ -154,7 +153,6 @@ services:
              python -m services.brain_claim.app"
     environment:
       USE_PG_SOURCE_OF_TRUTH: "1"
-      SQLITE_WRITES_ENABLED: "0"
       REDIS_ENABLED: "1"
       REDIS_URL: redis://redis:6379/0
       CANDIDATES_STREAM_KEY: candidates
@@ -183,7 +181,6 @@ services:
              python -m services.payload_validator.app"
     environment:
       USE_PG_SOURCE_OF_TRUTH: "1"
-      SQLITE_WRITES_ENABLED: "0"
       REDIS_ENABLED: "1"
       REDIS_URL: redis://redis:6379/0
       CANDIDATES_STREAM_KEY: candidates
@@ -211,7 +208,6 @@ services:
              python -m services.batcher_dispatcher.app"
     environment:
       USE_PG_SOURCE_OF_TRUTH: "1"
-      SQLITE_WRITES_ENABLED: "0"
       REDIS_ENABLED: "1"
       REDIS_URL: redis://redis:6379/0
       VALIDATED_STREAM_KEY: validated
@@ -241,7 +237,6 @@ services:
              python -m services.worker_orchestrator.app"
     environment:
       USE_PG_SOURCE_OF_TRUTH: "1"
-      SQLITE_WRITES_ENABLED: "0"
       REDIS_ENABLED: "1"
       REDIS_URL: redis://redis:6379/0
       QUEUE_MODE: redis_streams
