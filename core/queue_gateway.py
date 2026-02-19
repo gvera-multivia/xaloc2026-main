@@ -163,12 +163,15 @@ class SQLiteQueueGateway(QueueGateway):
 def build_queue_gateway(*, backend: Optional[str], db: SQLiteDatabase):
     logger = logging.getLogger("queue_gateway")
     queue_mode = get_queue_mode(backend)
+    if queue_mode == "redis_streams":
+        from core.redis_streams_queue_gateway import RedisStreamsQueueGateway
+
+        logger.info("Queue backend activo: redis_streams")
+        return RedisStreamsQueueGateway(db=db)
+
     if is_redis_queue_mode(queue_mode):
-        if queue_mode == "redis_streams":
-            logger.warning(
-                "QUEUE_MODE=redis_streams activo, pero en Fase 0 se usa temporalmente el gateway Redis list/hash actual."
-            )
         from core.redis_queue_gateway import RedisQueueGateway
 
+        logger.info("Queue backend activo: redis_list (list/hash legado)")
         return RedisQueueGateway(db=db)
     return SQLiteQueueGateway(db=db)

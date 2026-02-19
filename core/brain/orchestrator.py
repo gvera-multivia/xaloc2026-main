@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 from core.sqlite_db import SQLiteDatabase
 from core.queue_gateway import build_queue_gateway
 from core.realtime_store import build_realtime_store
-from core.runtime_flags import get_queue_mode
+from core.runtime_flags import get_queue_mode, is_redis_streams_pilot_enabled
 from core.xvia_auth import create_authenticated_session_in_place
 from core.nt_expediente_fixer import is_nt_pattern, fix_nt_expediente
 from core.client_documentation import check_requires_gesdoc
@@ -33,6 +33,8 @@ MAX_CLAIMS_PER_CYCLE = int(os.getenv("BRAIN_MAX_CLAIMS", 999999))
 ENABLED_SITES_CSV = os.getenv("BRAIN_ENABLED_SITES", "").strip()
 QUEUE_BACKEND = (os.getenv("QUEUE_BACKEND", "sqlite") or "sqlite").strip().lower()
 QUEUE_MODE = get_queue_mode(QUEUE_BACKEND)
+if QUEUE_MODE == "redis_streams" and not is_redis_streams_pilot_enabled():
+    QUEUE_MODE = "redis_list"
 
 XVIA_EMAIL = os.getenv("XVIA_EMAIL")
 XVIA_PASSWORD = os.getenv("XVIA_PASSWORD")
@@ -114,6 +116,10 @@ class BrainOrchestrator:
         self.session: Optional[aiohttp.ClientSession] = None
         self.authenticated_user: Optional[str] = None
         self.queue_backend = QUEUE_MODE
+        if (os.getenv("QUEUE_MODE") or "").strip().lower() == "redis_streams" and self.queue_backend != "redis_streams":
+            self.logger.warning(
+                "QUEUE_MODE=redis_streams solicitado, pero REDIS_STREAMS_PILOT_ENABLED!=1. Usando redis_list temporalmente."
+            )
         self.queue_gateway = build_queue_gateway(backend=self.queue_backend, db=self.db)
         self.realtime_store = build_realtime_store(logger=self.logger)
 

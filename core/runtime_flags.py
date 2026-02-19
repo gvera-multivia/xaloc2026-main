@@ -40,6 +40,10 @@ def is_redis_queue_mode(mode: str) -> bool:
     return normalize_queue_mode(mode) in {"redis_list", "redis_streams"}
 
 
+def is_redis_streams_pilot_enabled() -> bool:
+    return _is_true(os.getenv("REDIS_STREAMS_PILOT_ENABLED", "0"))
+
+
 def get_report_pg_dsn(explicit: Optional[str] = None) -> Optional[str]:
     dsn = (explicit or "").strip()
     if not dsn:
@@ -55,4 +59,3 @@ def get_report_pg_dsn(explicit: Optional[str] = None) -> Optional[str]:
     if "://" in dsn or "=" in dsn:
         return dsn
     return None
-

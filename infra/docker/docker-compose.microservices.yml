@@ -34,7 +34,24 @@ services:
       timeout: 5s
       retries: 10
 
+  jobs-service:
+    image: python:3.11-slim
+    container_name: xaloc-jobs-service
+    restart: unless-stopped
+    working_dir: /app
+    command: >
+      sh -c "pip install --no-cache-dir fastapi uvicorn psycopg[binary] &&
+             uvicorn services.jobs.app:app --host 0.0.0.0 --port 8103"
+    environment:
+      REPORT_PG_DSN: postgresql://xaloc:xaloc_dev_password@postgres:5432/xaloc
+    volumes:
+      - ../../:/app
+    ports:
+      - "8103:8103"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   redis_data:
-
