@@ -8,7 +8,6 @@ from typing import Any, Optional
 from pathlib import Path
 
 import aiohttp
-import jwt
 from fastapi import FastAPI, Query, HTTPException, Body, Request, WebSocket, WebSocketDisconnect, Header, Depends, status
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,14 +16,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from dashboard import DashboardService
-from dashboard.auth import (
-    DashboardAuthStore,
-    JwtManager,
-    ROLE_ADMIN,
-    ROLE_USER,
-    VALID_ROLES,
-    resolve_secret_key,
-)
 from dashboard.process_manager import ProcessManager
 from core.xvia_auth import create_authenticated_session_in_place
 from core.xvia_deselect import deselect_resource
@@ -37,11 +28,9 @@ SQLITE_DB_PATH = (os.getenv("SQLITE_DB_PATH") or "db/xaloc_database.db").strip()
 AUTH_COOKIE_NAME = "dashboard_access_token"
 AUTH_ROLE_COOKIE_NAME = "dashboard_role"
 TOKEN_EXPIRE_MINUTES = max(5, int((os.getenv("DASHBOARD_TOKEN_EXPIRE_MINUTES") or "480").strip() or "480"))
-JWT_SECRET_KEY = resolve_secret_key()
-JWT_ISSUER = (os.getenv("DASHBOARD_JWT_ISSUER") or "xaloc-dashboard").strip() or "xaloc-dashboard"
-JWT_AUDIENCE = (os.getenv("DASHBOARD_JWT_AUDIENCE") or "xaloc-dashboard-clients").strip() or "xaloc-dashboard-clients"
 AUTH_COOKIE_SECURE = (os.getenv("DASHBOARD_AUTH_COOKIE_SECURE") or "0").strip().lower() in {"1", "true", "yes", "on"}
 ENABLE_WS_REALTIME = (os.getenv("DASHBOARD_ENABLE_WS") or "0").strip().lower() in {"1", "true", "yes", "on"}
+AUTH_RBAC_SERVICE_URL = (os.getenv("AUTH_RBAC_SERVICE_URL") or "http://auth-rbac-service:8101").strip().rstrip("/")
 
 cors_origins_raw = (os.getenv("DASHBOARD_CORS_ORIGINS") or "").strip()
 if cors_origins_raw:
@@ -60,15 +49,6 @@ app.add_middleware(
 service = DashboardService()
 process_manager = ProcessManager(base_dir=".", logs_dir="logs")
 logger = logging.getLogger("dashboard_api")
-auth_store = DashboardAuthStore(db_path=SQLITE_DB_PATH)
-jwt_manager = JwtManager(
-    secret_key=JWT_SECRET_KEY,
-    issuer=JWT_ISSUER,
-    audience=JWT_AUDIENCE,
-    access_token_minutes=TOKEN_EXPIRE_MINUTES,
-)
-if not (os.getenv("SECRET_KEY") or "").strip():
-    logger.warning("SECRET_KEY no definido; usando clave efimera solo para la sesion actual.")
 
 FRONTEND_HOST = os.getenv("DASHBOARD_FRONTEND_HOST", "127.0.0.1").strip() or "127.0.0.1"
 FRONTEND_PORT = int((os.getenv("DASHBOARD_FRONTEND_PORT") or "3000").strip() or "3000")
@@ -211,18 +191,8 @@ async def app_startup() -> None:
     loop = asyncio.get_running_loop()
     _prev_loop_exception_handler = loop.get_exception_handler()
     loop.set_exception_handler(_loop_exception_handler)
-    bootstrap_admin_user = (os.getenv("DASHBOARD_ADMIN_USERNAME") or "").strip().lower()
-    bootstrap_admin_password = (os.getenv("DASHBOARD_ADMIN_PASSWORD") or "").strip()
-    if bootstrap_admin_user and bootstrap_admin_password:
-        try:
-            auth_store.ensure_bootstrap_admin(
-                username=bootstrap_admin_user,
-                password=bootstrap_admin_password,
-            )
-            logger.info("Usuario admin bootstrap verificado: %s", bootstrap_admin_user)
-        except Exception as exc:
-            logger.error("No se pudo inicializar usuario admin bootstrap: %s", exc)
-    await _start_frontend_server()
+    if (os.getenv("DASHBOARD_ENABLE_FRONTEND_PROXY") or "1").strip().lower() in {"1", "true", "yes", "on"}:
+        await _start_frontend_server()
 
 
 @app.on_event("shutdown")
@@ -235,7 +205,8 @@ async def app_shutdown() -> None:
     if _proxy_session is not None and not _proxy_session.closed:
         await _proxy_session.close()
     _proxy_session = None
-    await _stop_frontend_server()
+    if (os.getenv("DASHBOARD_ENABLE_FRONTEND_PROXY") or "1").strip().lower() in {"1", "true", "yes", "on"}:
+        await _stop_frontend_server()
 
 # ==========================================================================
 # AUTH & REDIS
@@ -274,158 +245,128 @@ def _extract_token_from_request(request: Request, authorization: Optional[str]) 
     return None
 
 
-def _decode_token_or_401(token: str) -> dict[str, Any]:
-    try:
-        payload = jwt_manager.decode_access_token(token)
-    except jwt.ExpiredSignatureError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired") from exc
-    except jwt.InvalidTokenError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
-    role = str(payload.get("role") or "").strip().lower()
-    if role not in VALID_ROLES:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token role invalid")
-    return payload
+async def _auth_introspect(token: str) -> dict[str, Any]:
+    timeout = aiohttp.ClientTimeout(total=10)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(
+            f"{AUTH_RBAC_SERVICE_URL}/auth/introspect",
+            headers={"Authorization": f"Bearer {token}"},
+        ) as resp:
+            body = await resp.text()
+            if resp.status >= 400:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid auth token")
+            try:
+                data = json.loads(body)
+            except Exception as exc:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Auth service response invalid") from exc
+            user = data.get("user")
+            if not isinstance(user, dict):
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Auth service did not return user")
+            return user
 
 
-def _ensure_user_is_active(payload: dict[str, Any]) -> dict[str, Any]:
-    try:
-        user_id = int(str(payload.get("sub") or ""))
-    except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token subject invalid") from exc
-    user = auth_store.get_user_by_id(user_id)
-    if user is None or not user.active:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
-    return {
-        "sub": str(user.id),
-        "username": user.username,
-        "role": user.role,
-    }
-
-
-def get_current_user(request: Request, authorization: Optional[str] = Header(None)) -> dict[str, Any]:
+async def get_current_user(request: Request, authorization: Optional[str] = Header(None)) -> dict[str, Any]:
     token = _extract_token_from_request(request, authorization)
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing auth token")
-    payload = _decode_token_or_401(token)
-    return _ensure_user_is_active(payload)
+    return await _auth_introspect(token)
 
 
-def require_user(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+async def require_user(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
     return user
 
 
-def require_admin(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
-    if str(user.get("role") or "").strip().lower() != ROLE_ADMIN:
+async def require_admin(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+    if str(user.get("role") or "").strip().lower() not in {"admin"}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
     return user
 
 
-@app.post("/api/auth/login")
-async def api_auth_login(payload: dict[str, Any] = Body(...)) -> Response:
-    username = str(payload.get("username") or "").strip()
-    password = str(payload.get("password") or "")
-    if not username or not password:
-        raise HTTPException(status_code=400, detail="username y password son obligatorios.")
-    user = auth_store.authenticate(username=username, password=password)
-    if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenciales invalidas.")
+async def _proxy_auth_service(
+    *,
+    method: str,
+    path: str,
+    request: Request,
+    payload: dict[str, Any] | None = None,
+) -> Response:
+    timeout = aiohttp.ClientTimeout(total=30)
+    headers: dict[str, str] = {}
+    auth_header = request.headers.get("authorization")
+    if auth_header:
+        headers["Authorization"] = auth_header
+    token_cookie = request.cookies.get(AUTH_COOKIE_NAME)
+    role_cookie = request.cookies.get(AUTH_ROLE_COOKIE_NAME)
+    cookie_header_parts: list[str] = []
+    if token_cookie:
+        cookie_header_parts.append(f"{AUTH_COOKIE_NAME}={token_cookie}")
+    if role_cookie:
+        cookie_header_parts.append(f"{AUTH_ROLE_COOKIE_NAME}={role_cookie}")
+    if cookie_header_parts:
+        headers["Cookie"] = "; ".join(cookie_header_parts)
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
 
-    token = jwt_manager.create_access_token(user)
-    response = Response(
-        content=json.dumps({"ok": True, "user": user.to_claims()}),
-        media_type="application/json",
-    )
-    response.set_cookie(
-        key=AUTH_COOKIE_NAME,
-        value=token,
-        httponly=True,
-        secure=AUTH_COOKIE_SECURE,
-        samesite="lax",
-        max_age=TOKEN_EXPIRE_MINUTES * 60,
-        path="/",
-    )
-    response.set_cookie(
-        key=AUTH_ROLE_COOKIE_NAME,
-        value=user.role,
-        httponly=False,
-        secure=AUTH_COOKIE_SECURE,
-        samesite="lax",
-        max_age=TOKEN_EXPIRE_MINUTES * 60,
-        path="/",
-    )
-    return response
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.request(
+            method=method,
+            url=f"{AUTH_RBAC_SERVICE_URL}{path}",
+            headers=headers,
+            data=(json.dumps(payload) if payload is not None else None),
+            allow_redirects=False,
+        ) as upstream:
+            body = await upstream.read()
+            out = Response(content=body, status_code=upstream.status, media_type=upstream.headers.get("content-type"))
+            for raw_cookie in upstream.headers.getall("Set-Cookie", []):
+                out.headers.append("set-cookie", raw_cookie)
+            return out
+
+
+@app.post("/api/auth/login")
+async def api_auth_login(request: Request, payload: dict[str, Any] = Body(...)) -> Response:
+    return await _proxy_auth_service(method="POST", path="/auth/login", request=request, payload=payload)
 
 
 @app.get("/api/auth/me")
-async def api_auth_me(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
-    return {"authenticated": True, "user": user}
+async def api_auth_me(request: Request, _user: dict[str, Any] = Depends(require_user)) -> Response:
+    return await _proxy_auth_service(method="GET", path="/auth/me", request=request)
 
 
 @app.post("/api/auth/logout")
-async def api_auth_logout() -> Response:
-    response = Response(content=json.dumps({"ok": True}), media_type="application/json")
-    response.delete_cookie(AUTH_COOKIE_NAME, path="/")
-    response.delete_cookie(AUTH_ROLE_COOKIE_NAME, path="/")
-    return response
+async def api_auth_logout(request: Request) -> Response:
+    return await _proxy_auth_service(method="POST", path="/auth/logout", request=request)
 
 
 @app.get("/api/auth/users")
-async def api_auth_list_users(_admin: dict[str, Any] = Depends(require_admin)) -> dict[str, Any]:
-    items = auth_store.list_users()
-    return {"items": items, "total": len(items)}
+async def api_auth_list_users(request: Request, _admin: dict[str, Any] = Depends(require_admin)) -> Response:
+    return await _proxy_auth_service(method="GET", path="/auth/users", request=request)
 
 
 @app.post("/api/auth/users")
 async def api_auth_create_user(
+    request: Request,
     payload: dict[str, Any] = Body(...),
     _admin: dict[str, Any] = Depends(require_admin),
-) -> dict[str, Any]:
-    username = str(payload.get("username") or "").strip()
-    password = str(payload.get("password") or "")
-    role = str(payload.get("role") or ROLE_USER).strip().lower()
-    active = bool(payload.get("active", True))
-    try:
-        user = auth_store.create_user(
-            username=username,
-            password=password,
-            role=role,
-            active=active,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"created": True, "user": user.to_claims() | {"active": user.active}}
+) -> Response:
+    return await _proxy_auth_service(method="POST", path="/auth/users", request=request, payload=payload)
 
 
 @app.put("/api/auth/users/{user_id}")
 async def api_auth_update_user(
+    request: Request,
     user_id: int,
     payload: dict[str, Any] = Body(...),
     _admin: dict[str, Any] = Depends(require_admin),
-) -> dict[str, Any]:
-    username = payload.get("username")
-    role = payload.get("role")
-    active = payload.get("active")
-    password = payload.get("password")
-    try:
-        ok = auth_store.update_user(
-            user_id,
-            username=username,
-            role=role,
-            active=active,
-            password=password,
-        )
-        return {"updated": ok}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+) -> Response:
+    return await _proxy_auth_service(method="PUT", path=f"/auth/users/{int(user_id)}", request=request, payload=payload)
 
 
 @app.delete("/api/auth/users/{user_id}")
 async def api_auth_delete_user(
+    request: Request,
     user_id: int,
     _admin: dict[str, Any] = Depends(require_admin),
-) -> dict[str, Any]:
-    ok = auth_store.delete_user(user_id)
-    return {"deleted": ok}
+) -> Response:
+    return await _proxy_auth_service(method="DELETE", path=f"/auth/users/{int(user_id)}", request=request)
 
 
 @app.websocket("/ws/dashboard")
@@ -439,8 +380,7 @@ async def websocket_dashboard(websocket: WebSocket):
         await websocket.close(code=4401, reason="Missing auth token")
         return
     try:
-        payload = _decode_token_or_401(token)
-        _ensure_user_is_active(payload)
+        await _auth_introspect(token)
     except HTTPException:
         await websocket.close(code=4401, reason="Invalid auth token")
         return
@@ -514,11 +454,11 @@ async def api_claim_incident(id: str, user: dict = Depends(require_user)):
 @app.post("/api/incidents/{id}/release")
 async def api_release_incident(id: str, user: dict = Depends(require_user)):
     user_id = str(user.get("sub", "unknown"))
-    role = user.get("role", ROLE_USER)
+    role = user.get("role", "user")
     release_result = service.db.release_incident_lock(
         incident_id=id,
         user_id=user_id,
-        is_admin=(str(role).strip().lower() == ROLE_ADMIN),
+        is_admin=(str(role).strip().lower() == "admin"),
     )
     reason = str(release_result.get("reason") or "")
     if reason == "not_owner":
@@ -1012,6 +952,8 @@ _HOP_BY_HOP_HEADERS = {
 async def catch_all(rest_of_path: str, request: Request):
     if rest_of_path.startswith("api/"):
         raise HTTPException(status_code=404, detail="API endpoint not found")
+    if (os.getenv("DASHBOARD_ENABLE_FRONTEND_PROXY") or "1").strip().lower() not in {"1", "true", "yes", "on"}:
+        raise HTTPException(status_code=404, detail="Frontend proxy disabled on this service")
 
     if not _frontend_process or _frontend_process.returncode is not None:
         await _start_frontend_server()

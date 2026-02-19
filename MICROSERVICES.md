@@ -597,6 +597,8 @@ python -m alembic upgrade head
 ```powershell
 uvicorn services.jobs.app:app --host 0.0.0.0 --port 8103
 uvicorn services.api_gateway.app:app --host 0.0.0.0 --port 8080
+uvicorn services.auth_rbac.app:app --host 0.0.0.0 --port 8101
+uvicorn services.dashboard_backend.app:app --host 0.0.0.0 --port 8788
 python -m services.brain_claim.app
 python -m services.payload_validator.app
 python -m services.batcher_dispatcher.app
@@ -629,6 +631,11 @@ python -m services.worker_orchestrator.app
   - `services/signing/app.py`
   - capas extraidas de `core/worker/processor.py` a `core/worker_execution/*`
   - compose actualizado con volúmenes `artifacts_data` y `cert_data`.
+- Fase 5: base implementada con:
+  - `services/auth_rbac/app.py` (JWT + RBAC + scopes por organismo/cliente)
+  - `services/dashboard_backend/app.py` (backend interno sin frontend proxy)
+  - `services/api_gateway/app.py` (gateway unico + proxy frontend/API)
+  - `dashboard_api.py` delegado a `auth-rbac-service` para `/api/auth/*` e introspeccion de token.
 
 ---
 

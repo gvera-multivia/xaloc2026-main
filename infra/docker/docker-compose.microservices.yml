@@ -52,6 +52,64 @@ services:
       postgres:
         condition: service_healthy
 
+  auth-rbac-service:
+    image: python:3.11-slim
+    container_name: xaloc-auth-rbac
+    restart: unless-stopped
+    working_dir: /app
+    command: >
+      sh -c "pip install --no-cache-dir fastapi uvicorn pyjwt &&
+             uvicorn services.auth_rbac.app:app --host 0.0.0.0 --port 8101"
+    environment:
+      AUTH_RBAC_DB_PATH: db/xaloc_database.db
+      DASHBOARD_JWT_ISSUER: xaloc-dashboard
+      DASHBOARD_JWT_AUDIENCE: xaloc-dashboard-clients
+      DASHBOARD_TOKEN_EXPIRE_MINUTES: "480"
+    volumes:
+      - ../../:/app
+    ports:
+      - "8101:8101"
+
+  dashboard-backend-service:
+    image: python:3.11-slim
+    container_name: xaloc-dashboard-backend
+    restart: unless-stopped
+    working_dir: /app
+    command: >
+      sh -c "pip install --no-cache-dir -r requirements.txt &&
+             uvicorn services.dashboard_backend.app:app --host 0.0.0.0 --port 8788"
+    environment:
+      DASHBOARD_ENABLE_FRONTEND_PROXY: "0"
+      AUTH_RBAC_SERVICE_URL: http://auth-rbac-service:8101
+    volumes:
+      - ../../:/app
+    ports:
+      - "8788:8788"
+    depends_on:
+      auth-rbac-service:
+        condition: service_started
+
+  api-gateway:
+    image: python:3.11-slim
+    container_name: xaloc-api-gateway
+    restart: unless-stopped
+    working_dir: /app
+    command: >
+      sh -c "pip install --no-cache-dir -r requirements.txt &&
+             uvicorn services.api_gateway.app:app --host 0.0.0.0 --port 8080"
+    environment:
+      DASHBOARD_BACKEND_URL: http://dashboard-backend-service:8788
+      DASHBOARD_FRONTEND_HOST: 0.0.0.0
+      DASHBOARD_FRONTEND_PORT: "3000"
+      DASHBOARD_FRONTEND_DEV: "1"
+    volumes:
+      - ../../:/app
+    ports:
+      - "8080:8080"
+    depends_on:
+      dashboard-backend-service:
+        condition: service_started
+
   brain-claim-service:
     image: python:3.11-slim
     container_name: xaloc-brain-claim
