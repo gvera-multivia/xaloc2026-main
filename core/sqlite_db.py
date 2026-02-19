@@ -24,6 +24,7 @@ class SQLiteDatabase:
         self.db_path = Path(db_path)
         self.logger = logging.getLogger("sqlite_db")
         self.pg_job_store = build_pg_job_store(logger=self.logger)
+        self._blocked_ops_logged: set[str] = set()
         self.sqlite_writes_enabled = (os.getenv("SQLITE_WRITES_ENABLED", "0") or "0").strip().lower() in {
             "1",
             "true",
@@ -37,13 +38,23 @@ class SQLiteDatabase:
     def _writes_blocked(self, op_name: str) -> bool:
         if self.sqlite_writes_enabled:
             return False
-        self.logger.warning("Escritura SQLite omitida (%s) por SQLITE_WRITES_ENABLED=0", op_name)
+        if op_name not in self._blocked_ops_logged:
+            self.logger.warning("Escritura SQLite omitida (%s) por SQLITE_WRITES_ENABLED=0", op_name)
+            self._blocked_ops_logged.add(op_name)
         return True
 
     def _init_db(self) -> None:
         """Inicializa la base de datos aplicando el esquema si no existe."""
         if not self.db_path.parent.exists():
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        if not self.sqlite_writes_enabled:
+            if not self.db_path.exists():
+                self.logger.warning(
+                    "SQLite en modo read-only y DB no existe en %s. "
+                    "Se omite inicializacion de esquema.",
+                    self.db_path,
+                )
+            return
 
         conn = self.get_connection()
         try:

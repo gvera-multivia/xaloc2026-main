@@ -1,11 +1,9 @@
-import os
 import uuid
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from core.sqlite_db import SQLiteDatabase
 from core.runtime_flags import get_queue_mode, is_redis_queue_mode
 
 
@@ -52,8 +50,8 @@ class QueueGateway(ABC):
 
 
 class SQLiteQueueGateway(QueueGateway):
-    def __init__(self, db: SQLiteDatabase):
-        self.db = db
+    def __init__(self, db: Any):
+        raise RuntimeError("SQLiteQueueGateway eliminado. Usa Redis (QUEUE_MODE=redis_streams).")
 
     async def enqueue(self, *, site_id: str, protocol: Optional[str], payload: dict[str, Any]) -> tuple[bool, str]:
         job_id = str(payload.get("job_id") or uuid.uuid4())
@@ -160,7 +158,7 @@ class SQLiteQueueGateway(QueueGateway):
         return self.db.count_tasks(site_id)
 
 
-def build_queue_gateway(*, backend: Optional[str], db: SQLiteDatabase):
+def build_queue_gateway(*, backend: Optional[str], db: Any):
     logger = logging.getLogger("queue_gateway")
     queue_mode = get_queue_mode(backend)
     if queue_mode == "redis_streams":
@@ -174,10 +172,4 @@ def build_queue_gateway(*, backend: Optional[str], db: SQLiteDatabase):
 
         logger.info("Queue backend activo: redis_list (list/hash legado)")
         return RedisQueueGateway(db=db)
-    if (os.getenv("ALLOW_LEGACY_SQLITE_QUEUE") or "0").strip().lower() in {"1", "true", "yes", "on"}:
-        logger.warning("Queue backend sqlite habilitado en modo legado por ALLOW_LEGACY_SQLITE_QUEUE=1.")
-        return SQLiteQueueGateway(db=db)
-    raise RuntimeError(
-        "QUEUE_MODE=sqlite deshabilitado en Fase 6. Usa QUEUE_MODE=redis_streams "
-        "o habilita temporalmente ALLOW_LEGACY_SQLITE_QUEUE=1."
-    )
+    raise RuntimeError("QUEUE_MODE=sqlite eliminado. Usa QUEUE_MODE=redis_streams.")

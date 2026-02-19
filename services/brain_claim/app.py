@@ -13,7 +13,7 @@ import aiohttp
 from dotenv import load_dotenv
 
 from core.redis_client import get_redis_client
-from core.sqlite_db import SQLiteDatabase
+from core.pg_admin_store import PgAdminStore
 from core.sqlserver_utils import build_sqlserver_connection_string
 from core.xvia_auth import create_authenticated_session_in_place
 from shared.queue import RedisStreamsClient
@@ -27,7 +27,10 @@ logger = logging.getLogger("brain_claim_service")
 
 class BrainClaimService:
     def __init__(self):
-        self.db = SQLiteDatabase()
+        self.admin_store = PgAdminStore.from_env(logger=logger)
+        seeded = self.admin_store.seed_organismo_config_if_empty()
+        if seeded:
+            logger.info("[brain-claim] seeded organismo_config en PG: %s", seeded)
         self.sqlserver_conn_str = build_sqlserver_connection_string()
         self.redis = get_redis_client()
         if self.redis is None:
@@ -112,7 +115,7 @@ class BrainClaimService:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                SELECT Estado, UsuarioAsignado
+                SELECT Estado, UsuarioAsignado, FUsuarioCompletado
                 FROM Recursos.RecursosExp
                 WHERE idRecurso = ?
                 """,
@@ -122,10 +125,48 @@ class BrainClaimService:
             conn.close()
             if not row:
                 return False
-            estado, usuario = row
+            estado, usuario, f_usuario_completado = row
             usuario_db = str(usuario or "").strip()
             expected = str(self.authenticated_user or "").strip()
+            if f_usuario_completado is not None and str(f_usuario_completado).strip():
+                return False
             return bool(estado == 1 and usuario_db == expected)
+        except Exception:
+            return False
+
+    def is_still_claimable_in_db(self, id_recurso: int) -> bool:
+        """
+        Revalida contra SQL Server, justo antes de reclamar/publicar, para evitar
+        carreras entre fetch y claim.
+        """
+        import pyodbc
+
+        try:
+            conn = pyodbc.connect(self.sqlserver_conn_str)
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT Estado, UsuarioAsignado, FUsuarioCompletado
+                FROM Recursos.RecursosExp
+                WHERE idRecurso = ?
+                """,
+                (id_recurso,),
+            )
+            row = cursor.fetchone()
+            conn.close()
+            if not row:
+                return False
+            estado, usuario, f_usuario_completado = row
+            # Nunca reclamar completados.
+            if f_usuario_completado is not None and str(f_usuario_completado).strip():
+                return False
+            # Reclamable nuevo.
+            if int(estado or 0) == 0:
+                return True
+            # Si ya esta reclamado, solo vale si lo tiene el usuario autenticado.
+            if int(estado or 0) == 1:
+                return str(usuario or "").strip() == str(self.authenticated_user or "").strip()
+            return False
         except Exception:
             return False
 
@@ -164,7 +205,7 @@ class BrainClaimService:
         return False
 
     def get_active_configs(self) -> list[dict[str, Any]]:
-        return self.db.get_active_organismo_configs()
+        return self.admin_store.get_active_organismo_configs()
 
     async def run_tick(self) -> dict[str, Any]:
         stats = {"claimed": 0, "published_candidates": 0, "errors": 0}
@@ -194,7 +235,10 @@ class BrainClaimService:
                         rid = int(rid_raw)
                     except Exception:
                         continue
-                    if self.db.is_resource_blocked(site_id=site_id, resource_id=rid):
+                    if not self.is_still_claimable_in_db(rid):
+                        logger.info("[%s] descartado idRecurso=%s por no estar reclamable en SQL Server (revalidacion).", site_id, rid)
+                        continue
+                    if self.admin_store.is_resource_blocked(site_id=site_id, resource_id=rid):
                         continue
                     expediente = str(cand.get("Expedient") or "").strip()
                     ok = await adapter.ensure_claimed(self, cand)
@@ -265,4 +309,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

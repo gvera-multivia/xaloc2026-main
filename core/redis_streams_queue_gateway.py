@@ -8,13 +8,12 @@ import uuid
 from typing import Any, Optional
 
 from core.queue_gateway import QueueGateway, QueueJob
-from core.sqlite_db import SQLiteDatabase
 from core.redis_client import get_redis_client
 from shared.queue import RedisStreamsClient
 
 
 class RedisStreamsQueueGateway(QueueGateway):
-    def __init__(self, db: SQLiteDatabase):
+    def __init__(self, db: Any):
         self._redis = get_redis_client()
         if self._redis is None:
             raise RuntimeError("Redis Streams requiere cliente Redis válido (REDIS_ENABLED=1 y REDIS_URL).")
@@ -278,4 +277,3 @@ class RedisStreamsQueueGateway(QueueGateway):
     def count_ready(self, site_id: str) -> int:
         # Aproximación: mantener criterio por ledger.
         return self.db.count_job_runs(site_id, states=("queued", "processing"))
-

@@ -40,7 +40,10 @@ services:
     restart: unless-stopped
     working_dir: /app
     command: >
-      sh -c "pip install --no-cache-dir fastapi uvicorn psycopg[binary] &&
+      sh -c "apt-get update &&
+             apt-get install -y --no-install-recommends unixodbc unixodbc-dev freetds-bin tdsodbc gcc g++ &&
+             rm -rf /var/lib/apt/lists/* &&
+             pip install --no-cache-dir -r requirements.txt &&
              uvicorn services.jobs.app:app --host 0.0.0.0 --port 8103"
     environment:
       USE_PG_SOURCE_OF_TRUTH: "1"
@@ -60,13 +63,16 @@ services:
     restart: unless-stopped
     working_dir: /app
     command: >
-      sh -c "pip install --no-cache-dir fastapi uvicorn pyjwt &&
+      sh -c "pip install --no-cache-dir fastapi uvicorn pyjwt psycopg[binary] &&
              uvicorn services.auth_rbac.app:app --host 0.0.0.0 --port 8101"
     environment:
-      AUTH_RBAC_DB_PATH: db/auth_rbac.db
       DASHBOARD_JWT_ISSUER: xaloc-dashboard
       DASHBOARD_JWT_AUDIENCE: xaloc-dashboard-clients
       DASHBOARD_TOKEN_EXPIRE_MINUTES: "480"
+      DASHBOARD_ADMIN_USERNAME: ${DASHBOARD_ADMIN_USERNAME:-admin}
+      DASHBOARD_ADMIN_PASSWORD: ${DASHBOARD_ADMIN_PASSWORD:-admin1234}
+      USE_PG_SOURCE_OF_TRUTH: ${USE_PG_SOURCE_OF_TRUTH:-1}
+      REPORT_PG_DSN: ${REPORT_PG_DSN:-postgresql://xaloc:xaloc_dev_password@postgres:5432/xaloc}
     volumes:
       - ../../:/app
     ports:
@@ -78,17 +84,23 @@ services:
     restart: unless-stopped
     working_dir: /app
     command: >
-      sh -c "pip install --no-cache-dir -r requirements.txt &&
+      sh -c "apt-get update &&
+             apt-get install -y --no-install-recommends unixodbc unixodbc-dev freetds-bin tdsodbc gcc g++ &&
+             rm -rf /var/lib/apt/lists/* &&
+             pip install --no-cache-dir -r requirements.txt &&
              uvicorn services.dashboard_backend.app:app --host 0.0.0.0 --port 8788"
     environment:
       DASHBOARD_ENABLE_FRONTEND_PROXY: "0"
       AUTH_RBAC_SERVICE_URL: http://auth-rbac-service:8101
       USE_PG_SOURCE_OF_TRUTH: "1"
       QUEUE_MODE: redis_streams
-      DASHBOARD_HISTORY_SOURCE: pg
+      DASHBOARD_HISTORY_SOURCE: ${DASHBOARD_HISTORY_SOURCE:-pg}
+      REPORT_PG_DSN: ${REPORT_PG_DSN:-postgresql://xaloc:xaloc_dev_password@postgres:5432/xaloc}
       SQLITE_WRITES_ENABLED: "0"
+      CLIENT_DOCS_BASE_PATH: /mnt/clientes
     volumes:
       - ../../:/app
+      - clientes_smb:/mnt/clientes:rw
     ports:
       - "8788:8788"
     depends_on:
@@ -101,15 +113,28 @@ services:
     restart: unless-stopped
     working_dir: /app
     command: >
-      sh -c "pip install --no-cache-dir -r requirements.txt &&
+      sh -c "apt-get update &&
+             apt-get install -y --no-install-recommends nodejs npm unixodbc unixodbc-dev freetds-bin tdsodbc gcc g++ &&
+             rm -rf /var/lib/apt/lists/* &&
+             pip install --no-cache-dir -r requirements.txt &&
+             cd /app/dashboard-frontend &&
+             npm install --include=dev --include=optional &&
+             if [ ! -f /app/dashboard-frontend/node_modules/lightningcss-linux-x64-gnu/lightningcss.linux-x64-gnu.node ]; then
+               echo '[api-gateway] reparando lightningcss nativo para linux' &&
+               npm rebuild lightningcss --include=optional &&
+               npm install lightningcss-linux-x64-gnu@1.30.2 --no-save;
+             fi &&
+             cd /app &&
              uvicorn services.api_gateway.app:app --host 0.0.0.0 --port 8080"
     environment:
       DASHBOARD_BACKEND_URL: http://dashboard-backend-service:8788
       DASHBOARD_FRONTEND_HOST: 0.0.0.0
       DASHBOARD_FRONTEND_PORT: "3000"
-      DASHBOARD_FRONTEND_DEV: "1"
+      DASHBOARD_FRONTEND_DEV: ${DASHBOARD_FRONTEND_DEV:-0}
     volumes:
       - ../../:/app
+      - dashboard_frontend_node_modules:/app/dashboard-frontend/node_modules
+      - dashboard_frontend_next:/app/dashboard-frontend/.next
     ports:
       - "8080:8080"
     depends_on:
@@ -122,7 +147,10 @@ services:
     restart: unless-stopped
     working_dir: /app
     command: >
-      sh -c "pip install --no-cache-dir -r requirements.txt &&
+      sh -c "apt-get update &&
+             apt-get install -y --no-install-recommends unixodbc unixodbc-dev freetds-bin tdsodbc gcc g++ &&
+             rm -rf /var/lib/apt/lists/* &&
+             pip install --no-cache-dir -r requirements.txt &&
              python -m services.brain_claim.app"
     environment:
       USE_PG_SOURCE_OF_TRUTH: "1"
@@ -132,8 +160,10 @@ services:
       CANDIDATES_STREAM_KEY: candidates
       REPORT_PG_DSN: postgresql://xaloc:xaloc_dev_password@postgres:5432/xaloc
       QUEUE_MODE: redis_streams
+      CLIENT_DOCS_BASE_PATH: /mnt/clientes
     volumes:
       - ../../:/app
+      - clientes_smb:/mnt/clientes:rw
     depends_on:
       postgres:
         condition: service_healthy
@@ -146,7 +176,10 @@ services:
     restart: unless-stopped
     working_dir: /app
     command: >
-      sh -c "pip install --no-cache-dir -r requirements.txt &&
+      sh -c "apt-get update &&
+             apt-get install -y --no-install-recommends unixodbc unixodbc-dev freetds-bin tdsodbc gcc g++ &&
+             rm -rf /var/lib/apt/lists/* &&
+             pip install --no-cache-dir -r requirements.txt &&
              python -m services.payload_validator.app"
     environment:
       USE_PG_SOURCE_OF_TRUTH: "1"
@@ -171,7 +204,10 @@ services:
     restart: unless-stopped
     working_dir: /app
     command: >
-      sh -c "pip install --no-cache-dir -r requirements.txt &&
+      sh -c "apt-get update &&
+             apt-get install -y --no-install-recommends unixodbc unixodbc-dev freetds-bin tdsodbc gcc g++ &&
+             rm -rf /var/lib/apt/lists/* &&
+             pip install --no-cache-dir -r requirements.txt &&
              python -m services.batcher_dispatcher.app"
     environment:
       USE_PG_SOURCE_OF_TRUTH: "1"
@@ -198,7 +234,10 @@ services:
     restart: unless-stopped
     working_dir: /app
     command: >
-      sh -c "pip install --no-cache-dir -r requirements.txt &&
+      sh -c "apt-get update &&
+             apt-get install -y --no-install-recommends unixodbc unixodbc-dev freetds-bin tdsodbc gcc g++ &&
+             rm -rf /var/lib/apt/lists/* &&
+             pip install --no-cache-dir -r requirements.txt &&
              python -m services.worker_orchestrator.app"
     environment:
       USE_PG_SOURCE_OF_TRUTH: "1"
@@ -212,9 +251,11 @@ services:
       QUEUE_STREAM_GROUP: worker_group
       QUEUE_STREAM_DLQ_KEY: dlq:jobs
       REPORT_PG_DSN: postgresql://xaloc:xaloc_dev_password@postgres:5432/xaloc
+      CLIENT_DOCS_BASE_PATH: /mnt/clientes
     volumes:
       - ../../:/app
       - artifacts_data:/data/artifacts
+      - clientes_smb:/mnt/clientes:rw
     depends_on:
       postgres:
         condition: service_healthy
@@ -229,7 +270,10 @@ services:
     restart: unless-stopped
     working_dir: /app
     command: >
-      sh -c "pip install --no-cache-dir -r requirements.txt fastapi uvicorn &&
+      sh -c "apt-get update &&
+             apt-get install -y --no-install-recommends unixodbc unixodbc-dev freetds-bin tdsodbc gcc g++ &&
+             rm -rf /var/lib/apt/lists/* &&
+             pip install --no-cache-dir -r requirements.txt fastapi uvicorn &&
              uvicorn services.playwright_runner.app:app --host 0.0.0.0 --port 8111"
     environment:
       XALOC_HEADLESS: "1"
@@ -261,3 +305,11 @@ volumes:
   postgres_data:
   redis_data:
   artifacts_data:
+  dashboard_frontend_node_modules:
+  dashboard_frontend_next:
+  clientes_smb:
+    driver: local
+    driver_opts:
+      type: cifs
+      o: username=${SMB_USER},password=${SMB_PASS},vers=${SMB_VERS:-3.0},rw,iocharset=utf8
+      device: "//${SMB_SERVER}/${SMB_SHARE}"

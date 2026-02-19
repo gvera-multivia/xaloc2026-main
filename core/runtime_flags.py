@@ -4,7 +4,7 @@ import os
 from typing import Optional
 
 
-VALID_QUEUE_MODES = {"sqlite", "redis_list", "redis_streams"}
+VALID_QUEUE_MODES = {"redis_list", "redis_streams"}
 
 
 def _is_true(value: str) -> bool:
@@ -22,7 +22,7 @@ def normalize_queue_mode(value: str) -> str:
     if mode == "redis_streams":
         return "redis_streams"
     if mode == "sqlite":
-        return "sqlite"
+        raise RuntimeError("QUEUE_MODE=sqlite ya no es valido. Usa QUEUE_MODE=redis_streams.")
     return "redis_streams"
 
 

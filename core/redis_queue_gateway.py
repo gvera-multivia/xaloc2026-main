@@ -7,11 +7,10 @@ import asyncio
 from typing import Any, Optional
 
 from core.queue_gateway import QueueGateway, QueueJob
-from core.sqlite_db import SQLiteDatabase
 from core.redis_client import get_redis_client
 
 class RedisQueueGateway(QueueGateway):
-    def __init__(self, db: SQLiteDatabase):
+    def __init__(self, db: Any):
         self._redis = get_redis_client()
         if self._redis is None:
             raise RuntimeError("Redis backend requires a valid Redis client. Check REDIS_URL or redis package installation.")

@@ -157,7 +157,11 @@ class PostgresHistoryRepository:
     def _conn(self):
         if not self.pg_dsn or psycopg is None:
             return None
-        return psycopg.connect(self.pg_dsn)
+        try:
+            return psycopg.connect(self.pg_dsn)
+        except Exception as exc:
+            self.logger.warning("No se pudo conectar a PostgreSQL para historico: %s", exc)
+            return None
 
     def list_days(self, *, source: str) -> list[str]:
         source_norm = source.lower().strip()
@@ -480,6 +484,198 @@ class SqliteQueueRepository:
         except Exception as exc:
             self.logger.warning("Error listando dias de cola en SQLite: %s", exc)
             return []
+        finally:
+            conn.close()
+
+
+class PostgresQueueRepository:
+    def __init__(self, pg_dsn: Optional[str], logger: Optional[logging.Logger] = None):
+        self.pg_dsn = (pg_dsn or "").strip() or None
+        self.logger = logger or logging.getLogger("dashboard.pg_queue_repo")
+
+    def _conn(self):
+        if not self.pg_dsn or psycopg is None:
+            return None
+        try:
+            return psycopg.connect(self.pg_dsn)
+        except Exception as exc:
+            self.logger.warning("No se pudo conectar a PostgreSQL para cola: %s", exc)
+            return None
+
+    @staticmethod
+    def _site_expr() -> str:
+        return "COALESCE(payload_json->>'site_id', NULLIF(split_part(dedup_key, ':', 1), ''), 'unknown')"
+
+    @staticmethod
+    def _resource_expr() -> str:
+        return (
+            "COALESCE("
+            "CASE WHEN (payload_json->>'idRecurso') ~ '^[0-9]+$' THEN (payload_json->>'idRecurso')::bigint END,"
+            "CASE WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+$' THEN split_part(dedup_key, ':', 2)::bigint END"
+            ")"
+        )
+
+    @staticmethod
+    def _protocol_expr() -> str:
+        return "COALESCE(payload_json->>'protocol', payload_json->>'protocolo', NULLIF(split_part(dedup_key, ':', 3), 'none'))"
+
+    def list_days(self) -> list[str]:
+        conn = self._conn()
+        if conn is None:
+            return []
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT DISTINCT TO_CHAR(COALESCE(queued_at, created_at), 'YYYY-MM-DD') AS day
+                    FROM jobs
+                    WHERE status IN ('queued', 'processing')
+                    ORDER BY day DESC
+                    """
+                )
+                return [str(row[0]) for row in cur.fetchall() if row and row[0]]
+        except Exception as exc:
+            self.logger.warning("Error listando dias de cola en PG: %s", exc)
+            return []
+        finally:
+            conn.close()
+
+    def list_current(self, *, day: str | None = None, page: int, page_size: int) -> dict[str, Any]:
+        offset = max(0, (page - 1) * page_size)
+        conn = self._conn()
+        if conn is None:
+            return {"items": [], "page": page, "page_size": page_size, "total": 0}
+        site_expr = self._site_expr()
+        resource_expr = self._resource_expr()
+        protocol_expr = self._protocol_expr()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM jobs
+                    WHERE status IN ('queued', 'processing')
+                    """
+                )
+                total = int(cur.fetchone()[0] or 0)
+                cur.execute(
+                    f"""
+                    SELECT
+                        {site_expr} AS site_id,
+                        {resource_expr} AS resource_id,
+                        job_id,
+                        {protocol_expr} AS protocol,
+                        status AS state,
+                        COALESCE(queued_at, created_at) AS started_at,
+                        updated_at AS ended_at,
+                        payload_json
+                    FROM jobs
+                    WHERE status IN ('queued', 'processing')
+                    ORDER BY COALESCE(queued_at, created_at) DESC
+                    LIMIT %s OFFSET %s
+                    """,
+                    (page_size, offset),
+                )
+                rows = cur.fetchall()
+                items = [
+                    {
+                        "site_id": row[0],
+                        "resource_id": row[1],
+                        "job_id": row[2],
+                        "protocol": row[3],
+                        "state": row[4],
+                        "day": (row[5].date().isoformat() if row[5] else ""),
+                        "started_at": row[5].isoformat() if row[5] else None,
+                        "ended_at": row[6].isoformat() if row[6] else None,
+                        "payload": row[7],
+                    }
+                    for row in rows
+                ]
+                return {"items": items, "page": page, "page_size": page_size, "total": total}
+        except Exception as exc:
+            self.logger.warning("Error listando cola actual en PG: %s", exc)
+            return {"items": [], "page": page, "page_size": page_size, "total": 0}
+        finally:
+            conn.close()
+
+    def get_live(self, *, day: str) -> Optional[dict[str, Any]]:
+        conn = self._conn()
+        if conn is None:
+            return None
+        site_expr = self._site_expr()
+        resource_expr = self._resource_expr()
+        protocol_expr = self._protocol_expr()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT
+                        {site_expr} AS site_id,
+                        {resource_expr} AS resource_id,
+                        job_id,
+                        {protocol_expr} AS protocol,
+                        status AS state,
+                        COALESCE(queued_at, created_at) AS started_at,
+                        updated_at AS ended_at,
+                        payload_json
+                    FROM jobs
+                    WHERE status = 'processing'
+                      AND TO_CHAR(COALESCE(queued_at, created_at), 'YYYY-MM-DD') = %s
+                    ORDER BY COALESCE(queued_at, created_at) DESC
+                    LIMIT 1
+                    """,
+                    (day,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                return {
+                    "site_id": row[0],
+                    "resource_id": row[1],
+                    "job_id": row[2],
+                    "protocol": row[3],
+                    "state": row[4],
+                    "day": (row[5].date().isoformat() if row[5] else ""),
+                    "started_at": row[5].isoformat() if row[5] else None,
+                    "ended_at": row[6].isoformat() if row[6] else None,
+                    "payload": row[7],
+                }
+        except Exception as exc:
+            self.logger.warning("Error obteniendo tramite vivo en PG: %s", exc)
+            return None
+        finally:
+            conn.close()
+
+    def get_completion_marker(self, *, day: str) -> dict[str, Any]:
+        conn = self._conn()
+        if conn is None:
+            return {"day": day, "completed_count": 0, "last_completed_at": None, "marker": "0|"}
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        COUNT(*) AS finished_count,
+                        MAX(COALESCE(finished_at, updated_at, created_at)) AS last_finished_at
+                    FROM jobs
+                    WHERE status IN ('completed', 'succeeded', 'failed', 'dead', 'cancelled')
+                      AND TO_CHAR(COALESCE(finished_at, updated_at, created_at), 'YYYY-MM-DD') = %s
+                    """,
+                    (day,),
+                )
+                row = cur.fetchone()
+                finished_count = int(row[0] if row and row[0] is not None else 0)
+                last_finished_at = row[1] if row else None
+                marker = f"{finished_count}|{last_finished_at.isoformat() if last_finished_at else ''}"
+                return {
+                    "day": day,
+                    "completed_count": finished_count,
+                    "last_completed_at": (last_finished_at.isoformat() if last_finished_at else None),
+                    "marker": marker,
+                }
+        except Exception as exc:
+            self.logger.warning("Error obteniendo completion marker en PG: %s", exc)
+            return {"day": day, "completed_count": 0, "last_completed_at": None, "marker": "0|"}
         finally:
             conn.close()
 

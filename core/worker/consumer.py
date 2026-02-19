@@ -12,7 +12,7 @@ from typing import Optional
 import aiohttp
 from dotenv import load_dotenv
 
-from core.sqlite_db import SQLiteDatabase
+from core.pg_runtime_store import PgRuntimeStore
 from core.queue_gateway import build_queue_gateway
 from core.realtime_store import build_realtime_store
 from core.runtime_flags import get_queue_mode
@@ -30,7 +30,7 @@ async def run_worker_loop():
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:8]
     logger = setup_worker_logging(run_id)
 
-    db = SQLiteDatabase()
+    db = PgRuntimeStore.from_env(logger=logger)
     realtime_store = build_realtime_store(logger=logger)
     queue_backend = get_queue_mode()
     queue_gateway = build_queue_gateway(backend=queue_backend, db=db)
@@ -285,16 +285,6 @@ async def run_worker_loop():
                             f"Número de anotación: {anotacion or 'N/A'}. "
                             f"Refrescos aplicados: {refresh_count if refresh_count is not None else 'N/A'}."
                         )
-                        try:
-                            db.add_incident(
-                                id_recurso=job.resource_id,
-                                n_exp=_extraer_n_expediente(job.payload),
-                                tipo="MADRID_TRAMITE_ENVIADO_SIN_JUSTIFICANTE",
-                                motivo=motivo,
-                                site_id=job.site_id,
-                            )
-                        except Exception as inc_db_exc:
-                            logger.error("No se pudo guardar incidencia Madrid sin justificante en SQLite: %s", inc_db_exc)
                         realtime_store.record_incident_once(
                             site_id=job.site_id,
                             incident_type="MADRID_TRAMITE_ENVIADO_SIN_JUSTIFICANTE",

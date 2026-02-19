@@ -685,13 +685,4 @@ def build_realtime_store(logger: Optional[logging.Logger] = None):
             return store
         except Exception as exc:
             log.error("No se pudo inicializar esquema PostgreSQL realtime: %s", exc)
-
-    sqlite_db_path = (os.getenv("SQLITE_DB_PATH") or "db/xaloc_database.db").strip() or "db/xaloc_database.db"
-    sqlite_store = SqliteRealtimeStore(sqlite_db_path=sqlite_db_path, logger=log)
-    try:
-        sqlite_store.ensure_schema()
-        log.info("Realtime store activo en SQLite: %s", sqlite_db_path)
-        return sqlite_store
-    except Exception as exc:
-        log.error("No se pudo inicializar esquema SQLite realtime: %s", exc)
-        return NullRealtimeStore()
+    raise RuntimeError("Realtime store requiere PostgreSQL activo. Fallback SQLite eliminado.")

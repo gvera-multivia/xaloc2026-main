@@ -77,7 +77,12 @@ class PgJobStore:
             resource_id=resource_id,
             protocol=protocol,
         )
-        payload = payload_snapshot or {}
+        payload = dict(payload_snapshot or {})
+        payload.setdefault("site_id", site_id)
+        if protocol is not None:
+            payload.setdefault("protocol", protocol)
+        if resource_id is not None and "idRecurso" not in payload:
+            payload["idRecurso"] = resource_id
         error_message = None
         if state in {"failed", "dead", "cancelled"}:
             error_message = f"state={state}"
@@ -141,6 +146,7 @@ class PgJobStore:
         finished: bool = False,
         error_message: Optional[str] = None,
         result_snapshot: Optional[dict[str, Any]] = None,
+        worker_id: Optional[str] = None,
     ) -> None:
         conn = self._conn()
         if conn is None:
@@ -195,6 +201,38 @@ class PgJobStore:
                             str(job_id),
                         ),
                     )
+                    if attempt is not None:
+                        cur.execute("SELECT id FROM jobs WHERE job_id = %s", (str(job_id),))
+                        row = cur.fetchone()
+                        if row and row[0] is not None:
+                            cur.execute(
+                                """
+                                INSERT INTO job_attempts (
+                                    job_id, attempt_no, worker_id, status, error_message, started_at, ended_at
+                                ) VALUES (
+                                    %s, %s, %s, %s, %s,
+                                    CASE WHEN %s THEN %s::timestamptz ELSE NULL END,
+                                    CASE WHEN %s THEN %s::timestamptz ELSE NULL END
+                                )
+                                ON CONFLICT (job_id, attempt_no) DO UPDATE SET
+                                    worker_id = COALESCE(EXCLUDED.worker_id, job_attempts.worker_id),
+                                    status = EXCLUDED.status,
+                                    error_message = COALESCE(EXCLUDED.error_message, job_attempts.error_message),
+                                    started_at = COALESCE(EXCLUDED.started_at, job_attempts.started_at),
+                                    ended_at = COALESCE(EXCLUDED.ended_at, job_attempts.ended_at)
+                                """,
+                                (
+                                    int(row[0]),
+                                    int(attempt),
+                                    worker_id,
+                                    str(state),
+                                    error_message,
+                                    bool(started),
+                                    now,
+                                    bool(finished),
+                                    now,
+                                ),
+                            )
         except Exception as exc:
             self.logger.warning("Dual-write update_job_run_state a PG falló (job_id=%s): %s", job_id, exc)
         finally:
@@ -203,4 +241,3 @@ class PgJobStore:
 
 def build_pg_job_store(logger: Optional[logging.Logger] = None) -> PgJobStore:
     return PgJobStore(PgJobStoreConfig.from_env(), logger=logger)
-

@@ -24,7 +24,7 @@ Este documento deja el proyecto listo para arrancar desde cero con la arquitectu
   - `XVIA_PASSWORD`
 - SQL Server (lectura de recursos):
   - `SQLSERVER_CONNECTION_STRING` (recomendado)
-  - o `SQLSERVER_SERVER`, `SQLSERVER_DATABASE`, `SQLSERVER_USERNAME`, `SQLSERVER_PASSWORD` (+ opcional `SQLSERVER_DRIVER`, `SQLSERVER_TRUSTED_CONNECTION`)
+  - o `SQLSERVER_SERVER`, `SQLSERVER_DATABASE`, `SQLSERVER_USERNAME`, `SQLSERVER_PASSWORD` (+ opcional `SQLSERVER_DRIVER`, `SQLSERVER_TRUSTED_CONNECTION`, `SQLSERVER_PORT`, `SQLSERVER_TDS_VERSION`)
 - GESDOC (si se usa documentacion obligatoria):
   - `GESDOC_USER`
   - `GESDOC_PWD`
@@ -32,16 +32,59 @@ Este documento deja el proyecto listo para arrancar desde cero con la arquitectu
 ## Certificado de firma
 
 - Tipo: **PKCS#12** (`.pfx` o `.p12`).
-- Ruta host esperada: `certificates/certificate.pfx`
+- Ruta host esperada (en tu maquina): `<ROOT_DEL_REPO>/certificates/certificate.pfx`
 - Ruta dentro del contenedor: `/data/certificates/certificate.pfx`
 - En `docker-compose.microservices.yml` ya esta montado como solo lectura:
   - `../../certificates:/data/certificates:ro`
 
 Si tu certificado es `.p12`, copialo con nombre `certificate.pfx`.
 
+## Aclaracion de rutas (importante)
+
+- `../../certificates` se evalua **relativo al archivo compose**:
+  - Compose: `infra/docker/docker-compose.microservices.yml`
+  - `infra/docker/../../certificates` => `<ROOT_DEL_REPO>/certificates`
+- Por tanto:
+  - En host debes tener: `<ROOT_DEL_REPO>/certificates/certificate.pfx`
+  - En contenedor se vera como: `/data/certificates/certificate.pfx`
+
+## Pasos exactos para instalar el certificado
+
+1. Crea la carpeta en la raiz del repo:
+   - `certificates/`
+2. Copia tu certificado PKCS#12 dentro:
+   - Si ya es `.pfx`: `certificates/certificate.pfx`
+   - Si es `.p12`: copialo/renombralo a `certificates/certificate.pfx`
+3. Verifica que existe el archivo:
+   - Windows PowerShell:
+     ```powershell
+     Test-Path .\certificates\certificate.pfx
+     ```
+   - Linux/macOS:
+     ```bash
+     test -f ./certificates/certificate.pfx && echo OK
+     ```
+4. Arranca contenedores:
+   ```powershell
+   docker compose -f infra/docker/docker-compose.microservices.yml up -d
+   ```
+5. Verifica que el `signing-service` ve el certificado:
+   ```powershell
+   docker compose -f infra/docker/docker-compose.microservices.yml exec signing-service sh -lc "ls -l /data/certificates"
+   ```
+   Debes ver `certificate.pfx`.
+
 ## Nota SQL Server + pyodbc
 
-`brain-claim-service` usa `pyodbc`. Si lo corres fuera de Docker en Windows, instala ODBC Driver 17/18 de SQL Server.
+`brain-claim-service` usa `pyodbc` dentro del contenedor.
+
+En contenedores Linux de este proyecto se usa mejor `FreeTDS`:
+
+- `.env`: `SQLSERVER_DRIVER=FreeTDS`
+- `.env`: `SQLSERVER_PORT=1433`
+- `.env`: `SQLSERVER_TDS_VERSION=7.4`
+- si ejecutas scripts locales en Windows, puedes mantener `SQLSERVER_DRIVER={ODBC Driver 17 for SQL Server}`.
+- En Docker, usa preferiblemente IP en `SQLSERVER_SERVER` (ej. `192.168.x.y`) en lugar de nombres NetBIOS como `BD-SERVER`.
 
 ## 2. Estructura minima esperada
 
@@ -69,11 +112,11 @@ SQLITE_WRITES_ENABLED=0
 # =========================
 # Postgres / Redis
 # =========================
-REPORT_PG_DSN=postgresql://xaloc:xaloc_dev_password@localhost:5432/xaloc
-PG_DSN=postgresql://xaloc:xaloc_dev_password@localhost:5432/xaloc
+REPORT_PG_DSN=postgresql://xaloc:xaloc_dev_password@postgres:5432/xaloc
+PG_DSN=postgresql://xaloc:xaloc_dev_password@postgres:5432/xaloc
 
 REDIS_ENABLED=1
-REDIS_URL=redis://localhost:6379/0
+REDIS_URL=redis://redis:6379/0
 
 # =========================
 # SQL Server
@@ -204,6 +247,13 @@ cd ..
 docker compose -f infra/docker/docker-compose.microservices.yml up -d
 ```
 
+Modo por defecto actual: **Docker completo**.
+Se levanta todo en Docker con un unico comando:
+
+```powershell
+docker compose -f infra/docker/docker-compose.microservices.yml up -d
+```
+
 ## 5.2 Accesos
 
 - Gateway + frontend: `http://localhost:8080`
@@ -219,6 +269,48 @@ Se crea en `auth-rbac-service` con:
 
 - `DASHBOARD_ADMIN_USERNAME`
 - `DASHBOARD_ADMIN_PASSWORD`
+
+## 5.4 Apagado y reinicio tras cambios
+
+Usa esta guia rapida segun el tipo de cambio.
+
+- Cambios en `.env`:
+  ```powershell
+  docker compose -f infra/docker/docker-compose.microservices.yml up -d --force-recreate
+  ```
+- Cambios en `docker-compose.microservices.yml`:
+  ```powershell
+  docker compose -f infra/docker/docker-compose.microservices.yml down
+  docker compose -f infra/docker/docker-compose.microservices.yml up -d
+  ```
+- Cambios en servicios dockerizados (`playwright-runner-service`, `signing-service`):
+  ```powershell
+  docker compose -f infra/docker/docker-compose.microservices.yml up -d --build playwright-runner-service signing-service
+  ```
+- Reiniciar solo infraestructura (`postgres`, `redis`):
+  ```powershell
+  docker compose -f infra/docker/docker-compose.microservices.yml restart postgres redis
+  ```
+- Apagar todo Docker de este proyecto:
+  ```powershell
+  docker compose -f infra/docker/docker-compose.microservices.yml down
+  ```
+- Apagar todo + borrar volúmenes (reset total local):
+  ```powershell
+  docker compose -f infra/docker/docker-compose.microservices.yml down -v
+  ```
+  Advertencia: esto borra datos locales de PostgreSQL y Redis.
+
+Chequeo rápido después de reiniciar:
+
+```powershell
+docker compose -f infra/docker/docker-compose.microservices.yml ps
+curl.exe http://localhost:8101/health
+curl.exe http://localhost:8788/health
+curl.exe http://localhost:8080/health
+curl.exe http://localhost:8111/health
+curl.exe http://localhost:8112/health
+```
 
 ## 6. Congelar SQLite como backup temporal
 
@@ -239,6 +331,18 @@ docker compose -f infra/docker/docker-compose.microservices.yml logs -f --tail=1
 
 ## 8. Troubleshooting minimo
 
+- Montaje de carpeta de clientes en Docker (host Linux):
+  - monta primero el SMB en el host, por ejemplo en `/mnt/clientes`.
+  - define en `.env`:
+    ```env
+    CLIENT_DOCS_HOST_PATH=/mnt/clientes
+    ```
+  - los contenedores usan `CLIENT_DOCS_BASE_PATH=/mnt/clientes`.
+  - verifica desde contenedor:
+    ```powershell
+    docker compose -f infra/docker/docker-compose.microservices.yml exec worker-orchestrator-service sh -lc "ls -la /mnt/clientes | head"
+    ```
+
 - Error Redis/cola:
   - revisa `REDIS_ENABLED=1`, `REDIS_URL`.
 - Error PostgreSQL:
@@ -249,21 +353,44 @@ docker compose -f infra/docker/docker-compose.microservices.yml logs -f --tail=1
   - revisa `SECRET_KEY`, `DASHBOARD_JWT_ISSUER`, `DASHBOARD_JWT_AUDIENCE`.
 - Error SQL Server en brain-claim:
   - valida `SQLSERVER_CONNECTION_STRING` y driver ODBC.
+- Error Docker `open //./pipe/dockerDesktopLinuxEngine`:
+  - Docker Desktop daemon no esta levantado.
+  - abre Docker Desktop y espera a que quede en estado "Engine running".
+  - valida con:
+    ```powershell
+    docker version
+    docker info
+    docker context use desktop-linux
+    ```
+  - si sigue igual en Windows:
+    ```powershell
+    wsl --shutdown
+    ```
+    luego reinicia Docker Desktop.
+- `npm audit fix` en raiz del repo da `ENOLOCK`:
+  - correcto: ese comando solo aplica en `dashboard-frontend/` (donde existe `package-lock.json`).
+  - usa:
+    ```powershell
+    cd dashboard-frontend
+    npm install
+    npm audit
+    ```
+  - evita `npm audit fix --force` salvo decision consciente (puede romper versiones de ESLint/Next).
+- Error `Cannot find module '../lightningcss.linux-x64-gnu.node'` en `api-gateway`:
+  - causa habitual: `node_modules` generados en Windows reutilizados dentro de contenedor Linux.
+  - este compose ya monta volúmenes Linux para:
+    - `/app/dashboard-frontend/node_modules`
+    - `/app/dashboard-frontend/.next`
+  - reconstruye solo el gateway:
+    ```powershell
+    docker compose -f infra/docker/docker-compose.microservices.yml up -d --build api-gateway
+    ```
 
-## 9. Ejecucion local alternativa (sin Docker completo)
+## 9. Nota de red en Docker
 
-Puedes ejecutar servicios sueltos en local:
+Dentro de contenedores, usa nombres de servicio Docker:
 
-```powershell
-python run_gateway.py
-```
+- PostgreSQL: `postgres:5432`
+- Redis: `redis:6379`
 
-o:
-
-```powershell
-uvicorn services.auth_rbac.app:app --host 0.0.0.0 --port 8101
-uvicorn services.dashboard_backend.app:app --host 0.0.0.0 --port 8788
-uvicorn services.api_gateway.app:app --host 0.0.0.0 --port 8080
-```
-
-Para pipeline completo, manten Postgres/Redis activos y levanta los workers/planes que necesites.
+No uses `localhost` en DSN/URL de servicios que corren dentro de Docker.

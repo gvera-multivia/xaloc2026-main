@@ -6,15 +6,17 @@ import hmac
 import json
 import os
 import secrets
-import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any, Optional
 
 import jwt
+import psycopg
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import Response
+from psycopg.rows import dict_row
+
+from core.runtime_flags import get_report_pg_dsn
 
 AUTH_COOKIE_NAME = "dashboard_access_token"
 AUTH_ROLE_COOKIE_NAME = "dashboard_role"
@@ -70,6 +72,20 @@ def verify_password(password: str, password_hash: str) -> bool:
     return hmac.compare_digest(computed, expected)
 
 
+def _resolve_secret_key() -> str:
+    configured = (os.getenv("SECRET_KEY") or "").strip()
+    if configured:
+        return configured
+    return secrets.token_urlsafe(48)
+
+
+def _resolve_pg_dsn() -> str:
+    dsn = get_report_pg_dsn() or ""
+    if not dsn:
+        raise RuntimeError("REPORT_PG_DSN/PG_DSN es obligatorio para auth-rbac-service.")
+    return dsn
+
+
 @dataclass(frozen=True)
 class AuthUser:
     id: int
@@ -78,137 +94,107 @@ class AuthUser:
     active: bool
 
     def to_claims(self, scopes: list[dict[str, Optional[str]]]) -> dict[str, Any]:
-        return {
-            "sub": str(self.id),
-            "username": self.username,
-            "role": self.role,
-            "scopes": scopes,
-        }
+        return {"sub": str(self.id), "username": self.username, "role": self.role, "scopes": scopes}
 
 
 class AuthRbacStore:
-    def __init__(self, db_path: str):
-        self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+    def __init__(self, dsn: str):
+        self.dsn = dsn
         self._init_schema()
 
-    def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+    def _conn(self):
+        return psycopg.connect(self.dsn, row_factory=dict_row)
 
     def _init_schema(self) -> None:
         with self._conn() as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS auth_users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username TEXT NOT NULL UNIQUE,
-                    password_hash TEXT NOT NULL,
-                    role TEXT NOT NULL,
-                    active INTEGER NOT NULL DEFAULT 1,
-                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS auth_users (
+                        id BIGSERIAL PRIMARY KEY,
+                        username TEXT NOT NULL UNIQUE,
+                        password_hash TEXT NOT NULL,
+                        role TEXT NOT NULL,
+                        active BOOLEAN NOT NULL DEFAULT TRUE,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
                 )
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS auth_user_scopes (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    scope TEXT NOT NULL,
-                    organism_id TEXT NULL,
-                    client_id TEXT NULL,
-                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(user_id, scope, organism_id, client_id),
-                    FOREIGN KEY(user_id) REFERENCES auth_users(id) ON DELETE CASCADE
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS auth_user_scopes (
+                        id BIGSERIAL PRIMARY KEY,
+                        user_id BIGINT NOT NULL REFERENCES auth_users(id) ON DELETE CASCADE,
+                        scope TEXT NOT NULL,
+                        organism_id TEXT NULL,
+                        client_id TEXT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
                 )
-                """
-            )
-            conn.execute(
-                """
-                CREATE INDEX IF NOT EXISTS ix_auth_user_scopes_user
-                ON auth_user_scopes(user_id)
-                """
-            )
+                cur.execute("CREATE INDEX IF NOT EXISTS ix_auth_user_scopes_user ON auth_user_scopes(user_id)")
+                cur.execute(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS ux_auth_user_scopes_unique
+                    ON auth_user_scopes (
+                        user_id, scope, COALESCE(organism_id, ''), COALESCE(client_id, '')
+                    )
+                    """
+                )
+            conn.commit()
 
     def get_user_by_username(self, username: str) -> Optional[dict[str, Any]]:
         username_norm = _normalize_username(username)
         if not username_norm:
             return None
         with self._conn() as conn:
-            row = conn.execute(
-                """
-                SELECT id, username, password_hash, role, active, created_at, updated_at
-                FROM auth_users
-                WHERE username = ?
-                LIMIT 1
-                """,
-                (username_norm,),
-            ).fetchone()
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, username, password_hash, role, active, created_at, updated_at
+                    FROM auth_users WHERE username = %s LIMIT 1
+                    """,
+                    (username_norm,),
+                )
+                row = cur.fetchone()
         return dict(row) if row else None
 
     def get_user_by_id(self, user_id: int) -> Optional[AuthUser]:
-        try:
-            user_id_int = int(user_id)
-        except Exception:
-            return None
         with self._conn() as conn:
-            row = conn.execute(
-                """
-                SELECT id, username, role, active
-                FROM auth_users
-                WHERE id = ?
-                LIMIT 1
-                """,
-                (user_id_int,),
-            ).fetchone()
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, username, role, active FROM auth_users WHERE id = %s LIMIT 1", (int(user_id),))
+                row = cur.fetchone()
         if not row:
             return None
         return AuthUser(
             id=int(row["id"]),
             username=str(row["username"]),
             role=str(row["role"]),
-            active=bool(int(row["active"])),
+            active=bool(row["active"]),
         )
 
     def list_user_scopes(self, user_id: int) -> list[dict[str, Optional[str]]]:
         with self._conn() as conn:
-            rows = conn.execute(
-                """
-                SELECT scope, organism_id, client_id
-                FROM auth_user_scopes
-                WHERE user_id = ?
-                ORDER BY scope ASC, organism_id ASC, client_id ASC
-                """,
-                (int(user_id),),
-            ).fetchall()
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT scope, organism_id, client_id
+                    FROM auth_user_scopes
+                    WHERE user_id = %s
+                    ORDER BY scope ASC, organism_id ASC, client_id ASC
+                    """,
+                    (int(user_id),),
+                )
+                rows = cur.fetchall()
         return [
             {
                 "scope": str(row["scope"]),
-                "organism_id": (str(row["organism_id"]) if row["organism_id"] is not None else None),
-                "client_id": (str(row["client_id"]) if row["client_id"] is not None else None),
+                "organism_id": str(row["organism_id"]) if row["organism_id"] is not None else None,
+                "client_id": str(row["client_id"]) if row["client_id"] is not None else None,
             }
             for row in rows
         ]
-
-    def list_users(self) -> list[dict[str, Any]]:
-        with self._conn() as conn:
-            rows = conn.execute(
-                """
-                SELECT id, username, role, active, created_at, updated_at
-                FROM auth_users
-                ORDER BY username ASC
-                """
-            ).fetchall()
-        items = [dict(row) for row in rows]
-        for item in items:
-            item["scopes"] = self.effective_scopes_for_role(
-                role=str(item["role"]),
-                user_scopes=self.list_user_scopes(int(item["id"])),
-            )
-        return items
 
     @staticmethod
     def effective_scopes_for_role(*, role: str, user_scopes: list[dict[str, Optional[str]]]) -> list[dict[str, Optional[str]]]:
@@ -221,6 +207,24 @@ class AuthRbacStore:
             dedup[key] = item
         return list(dedup.values())
 
+    def list_users(self) -> list[dict[str, Any]]:
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, username, role, active, created_at, updated_at
+                    FROM auth_users ORDER BY username ASC
+                    """
+                )
+                rows = cur.fetchall()
+        items = [dict(r) for r in rows]
+        for item in items:
+            item["scopes"] = self.effective_scopes_for_role(
+                role=str(item["role"]),
+                user_scopes=self.list_user_scopes(int(item["id"])),
+            )
+        return items
+
     def create_user(self, *, username: str, password: str, role: str = ROLE_USER, active: bool = True) -> AuthUser:
         username_norm = _normalize_username(username)
         if not username_norm:
@@ -228,21 +232,23 @@ class AuthRbacStore:
         role_norm = str(role or "").strip().lower()
         if role_norm not in VALID_ROLES:
             raise ValueError("role invalido.")
-
         password_hash = hash_password(password)
         now_iso = _utc_now().isoformat()
         with self._conn() as conn:
-            try:
-                cur = conn.execute(
-                    """
-                    INSERT INTO auth_users (username, password_hash, role, active, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                    (username_norm, password_hash, role_norm, 1 if active else 0, now_iso, now_iso),
-                )
-            except sqlite3.IntegrityError as exc:
-                raise ValueError(f"Ya existe un usuario con username '{username_norm}'.") from exc
-            user_id = int(cur.lastrowid)
+            with conn.cursor() as cur:
+                try:
+                    cur.execute(
+                        """
+                        INSERT INTO auth_users (username, password_hash, role, active, created_at, updated_at)
+                        VALUES (%s, %s, %s, %s, %s::timestamptz, %s::timestamptz)
+                        RETURNING id
+                        """,
+                        (username_norm, password_hash, role_norm, bool(active), now_iso, now_iso),
+                    )
+                except Exception as exc:
+                    raise ValueError(f"Ya existe un usuario con username '{username_norm}'.") from exc
+                user_id = int(cur.fetchone()["id"])
+            conn.commit()
         return AuthUser(id=user_id, username=username_norm, role=role_norm, active=bool(active))
 
     def update_user(
@@ -254,131 +260,114 @@ class AuthRbacStore:
         active: Optional[bool] = None,
         password: Optional[str] = None,
     ) -> bool:
-        updates = []
+        updates: list[str] = []
         params: list[Any] = []
-        now_iso = _utc_now().isoformat()
-
         if username is not None:
             username_norm = _normalize_username(username)
             if not username_norm:
                 raise ValueError("username no puede estar vacio.")
-            updates.append("username = ?")
+            updates.append("username = %s")
             params.append(username_norm)
-
         if role is not None:
             role_norm = str(role).strip().lower()
             if role_norm not in VALID_ROLES:
                 raise ValueError("role invalido.")
-            updates.append("role = ?")
+            updates.append("role = %s")
             params.append(role_norm)
-
         if active is not None:
-            updates.append("active = ?")
-            params.append(1 if active else 0)
-
+            updates.append("active = %s")
+            params.append(bool(active))
         if password is not None:
-            updates.append("password_hash = ?")
+            updates.append("password_hash = %s")
             params.append(hash_password(password))
-
         if not updates:
             return False
-        updates.append("updated_at = ?")
-        params.append(now_iso)
+        updates.append("updated_at = %s::timestamptz")
+        params.append(_utc_now().isoformat())
         params.append(int(user_id))
-
         with self._conn() as conn:
-            try:
-                cur = conn.execute(
-                    f"UPDATE auth_users SET {', '.join(updates)} WHERE id = ?",
-                    tuple(params),
-                )
-                return cur.rowcount > 0
-            except sqlite3.IntegrityError as exc:
-                raise ValueError("El username ya existe.") from exc
+            with conn.cursor() as cur:
+                cur.execute(f"UPDATE auth_users SET {', '.join(updates)} WHERE id = %s", tuple(params))
+                updated = cur.rowcount > 0
+            conn.commit()
+        return updated
 
     def delete_user(self, user_id: int) -> bool:
         with self._conn() as conn:
-            cur = conn.execute("DELETE FROM auth_users WHERE id = ?", (int(user_id),))
-            return cur.rowcount > 0
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM auth_users WHERE id = %s", (int(user_id),))
+                deleted = cur.rowcount > 0
+            conn.commit()
+        return deleted
 
     def set_password(self, *, username: str, password: str) -> bool:
         username_norm = _normalize_username(username)
-        if not username_norm:
-            raise ValueError("username es obligatorio.")
-        password_hash = hash_password(password)
-        now_iso = _utc_now().isoformat()
         with self._conn() as conn:
-            cur = conn.execute(
-                """
-                UPDATE auth_users
-                SET password_hash = ?, updated_at = ?
-                WHERE username = ?
-                """,
-                (password_hash, now_iso, username_norm),
-            )
-        return cur.rowcount > 0
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE auth_users
+                    SET password_hash = %s, updated_at = %s::timestamptz
+                    WHERE username = %s
+                    """,
+                    (hash_password(password), _utc_now().isoformat(), username_norm),
+                )
+                ok = cur.rowcount > 0
+            conn.commit()
+        return ok
 
-    def upsert_scope(
-        self,
-        *,
-        user_id: int,
-        scope: str,
-        organism_id: Optional[str] = None,
-        client_id: Optional[str] = None,
-    ) -> dict[str, Optional[str]]:
+    def upsert_scope(self, *, user_id: int, scope: str, organism_id: Optional[str] = None, client_id: Optional[str] = None) -> dict[str, Optional[str]]:
         scope_norm = str(scope or "").strip()
         if not scope_norm:
             raise ValueError("scope es obligatorio.")
         organism_norm = str(organism_id).strip() if organism_id else None
         client_norm = str(client_id).strip() if client_id else None
         with self._conn() as conn:
-            conn.execute(
-                """
-                INSERT INTO auth_user_scopes (user_id, scope, organism_id, client_id)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(user_id, scope, organism_id, client_id) DO NOTHING
-                """,
-                (int(user_id), scope_norm, organism_norm, client_norm),
-            )
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO auth_user_scopes (user_id, scope, organism_id, client_id)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (user_id, scope, COALESCE(organism_id, ''), COALESCE(client_id, '')) DO NOTHING
+                    """,
+                    (int(user_id), scope_norm, organism_norm, client_norm),
+                )
+            conn.commit()
         return {"scope": scope_norm, "organism_id": organism_norm, "client_id": client_norm}
 
-    def delete_scope(
-        self,
-        *,
-        user_id: int,
-        scope: str,
-        organism_id: Optional[str] = None,
-        client_id: Optional[str] = None,
-    ) -> bool:
+    def delete_scope(self, *, user_id: int, scope: str, organism_id: Optional[str] = None, client_id: Optional[str] = None) -> bool:
         with self._conn() as conn:
-            cur = conn.execute(
-                """
-                DELETE FROM auth_user_scopes
-                WHERE user_id = ? AND scope = ? AND
-                      COALESCE(organism_id, '') = COALESCE(?, '') AND
-                      COALESCE(client_id, '') = COALESCE(?, '')
-                """,
-                (int(user_id), str(scope or "").strip(), organism_id, client_id),
-            )
-            return cur.rowcount > 0
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    DELETE FROM auth_user_scopes
+                    WHERE user_id = %s AND scope = %s
+                      AND COALESCE(organism_id, '') = COALESCE(%s, '')
+                      AND COALESCE(client_id, '') = COALESCE(%s, '')
+                    """,
+                    (int(user_id), str(scope or "").strip(), organism_id, client_id),
+                )
+                deleted = cur.rowcount > 0
+            conn.commit()
+        return deleted
 
     def ensure_bootstrap_admin(self, *, username: str, password: str) -> AuthUser:
         existing = self.get_user_by_username(username)
         if existing:
-            role = str(existing["role"])
-            active = bool(int(existing["active"]))
-            if role != ROLE_ADMIN or not active:
+            if str(existing["role"]) != ROLE_ADMIN or not bool(existing["active"]):
                 with self._conn() as conn:
-                    conn.execute(
-                        """
-                        UPDATE auth_users
-                        SET role = ?, active = 1, updated_at = ?
-                        WHERE id = ?
-                        """,
-                        (ROLE_ADMIN, _utc_now().isoformat(), int(existing["id"])),
-                    )
-                if password:
-                    self.set_password(username=str(existing["username"]), password=password)
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            UPDATE auth_users
+                            SET role = %s, active = TRUE, updated_at = %s::timestamptz
+                            WHERE id = %s
+                            """,
+                            (ROLE_ADMIN, _utc_now().isoformat(), int(existing["id"])),
+                        )
+                    conn.commit()
+            if password:
+                self.set_password(username=str(existing["username"]), password=password)
             return AuthUser(id=int(existing["id"]), username=str(existing["username"]), role=ROLE_ADMIN, active=True)
         return self.create_user(username=username, password=password, role=ROLE_ADMIN, active=True)
 
@@ -386,28 +375,15 @@ class AuthRbacStore:
         row = self.get_user_by_username(username)
         if not row:
             return None
-        if not bool(int(row["active"])):
+        if not bool(row["active"]):
             return None
         if not verify_password(str(password or ""), str(row["password_hash"] or "")):
             return None
-        return AuthUser(
-            id=int(row["id"]),
-            username=str(row["username"]),
-            role=str(row["role"]),
-            active=True,
-        )
+        return AuthUser(id=int(row["id"]), username=str(row["username"]), role=str(row["role"]), active=True)
 
 
 class JwtManager:
-    def __init__(
-        self,
-        *,
-        secret_key: str,
-        algorithm: str = "HS256",
-        issuer: str = "xaloc-dashboard",
-        audience: str = "xaloc-dashboard-clients",
-        access_token_minutes: int = 480,
-    ):
+    def __init__(self, *, secret_key: str, algorithm: str = "HS256", issuer: str = "xaloc-dashboard", audience: str = "xaloc-dashboard-clients", access_token_minutes: int = 480):
         secret = str(secret_key or "").strip()
         if not secret:
             raise ValueError("SECRET_KEY no puede estar vacio.")
@@ -430,20 +406,7 @@ class JwtManager:
         return jwt.encode(payload, self.secret_key, algorithm=self.algorithm)
 
     def decode_access_token(self, token: str) -> dict[str, Any]:
-        return jwt.decode(
-            str(token or ""),
-            self.secret_key,
-            algorithms=[self.algorithm],
-            audience=self.audience,
-            issuer=self.issuer,
-        )
-
-
-def resolve_secret_key() -> str:
-    configured = (os.getenv("SECRET_KEY") or "").strip()
-    if configured:
-        return configured
-    return secrets.token_urlsafe(48)
+        return jwt.decode(str(token or ""), self.secret_key, algorithms=[self.algorithm], audience=self.audience, issuer=self.issuer)
 
 
 def _extract_bearer_from_authorization(authorization: Optional[str]) -> Optional[str]:
@@ -459,36 +422,24 @@ def _extract_token_from_request(request: Request, authorization: Optional[str]) 
     header_token = _extract_bearer_from_authorization(authorization)
     if header_token:
         return header_token
-    cookie_token = request.cookies.get(AUTH_COOKIE_NAME)
-    if cookie_token:
-        return cookie_token
-    return None
+    return request.cookies.get(AUTH_COOKIE_NAME)
 
 
-def _decode_token_or_401(token: str) -> dict[str, Any]:
-    try:
-        return jwt_manager.decode_access_token(token)
-    except jwt.ExpiredSignatureError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired") from exc
-    except jwt.InvalidTokenError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
+app = FastAPI(title="auth-rbac-service", version="0.2.0")
+store = AuthRbacStore(dsn=_resolve_pg_dsn())
+jwt_manager = JwtManager(
+    secret_key=_resolve_secret_key(),
+    issuer=(os.getenv("DASHBOARD_JWT_ISSUER") or "xaloc-dashboard").strip() or "xaloc-dashboard",
+    audience=(os.getenv("DASHBOARD_JWT_AUDIENCE") or "xaloc-dashboard-clients").strip() or "xaloc-dashboard-clients",
+    access_token_minutes=max(5, int((os.getenv("DASHBOARD_TOKEN_EXPIRE_MINUTES") or "480").strip() or "480")),
+)
+AUTH_COOKIE_SECURE = (os.getenv("DASHBOARD_AUTH_COOKIE_SECURE") or "0").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _build_claims_for_user(user: AuthUser) -> dict[str, Any]:
     raw_scopes = store.list_user_scopes(user.id)
     scopes = store.effective_scopes_for_role(role=user.role, user_scopes=raw_scopes)
     return user.to_claims(scopes=scopes)
-
-
-app = FastAPI(title="auth-rbac-service", version="0.1.0")
-store = AuthRbacStore(db_path=(os.getenv("AUTH_RBAC_DB_PATH") or "db/auth_rbac.db").strip() or "db/auth_rbac.db")
-jwt_manager = JwtManager(
-    secret_key=resolve_secret_key(),
-    issuer=(os.getenv("DASHBOARD_JWT_ISSUER") or "xaloc-dashboard").strip() or "xaloc-dashboard",
-    audience=(os.getenv("DASHBOARD_JWT_AUDIENCE") or "xaloc-dashboard-clients").strip() or "xaloc-dashboard-clients",
-    access_token_minutes=max(5, int((os.getenv("DASHBOARD_TOKEN_EXPIRE_MINUTES") or "480").strip() or "480")),
-)
-AUTH_COOKIE_SECURE = (os.getenv("DASHBOARD_AUTH_COOKIE_SECURE") or "0").strip().lower() in {"1", "true", "yes", "on"}
 
 
 @app.on_event("startup")
@@ -516,24 +467,8 @@ async def auth_login(payload: dict[str, Any] = Body(...)) -> Response:
     claims = _build_claims_for_user(user)
     token = jwt_manager.create_access_token(user, claims.get("scopes") or [])
     response = Response(content=json.dumps({"ok": True, "user": claims}), media_type="application/json")
-    response.set_cookie(
-        key=AUTH_COOKIE_NAME,
-        value=token,
-        httponly=True,
-        secure=AUTH_COOKIE_SECURE,
-        samesite="lax",
-        max_age=jwt_manager.access_token_minutes * 60,
-        path="/",
-    )
-    response.set_cookie(
-        key=AUTH_ROLE_COOKIE_NAME,
-        value=user.role,
-        httponly=False,
-        secure=AUTH_COOKIE_SECURE,
-        samesite="lax",
-        max_age=jwt_manager.access_token_minutes * 60,
-        path="/",
-    )
+    response.set_cookie(key=AUTH_COOKIE_NAME, value=token, httponly=True, secure=AUTH_COOKIE_SECURE, samesite="lax", max_age=jwt_manager.access_token_minutes * 60, path="/")
+    response.set_cookie(key=AUTH_ROLE_COOKIE_NAME, value=user.role, httponly=False, secure=AUTH_COOKIE_SECURE, samesite="lax", max_age=jwt_manager.access_token_minutes * 60, path="/")
     return response
 
 
@@ -545,14 +480,22 @@ async def auth_logout() -> Response:
     return response
 
 
+def _decode_token_or_401(token: str) -> dict[str, Any]:
+    try:
+        return jwt_manager.decode_access_token(token)
+    except jwt.ExpiredSignatureError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired") from exc
+    except jwt.InvalidTokenError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
+
+
 @app.get("/auth/me")
 async def auth_me(request: Request, authorization: Optional[str] = Header(None)) -> dict[str, Any]:
     token = _extract_token_from_request(request, authorization)
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing auth token")
     payload = _decode_token_or_401(token)
-    user_id = int(str(payload.get("sub") or "0"))
-    user = store.get_user_by_id(user_id)
+    user = store.get_user_by_id(int(str(payload.get("sub") or "0")))
     if user is None or not user.active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
     return {"authenticated": True, "user": _build_claims_for_user(user)}
@@ -579,21 +522,18 @@ async def auth_users_list(_admin: dict[str, Any] = Depends(_require_admin)) -> d
 
 @app.post("/auth/users")
 async def auth_users_create(payload: dict[str, Any] = Body(...), _admin: dict[str, Any] = Depends(_require_admin)) -> dict[str, Any]:
-    username = str(payload.get("username") or "").strip()
-    password = str(payload.get("password") or "")
-    role = str(payload.get("role") or ROLE_USER).strip().lower()
-    active = bool(payload.get("active", True))
-    user = store.create_user(username=username, password=password, role=role, active=active)
+    user = store.create_user(
+        username=str(payload.get("username") or "").strip(),
+        password=str(payload.get("password") or ""),
+        role=str(payload.get("role") or ROLE_USER).strip().lower(),
+        active=bool(payload.get("active", True)),
+    )
     claims = _build_claims_for_user(user)
     return {"created": True, "user": claims | {"active": user.active}}
 
 
 @app.put("/auth/users/{user_id}")
-async def auth_users_update(
-    user_id: int,
-    payload: dict[str, Any] = Body(...),
-    _admin: dict[str, Any] = Depends(_require_admin),
-) -> dict[str, Any]:
+async def auth_users_update(user_id: int, payload: dict[str, Any] = Body(...), _admin: dict[str, Any] = Depends(_require_admin)) -> dict[str, Any]:
     ok = store.update_user(
         user_id=user_id,
         username=payload.get("username"),
@@ -606,8 +546,7 @@ async def auth_users_update(
 
 @app.delete("/auth/users/{user_id}")
 async def auth_users_delete(user_id: int, _admin: dict[str, Any] = Depends(_require_admin)) -> dict[str, Any]:
-    ok = store.delete_user(user_id)
-    return {"deleted": ok}
+    return {"deleted": store.delete_user(user_id)}
 
 
 @app.get("/auth/users/{user_id}/scopes")
@@ -615,19 +554,12 @@ async def auth_user_scopes_list(user_id: int, _admin: dict[str, Any] = Depends(_
     user = store.get_user_by_id(user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
-    scopes = store.effective_scopes_for_role(
-        role=user.role,
-        user_scopes=store.list_user_scopes(user_id),
-    )
+    scopes = store.effective_scopes_for_role(role=user.role, user_scopes=store.list_user_scopes(user_id))
     return {"items": scopes, "total": len(scopes)}
 
 
 @app.post("/auth/users/{user_id}/scopes")
-async def auth_user_scopes_add(
-    user_id: int,
-    payload: dict[str, Any] = Body(...),
-    _admin: dict[str, Any] = Depends(_require_admin),
-) -> dict[str, Any]:
+async def auth_user_scopes_add(user_id: int, payload: dict[str, Any] = Body(...), _admin: dict[str, Any] = Depends(_require_admin)) -> dict[str, Any]:
     user = store.get_user_by_id(user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
@@ -651,10 +583,4 @@ async def auth_user_scopes_delete(
     user = store.get_user_by_id(user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
-    ok = store.delete_scope(
-        user_id=user_id,
-        scope=scope,
-        organism_id=organism_id,
-        client_id=client_id,
-    )
-    return {"deleted": ok}
+    return {"deleted": store.delete_scope(user_id=user_id, scope=scope, organism_id=organism_id, client_id=client_id)}

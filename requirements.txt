@@ -13,3 +13,4 @@ uvicorn
 pypdf
 pyjwt
 websockets
+redis
