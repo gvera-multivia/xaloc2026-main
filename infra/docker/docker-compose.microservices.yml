@@ -52,6 +52,77 @@ services:
       postgres:
         condition: service_healthy
 
+  brain-claim-service:
+    image: python:3.11-slim
+    container_name: xaloc-brain-claim
+    restart: unless-stopped
+    working_dir: /app
+    command: >
+      sh -c "pip install --no-cache-dir -r requirements.txt &&
+             python -m services.brain_claim.app"
+    environment:
+      REDIS_ENABLED: "1"
+      REDIS_URL: redis://redis:6379/0
+      CANDIDATES_STREAM_KEY: candidates
+      REPORT_PG_DSN: postgresql://xaloc:xaloc_dev_password@postgres:5432/xaloc
+      QUEUE_MODE: redis_streams
+      REDIS_STREAMS_PILOT_ENABLED: "1"
+    volumes:
+      - ../../:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  payload-validator-service:
+    image: python:3.11-slim
+    container_name: xaloc-payload-validator
+    restart: unless-stopped
+    working_dir: /app
+    command: >
+      sh -c "pip install --no-cache-dir -r requirements.txt &&
+             python -m services.payload_validator.app"
+    environment:
+      REDIS_ENABLED: "1"
+      REDIS_URL: redis://redis:6379/0
+      CANDIDATES_STREAM_KEY: candidates
+      VALIDATED_STREAM_KEY: validated
+      VALIDATOR_STREAM_GROUP: validator_group
+      REPORT_PG_DSN: postgresql://xaloc:xaloc_dev_password@postgres:5432/xaloc
+    volumes:
+      - ../../:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  batcher-dispatcher-service:
+    image: python:3.11-slim
+    container_name: xaloc-batcher-dispatcher
+    restart: unless-stopped
+    working_dir: /app
+    command: >
+      sh -c "pip install --no-cache-dir -r requirements.txt &&
+             python -m services.batcher_dispatcher.app"
+    environment:
+      REDIS_ENABLED: "1"
+      REDIS_URL: redis://redis:6379/0
+      VALIDATED_STREAM_KEY: validated
+      QUEUE_STREAM_JOBS_KEY: jobs
+      DLQ_VALIDATED_STREAM_KEY: dlq:validated
+      BATCH_WINDOW_SECONDS: "30"
+      BATCHER_STREAM_GROUP: batcher_group
+      REPORT_PG_DSN: postgresql://xaloc:xaloc_dev_password@postgres:5432/xaloc
+    volumes:
+      - ../../:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   redis_data:
