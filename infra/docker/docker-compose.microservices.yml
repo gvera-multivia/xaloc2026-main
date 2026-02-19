@@ -123,6 +123,72 @@ services:
       redis:
         condition: service_healthy
 
+  worker-orchestrator-service:
+    image: python:3.11-slim
+    container_name: xaloc-worker-orchestrator
+    restart: unless-stopped
+    working_dir: /app
+    command: >
+      sh -c "pip install --no-cache-dir -r requirements.txt &&
+             python -m services.worker_orchestrator.app"
+    environment:
+      REDIS_ENABLED: "1"
+      REDIS_URL: redis://redis:6379/0
+      QUEUE_MODE: redis_streams
+      REDIS_STREAMS_PILOT_ENABLED: "1"
+      USE_PLAYWRIGHT_RUNNER_SERVICE: "1"
+      PLAYWRIGHT_RUNNER_URL: http://playwright-runner-service:8111
+      QUEUE_STREAM_JOBS_KEY: jobs
+      QUEUE_STREAM_GROUP: worker_group
+      QUEUE_STREAM_DLQ_KEY: dlq:jobs
+      REPORT_PG_DSN: postgresql://xaloc:xaloc_dev_password@postgres:5432/xaloc
+    volumes:
+      - ../../:/app
+      - artifacts_data:/data/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      playwright-runner-service:
+        condition: service_started
+
+  playwright-runner-service:
+    image: mcr.microsoft.com/playwright/python:v1.52.0-jammy
+    container_name: xaloc-playwright-runner
+    restart: unless-stopped
+    working_dir: /app
+    command: >
+      sh -c "pip install --no-cache-dir -r requirements.txt fastapi uvicorn &&
+             uvicorn services.playwright_runner.app:app --host 0.0.0.0 --port 8111"
+    environment:
+      XALOC_HEADLESS: "1"
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ../../:/app
+      - artifacts_data:/data/artifacts
+    ports:
+      - "8111:8111"
+
+  signing-service:
+    image: python:3.11-slim
+    container_name: xaloc-signing-service
+    restart: unless-stopped
+    working_dir: /app
+    command: >
+      sh -c "pip install --no-cache-dir fastapi uvicorn &&
+             uvicorn services.signing.app:app --host 0.0.0.0 --port 8112"
+    environment:
+      SIGNING_CERT_PATH: /data/certificates/certificate.pfx
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ../../:/app
+      - cert_data:/data/certificates
+    ports:
+      - "8112:8112"
+
 volumes:
   postgres_data:
   redis_data:
+  artifacts_data:
+  cert_data:

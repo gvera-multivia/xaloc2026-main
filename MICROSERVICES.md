@@ -613,6 +613,23 @@ python -m services.worker_orchestrator.app
 6. API gateway y RBAC completo.
 7. Retirada SQLite.
 
+## 18. Estado de implementacion en este repositorio
+
+- Fase 0: completada.
+- Fase 1: completada con `services/jobs`, dual-write a PG y script de reconciliacion.
+- Fase 2: completada con `shared/queue/redis_streams.py`, gateway paralelo y piloto por flag.
+- Fase 3: completada con:
+  - `services/brain_claim/app.py`
+  - `services/payload_validator/app.py`
+  - `services/batcher_dispatcher/app.py`
+  - `infra/postgres/init/002_control_plane_schema.sql`
+- Fase 4: base implementada con:
+  - `services/worker_orchestrator/app.py`
+  - `services/playwright_runner/app.py`
+  - `services/signing/app.py`
+  - capas extraidas de `core/worker/processor.py` a `core/worker_execution/*`
+  - compose actualizado con volúmenes `artifacts_data` y `cert_data`.
+
 ---
 
 Este plan esta alineado con el estado real del repositorio actual y con tu propuesta de microservicios. El siguiente paso recomendable es implementar **Fase 0 + Fase 1** como primer hito tecnico con entregables en `infra/`, `shared/` y `services/jobs/`.
