@@ -630,12 +630,20 @@ python -m services.worker_orchestrator.app
   - `services/playwright_runner/app.py`
   - `services/signing/app.py`
   - capas extraidas de `core/worker/processor.py` a `core/worker_execution/*`
-  - compose actualizado con volúmenes `artifacts_data` y `cert_data`.
+  - compose actualizado con volumen `artifacts_data` y bind mount local `certificates/`.
 - Fase 5: base implementada con:
   - `services/auth_rbac/app.py` (JWT + RBAC + scopes por organismo/cliente)
   - `services/dashboard_backend/app.py` (backend interno sin frontend proxy)
   - `services/api_gateway/app.py` (gateway unico + proxy frontend/API)
   - `dashboard_api.py` delegado a `auth-rbac-service` para `/api/auth/*` e introspeccion de token.
+- Fase 6: aplicada en corte final:
+  - defaults cambiados a `USE_PG_SOURCE_OF_TRUTH=1` y `QUEUE_MODE=redis_streams`.
+  - `core/queue_gateway.py` bloquea `QUEUE_MODE=sqlite` salvo override temporal `ALLOW_LEGACY_SQLITE_QUEUE=1`.
+  - `core/sqlite_db.py` con `SQLITE_WRITES_ENABLED=0` por defecto (writers desactivados).
+  - `run_dashboard.py` ahora levanta `services.api_gateway.app:app` (frontend solo via gateway).
+  - legado auth SQLite retirado (`dashboard/auth.py` eliminado).
+  - script de congelacion backup: `scripts/freeze_sqlite_readonly.py`.
+  - guia de bootstrap y `.env` completo: `BOOTSTRAP_SETUP.md`.
 
 ---
 

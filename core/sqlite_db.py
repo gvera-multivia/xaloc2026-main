@@ -24,7 +24,21 @@ class SQLiteDatabase:
         self.db_path = Path(db_path)
         self.logger = logging.getLogger("sqlite_db")
         self.pg_job_store = build_pg_job_store(logger=self.logger)
+        self.sqlite_writes_enabled = (os.getenv("SQLITE_WRITES_ENABLED", "0") or "0").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if not self.sqlite_writes_enabled:
+            self.logger.warning("SQLite writers desactivados (SQLITE_WRITES_ENABLED=0). Modo backup/read-only.")
         self._init_db()
+
+    def _writes_blocked(self, op_name: str) -> bool:
+        if self.sqlite_writes_enabled:
+            return False
+        self.logger.warning("Escritura SQLite omitida (%s) por SQLITE_WRITES_ENABLED=0", op_name)
+        return True
 
     def _init_db(self) -> None:
         """Inicializa la base de datos aplicando el esquema si no existe."""
@@ -365,6 +379,8 @@ class SQLiteDatabase:
         """
         Actualiza el estado de una tarea (completed/failed).
         """
+        if self._writes_blocked("update_task_status"):
+            return
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
@@ -397,6 +413,8 @@ class SQLiteDatabase:
 
     def delete_task(self, task_id: int) -> None:
         """Elimina definitivamente una tarea de tramite_queue."""
+        if self._writes_blocked("delete_task"):
+            return
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
@@ -411,6 +429,8 @@ class SQLiteDatabase:
         """
         Inserta una nueva tarea en la cola.
         """
+        if self._writes_blocked("insert_task"):
+            return -1
         resource_id = payload.get("idRecurso")
         try:
             if resource_id is not None:
@@ -493,6 +513,8 @@ class SQLiteDatabase:
 
     def requeue_task(self, task_id: int, error: Optional[str] = None) -> None:
         """Devuelve una tarea en processing a pending para reintento."""
+        if self._writes_blocked("requeue_task"):
+            return
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
@@ -516,6 +538,8 @@ class SQLiteDatabase:
         Devuelve una tarea a pending sin incrementar intentos.
         Uso principal: parada manual (Ctrl+C) para no penalizar el job.
         """
+        if self._writes_blocked("release_task_to_pending"):
+            return
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
@@ -614,6 +638,19 @@ class SQLiteDatabase:
         max_attempts: int = 3,
         trace_id: Optional[str] = None,
     ) -> None:
+        if self._writes_blocked("upsert_job_run"):
+            self.pg_job_store.upsert_job_run(
+                job_id=job_id,
+                site_id=site_id,
+                resource_id=resource_id,
+                protocol=protocol,
+                payload_snapshot=payload_snapshot,
+                state=state,
+                attempt=attempt,
+                max_attempts=max_attempts,
+                trace_id=trace_id,
+            )
+            return
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
@@ -685,6 +722,17 @@ class SQLiteDatabase:
         worker_id: Optional[str] = None,
         result_snapshot: Optional[Dict[str, Any]] = None,
     ) -> None:
+        if self._writes_blocked("update_job_run_state"):
+            self.pg_job_store.update_job_run_state(
+                job_id=job_id,
+                state=state,
+                attempt=attempt,
+                started=started,
+                finished=finished,
+                error_message=error_message,
+                result_snapshot=result_snapshot,
+            )
+            return
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
@@ -793,6 +841,8 @@ class SQLiteDatabase:
         status: str = "online",
         current_job_id: Optional[str] = None,
     ) -> None:
+        if self._writes_blocked("upsert_worker_runtime"):
+            return
         wid = (worker_id or "").strip()
         if not wid:
             return
@@ -829,6 +879,8 @@ class SQLiteDatabase:
             conn.close()
 
     def mark_worker_runtime_offline(self, *, worker_id: str, status: str = "offline") -> None:
+        if self._writes_blocked("mark_worker_runtime_offline"):
+            return
         wid = (worker_id or "").strip()
         if not wid:
             return
@@ -1012,6 +1064,8 @@ class SQLiteDatabase:
         motivo: Optional[str],
         site_id: Optional[str],
     ) -> int:
+        if self._writes_blocked("add_incident"):
+            return -1
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
@@ -1271,6 +1325,8 @@ class SQLiteDatabase:
         reason: Optional[str] = None,
         source: Optional[str] = None,
     ) -> None:
+        if self._writes_blocked("block_resource"):
+            return
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
@@ -1341,6 +1397,8 @@ class SQLiteDatabase:
             conn.close()
 
     def unblock_resource(self, site_id: str, resource_id: int) -> bool:
+        if self._writes_blocked("unblock_resource"):
+            return False
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
@@ -1368,6 +1426,8 @@ class SQLiteDatabase:
         reason: Optional[str] = None,
         expires_at: Optional[str] = None,
     ) -> None:
+        if self._writes_blocked("set_site_processing_pause"):
+            return
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
@@ -1394,6 +1454,8 @@ class SQLiteDatabase:
             conn.close()
 
     def clear_site_processing_pause(self, *, site_id: str) -> bool:
+        if self._writes_blocked("clear_site_processing_pause"):
+            return False
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
@@ -1464,6 +1526,8 @@ class SQLiteDatabase:
         reason: Optional[str] = None,
         expires_at: Optional[str] = None,
     ) -> None:
+        if self._writes_blocked("set_resource_processing_pause"):
+            return
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
@@ -1491,6 +1555,8 @@ class SQLiteDatabase:
             conn.close()
 
     def clear_resource_processing_pause(self, *, site_id: str, resource_id: int) -> bool:
+        if self._writes_blocked("clear_resource_processing_pause"):
+            return False
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
@@ -1556,6 +1622,8 @@ class SQLiteDatabase:
             conn.close()
 
     def remove_pending_queue_item(self, *, site_id: str, resource_id: int) -> Dict[str, Any]:
+        if self._writes_blocked("remove_pending_queue_item"):
+            return {"removed": False, "reason": "sqlite_writes_disabled"}
         conn = self.get_connection()
         conn.row_factory = sqlite3.Row
         try:
@@ -1672,6 +1740,8 @@ class SQLiteDatabase:
             conn.close()
 
     def update_organismo_config(self, site_id: str, updates: Dict[str, Any]) -> bool:
+        if self._writes_blocked("update_organismo_config"):
+            return False
         allowed_fields = {
             "query_organisme",
             "filtro_texp",
@@ -1711,6 +1781,8 @@ class SQLiteDatabase:
             conn.close()
 
     def update_last_sync(self, site_id: str) -> None:
+        if self._writes_blocked("update_last_sync"):
+            return
         """Actualiza el timestamp de última sincronización."""
         conn = self.get_connection()
         try:
@@ -1725,6 +1797,8 @@ class SQLiteDatabase:
             conn.close()
     
     def insert_organismo_config(self, config: Dict[str, Any]) -> int:
+        if self._writes_blocked("insert_organismo_config"):
+            return -1
         """Inserta una nueva configuración de organismo."""
         conn = self.get_connection()
         try:
@@ -1749,6 +1823,8 @@ class SQLiteDatabase:
             conn.close()
 
     def upsert_organismo_config(self, config: Dict[str, Any]) -> int:
+        if self._writes_blocked("upsert_organismo_config"):
+            return -1
         """
         Inserta o actualiza una configuración de organismo (por site_id).
 
@@ -1822,6 +1898,8 @@ class SQLiteDatabase:
         authorization_type: str = "gesdoc",
         reason: Optional[str] = None
     ) -> int:
+        if self._writes_blocked("insert_pending_authorization"):
+            return -1
         """
         Inserta una tarea que requiere autorización externa antes de procesarse.
         
@@ -1924,6 +2002,9 @@ class SQLiteDatabase:
             conn.close()
 
     def authorize_and_move_to_queue(self, pending_id: int, authorized_by: str = "system") -> Optional[int]:
+        if self._writes_blocked("authorize_and_move_to_queue"):
+            self.logger.warning("No se autoriza pending_id=%s porque SQLite esta congelada.", pending_id)
+            return None
         """
         Autoriza una tarea pendiente y la mueve a la cola principal (tramite_queue).
         
@@ -2034,6 +2115,8 @@ class SQLiteDatabase:
             conn.close()
 
     def reject_pending_authorization(self, pending_id: int, reason: str, rejected_by: str = "system") -> bool:
+        if self._writes_blocked("reject_pending_authorization"):
+            return False
         """
         Rechaza una tarea pendiente de autorización.
         

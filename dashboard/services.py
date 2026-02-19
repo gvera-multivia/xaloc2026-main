@@ -89,10 +89,10 @@ def resolve_dashboard_assigned_user(logger: logging.Logger) -> Optional[str]:
 
 
 def resolve_dashboard_history_source() -> str:
-    raw = (os.getenv("DASHBOARD_HISTORY_SOURCE") or "sqlite").strip().lower()
+    raw = (os.getenv("DASHBOARD_HISTORY_SOURCE") or "pg").strip().lower()
     if raw in {"sqlite", "sqlserver", "pg", "auto"}:
         return raw
-    return "sqlite"
+    return "pg"
 
 
 class DashboardService:

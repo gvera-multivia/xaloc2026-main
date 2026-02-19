@@ -32,14 +32,14 @@ class BrainSettings(BaseSettings):
 class WorkerSettings(BaseSettings):
     heartbeat_seconds: int = Field(default=5, alias="WORKER_HEARTBEAT_SECONDS")
     heartbeat_timeout: int = Field(default=90, alias="WORKER_HEARTBEAT_TIMEOUT_SECONDS")
-    queue_mode: str = Field(default="sqlite", alias="QUEUE_MODE")
+    queue_mode: str = Field(default="redis_streams", alias="QUEUE_MODE")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 
 class FeatureFlagSettings(BaseSettings):
-    use_pg_source_of_truth: bool = Field(default=False, alias="USE_PG_SOURCE_OF_TRUTH")
-    queue_mode: str = Field(default="sqlite", alias="QUEUE_MODE")
+    use_pg_source_of_truth: bool = Field(default=True, alias="USE_PG_SOURCE_OF_TRUTH")
+    queue_mode: str = Field(default="redis_streams", alias="QUEUE_MODE")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

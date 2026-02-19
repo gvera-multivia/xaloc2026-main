@@ -481,7 +481,7 @@ def _build_claims_for_user(user: AuthUser) -> dict[str, Any]:
 
 
 app = FastAPI(title="auth-rbac-service", version="0.1.0")
-store = AuthRbacStore(db_path=(os.getenv("AUTH_RBAC_DB_PATH") or "db/xaloc_database.db").strip() or "db/xaloc_database.db")
+store = AuthRbacStore(db_path=(os.getenv("AUTH_RBAC_DB_PATH") or "db/auth_rbac.db").strip() or "db/auth_rbac.db")
 jwt_manager = JwtManager(
     secret_key=resolve_secret_key(),
     issuer=(os.getenv("DASHBOARD_JWT_ISSUER") or "xaloc-dashboard").strip() or "xaloc-dashboard",

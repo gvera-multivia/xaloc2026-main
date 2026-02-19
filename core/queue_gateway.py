@@ -174,4 +174,10 @@ def build_queue_gateway(*, backend: Optional[str], db: SQLiteDatabase):
 
         logger.info("Queue backend activo: redis_list (list/hash legado)")
         return RedisQueueGateway(db=db)
-    return SQLiteQueueGateway(db=db)
+    if (os.getenv("ALLOW_LEGACY_SQLITE_QUEUE") or "0").strip().lower() in {"1", "true", "yes", "on"}:
+        logger.warning("Queue backend sqlite habilitado en modo legado por ALLOW_LEGACY_SQLITE_QUEUE=1.")
+        return SQLiteQueueGateway(db=db)
+    raise RuntimeError(
+        "QUEUE_MODE=sqlite deshabilitado en Fase 6. Usa QUEUE_MODE=redis_streams "
+        "o habilita temporalmente ALLOW_LEGACY_SQLITE_QUEUE=1."
+    )

@@ -43,6 +43,8 @@ services:
       sh -c "pip install --no-cache-dir fastapi uvicorn psycopg[binary] &&
              uvicorn services.jobs.app:app --host 0.0.0.0 --port 8103"
     environment:
+      USE_PG_SOURCE_OF_TRUTH: "1"
+      QUEUE_MODE: redis_streams
       REPORT_PG_DSN: postgresql://xaloc:xaloc_dev_password@postgres:5432/xaloc
     volumes:
       - ../../:/app
@@ -61,7 +63,7 @@ services:
       sh -c "pip install --no-cache-dir fastapi uvicorn pyjwt &&
              uvicorn services.auth_rbac.app:app --host 0.0.0.0 --port 8101"
     environment:
-      AUTH_RBAC_DB_PATH: db/xaloc_database.db
+      AUTH_RBAC_DB_PATH: db/auth_rbac.db
       DASHBOARD_JWT_ISSUER: xaloc-dashboard
       DASHBOARD_JWT_AUDIENCE: xaloc-dashboard-clients
       DASHBOARD_TOKEN_EXPIRE_MINUTES: "480"
@@ -81,6 +83,10 @@ services:
     environment:
       DASHBOARD_ENABLE_FRONTEND_PROXY: "0"
       AUTH_RBAC_SERVICE_URL: http://auth-rbac-service:8101
+      USE_PG_SOURCE_OF_TRUTH: "1"
+      QUEUE_MODE: redis_streams
+      DASHBOARD_HISTORY_SOURCE: pg
+      SQLITE_WRITES_ENABLED: "0"
     volumes:
       - ../../:/app
     ports:
@@ -119,12 +125,13 @@ services:
       sh -c "pip install --no-cache-dir -r requirements.txt &&
              python -m services.brain_claim.app"
     environment:
+      USE_PG_SOURCE_OF_TRUTH: "1"
+      SQLITE_WRITES_ENABLED: "0"
       REDIS_ENABLED: "1"
       REDIS_URL: redis://redis:6379/0
       CANDIDATES_STREAM_KEY: candidates
       REPORT_PG_DSN: postgresql://xaloc:xaloc_dev_password@postgres:5432/xaloc
       QUEUE_MODE: redis_streams
-      REDIS_STREAMS_PILOT_ENABLED: "1"
     volumes:
       - ../../:/app
     depends_on:
@@ -142,6 +149,8 @@ services:
       sh -c "pip install --no-cache-dir -r requirements.txt &&
              python -m services.payload_validator.app"
     environment:
+      USE_PG_SOURCE_OF_TRUTH: "1"
+      SQLITE_WRITES_ENABLED: "0"
       REDIS_ENABLED: "1"
       REDIS_URL: redis://redis:6379/0
       CANDIDATES_STREAM_KEY: candidates
@@ -165,6 +174,8 @@ services:
       sh -c "pip install --no-cache-dir -r requirements.txt &&
              python -m services.batcher_dispatcher.app"
     environment:
+      USE_PG_SOURCE_OF_TRUTH: "1"
+      SQLITE_WRITES_ENABLED: "0"
       REDIS_ENABLED: "1"
       REDIS_URL: redis://redis:6379/0
       VALIDATED_STREAM_KEY: validated
@@ -190,10 +201,11 @@ services:
       sh -c "pip install --no-cache-dir -r requirements.txt &&
              python -m services.worker_orchestrator.app"
     environment:
+      USE_PG_SOURCE_OF_TRUTH: "1"
+      SQLITE_WRITES_ENABLED: "0"
       REDIS_ENABLED: "1"
       REDIS_URL: redis://redis:6379/0
       QUEUE_MODE: redis_streams
-      REDIS_STREAMS_PILOT_ENABLED: "1"
       USE_PLAYWRIGHT_RUNNER_SERVICE: "1"
       PLAYWRIGHT_RUNNER_URL: http://playwright-runner-service:8111
       QUEUE_STREAM_JOBS_KEY: jobs

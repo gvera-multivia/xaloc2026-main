@@ -15,7 +15,6 @@ from dotenv import load_dotenv
 from core.sqlite_db import SQLiteDatabase
 from core.queue_gateway import build_queue_gateway
 from core.realtime_store import build_realtime_store
-from core.runtime_flags import is_redis_streams_pilot_enabled
 from core.runtime_flags import get_queue_mode
 from core.worker_logging import setup_worker_logging
 from core.xvia_auth import create_authenticated_session_in_place
@@ -34,12 +33,6 @@ async def run_worker_loop():
     db = SQLiteDatabase()
     realtime_store = build_realtime_store(logger=logger)
     queue_backend = get_queue_mode()
-    if queue_backend == "redis_streams" and not is_redis_streams_pilot_enabled():
-        logger.warning(
-            "QUEUE_MODE=redis_streams activo pero REDIS_STREAMS_PILOT_ENABLED!=1. "
-            "Worker usara redis_list para mantener compatibilidad."
-        )
-        queue_backend = "redis_list"
     queue_gateway = build_queue_gateway(backend=queue_backend, db=db)
     logger.info("Iniciando Worker Loop. Esperando tareas...")
     logger.info("Run ID: %s", run_id)

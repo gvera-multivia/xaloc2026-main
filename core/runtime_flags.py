@@ -12,7 +12,7 @@ def _is_true(value: str) -> bool:
 
 
 def is_pg_source_of_truth_enabled() -> bool:
-    return _is_true(os.getenv("USE_PG_SOURCE_OF_TRUTH", "0"))
+    return _is_true(os.getenv("USE_PG_SOURCE_OF_TRUTH", "1"))
 
 
 def normalize_queue_mode(value: str) -> str:
@@ -23,7 +23,7 @@ def normalize_queue_mode(value: str) -> str:
         return "redis_streams"
     if mode == "sqlite":
         return "sqlite"
-    return "sqlite"
+    return "redis_streams"
 
 
 def get_queue_mode(explicit: Optional[str] = None) -> str:
@@ -32,8 +32,8 @@ def get_queue_mode(explicit: Optional[str] = None) -> str:
         raw = os.getenv("QUEUE_MODE")
     if not (raw or "").strip():
         # Backwards compatibility with legacy env var.
-        raw = os.getenv("QUEUE_BACKEND", "sqlite")
-    return normalize_queue_mode(raw or "sqlite")
+        raw = os.getenv("QUEUE_BACKEND", "redis_streams")
+    return normalize_queue_mode(raw or "redis_streams")
 
 
 def is_redis_queue_mode(mode: str) -> bool:
