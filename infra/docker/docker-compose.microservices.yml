@@ -253,7 +253,7 @@ services:
       PYTHONUNBUFFERED: "1"
     volumes:
       - ../../:/app
-      - cert_data:/data/certificates
+      - ../../certificates:/data/certificates:ro
     ports:
       - "8112:8112"
 
@@ -261,4 +261,3 @@ volumes:
   postgres_data:
   redis_data:
   artifacts_data:
-  cert_data:
