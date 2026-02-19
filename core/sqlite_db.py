@@ -10,6 +10,7 @@ import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
+from core.runtime_flags import get_queue_mode
 
 class DecimalEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -1941,8 +1942,8 @@ class SQLiteDatabase:
                 raise ValueError(
                     f"pending_id={pending_id}: falta protocol en payload para site_id=base_online"
                 )
-            queue_backend = (os.getenv("QUEUE_BACKEND", "sqlite") or "sqlite").strip().lower()
-            if queue_backend == "redis":
+            queue_backend = get_queue_mode()
+            if queue_backend in {"redis_list", "redis_streams"}:
                 from core.queue_gateway import build_queue_gateway
 
                 queue_gateway = build_queue_gateway(backend=queue_backend, db=self)

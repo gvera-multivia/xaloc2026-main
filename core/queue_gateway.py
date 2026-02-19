@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from core.sqlite_db import SQLiteDatabase
+from core.runtime_flags import get_queue_mode, is_redis_queue_mode
 
 
 @dataclass
@@ -160,8 +161,13 @@ class SQLiteQueueGateway(QueueGateway):
 
 
 def build_queue_gateway(*, backend: Optional[str], db: SQLiteDatabase):
-    backend_norm = (backend or os.getenv("QUEUE_BACKEND", "sqlite")).strip().lower()
-    if backend_norm == "redis":
+    logger = logging.getLogger("queue_gateway")
+    queue_mode = get_queue_mode(backend)
+    if is_redis_queue_mode(queue_mode):
+        if queue_mode == "redis_streams":
+            logger.warning(
+                "QUEUE_MODE=redis_streams activo, pero en Fase 0 se usa temporalmente el gateway Redis list/hash actual."
+            )
         from core.redis_queue_gateway import RedisQueueGateway
 
         return RedisQueueGateway(db=db)

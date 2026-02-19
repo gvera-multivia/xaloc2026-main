@@ -11,6 +11,7 @@ from typing import Any, Optional
 import requests
 
 from core.sqlite_db import SQLiteDatabase
+from core.runtime_flags import get_queue_mode, get_report_pg_dsn, is_pg_source_of_truth_enabled
 from core.sqlserver_utils import build_sqlserver_connection_string
 from core.xvia_auth import LOGIN_URL, extract_csrf_token
 from .repositories import (
@@ -107,23 +108,18 @@ class DashboardService:
         except Exception:
             sqlserver_conn_str = ""
 
-        pg_dsn_value = (pg_dsn or os.getenv("REPORT_PG_DSN") or "").strip()
-        lowered = pg_dsn_value.lower()
-        has_valid_pg_dsn = bool(
-            pg_dsn_value
-            and lowered not in {"0", "1", "true", "false", "yes", "no", "on", "off", "enabled", "disabled"}
-            and ("://" in pg_dsn_value or "=" in pg_dsn_value)
-        )
+        pg_dsn_value = get_report_pg_dsn(pg_dsn)
+        has_valid_pg_dsn = bool(pg_dsn_value) and is_pg_source_of_truth_enabled()
         has_valid_sqlserver = bool(sqlserver_conn_str)
-        if has_valid_sqlserver:
+        if has_valid_pg_dsn:
+            self.success_history_repo = PostgresHistoryRepository(
+                pg_dsn=pg_dsn_value,
+                logger=self.logger,
+            )
+        elif has_valid_sqlserver:
             self.success_history_repo = SQLServerHistoryRepository(
                 conn_str=sqlserver_conn_str,
                 assigned_user=sqlserver_assigned_user,
-                logger=self.logger,
-            )
-        elif has_valid_pg_dsn:
-            self.success_history_repo = PostgresHistoryRepository(
-                pg_dsn=pg_dsn_value,
                 logger=self.logger,
             )
         else:
@@ -135,12 +131,13 @@ class DashboardService:
             sqlite_db_path=sqlite_path,
             logger=self.logger,
         )
+        resolved_queue_mode = get_queue_mode(queue_backend)
         self.queue_repo = SqliteQueueRepository(
             sqlite_db_path=sqlite_path,
-            queue_backend=queue_backend or os.getenv("QUEUE_BACKEND", "sqlite"),
+            queue_backend=resolved_queue_mode,
             logger=self.logger,
         )
-        self.queue_backend = (queue_backend or os.getenv("QUEUE_BACKEND", "sqlite")).strip().lower()
+        self.queue_backend = resolved_queue_mode
         self.db = SQLiteDatabase(db_path=sqlite_path)
 
     def _ensure_site_config_exists(self, site_id: str) -> bool:
@@ -372,7 +369,7 @@ class DashboardService:
             raise ValueError("resource_id debe ser entero.") from exc
 
         if self.queue_backend != "sqlite":
-            raise ValueError("Eliminar elementos de cola solo esta soportado en QUEUE_BACKEND=sqlite.")
+            raise ValueError("Eliminar elementos de cola solo esta soportado en QUEUE_MODE=sqlite.")
 
         result = self.db.remove_pending_queue_item(site_id=site, resource_id=rid)
         if not result.get("removed") and (result.get("reason") or "") == "status_processing":

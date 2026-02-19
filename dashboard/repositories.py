@@ -6,6 +6,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+from core.runtime_flags import is_redis_queue_mode
 
 try:
     import psycopg
@@ -457,7 +458,7 @@ class SqliteQueueRepository:
     def list_days(self) -> list[str]:
         conn = self._conn()
         try:
-            if self.queue_backend == "redis":
+            if is_redis_queue_mode(self.queue_backend):
                 rows = conn.execute(
                     """
                     SELECT DISTINCT substr(COALESCE(queued_at, created_at), 1, 10) AS day
@@ -487,7 +488,7 @@ class SqliteQueueRepository:
         offset = max(0, (page - 1) * page_size)
         conn = self._conn()
         try:
-            if self.queue_backend == "redis":
+            if is_redis_queue_mode(self.queue_backend):
                 count_row = conn.execute(
                     """
                     SELECT COUNT(*)
@@ -568,7 +569,7 @@ class SqliteQueueRepository:
     def get_live(self, *, day: str) -> Optional[dict[str, Any]]:
         conn = self._conn()
         try:
-            if self.queue_backend == "redis":
+            if is_redis_queue_mode(self.queue_backend):
                 row = conn.execute(
                     """
                     SELECT site_id, resource_id, job_id, protocol, state,
@@ -601,7 +602,7 @@ class SqliteQueueRepository:
                 return {
                     "site_id": row["site_id"],
                     "resource_id": row["resource_id"],
-                    "job_id": row["job_id"] if self.queue_backend == "redis" else row["id"],
+                    "job_id": row["job_id"] if is_redis_queue_mode(self.queue_backend) else row["id"],
                     "protocol": row["protocol"],
                     "state": row["state"],
                     "day": str(row["started_at"] or "")[:10],
@@ -619,7 +620,7 @@ class SqliteQueueRepository:
     def get_completion_marker(self, *, day: str) -> dict[str, Any]:
         conn = self._conn()
         try:
-            if self.queue_backend == "redis":
+            if is_redis_queue_mode(self.queue_backend):
                 row = conn.execute(
                     """
                     SELECT COUNT(*) AS finished_count,

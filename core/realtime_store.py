@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+from core.runtime_flags import get_report_pg_dsn, is_pg_source_of_truth_enabled
 
 try:
     import psycopg
@@ -82,17 +83,12 @@ class PostgresConfig:
 
     @classmethod
     def from_env(cls) -> Optional["PostgresConfig"]:
-        dsn = (os.getenv("REPORT_PG_DSN") or "").strip()
+        if not is_pg_source_of_truth_enabled():
+            return None
+        dsn = get_report_pg_dsn()
         if not dsn:
             return None
-        lowered = dsn.lower()
-        # Defensive guard: env flags like "1"/"true" are common and are not valid DSN values.
-        if lowered in {"0", "1", "true", "false", "yes", "no", "on", "off", "enabled", "disabled"}:
-            return None
-        # Accept URL-style DSN (postgresql://...) or keyword DSN (host=... dbname=...).
-        if "://" in dsn or "=" in dsn:
-            return cls(dsn=dsn)
-        return None
+        return cls(dsn=dsn)
 
 
 class PostgresRealtimeStore:
