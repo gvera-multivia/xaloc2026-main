@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS rulesets (
 
 CREATE TABLE IF NOT EXISTS jobs (
     id BIGSERIAL PRIMARY KEY,
-    job_id UUID NOT NULL UNIQUE,
+    job_id TEXT NOT NULL UNIQUE,
     organism_id BIGINT REFERENCES organisms(id),
     dedup_key TEXT NOT NULL UNIQUE,
     status TEXT NOT NULL,
@@ -127,4 +127,3 @@ VALUES
     ('comercial', 'Comercial'),
     ('cliente', 'Cliente')
 ON CONFLICT (code) DO NOTHING;
-

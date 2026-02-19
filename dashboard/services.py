@@ -88,6 +88,13 @@ def resolve_dashboard_assigned_user(logger: logging.Logger) -> Optional[str]:
     return _run_fetch_user_sync(email, password, logger)
 
 
+def resolve_dashboard_history_source() -> str:
+    raw = (os.getenv("DASHBOARD_HISTORY_SOURCE") or "sqlite").strip().lower()
+    if raw in {"sqlite", "sqlserver", "pg", "auto"}:
+        return raw
+    return "sqlite"
+
+
 class DashboardService:
     def __init__(
         self,
@@ -111,17 +118,35 @@ class DashboardService:
         pg_dsn_value = get_report_pg_dsn(pg_dsn)
         has_valid_pg_dsn = bool(pg_dsn_value) and is_pg_source_of_truth_enabled()
         has_valid_sqlserver = bool(sqlserver_conn_str)
-        if has_valid_pg_dsn:
+        history_source = resolve_dashboard_history_source()
+        if history_source == "pg" and has_valid_pg_dsn:
             self.success_history_repo = PostgresHistoryRepository(
                 pg_dsn=pg_dsn_value,
                 logger=self.logger,
             )
-        elif has_valid_sqlserver:
+        elif history_source == "sqlserver" and has_valid_sqlserver:
             self.success_history_repo = SQLServerHistoryRepository(
                 conn_str=sqlserver_conn_str,
                 assigned_user=sqlserver_assigned_user,
                 logger=self.logger,
             )
+        elif history_source == "auto":
+            if has_valid_pg_dsn:
+                self.success_history_repo = PostgresHistoryRepository(
+                    pg_dsn=pg_dsn_value,
+                    logger=self.logger,
+                )
+            elif has_valid_sqlserver:
+                self.success_history_repo = SQLServerHistoryRepository(
+                    conn_str=sqlserver_conn_str,
+                    assigned_user=sqlserver_assigned_user,
+                    logger=self.logger,
+                )
+            else:
+                self.success_history_repo = SqliteHistoryRepository(
+                    sqlite_db_path=sqlite_path,
+                    logger=self.logger,
+                )
         else:
             self.success_history_repo = SqliteHistoryRepository(
                 sqlite_db_path=sqlite_path,

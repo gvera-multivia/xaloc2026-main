@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
 from core.runtime_flags import get_queue_mode
+from core.pg_job_store import build_pg_job_store
 
 class DecimalEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -22,6 +23,7 @@ class SQLiteDatabase:
     def __init__(self, db_path: str = "db/xaloc_database.db"):
         self.db_path = Path(db_path)
         self.logger = logging.getLogger("sqlite_db")
+        self.pg_job_store = build_pg_job_store(logger=self.logger)
         self._init_db()
 
     def _init_db(self) -> None:
@@ -658,6 +660,17 @@ class SQLiteDatabase:
             conn.commit()
         finally:
             conn.close()
+        self.pg_job_store.upsert_job_run(
+            job_id=job_id,
+            site_id=site_id,
+            resource_id=resource_id,
+            protocol=protocol,
+            payload_snapshot=payload_snapshot,
+            state=state,
+            attempt=attempt,
+            max_attempts=max_attempts,
+            trace_id=trace_id,
+        )
 
     def update_job_run_state(
         self,
@@ -715,6 +728,15 @@ class SQLiteDatabase:
             conn.commit()
         finally:
             conn.close()
+        self.pg_job_store.update_job_run_state(
+            job_id=job_id,
+            state=state,
+            attempt=attempt,
+            started=started,
+            finished=finished,
+            error_message=error_message,
+            result_snapshot=result_snapshot,
+        )
 
     def get_job_run(self, job_id: str) -> Optional[Dict[str, Any]]:
         conn = self.get_connection()
