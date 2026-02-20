@@ -49,3 +49,5 @@ Thumbs.db
 
 # Configuración local
 config_local.py
+
+certificates/*
