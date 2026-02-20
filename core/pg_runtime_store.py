@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import psycopg
@@ -73,6 +73,18 @@ class PgRuntimeStore:
                         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         PRIMARY KEY (site_id, resource_id)
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS incident_locks (
+                        incident_id TEXT PRIMARY KEY,
+                        user_id TEXT NOT NULL,
+                        username TEXT,
+                        expires_at TIMESTAMPTZ NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                     )
                     """
                 )
@@ -336,3 +348,103 @@ class PgRuntimeStore:
     def block_resource(self, *, site_id: str, resource_id: int, reason: str | None = None, source: str | None = None) -> None:
         self.admin_store.block_resource(site_id=site_id, resource_id=resource_id, reason=reason, source=source)
 
+    # Incident locks API
+    def acquire_incident_lock(
+        self,
+        *,
+        incident_id: str,
+        user_id: str,
+        username: str | None = None,
+        ttl_seconds: int = 1800,
+    ) -> dict[str, Any]:
+        incident = str(incident_id or "").strip()
+        if not incident:
+            raise ValueError("incident_id es obligatorio.")
+        uid = str(user_id or "").strip()
+        if not uid:
+            raise ValueError("user_id es obligatorio.")
+        ttl = max(30, int(ttl_seconds))
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT user_id, username, expires_at
+                    FROM incident_locks
+                    WHERE incident_id = %s
+                    """,
+                    (incident,),
+                )
+                row = cur.fetchone()
+                now = datetime.now(timezone.utc)
+                if row and row[2] and row[2] > now and str(row[0]) != uid:
+                    return {
+                        "acquired": False,
+                        "owner_id": str(row[0]),
+                        "owner_username": row[1],
+                        "expires_at": row[2].isoformat() if row[2] else None,
+                    }
+                cur.execute(
+                    """
+                    INSERT INTO incident_locks (incident_id, user_id, username, expires_at, updated_at)
+                    VALUES (%s, %s, %s, NOW() + (%s * INTERVAL '1 second'), NOW())
+                    ON CONFLICT (incident_id) DO UPDATE SET
+                        user_id = EXCLUDED.user_id,
+                        username = EXCLUDED.username,
+                        expires_at = EXCLUDED.expires_at,
+                        updated_at = NOW()
+                    """,
+                    (incident, uid, username, ttl),
+                )
+            conn.commit()
+        return {
+            "acquired": True,
+            "owner_id": uid,
+            "owner_username": username,
+            "expires_at": (datetime.now(timezone.utc) + timedelta(seconds=ttl)).isoformat(),
+        }
+
+    def release_incident_lock(self, *, incident_id: str, user_id: str, is_admin: bool = False) -> dict[str, Any]:
+        incident = str(incident_id or "").strip()
+        uid = str(user_id or "").strip()
+        if not incident:
+            raise ValueError("incident_id es obligatorio.")
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT user_id FROM incident_locks WHERE incident_id = %s",
+                    (incident,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return {"released": False, "reason": "not_locked"}
+                owner_id = str(row[0] or "")
+                if not is_admin and owner_id != uid:
+                    return {"released": False, "reason": "not_owner"}
+                cur.execute("DELETE FROM incident_locks WHERE incident_id = %s", (incident,))
+            conn.commit()
+        return {"released": True, "reason": "released"}
+
+    def get_incident_locks(self, *, incident_ids: list[str]) -> dict[str, dict[str, Any]]:
+        ids = [str(i).strip() for i in (incident_ids or []) if str(i).strip()]
+        if not ids:
+            return {}
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT incident_id, user_id, username, expires_at
+                    FROM incident_locks
+                    WHERE incident_id = ANY(%s)
+                      AND expires_at > NOW()
+                    """,
+                    (ids,),
+                )
+                rows = cur.fetchall()
+        return {
+            str(row[0]): {
+                "user_id": str(row[1] or ""),
+                "username": row[2],
+                "expires_at": row[3].isoformat() if row[3] else None,
+            }
+            for row in rows
+        }

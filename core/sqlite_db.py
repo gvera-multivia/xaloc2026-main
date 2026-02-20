@@ -21,19 +21,10 @@ class DecimalEncoder(json.JSONEncoder):
 
 class SQLiteDatabase:
     def __init__(self, db_path: str = "db/xaloc_database.db"):
-        self.db_path = Path(db_path)
-        self.logger = logging.getLogger("sqlite_db")
-        self.pg_job_store = build_pg_job_store(logger=self.logger)
-        self._blocked_ops_logged: set[str] = set()
-        self.sqlite_writes_enabled = (os.getenv("SQLITE_WRITES_ENABLED", "0") or "0").strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
-        if not self.sqlite_writes_enabled:
-            self.logger.warning("SQLite writers desactivados (SQLITE_WRITES_ENABLED=0). Modo backup/read-only.")
-        self._init_db()
+        raise RuntimeError(
+            "SQLiteDatabase deshabilitado permanentemente. "
+            "El sistema usa PostgreSQL + Redis exclusivamente."
+        )
 
     def _writes_blocked(self, op_name: str) -> bool:
         if self.sqlite_writes_enabled:

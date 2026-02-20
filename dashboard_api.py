@@ -24,7 +24,6 @@ from core.redis_client import get_redis_client
 
 app = FastAPI(title="Xaloc Realtime Dashboard", version="2.0.0")
 
-SQLITE_DB_PATH = (os.getenv("SQLITE_DB_PATH") or "db/xaloc_database.db").strip() or "db/xaloc_database.db"
 AUTH_COOKIE_NAME = "dashboard_access_token"
 AUTH_ROLE_COOKIE_NAME = "dashboard_role"
 TOKEN_EXPIRE_MINUTES = max(5, int((os.getenv("DASHBOARD_TOKEN_EXPIRE_MINUTES") or "480").strip() or "480"))
@@ -430,7 +429,7 @@ async def api_claim_incident(id: str, user: dict = Depends(require_user)):
     user_id = str(user.get("sub", "unknown"))
     username = user.get("username", "Unknown")
     try:
-        lock_result = service.db.acquire_incident_lock(
+        lock_result = service.runtime_store.acquire_incident_lock(
             incident_id=id,
             user_id=user_id,
             username=username,
@@ -455,7 +454,7 @@ async def api_claim_incident(id: str, user: dict = Depends(require_user)):
 async def api_release_incident(id: str, user: dict = Depends(require_user)):
     user_id = str(user.get("sub", "unknown"))
     role = user.get("role", "user")
-    release_result = service.db.release_incident_lock(
+    release_result = service.runtime_store.release_incident_lock(
         incident_id=id,
         user_id=user_id,
         is_admin=(str(role).strip().lower() == "admin"),
@@ -501,7 +500,7 @@ async def api_incidents_pending(
     result = service.list_history_incidents(day=None, page=page, page_size=page_size)
     items = list(result.get("items") or [])
     incident_ids = [f"{it.get('site_id')}:{it.get('resource_id')}" for it in items]
-    locks = service.db.get_incident_locks(incident_ids=incident_ids)
+    locks = service.runtime_store.get_incident_locks(incident_ids=incident_ids)
     for item in items:
         incident_id = f"{item.get('site_id')}:{item.get('resource_id')}"
         lock_info = locks.get(incident_id)

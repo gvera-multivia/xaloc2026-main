@@ -31,3 +31,15 @@ CREATE TABLE IF NOT EXISTS resource_processing_pauses (
 
 CREATE INDEX IF NOT EXISTS ix_resource_processing_pauses_site_exp
 ON resource_processing_pauses(site_id, expires_at);
+
+CREATE TABLE IF NOT EXISTS incident_locks (
+    incident_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    username TEXT,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS ix_incident_locks_exp
+ON incident_locks(expires_at);

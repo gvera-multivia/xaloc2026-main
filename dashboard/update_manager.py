@@ -149,36 +149,13 @@ class UpdateManager:
             self.logger.warning("No se pudieron listar sites de organismo_config: %s", exc)
 
         try:
-            by_site = self.service.db.count_tasks_any(statuses=("pending", "processing"))
-            site_ids.update(str(site).strip() for site in by_site.keys() if str(site).strip())
+            current = self.service.list_queue_current(day=None, page=1, page_size=10000)
+            for item in list(current.get("items") or []):
+                site = str((item or {}).get("site_id") or "").strip()
+                if site:
+                    site_ids.add(site)
         except Exception as exc:
-            self.logger.warning("No se pudieron listar sites de tramite_queue: %s", exc)
-
-        if self.service.queue_backend == "redis":
-            conn = None
-            try:
-                conn = self.service.db.get_connection()
-                conn.row_factory = None
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    SELECT DISTINCT site_id
-                    FROM job_runs
-                    WHERE state IN ('queued', 'processing')
-                      AND site_id IS NOT NULL
-                    """
-                )
-                for row in cursor.fetchall():
-                    site = str((row or [None])[0] or "").strip()
-                    if site:
-                        site_ids.add(site)
-            except Exception as exc:
-                self.logger.warning("No se pudieron listar sites de job_runs redis: %s", exc)
-            finally:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
+            self.logger.warning("No se pudieron listar sites en cola activa: %s", exc)
 
         for site in sorted(site_ids):
             try:
@@ -217,18 +194,9 @@ class UpdateManager:
             await asyncio.sleep(poll_seconds)
 
     def _count_processing_items(self) -> int:
-        if self.service.queue_backend == "redis":
-            conn = self.service.db.get_connection()
-            try:
-                cursor = conn.cursor()
-                cursor.execute("SELECT COUNT(*) FROM job_runs WHERE state = 'processing'")
-                row = cursor.fetchone()
-                return int(row[0] if row and row[0] is not None else 0)
-            finally:
-                conn.close()
-
-        by_site = self.service.db.count_tasks_any(statuses=("processing",))
-        return int(sum(int(v) for v in by_site.values()))
+        current = self.service.list_queue_current(day=None, page=1, page_size=10000)
+        items = list(current.get("items") or [])
+        return int(sum(1 for item in items if str((item or {}).get("state") or "").strip().lower() == "processing"))
 
     async def _git_ahead_behind(self) -> tuple[int, int]:
         out = await self._git_cmd("rev-list", "--left-right", "--count", "HEAD...@{upstream}")

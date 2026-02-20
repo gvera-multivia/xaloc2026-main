@@ -4,7 +4,7 @@ Este documento deja el proyecto listo para arrancar desde cero con la arquitectu
 
 - `USE_PG_SOURCE_OF_TRUTH=1`
 - `QUEUE_MODE=redis_streams`
-- SQLite congelada como respaldo (`SQLITE_WRITES_ENABLED=0`)
+- Persistencia runtime solo en PostgreSQL + Redis
 - Frontend conectado solo al `api-gateway`
 
 ## 1. Requisitos previos
@@ -104,10 +104,6 @@ Crea `.env` en la raiz con este contenido base:
 # =========================
 USE_PG_SOURCE_OF_TRUTH=1
 QUEUE_MODE=redis_streams
-SQLITE_WRITES_ENABLED=0
-
-# Solo para rollback temporal (no usar en normal)
-# ALLOW_LEGACY_SQLITE_QUEUE=1
 
 # =========================
 # Postgres / Redis
@@ -150,7 +146,6 @@ DASHBOARD_TOKEN_EXPIRE_MINUTES=480
 DASHBOARD_ADMIN_USERNAME=admin
 DASHBOARD_ADMIN_PASSWORD=cambiar_admin_password
 
-AUTH_RBAC_DB_PATH=db/auth_rbac.db
 AUTH_RBAC_SERVICE_URL=http://localhost:8101
 DASHBOARD_BACKEND_URL=http://localhost:8788
 
@@ -312,15 +307,9 @@ curl.exe http://localhost:8111/health
 curl.exe http://localhost:8112/health
 ```
 
-## 6. Congelar SQLite como backup temporal
+## 6. Persistencia y colas
 
-Si quieres congelar fisicamente el archivo SQLite:
-
-```powershell
-python scripts/freeze_sqlite_readonly.py --db db/xaloc_database.db
-```
-
-Nota: el sistema ya va con writers SQLite desactivados por `SQLITE_WRITES_ENABLED=0`.
+La persistencia de estado runtime es exclusivamente PostgreSQL y Redis Streams.
 
 ## 7. Comprobacion rapida de salud
 
