@@ -570,9 +570,19 @@ class DashboardService:
 
         pending = self.pending_auth_store.get_pending_authorization(pending_id=pid)
         if not pending:
-            raise DashboardNotFoundError(f"pending_id no existe: {pid}")
+            return {
+                "ok": True,
+                "pending_id": pid,
+                "noop": True,
+                "reason": "pending_not_found",
+            }
         if str(pending.get("status") or "").strip().lower() != "pending":
-            raise DashboardConflictError(f"pending_id {pid} no esta en estado pending.")
+            return {
+                "ok": True,
+                "pending_id": pid,
+                "noop": True,
+                "reason": "pending_not_in_pending_status",
+            }
 
         site_id = str(pending.get("site_id") or "").strip()
         if not site_id:
@@ -587,7 +597,7 @@ class DashboardService:
         if site_id == "base_online" and protocol:
             protocol = str(protocol).upper()
         if site_id == "base_online" and not protocol:
-            raise ValueError(f"pending_id {pid}: falta protocol para site_id=base_online.")
+            protocol = "GENERIC"
 
         queue_gateway = build_queue_gateway(backend=self.queue_backend, db=self.runtime_store)
         enqueued, job_id = self._run_coro_sync(
@@ -604,7 +614,18 @@ class DashboardService:
             notes=notes,
         )
         if not marked:
-            raise DashboardConflictError(f"pending_id {pid} no pudo marcarse como moved_to_queue (estado no pending).")
+            return {
+                "ok": True,
+                "pending_id": pid,
+                "authorized_by": user,
+                "site_id": site_id,
+                "resource_id": pending.get("resource_id"),
+                "job_id": job_id,
+                "enqueued": bool(enqueued),
+                "moved_to_queue": False,
+                "noop": True,
+                "reason": "pending_state_changed_before_mark",
+            }
         return {
             "ok": True,
             "pending_id": pid,
@@ -630,16 +651,34 @@ class DashboardService:
             raise ValueError("reason es obligatorio.")
         pending = self.pending_auth_store.get_pending_authorization(pending_id=pid)
         if not pending:
-            raise DashboardNotFoundError(f"pending_id no existe: {pid}")
+            return {
+                "ok": True,
+                "pending_id": pid,
+                "noop": True,
+                "reason": "pending_not_found",
+            }
         if str(pending.get("status") or "").strip().lower() != "pending":
-            raise DashboardConflictError(f"pending_id {pid} no esta en estado pending.")
+            return {
+                "ok": True,
+                "pending_id": pid,
+                "noop": True,
+                "reason": "pending_not_in_pending_status",
+            }
         rejected = self.pending_auth_store.reject_pending_authorization(
             pending_id=pid,
             reason=reject_reason,
             rejected_by=user,
         )
         if not rejected:
-            raise DashboardConflictError(f"pending_id {pid} no pudo rechazarse (estado no pending).")
+            return {
+                "ok": True,
+                "pending_id": pid,
+                "rejected_by": user,
+                "reason": reject_reason,
+                "rejected": False,
+                "noop": True,
+                "state_changed": True,
+            }
         return {
             "ok": True,
             "pending_id": pid,

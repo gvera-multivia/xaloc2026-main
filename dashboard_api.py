@@ -48,6 +48,7 @@ app.add_middleware(
 service = DashboardService()
 process_manager = ProcessManager(base_dir=".", logs_dir="logs")
 logger = logging.getLogger("dashboard_api")
+CONTROL_PROCESS_NAMES = {"worker", "brain"}
 
 FRONTEND_HOST = os.getenv("DASHBOARD_FRONTEND_HOST", "127.0.0.1").strip() or "127.0.0.1"
 FRONTEND_PORT = int((os.getenv("DASHBOARD_FRONTEND_PORT") or "3000").strip() or "3000")
@@ -594,35 +595,65 @@ async def api_queue_live_screenshot(_user: dict = Depends(require_user)):
     )
 @app.get("/api/control/status")
 async def api_control_status(_admin: dict = Depends(require_admin)) -> dict:
-    return process_manager.get_all_status()
+    states = service.runtime_store.list_process_desired_states()
+    return {
+        "worker": "running" if states.get("worker", {}).get("desired_state") != "stopped" else "stopped",
+        "brain": "running" if states.get("brain", {}).get("desired_state") != "stopped" else "stopped",
+    }
 
 
 @app.post("/api/control/{process_name}/start")
 async def api_control_start(process_name: str, _admin: dict = Depends(require_admin)) -> dict:
-    try:
-        return await process_manager.start_process(process_name)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    pname = str(process_name or "").strip().lower()
+    if pname not in CONTROL_PROCESS_NAMES:
+        raise HTTPException(status_code=400, detail="process_name invalido. Usa 'worker' o 'brain'.")
+    state = service.runtime_store.set_process_desired_state(
+        process_name=pname,
+        desired_state="running",
+        reason="dashboard_control_start",
+    )
+    return {
+        "name": pname,
+        "status": "running",
+        "started": True,
+        "control": state,
+    }
 
 
 @app.post("/api/control/{process_name}/stop")
 async def api_control_stop(process_name: str, _admin: dict = Depends(require_admin)) -> dict:
-    try:
-        return await process_manager.stop_process(process_name)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    pname = str(process_name or "").strip().lower()
+    if pname not in CONTROL_PROCESS_NAMES:
+        raise HTTPException(status_code=400, detail="process_name invalido. Usa 'worker' o 'brain'.")
+    state = service.runtime_store.set_process_desired_state(
+        process_name=pname,
+        desired_state="stopped",
+        reason="dashboard_control_stop",
+    )
+    return {
+        "name": pname,
+        "status": "stopped",
+        "stopped": True,
+        "control": state,
+    }
 
 
 @app.post("/api/control/{process_name}/restart")
 async def api_control_restart(process_name: str, _admin: dict = Depends(require_admin)) -> dict:
-    try:
-        return await process_manager.restart_process(process_name)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    pname = str(process_name or "").strip().lower()
+    if pname not in CONTROL_PROCESS_NAMES:
+        raise HTTPException(status_code=400, detail="process_name invalido. Usa 'worker' o 'brain'.")
+    state = service.runtime_store.set_process_desired_state(
+        process_name=pname,
+        desired_state="running",
+        reason="dashboard_control_restart",
+    )
+    return {
+        "name": pname,
+        "status": "running",
+        "restarted": True,
+        "control": state,
+    }
 
 
 @app.get("/api/logs/{process_name}")

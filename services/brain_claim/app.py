@@ -7,6 +7,8 @@ import os
 import re
 import signal
 import uuid
+import sys
+from pathlib import Path
 from typing import Any, Optional
 
 import aiohttp
@@ -14,6 +16,7 @@ from dotenv import load_dotenv
 
 from core.redis_client import get_redis_client
 from core.pg_admin_store import PgAdminStore
+from core.pg_runtime_store import PgRuntimeStore
 from core.sqlserver_utils import build_sqlserver_connection_string
 from core.xvia_auth import create_authenticated_session_in_place
 from shared.queue import RedisStreamsClient
@@ -25,9 +28,41 @@ load_dotenv()
 logger = logging.getLogger("brain_claim_service")
 
 
+def _setup_brain_claim_logging() -> None:
+    logs_dir = Path("logs")
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    stable_log_path = logs_dir / "brain_out.log"
+
+    root = logging.getLogger()
+    for handler in list(root.handlers):
+        root.removeHandler(handler)
+    root.setLevel(logging.INFO)
+
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if hasattr(stream, "reconfigure"):
+                stream.reconfigure(errors="backslashreplace")
+        except Exception:
+            pass
+
+    formatter = logging.Formatter("%(asctime)s [brain-claim] %(levelname)s %(message)s")
+
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setLevel(logging.INFO)
+    stream_handler.setFormatter(formatter)
+
+    file_handler = logging.FileHandler(stable_log_path, encoding="utf-8")
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(formatter)
+
+    root.addHandler(stream_handler)
+    root.addHandler(file_handler)
+
+
 class BrainClaimService:
     def __init__(self):
         self.admin_store = PgAdminStore.from_env(logger=logger)
+        self.runtime_store = PgRuntimeStore.from_env(logger=logger)
         seeded = self.admin_store.seed_organismo_config_if_empty()
         if seeded:
             logger.info("[brain-claim] seeded organismo_config en PG: %s", seeded)
@@ -218,6 +253,8 @@ class BrainClaimService:
             config = configs.get(site_id)
             if not config:
                 continue
+            if self.runtime_store.is_site_processing_paused(site_id=site_id):
+                continue
             try:
                 await self.init_session(config["login_url"])
                 candidates = adapter.fetch_candidates(
@@ -240,6 +277,13 @@ class BrainClaimService:
                         continue
                     if self.admin_store.is_resource_blocked(site_id=site_id, resource_id=rid):
                         continue
+                    if self.runtime_store.has_active_job_for_resource(site_id=site_id, resource_id=rid):
+                        logger.info(
+                            "[%s] descartado idRecurso=%s por job activo en cola (queued/processing).",
+                            site_id,
+                            rid,
+                        )
+                        continue
                     expediente = str(cand.get("Expedient") or "").strip()
                     ok = await adapter.ensure_claimed(self, cand)
                     if not ok:
@@ -248,22 +292,37 @@ class BrainClaimService:
                     stats["claimed"] += 1
                     remaining -= 1
 
-                    trace_id = str(uuid.uuid4())
-                    candidate_payload = {
-                        "candidate_id": str(uuid.uuid4()),
-                        "organism_id": site_id,
-                        "external_resource_id": str(rid),
-                        "raw_payload": json.loads(json.dumps(cand, default=str)),
-                        "claimed_at": cand.get("claimed_at") or "",
-                        "trace_id": trace_id,
-                        "expediente": expediente,
-                    }
-                    await self.streams.publish_json(
-                        stream=self.candidates_stream,
-                        payload=candidate_payload,
-                        maxlen=int((os.getenv("CANDIDATES_STREAM_MAXLEN") or "200000").strip() or "200000"),
-                    )
-                    stats["published_candidates"] += 1
+                    payloads = await adapter.build_payloads([cand], on_discard=None)
+                    if not payloads:
+                        logger.warning(
+                            "[%s] idRecurso=%s reclamado pero descartado por adapter.build_payloads (payload invalido).",
+                            site_id,
+                            rid,
+                        )
+                        continue
+
+                    for payload in payloads:
+                        trace_id = str(uuid.uuid4())
+                        rid_payload = payload.get("idRecurso")
+                        try:
+                            rid_payload_int = int(rid_payload) if rid_payload is not None else rid
+                        except Exception:
+                            rid_payload_int = rid
+                        candidate_payload = {
+                            "candidate_id": str(uuid.uuid4()),
+                            "organism_id": site_id,
+                            "external_resource_id": str(rid_payload_int),
+                            "raw_payload": json.loads(json.dumps(payload, default=str)),
+                            "claimed_at": payload.get("claimed_at") or cand.get("claimed_at") or "",
+                            "trace_id": trace_id,
+                            "expediente": str(payload.get("expediente") or expediente),
+                        }
+                        await self.streams.publish_json(
+                            stream=self.candidates_stream,
+                            payload=candidate_payload,
+                            maxlen=int((os.getenv("CANDIDATES_STREAM_MAXLEN") or "200000").strip() or "200000"),
+                        )
+                        stats["published_candidates"] += 1
             except Exception as exc:
                 logger.exception("[%s] fallo en run_tick claim-only: %s", site_id, exc)
                 stats["errors"] += 1
@@ -287,6 +346,12 @@ class BrainClaimService:
 
         while not shutdown.is_set():
             try:
+                if not self.runtime_store.is_process_enabled(process_name="brain"):
+                    try:
+                        await asyncio.wait_for(shutdown.wait(), timeout=2)
+                    except asyncio.TimeoutError:
+                        pass
+                    continue
                 stats = await self.run_tick()
                 logger.info("[brain-claim] stats=%s", stats)
             except Exception as exc:
@@ -298,7 +363,7 @@ class BrainClaimService:
 
 
 async def _main_async() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [brain-claim] %(levelname)s %(message)s")
+    _setup_brain_claim_logging()
     svc = BrainClaimService()
     await svc.run_forever()
 

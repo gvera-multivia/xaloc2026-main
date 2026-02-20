@@ -55,6 +55,10 @@ Si tu certificado es `.p12`, copialo con nombre `certificate.pfx`.
 2. Copia tu certificado PKCS#12 dentro:
    - Si ya es `.pfx`: `certificates/certificate.pfx`
    - Si es `.p12`: copialo/renombralo a `certificates/certificate.pfx`
+   - Ejemplo Windows (tu caso):
+     ```powershell
+     Copy-Item "E:\MiCertificado.p12" ".\certificates\certificate.pfx" -Force
+     ```
 3. Verifica que existe el archivo:
    - Windows PowerShell:
      ```powershell
@@ -73,6 +77,10 @@ Si tu certificado es `.p12`, copialo con nombre `certificate.pfx`.
    docker compose --env-file .env -f infra/docker/docker-compose.microservices.yml exec signing-service sh -lc "ls -l /data/certificates"
    ```
    Debes ver `certificate.pfx`.
+6. Verifica que `playwright-runner-service` tambien ve el certificado:
+   ```powershell
+   docker compose --env-file .env -f infra/docker/docker-compose.microservices.yml exec playwright-runner-service sh -lc "ls -l /data/certificates && certutil -L -d sql:/app/profiles/worker"
+   ```
 
 ## Nota SQL Server + pyodbc
 
@@ -193,6 +201,9 @@ USE_PLAYWRIGHT_RUNNER_SERVICE=1
 PLAYWRIGHT_RUNNER_URL=http://localhost:8111
 PLAYWRIGHT_RUNNER_TIMEOUT_SECONDS=900
 SIGNING_CERT_PATH=/data/certificates/certificate.pfx
+PLAYWRIGHT_CERT_REQUIRED=1
+# Si el .pfx/.p12 tiene password, ponla aqui:
+PLAYWRIGHT_CERT_PASSWORD=
 
 WORKER_HEARTBEAT_SECONDS=5
 WORKER_HEARTBEAT_TIMEOUT_SECONDS=90
@@ -387,3 +398,7 @@ Dentro de contenedores, usa nombres de servicio Docker:
 - Redis: `redis:6379`
 
 No uses `localhost` en DSN/URL de servicios que corren dentro de Docker.
+
+
+
+powershell -ExecutionPolicy Bypass -File scripts/validate_migration.ps1 -SkipBuild    

@@ -45,12 +45,29 @@ def _compose_ps_json(env_file: Path, compose_file: Path) -> list[dict[str, Any]]
         return []
     try:
         parsed = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"No se pudo parsear 'docker compose ps --format json': {raw}") from exc
-    if isinstance(parsed, list):
-        return parsed
-    if isinstance(parsed, dict):
-        return [parsed]
+        if isinstance(parsed, list):
+            return parsed
+        if isinstance(parsed, dict):
+            return [parsed]
+    except json.JSONDecodeError:
+        # Docker Compose en Windows suele devolver NDJSON:
+        # una línea JSON por servicio, no un array.
+        services: list[dict[str, Any]] = []
+        bad_lines: list[str] = []
+        for line in raw.splitlines():
+            txt = line.strip()
+            if not txt:
+                continue
+            try:
+                item = json.loads(txt)
+                if isinstance(item, dict):
+                    services.append(item)
+            except json.JSONDecodeError:
+                bad_lines.append(txt)
+        if services:
+            return services
+        preview = "\n".join(bad_lines[:3]) if bad_lines else raw[:500]
+        raise RuntimeError(f"No se pudo parsear 'docker compose ps --format json': {preview}")
     return []
 
 
@@ -118,6 +135,39 @@ def _wait_for_stop(env_file: Path, compose_file: Path, timeout: int, interval: f
         time.sleep(interval)
 
 
+def _check_client_docs_mount(
+    env_file: Path,
+    compose_file: Path,
+    *,
+    service: str,
+    path: str,
+) -> int:
+    cmd = _compose_base_cmd(env_file, compose_file) + [
+        "exec",
+        "-T",
+        service,
+        "sh",
+        "-lc",
+        f"ls -1 {path}",
+    ]
+    proc = _run_cmd(cmd)
+    if proc.returncode != 0:
+        msg = proc.stderr.strip() or proc.stdout.strip() or "error ejecutando check de montaje"
+        print(f"[FAILED] No se puede validar compartido de clientes en {service}:{path}: {msg}")
+        return 2
+
+    entries = [line.strip() for line in (proc.stdout or "").splitlines() if line.strip()]
+    expected_alpha_dirs = {"0-9 (NUMEROS)", "A-C", "D-E", "F-J", "K-L", "M-O", "P-U", "V-Z"}
+    visible = {name for name in entries if name in expected_alpha_dirs}
+    if not visible:
+        print(f"[FAILED] Compartido de clientes no montado o vacío en runtime: {service}:{path}")
+        print(f"[STATE] Entradas visibles: {', '.join(entries[:20]) if entries else '(sin entradas)'}")
+        return 2
+
+    print(f"[OK] Compartido de clientes montado en {service}:{path} ({len(entries)} entradas).")
+    return 0
+
+
 def _run_compose_action(env_file: Path, compose_file: Path, action: str) -> None:
     if action == "start":
         cmd = _compose_base_cmd(env_file, compose_file) + ["up", "-d"]
@@ -145,6 +195,21 @@ def main() -> int:
     parser.add_argument("--interval", type=float, default=3.0, help="Intervalo de polling en segundos (default: 3).")
     parser.add_argument("--env-file", default=str(DEFAULT_ENV_FILE), help="Ruta a .env.")
     parser.add_argument("--compose-file", default=str(DEFAULT_COMPOSE_FILE), help="Ruta a docker-compose.")
+    parser.add_argument(
+        "--skip-client-docs-check",
+        action="store_true",
+        help="No valida montaje del compartido de clientes tras start/restart.",
+    )
+    parser.add_argument(
+        "--client-docs-service",
+        default="worker-orchestrator-service",
+        help="Servicio a usar para validar /mnt/clientes (default: worker-orchestrator-service).",
+    )
+    parser.add_argument(
+        "--client-docs-path",
+        default="/mnt/clientes",
+        help="Ruta dentro del contenedor para validar compartido de clientes (default: /mnt/clientes).",
+    )
     args = parser.parse_args()
 
     env_file = Path(args.env_file).resolve()
@@ -159,7 +224,17 @@ def main() -> int:
     try:
         if args.start:
             _run_compose_action(env_file, compose_file, "start")
-            return _wait_for_start(env_file, compose_file, timeout=args.timeout, interval=args.interval)
+            rc = _wait_for_start(env_file, compose_file, timeout=args.timeout, interval=args.interval)
+            if rc != 0:
+                return rc
+            if not args.skip_client_docs_check:
+                return _check_client_docs_mount(
+                    env_file,
+                    compose_file,
+                    service=args.client_docs_service,
+                    path=args.client_docs_path,
+                )
+            return 0
         if args.stop:
             _run_compose_action(env_file, compose_file, "stop")
             return _wait_for_stop(env_file, compose_file, timeout=args.timeout, interval=args.interval)
@@ -169,7 +244,17 @@ def main() -> int:
         if rc != 0:
             return rc
         _run_compose_action(env_file, compose_file, "start")
-        return _wait_for_start(env_file, compose_file, timeout=args.timeout, interval=args.interval)
+        rc = _wait_for_start(env_file, compose_file, timeout=args.timeout, interval=args.interval)
+        if rc != 0:
+            return rc
+        if not args.skip_client_docs_check:
+            return _check_client_docs_mount(
+                env_file,
+                compose_file,
+                service=args.client_docs_service,
+                path=args.client_docs_path,
+            )
+        return 0
     except RuntimeError as exc:
         print(f"[ERROR] {exc}", file=sys.stderr)
         return 1

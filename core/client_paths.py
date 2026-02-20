@@ -105,4 +105,19 @@ def get_ruta_cliente_documentacion(client: ClientIdentity, base_path: str | Path
     if len(matches) == 1:
         return matches[0]
 
+    # Fallback robusto SMB: si no aparece en la carpeta alfabética esperada,
+    # buscar por nombre normalizado en el resto de carpetas de primer nivel.
+    if not matches and base.exists():
+        for top in base.iterdir():
+            if not top.is_dir() or top.name == alpha_folder:
+                continue
+            try:
+                for sub in top.iterdir():
+                    if sub.is_dir() and normalize_client_folder_name(sub.name) == target_norm:
+                        matches.append(sub)
+            except Exception:
+                continue
+        if len(matches) == 1:
+            return matches[0]
+
     return candidate

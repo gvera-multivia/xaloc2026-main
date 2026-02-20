@@ -258,15 +258,39 @@ services:
     container_name: xaloc-playwright-runner
     restart: unless-stopped
     working_dir: /app
-    command: /opt/venv/bin/uvicorn services.playwright_runner.app:app --host 0.0.0.0 --port 8111
+    command: /usr/local/bin/playwright-runner-visual-entrypoint.sh /opt/venv/bin/uvicorn services.playwright_runner.app:app --host 0.0.0.0 --port 8111
     environment:
-      XALOC_HEADLESS: "1"
+      HOME: /root
+      DISPLAY: ":99"
+      XALOC_HEADLESS: ${XALOC_HEADLESS:-0}
+      XALOC_VISUAL_DEBUG: ${XALOC_VISUAL_DEBUG:-1}
+      XALOC_VNC_PORT: ${XALOC_VNC_PORT:-5900}
+      XALOC_NOVNC_PORT: ${XALOC_NOVNC_PORT:-6080}
       PYTHONUNBUFFERED: "1"
+      XALOC_DISABLE_KEEP_BROWSER_OPEN: "1"
+      XALOC_FORCE_UNLOCK_PROFILE: "1"
+      XALOC_CERT_DEBUG: ${XALOC_CERT_DEBUG:-1}
+      XALOC_BROWSER_DEBUG: ${XALOC_BROWSER_DEBUG:-1}
+      XALOC_CHROMIUM_NETLOG: ${XALOC_CHROMIUM_NETLOG:-0}
+      XALOC_CERT_AUTOSELECT_VIA_POLICY: "1"
+      XALOC_CERT_AUTOSELECT_CLI_FALLBACK: "1"
+      XALOC_CERT_FILTER_BY_CN: "0"
+      PLAYWRIGHT_USE_CLIENT_CERTIFICATES: "0"
+      PLAYWRIGHT_CLIENT_CERT_ORIGINS: "https://cert.valid.aoc.cat,https://valid.aoc.cat"
+      PLAYWRIGHT_CERT_PATH: /data/certificates/certificate.pfx
+      PLAYWRIGHT_PROFILE_DIR: /app/profiles/worker
+      PLAYWRIGHT_NSS_DB_DIR: /app/profiles/worker
+      PLAYWRIGHT_GLOBAL_NSS_DB_DIR: /root/.pki/nssdb
+      PLAYWRIGHT_CERT_REQUIRED: ${PLAYWRIGHT_CERT_REQUIRED:-1}
+      PLAYWRIGHT_CERT_PASSWORD: ${PLAYWRIGHT_CERT_PASSWORD:-}
     volumes:
       - ../../:/app
       - artifacts_data:/data/artifacts
+      - ../../certificates:/data/certificates:ro
     ports:
       - "8111:8111"
+      - "6080:6080"
+      - "5900:5900"
 
   signing-service:
     build:

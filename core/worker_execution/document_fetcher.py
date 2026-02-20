@@ -62,10 +62,48 @@ async def download_document_and_attachments(
     adjuntos_metadata = payload.get("adjuntos", [])
     if adjuntos_metadata:
         attachment_downloader = AttachmentDownloader()
-        attachments_info = [
-            AttachmentInfo(id=adj["id"], filename=adj["filename"], url=adj["url"])
-            for adj in adjuntos_metadata
-        ]
+        attachments_info: list[AttachmentInfo] = []
+        for adj in adjuntos_metadata:
+            if not isinstance(adj, dict):
+                logger.warning("Adjunto invalido (no dict), se omite: %r", adj)
+                continue
+
+            raw_id = adj.get("id")
+            if raw_id is None:
+                raw_id = adj.get("attachment_id")
+            if raw_id is None:
+                raw_id = adj.get("adjunto_id")
+            if raw_id is None:
+                logger.warning("Adjunto sin id, se omite: %r", adj)
+                continue
+            att_id = str(raw_id).strip()
+            if not att_id:
+                logger.warning("Adjunto con id vacio, se omite: %r", adj)
+                continue
+
+            raw_filename = adj.get("filename")
+            if raw_filename is None:
+                raw_filename = adj.get("name")
+            if raw_filename is None:
+                raw_filename = f"adjunto_{att_id}.pdf"
+            filename = str(raw_filename).strip() or f"adjunto_{att_id}.pdf"
+
+            raw_url = adj.get("url")
+            if raw_url is None:
+                raw_url = adj.get("download_url")
+            if raw_url is None:
+                raw_url = adj.get("href")
+            url = str(raw_url).strip() if raw_url is not None else ""
+            if not url:
+                url = attachment_downloader.build_url(att_id)
+
+            attachments_info.append(AttachmentInfo(id=att_id, filename=filename, url=url))
+
+        if not attachments_info:
+            logger.info("No hay adjuntos descargables validos para idRecurso=%s.", id_recurso)
+            payload["archivos"] = [str(p) for p in archivos_para_subir if p]
+            return archivos_para_subir
+
         download_results = await attachment_downloader.download_batch(
             attachments_info,
             str(id_recurso),

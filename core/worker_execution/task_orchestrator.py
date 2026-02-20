@@ -54,7 +54,15 @@ async def process_task(
     payload: dict,
     auth_session: Optional[aiohttp.ClientSession] = None,
 ) -> ProcessOutcome:
-    task_label = str(task_id) if task_id is not None else "TEST"
+    task_label = str(
+        task_id
+        if task_id is not None
+        else payload.get("idRecurso")
+        or payload.get("resource_id")
+        or payload.get("idExp")
+        or payload.get("expediente")
+        or "NO_ID"
+    )
     logger.info("Procesando tarea ID=%s site=%s protocol=%s", task_label, site_id, protocol)
     try:
         if auth_session is None:

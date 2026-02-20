@@ -1,19 +1,26 @@
-FROM mcr.microsoft.com/playwright/python:v1.52.0-jammy
+FROM mcr.microsoft.com/playwright/python:v1.58.0-jammy
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     VIRTUAL_ENV=/opt/venv \
-    PATH="/opt/venv/bin:${PATH}"
+    PATH="/opt/venv/bin:${PATH}" \
+    DEBIAN_FRONTEND=noninteractive \
+    TZ=Etc/UTC
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-      python3-venv unixodbc unixodbc-dev freetds-bin tdsodbc gcc g++ ca-certificates && \
+      python3-venv unixodbc unixodbc-dev freetds-bin tdsodbc gcc g++ ca-certificates libnss3-tools \
+      xvfb x11vnc fluxbox novnc websockify && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY requirements.txt /tmp/requirements.txt
+COPY infra/docker/playwright-runner-entrypoint.sh /usr/local/bin/playwright-runner-entrypoint.sh
+COPY infra/docker/playwright-runner-visual-entrypoint.sh /usr/local/bin/playwright-runner-visual-entrypoint.sh
 
 RUN python -m venv /opt/venv && \
     /opt/venv/bin/pip install --no-cache-dir --upgrade pip && \
-    /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt
+    /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt && \
+    chmod +x /usr/local/bin/playwright-runner-entrypoint.sh && \
+    chmod +x /usr/local/bin/playwright-runner-visual-entrypoint.sh

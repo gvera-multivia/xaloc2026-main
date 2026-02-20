@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import logging
+import traceback
 from pathlib import Path
 from typing import Any, Optional
 
@@ -9,6 +12,8 @@ from pydantic import BaseModel, Field
 from core.worker_execution.browser_executor import execute_browser_flow
 
 app = FastAPI(title="playwright-runner-service", version="0.1.0")
+_EXECUTE_LOCK = asyncio.Lock()
+logger = logging.getLogger("playwright-runner")
 
 
 class ExecuteRequest(BaseModel):
@@ -34,12 +39,13 @@ def health() -> dict[str, str]:
 @app.post("/execute", response_model=ExecuteResponse)
 async def execute(payload: ExecuteRequest) -> ExecuteResponse:
     try:
-        outcome = await execute_browser_flow(
-            site_id=payload.site_id,
-            protocol=payload.protocol,
-            payload=payload.payload,
-            archivos_para_subir=[Path(p) for p in payload.archivos],
-        )
+        async with _EXECUTE_LOCK:
+            outcome = await execute_browser_flow(
+                site_id=payload.site_id,
+                protocol=payload.protocol,
+                payload=payload.payload,
+                archivos_para_subir=[Path(p) for p in payload.archivos],
+            )
         return ExecuteResponse(
             success=outcome.success,
             error=outcome.error,
@@ -48,4 +54,6 @@ async def execute(payload: ExecuteRequest) -> ExecuteResponse:
             payload_updates=outcome.payload_updates,
         )
     except Exception as exc:
+        logger.error("Error ejecutando flujo site=%s protocol=%s: %s", payload.site_id, payload.protocol, exc)
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(exc)) from exc

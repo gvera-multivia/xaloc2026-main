@@ -88,6 +88,16 @@ class PgRuntimeStore:
                     )
                     """
                 )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS process_runtime_controls (
+                        process_name TEXT PRIMARY KEY,
+                        desired_state TEXT NOT NULL DEFAULT 'running',
+                        reason TEXT,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
+                )
             conn.commit()
 
     # Queue/job ledger API
@@ -161,6 +171,22 @@ class PgRuntimeStore:
                     return None
                 return str(row[0]).strip().lower()
 
+    def has_active_job_for_resource(self, *, site_id: str, resource_id: int) -> bool:
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT 1
+                    FROM jobs
+                    WHERE status IN ('queued', 'processing')
+                      AND COALESCE(payload_json->>'site_id', split_part(dedup_key, ':', 1), '') = %s
+                      AND COALESCE(payload_json->>'idRecurso', split_part(dedup_key, ':', 2), '') = %s
+                    LIMIT 1
+                    """,
+                    (str(site_id), str(int(resource_id))),
+                )
+                return cur.fetchone() is not None
+
     # Worker runtime API
     def upsert_worker_runtime(
         self,
@@ -214,6 +240,97 @@ class PgRuntimeStore:
         # No-op until full worker/job_attempt owner-tracking migration is completed in PG.
         return {"recovered": 0, "alive_workers": 0, "items": []}
 
+    # Process runtime control API
+    def _normalize_process_name(self, process_name: str) -> str:
+        value = str(process_name or "").strip().lower()
+        if value not in {"worker", "brain"}:
+            raise ValueError("process_name invalido. Usa 'worker' o 'brain'.")
+        return value
+
+    def _normalize_desired_state(self, desired_state: str) -> str:
+        value = str(desired_state or "").strip().lower()
+        if value not in {"running", "stopped"}:
+            raise ValueError("desired_state invalido. Usa 'running' o 'stopped'.")
+        return value
+
+    def set_process_desired_state(
+        self,
+        *,
+        process_name: str,
+        desired_state: str,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        name = self._normalize_process_name(process_name)
+        state = self._normalize_desired_state(desired_state)
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO process_runtime_controls (process_name, desired_state, reason, updated_at)
+                    VALUES (%s, %s, %s, NOW())
+                    ON CONFLICT (process_name) DO UPDATE SET
+                        desired_state = EXCLUDED.desired_state,
+                        reason = EXCLUDED.reason,
+                        updated_at = NOW()
+                    """,
+                    (name, state, (str(reason).strip() if reason else None)),
+                )
+            conn.commit()
+        return self.get_process_desired_state(process_name=name)
+
+    def get_process_desired_state(self, *, process_name: str) -> dict[str, Any]:
+        name = self._normalize_process_name(process_name)
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT desired_state, reason, updated_at
+                    FROM process_runtime_controls
+                    WHERE process_name = %s
+                    LIMIT 1
+                    """,
+                    (name,),
+                )
+                row = cur.fetchone()
+        if not row:
+            return {"process_name": name, "desired_state": "running", "reason": None, "updated_at": None}
+        return {
+            "process_name": name,
+            "desired_state": str(row[0] or "running").strip().lower() or "running",
+            "reason": row[1],
+            "updated_at": row[2].isoformat() if row[2] else None,
+        }
+
+    def is_process_enabled(self, *, process_name: str) -> bool:
+        state = self.get_process_desired_state(process_name=process_name)
+        return str(state.get("desired_state") or "running").strip().lower() != "stopped"
+
+    def list_process_desired_states(self) -> dict[str, dict[str, Any]]:
+        base = {
+            "worker": {"process_name": "worker", "desired_state": "running", "reason": None, "updated_at": None},
+            "brain": {"process_name": "brain", "desired_state": "running", "reason": None, "updated_at": None},
+        }
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT process_name, desired_state, reason, updated_at
+                    FROM process_runtime_controls
+                    """
+                )
+                rows = cur.fetchall()
+        for row in rows:
+            name = str(row[0] or "").strip().lower()
+            if name not in base:
+                continue
+            base[name] = {
+                "process_name": name,
+                "desired_state": str(row[1] or "running").strip().lower() or "running",
+                "reason": row[2],
+                "updated_at": row[3].isoformat() if row[3] else None,
+            }
+        return base
+
     # Processing pause API
     def is_site_processing_paused(self, *, site_id: str) -> bool:
         with self._conn() as conn:
@@ -229,6 +346,27 @@ class PgRuntimeStore:
                     (str(site_id),),
                 )
                 return cur.fetchone() is not None
+
+    def is_site_active(self, *, site_id: str) -> bool:
+        site = str(site_id or "").strip()
+        if not site:
+            return True
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT active
+                    FROM organismo_config
+                    WHERE site_id = %s
+                    LIMIT 1
+                    """,
+                    (site,),
+                )
+                row = cur.fetchone()
+        if row is None:
+            # Si no existe config, no bloqueamos por defecto para no romper sites legacy.
+            return True
+        return bool(row[0])
 
     def is_resource_processing_paused(self, *, site_id: str, resource_id: int) -> bool:
         with self._conn() as conn:

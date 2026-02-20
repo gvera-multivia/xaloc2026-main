@@ -161,6 +161,14 @@ async def run_worker_loop():
         while not shutdown_event.is_set():
             current_job = None
             try:
+                if not db.is_process_enabled(process_name="worker"):
+                    runtime_state["current_job_id"] = None
+                    try:
+                        await asyncio.wait_for(shutdown_event.wait(), timeout=2)
+                    except asyncio.TimeoutError:
+                        pass
+                    continue
+
                 # Reservamos con algo de espera, pero checkeando shutdown
                 try:
                     job = await asyncio.wait_for(
@@ -221,6 +229,14 @@ async def run_worker_loop():
                         )
                     else:
                         failed_jobs += 1
+                        logger.error(
+                            "Task fallida job=%s site=%s protocol=%s resource=%s error=%s",
+                            job.job_id,
+                            job.site_id,
+                            job.protocol,
+                            job.resource_id,
+                            outcome.error or "unknown_error",
+                        )
                         if outcome.release_without_attempt:
                             await queue_gateway.release(
                                 job,

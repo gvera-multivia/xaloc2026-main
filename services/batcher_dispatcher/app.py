@@ -117,12 +117,24 @@ class BatcherDispatcherService:
                         external_resource_id=str(normalized_payload.get("external_resource_id") or ""),
                         job_type=p["job_type"],
                     )
-                    job_id = self.store.upsert_job_from_draft(
+                    upsert_result = self.store.upsert_job_from_draft(
                         draft_id=draft_id,
                         dedup_key=dedup_key,
                         priority=int(p["priority"]),
                         payload=normalized_payload,
                     )
+                    job_id = str(upsert_result.get("job_id") or "").strip()
+                    if not job_id:
+                        raise ValueError("upsert_job_from_draft devolvio job_id vacio")
+                    if not bool(upsert_result.get("dispatch", True)):
+                        logger.info(
+                            "[batcher-dispatcher] skip dispatch dedup activo: job_id=%s dedup_key=%s status=%s",
+                            job_id,
+                            dedup_key,
+                            str(upsert_result.get("job_status") or "").strip() or "unknown",
+                        )
+                        await self.streams.ack(stream=self.validated_stream, group=self.group, message_id=msg.message_id)
+                        continue
                     job_payload = {
                         "job_id": job_id,
                         "attempt": int(normalized_payload.get("attempt") or 0),
@@ -201,4 +213,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

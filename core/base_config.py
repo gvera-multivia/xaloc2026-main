@@ -1,5 +1,5 @@
-"""
-Configuración base reutilizable para cualquier sitio.
+﻿"""
+ConfiguraciÃ³n base reutilizable para cualquier sitio.
 """
 
 from __future__ import annotations
@@ -12,12 +12,19 @@ import os
 
 @dataclass
 class BrowserConfig:
-    """Configuración del navegador Playwright."""
+    """ConfiguraciÃ³n del navegador Playwright."""
 
     headless: bool = field(default_factory=lambda: os.getenv("XALOC_HEADLESS", "0") == "1")
-    perfil_path: Path = Path("profiles/edge")
-    canal: str = "msedge"
-    certificado_cn: str = os.getenv("certificado_cn", "")
+    perfil_path: Path = field(default_factory=lambda: Path(os.getenv("PLAYWRIGHT_PROFILE_DIR", "profiles/edge")))
+    canal: str = field(default_factory=lambda: os.getenv("XALOC_BROWSER_CHANNEL", "msedge"))
+    default_cert_cn: str = "35059210B MARIA TERESA MORENTE (R: B62798210)"
+    certificado_cn: str = field(
+        default_factory=lambda: (
+            os.getenv("CERTIFICADO_CN")
+            or os.getenv("certificado_cn")
+            or "35059210B MARIA TERESA MORENTE (R: B62798210)"
+        ).strip()
+    )
     args: List[str] = field(
         default_factory=lambda: [
             "--start-maximized",
@@ -39,9 +46,9 @@ class Timeouts:
 @dataclass
 class BaseConfig:
     """
-    Configuración común.
+    ConfiguraciÃ³n comÃºn.
 
-    Cada sitio debería extender esta clase para añadir URLs, selectores y particularidades del flujo.
+    Cada sitio deberÃ­a extender esta clase para aÃ±adir URLs, selectores y particularidades del flujo.
     """
 
     site_id: str
@@ -63,7 +70,7 @@ class BaseConfig:
     stealth_disable_webdriver: bool = False
 
     # Delays (milisegundos)
-    # Útiles para desacelerar la demo y dar tiempo a renders/handlers del sitio.
+    # Ãštiles para desacelerar la demo y dar tiempo a renders/handlers del sitio.
     delay_ms: int = 500
     cert_popup_delay_ms: int = 2000
     cert_popup_midload_delay_ms: int = 1600
@@ -72,3 +79,4 @@ class BaseConfig:
         self.dir_screenshots.mkdir(exist_ok=True)
         self.dir_logs.mkdir(exist_ok=True)
         self.navegador.perfil_path.mkdir(parents=True, exist_ok=True)
+

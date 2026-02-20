@@ -110,14 +110,32 @@ class PgControlPlaneStore:
         dedup_key: str,
         priority: int,
         payload: dict[str, Any],
-    ) -> str:
+    ) -> dict[str, Any]:
         now = datetime.now().isoformat()
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT job_id FROM jobs WHERE dedup_key = %s LIMIT 1", (dedup_key,))
+                cur.execute("SELECT job_id, status FROM jobs WHERE dedup_key = %s LIMIT 1", (dedup_key,))
                 existing = cur.fetchone()
+                existing_status = str(existing[1] or "").strip().lower() if existing and existing[1] is not None else None
                 if existing and existing[0]:
                     job_id = str(existing[0])
+                    if existing_status in {"queued", "processing"}:
+                        cur.execute(
+                            """
+                            UPDATE job_drafts
+                            SET status = 'dedup_active',
+                                job_id = %s,
+                                updated_at = %s::timestamptz
+                            WHERE draft_id = %s
+                            """,
+                            (job_id, now, draft_id),
+                        )
+                        conn.commit()
+                        return {
+                            "job_id": job_id,
+                            "dispatch": False,
+                            "job_status": existing_status,
+                        }
                 else:
                     cur.execute("SELECT job_id FROM job_drafts WHERE draft_id = %s LIMIT 1", (draft_id,))
                     draft_row = cur.fetchone()
@@ -163,7 +181,11 @@ class PgControlPlaneStore:
                     (job_id, now, now, draft_id),
                 )
             conn.commit()
-        return job_id
+        return {
+            "job_id": job_id,
+            "dispatch": True,
+            "job_status": "queued",
+        }
 
     def mark_draft_error(self, *, draft_id: str, error: str) -> None:
         now = datetime.now().isoformat()
@@ -180,4 +202,3 @@ class PgControlPlaneStore:
                     (error, now, draft_id),
                 )
             conn.commit()
-

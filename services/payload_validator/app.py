@@ -110,6 +110,27 @@ class PayloadValidatorService:
             }
 
             disable_gesdoc = bool(normalized_payload.get("disable_gesdoc"))
+            # Si ya existe autorización previa para este site/recurso,
+            # no volver a recrear pending-auth para el mismo ítem.
+            resource_for_auth = normalized_payload.get("idRecurso")
+            if resource_for_auth is None:
+                resource_for_auth = normalized_payload.get("external_resource_id")
+            try:
+                rid_for_auth = int(resource_for_auth) if resource_for_auth is not None else None
+            except Exception:
+                rid_for_auth = None
+
+            if rid_for_auth is not None and self.pending_auth_store.has_authorized_record(
+                site_id=organism_id,
+                resource_id=rid_for_auth,
+            ):
+                logger.info(
+                    "[payload-validator] skip gesdoc pending recreation: site=%s resource_id=%s already moved_to_queue",
+                    organism_id,
+                    rid_for_auth,
+                )
+                disable_gesdoc = True
+
             if not disable_gesdoc:
                 requires_gesdoc, gesdoc_reason = check_requires_gesdoc(normalized_payload)
                 if requires_gesdoc:

@@ -559,6 +559,7 @@ def check_requires_gesdoc(payload: dict, base_path: str | None = None) -> tuple[
     """
     if base_path is None:
         base_path = os.getenv("CLIENT_DOCS_BASE_PATH") or r"\\SERVER-DOC\clientes"
+    base_root = Path(base_path)
     
     # 1. Intentar obtener identidad del cliente
     try:
@@ -575,6 +576,17 @@ def check_requires_gesdoc(payload: dict, base_path: str | None = None) -> tuple[
     
     # 3. Verificar si la carpeta existe
     if not ruta_docu.exists():
+        # Diagnóstico de montaje SMB: diferenciamos "carpeta cliente no existe"
+        # de "el share no está realmente montado/accesible".
+        try:
+            root_entries = [p for p in base_root.iterdir() if p.is_dir()]
+        except Exception:
+            return (True, f"Compartido de clientes inaccesible/no montado: {base_root}")
+
+        expected_alpha_dirs = {"0-9 (NUMEROS)", "A-C", "D-E", "F-J", "K-L", "M-O", "P-U", "V-Z"}
+        visible_alpha_dirs = {p.name for p in root_entries if p.name in expected_alpha_dirs}
+        if not visible_alpha_dirs:
+            return (True, f"Compartido de clientes vacío/no montado en runtime: {base_root}")
         return (True, f"Carpeta de documentación no existe: {ruta_docu}")
     
     # 4. Buscar AUT en la carpeta (solo verificamos existencia, no seleccionamos)

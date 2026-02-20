@@ -1,0 +1,63 @@
+﻿{
+    "result":  "OK",
+    "started_at_utc":  "2026-02-20T09:01:45.4951315Z",
+    "finished_at_utc":  "2026-02-20T09:01:47.5583241Z",
+    "duration_seconds":  2.063,
+    "counts":  {
+                   "checks":  9,
+                   "ok":  9,
+                   "warn":  0,
+                   "fail":  0
+               },
+    "files":  {
+                  "log":  "C:\\Users\\Guillem Vera\\Desktop\\Proyectos\\xaloc2026-main\\logs\\migration_validation_20260220_100145.log",
+                  "summary":  "C:\\Users\\Guillem Vera\\Desktop\\Proyectos\\xaloc2026-main\\logs\\migration_validation_20260220_100145.summary.json"
+              },
+    "checks":  [
+                   {
+                       "timestamp":  "2026-02-20T09:01:46.2395134Z",
+                       "level":  "OK",
+                       "message":  "docker compose up ejecutado"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T09:01:46.2535099Z",
+                       "level":  "OK",
+                       "message":  "Pycache local de dashboard/services limpiado"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T09:01:46.8133826Z",
+                       "level":  "OK",
+                       "message":  "dashboard-backend-service recreado"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T09:01:47.0056207Z",
+                       "level":  "OK",
+                       "message":  "auth-rbac-service listo (http://localhost:8101/health)"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T09:01:47.1414128Z",
+                       "level":  "OK",
+                       "message":  "dashboard-backend-service listo (http://localhost:8788/openapi.json)"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T09:01:47.1834126Z",
+                       "level":  "OK",
+                       "message":  "api-gateway listo (http://localhost:8080/health)"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T09:01:47.2264168Z",
+                       "level":  "OK",
+                       "message":  "playwright-runner-service listo (http://localhost:8111/health)"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T09:01:47.2744114Z",
+                       "level":  "OK",
+                       "message":  "signing-service listo (http://localhost:8112/health)"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T09:01:47.4223233Z",
+                       "level":  "OK",
+                       "message":  "Conexion PostgreSQL OK (docker exec psql)"
+                   }
+               ]
+}

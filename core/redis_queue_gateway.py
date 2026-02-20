@@ -169,6 +169,19 @@ class RedisQueueGateway(QueueGateway):
                 continue
 
             site_id = raw.get("site_id") or ""
+            site_active_check = getattr(self.db, "is_site_active", None)
+            is_site_active = True
+            if callable(site_active_check) and site_id:
+                is_site_active = bool(site_active_check(site_id=site_id))
+            if site_id and not is_site_active:
+                await self._redis.zrem(self.inflight_key, job_id)
+                await self._redis.rpush(self.ready_key, job_id)
+                paused_seen += 1
+                if paused_seen >= 10 or time.time() >= deadline:
+                    await asyncio.sleep(0.2)
+                    return None
+                continue
+
             if site_id and self.db.is_site_processing_paused(site_id=site_id):
                 await self._redis.zrem(self.inflight_key, job_id)
                 await self._redis.rpush(self.ready_key, job_id)

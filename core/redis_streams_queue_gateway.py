@@ -125,6 +125,28 @@ class RedisStreamsQueueGateway(QueueGateway):
                     await self.streams.delete(stream=self.stream_key, message_id=message.message_id)
                 return None
 
+        site_active_check = getattr(self.db, "is_site_active", None)
+        is_site_active = True
+        if callable(site_active_check) and site_id:
+            is_site_active = bool(site_active_check(site_id=site_id))
+        if site_id and not is_site_active:
+            await self.streams.ack(stream=self.stream_key, group=self.group, message_id=message.message_id)
+            await self.streams.publish_json(
+                stream=self.stream_key,
+                payload={
+                    "job_id": job_id,
+                    "site_id": site_id,
+                    "protocol": protocol or "",
+                    "payload": payload,
+                    "resource_id": resource_id,
+                    "attempt": attempt,
+                    "max_attempts": max_attempts,
+                    "created_at": int(time.time()),
+                },
+                maxlen=self.trim_maxlen,
+            )
+            return None
+
         if site_id and self.db.is_site_processing_paused(site_id=site_id):
             await self.streams.ack(stream=self.stream_key, group=self.group, message_id=message.message_id)
             await self.streams.publish_json(

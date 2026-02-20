@@ -47,13 +47,28 @@ class RedisStreamsClient:
         block_ms: int = 5000,
         count: int = 1,
     ) -> Optional[RedisStreamMessage]:
-        rows = await self.redis.xreadgroup(
-            groupname=group,
-            consumername=consumer,
-            streams={stream: ">"},
-            count=max(1, int(count)),
-            block=max(1, int(block_ms)),
-        )
+        try:
+            rows = await self.redis.xreadgroup(
+                groupname=group,
+                consumername=consumer,
+                streams={stream: ">"},
+                count=max(1, int(count)),
+                block=max(1, int(block_ms)),
+            )
+        except Exception as exc:
+            text = str(exc).upper()
+            if "NOGROUP" in text:
+                # Auto-heal when stream/group was deleted externally.
+                await self.ensure_group(stream=stream, group=group)
+                rows = await self.redis.xreadgroup(
+                    groupname=group,
+                    consumername=consumer,
+                    streams={stream: ">"},
+                    count=max(1, int(count)),
+                    block=max(1, int(block_ms)),
+                )
+            else:
+                raise
         if not rows:
             return None
 
@@ -73,4 +88,3 @@ class RedisStreamsClient:
 
     async def delete(self, *, stream: str, message_id: str) -> int:
         return int(await self.redis.xdel(stream, message_id) or 0)
-

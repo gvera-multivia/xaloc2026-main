@@ -50,7 +50,13 @@ async def execute_browser_flow(
             mapped_data["archivos"] = archivos_para_subir
 
         datos = call_with_supported_kwargs(controller.create_target, **mapped_data)
-        if site_id in ["madrid", "base_online", "ayunta_palma"]:
+        keep_browser_open_disabled = (os.getenv("XALOC_DISABLE_KEEP_BROWSER_OPEN") or "0").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if (not keep_browser_open_disabled) and site_id in ["madrid", "base_online", "ayunta_palma"]:
             os.environ["XALOC_KEEP_BROWSER_OPEN"] = "1"
             os.environ["XALOC_KEEP_TAB_OPEN"] = "0" if site_id == "ayunta_palma" else "1"
 

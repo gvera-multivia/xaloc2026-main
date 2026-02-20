@@ -45,6 +45,27 @@ class PgPendingAuthorizationStore:
         except Exception as exc:
             raise ValueError("resource_id invalido en payload para pending authorization.") from exc
 
+    def has_authorized_record(self, *, site_id: str, resource_id: int) -> bool:
+        site = (site_id or "").strip()
+        if not site:
+            return False
+        rid = int(resource_id)
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT 1
+                    FROM pending_authorization_queue
+                    WHERE lower(btrim(site_id)) = lower(btrim(%s))
+                      AND resource_id = %s
+                      AND status = 'moved_to_queue'
+                    LIMIT 1
+                    """,
+                    (site, rid),
+                )
+                row = cur.fetchone()
+        return bool(row)
+
     def insert_pending_authorization(
         self,
         *,
@@ -63,6 +84,27 @@ class PgPendingAuthorizationStore:
 
         with self._conn() as conn:
             with conn.cursor() as cur:
+                # Guardarrail fuerte: no recrear pending para un recurso
+                # que ya está pending o ya fue autorizado/movido a cola.
+                cur.execute(
+                    """
+                    SELECT id, status
+                    FROM pending_authorization_queue
+                    WHERE lower(btrim(site_id)) = lower(btrim(%s))
+                      AND resource_id = %s
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (site, int(resource_id)),
+                )
+                existing = cur.fetchone()
+                if existing:
+                    existing_id = int(existing[0])
+                    existing_status = str(existing[1] or "").strip().lower()
+                    if existing_status in {"pending", "moved_to_queue"}:
+                        conn.commit()
+                        return existing_id
+
                 try:
                     cur.execute(
                         """

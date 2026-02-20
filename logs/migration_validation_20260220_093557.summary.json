@@ -1,0 +1,88 @@
+﻿{
+    "result":  "FAILED",
+    "started_at_utc":  "2026-02-20T08:35:57.8789781Z",
+    "finished_at_utc":  "2026-02-20T08:36:00.1775562Z",
+    "duration_seconds":  2.299,
+    "counts":  {
+                   "checks":  14,
+                   "ok":  13,
+                   "warn":  0,
+                   "fail":  1
+               },
+    "files":  {
+                  "log":  "C:\\Users\\Guillem Vera\\Desktop\\Proyectos\\xaloc2026-main\\logs\\migration_validation_20260220_093557.log",
+                  "summary":  "C:\\Users\\Guillem Vera\\Desktop\\Proyectos\\xaloc2026-main\\logs\\migration_validation_20260220_093557.summary.json"
+              },
+    "checks":  [
+                   {
+                       "timestamp":  "2026-02-20T08:35:58.5163223Z",
+                       "level":  "OK",
+                       "message":  "docker compose up ejecutado"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:35:58.5298748Z",
+                       "level":  "OK",
+                       "message":  "Pycache local de dashboard/services limpiado"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:35:58.9930935Z",
+                       "level":  "OK",
+                       "message":  "dashboard-backend-service recreado"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:35:59.1216120Z",
+                       "level":  "OK",
+                       "message":  "auth-rbac-service listo (http://localhost:8101/health)"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:35:59.1996949Z",
+                       "level":  "OK",
+                       "message":  "dashboard-backend-service listo (http://localhost:8788/openapi.json)"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:35:59.2252418Z",
+                       "level":  "OK",
+                       "message":  "api-gateway listo (http://localhost:8080/health)"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:35:59.2514256Z",
+                       "level":  "OK",
+                       "message":  "playwright-runner-service listo (http://localhost:8111/health)"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:35:59.2759866Z",
+                       "level":  "OK",
+                       "message":  "signing-service listo (http://localhost:8112/health)"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:35:59.4075882Z",
+                       "level":  "OK",
+                       "message":  "Conexion PostgreSQL OK (docker exec psql)"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:35:59.6098762Z",
+                       "level":  "OK",
+                       "message":  "Migracion pending_authorization_queue aplicada/verificada"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:35:59.8283052Z",
+                       "level":  "OK",
+                       "message":  "Login dashboard OK (user=TheMorrigan)"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:35:59.9128086Z",
+                       "level":  "OK",
+                       "message":  "/api/auth/me OK"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:35:59.9629600Z",
+                       "level":  "FAIL",
+                       "message":  "/api/pending-auth list fallo: HTTP 500 "
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:36:00.0386901Z",
+                       "level":  "OK",
+                       "message":  "/api/queue/current OK"
+                   }
+               ]
+}

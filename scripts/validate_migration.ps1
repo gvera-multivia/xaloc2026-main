@@ -240,14 +240,53 @@ function Wait-Http200 {
     return $false
 }
 
+function Wait-ApiStatus {
+    param(
+        [string]$Method,
+        [string]$Url,
+        [Microsoft.PowerShell.Commands.WebRequestSession]$Session = $null,
+        [int]$ExpectedStatus = 200,
+        [int]$MaxAttempts = 12,
+        [int]$SleepSeconds = 1,
+        [int]$TimeoutSeconds = 30
+    )
+    $last = $null
+    for ($i = 1; $i -le $MaxAttempts; $i++) {
+        $last = Invoke-Api -Method $Method -Url $Url -Session $Session -TimeoutSeconds $TimeoutSeconds
+        if ($last.StatusCode -eq $ExpectedStatus) {
+            return $last
+        }
+        Start-Sleep -Seconds $SleepSeconds
+    }
+    return $last
+}
+
 function Run-Psql {
     param([string]$Sql)
-    $args = @(
-        "exec", "xaloc-postgres",
-        "psql", "-U", "xaloc", "-d", "xaloc", "-t", "-A",
-        "-c", $Sql
-    )
-    return Invoke-Cmd -FilePath "docker" -Args $args
+    $all = docker exec xaloc-postgres psql -U xaloc -d xaloc -t -A -c $Sql 2>&1
+    $exit = $LASTEXITCODE
+    $joined = ""
+    if ($null -ne $all) {
+        $joined = ($all | ForEach-Object { "$_" }) -join [Environment]::NewLine
+    }
+    return [pscustomobject]@{
+        ExitCode = $exit
+        StdOut   = $joined
+        StdErr   = ""
+        TimedOut = $false
+    }
+}
+
+function Get-FirstIntFromText {
+    param([string]$Text)
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return $null
+    }
+    $m = [regex]::Match($Text, "\b\d+\b")
+    if (-not $m.Success) {
+        return $null
+    }
+    return $m.Value
 }
 
 function New-TestResourceId {
@@ -295,6 +334,9 @@ try {
     }
 
     if (-not $SkipBackendRestart) {
+        $pycacheGlob = Join-Path $root "dashboard/__pycache__/services*.pyc"
+        Get-ChildItem -Path $pycacheGlob -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+        Mark-Ok "Pycache local de dashboard/services limpiado"
         Write-Log -Level "INFO" -Message "Recreando dashboard-backend-service para cargar codigo local actualizado..."
         $restartArgs = @("compose", "--env-file", $envPath, "-f", $composePath, "up", "-d", "--no-deps", "--force-recreate", "dashboard-backend-service")
         $restartRes = Invoke-Cmd -FilePath "docker" -Args $restartArgs -TimeoutSeconds 180
@@ -325,6 +367,21 @@ try {
         throw "PostgreSQL no accesible."
     }
 
+    # Ensure pending-auth schema exists even on persistent volumes created before migration 005.
+    $migrationPath = Join-Path $root "infra/postgres/init/005_pending_authorization_schema.sql"
+    if (Test-Path $migrationPath) {
+        $migrationSql = Get-Content -Raw $migrationPath
+        $migRes = Run-Psql -Sql $migrationSql
+        if ($migRes.ExitCode -eq 0) {
+            Mark-Ok "Migracion pending_authorization_queue aplicada/verificada"
+        } else {
+            Mark-Fail ("No se pudo aplicar migracion pending_authorization_queue: {0}" -f ($migRes.StdOut.Trim()))
+            throw "Fallo aplicando migration 005."
+        }
+    } else {
+        Mark-Warn ("No existe migration file esperado: {0}" -f $migrationPath)
+    }
+
     $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
     $adminUser = Get-EnvValue -FilePath $envPath -Key "DASHBOARD_ADMIN_USERNAME" -DefaultValue "admin"
     $adminPass = Get-EnvValue -FilePath $envPath -Key "DASHBOARD_ADMIN_PASSWORD" -DefaultValue "admin1234"
@@ -351,11 +408,11 @@ try {
     }
 
     if ((Get-Date).ToUniversalTime() -gt $apiDeadline) { throw "Timeout de fase API antes de /api/pending-auth." }
-    $pendingListRes = Invoke-Api -Method "GET" -Url "http://localhost:8788/api/pending-auth" -Session $session -TimeoutSeconds $HttpRequestTimeoutSeconds
+    $pendingListRes = Wait-ApiStatus -Method "GET" -Url "http://localhost:8788/api/pending-auth" -Session $session -ExpectedStatus 200 -MaxAttempts 12 -SleepSeconds 1 -TimeoutSeconds $HttpRequestTimeoutSeconds
     if ($pendingListRes.Success -and $pendingListRes.StatusCode -eq 200) {
         Mark-Ok "/api/pending-auth list OK"
     } else {
-        Mark-Fail ("/api/pending-auth list fallo: HTTP {0}" -f $pendingListRes.StatusCode)
+        Mark-Fail ("/api/pending-auth list fallo: HTTP {0} {1}" -f $pendingListRes.StatusCode, $pendingListRes.RawBody)
     }
 
     if ((Get-Date).ToUniversalTime() -gt $apiDeadline) { throw "Timeout de fase API antes de /api/queue/current." }
@@ -371,7 +428,7 @@ try {
 INSERT INTO pending_authorization_queue
 (site_id, resource_id, payload_json, authorization_type, reason, status, created_at, updated_at)
 VALUES
-('madrid', $ridApprove, '{"idRecurso":$ridApprove,"site_id":"madrid","protocol":"P1","expediente":"SMOKE-APPROVE-$ridApprove"}'::jsonb, 'gesdoc', 'smoke-approve', 'pending', NOW(), NOW())
+('madrid', $ridApprove, jsonb_build_object('idRecurso',$ridApprove,'site_id','madrid','protocol','P1','expediente','SMOKE-APPROVE-$ridApprove'), 'gesdoc', 'smoke-approve', 'pending', NOW(), NOW())
 RETURNING id;
 "@
     $insApprove = Run-Psql -Sql $sqlApprove
@@ -379,9 +436,9 @@ RETURNING id;
         Mark-Fail ("Insert pending approve fallo: {0}" -f ($insApprove.StdErr.Trim()))
         throw "No se pudo preparar prueba approve."
     }
-    $pendingApproveId = ($insApprove.StdOut.Trim() -split "`n" | Select-Object -Last 1).Trim()
+    $pendingApproveId = Get-FirstIntFromText -Text $insApprove.StdOut
     if (-not $pendingApproveId) {
-        Mark-Fail "No se obtuvo pending_id para approve."
+        Mark-Fail ("No se obtuvo pending_id numerico para approve. Salida psql: {0}" -f ($insApprove.StdOut.Trim()))
         throw "pending_id approve vacio."
     }
     Mark-Ok ("pending-auth preparado para approve (id={0})" -f $pendingApproveId)
@@ -408,7 +465,7 @@ RETURNING id;
 INSERT INTO pending_authorization_queue
 (site_id, resource_id, payload_json, authorization_type, reason, status, created_at, updated_at)
 VALUES
-('madrid', $ridReject, '{"idRecurso":$ridReject,"site_id":"madrid","protocol":"P1","expediente":"SMOKE-REJECT-$ridReject"}'::jsonb, 'gesdoc', 'smoke-reject', 'pending', NOW(), NOW())
+('madrid', $ridReject, jsonb_build_object('idRecurso',$ridReject,'site_id','madrid','protocol','P1','expediente','SMOKE-REJECT-$ridReject'), 'gesdoc', 'smoke-reject', 'pending', NOW(), NOW())
 RETURNING id;
 "@
     $insReject = Run-Psql -Sql $sqlReject
@@ -416,9 +473,9 @@ RETURNING id;
         Mark-Fail ("Insert pending reject fallo: {0}" -f ($insReject.StdErr.Trim()))
         throw "No se pudo preparar prueba reject."
     }
-    $pendingRejectId = ($insReject.StdOut.Trim() -split "`n" | Select-Object -Last 1).Trim()
+    $pendingRejectId = Get-FirstIntFromText -Text $insReject.StdOut
     if (-not $pendingRejectId) {
-        Mark-Fail "No se obtuvo pending_id para reject."
+        Mark-Fail ("No se obtuvo pending_id numerico para reject. Salida psql: {0}" -f ($insReject.StdOut.Trim()))
         throw "pending_id reject vacio."
     }
     Mark-Ok ("pending-auth preparado para reject (id={0})" -f $pendingRejectId)
@@ -449,7 +506,7 @@ RETURNING id;
 INSERT INTO jobs
 (job_id, organism_id, dedup_key, status, priority, payload_json, queued_at, created_at, updated_at)
 VALUES
-('$jobIdDelete', NULL, '$dedupDelete', 'queued', 100, '{"idRecurso":$ridDelete,"site_id":"madrid","protocol":"P1","expediente":"SMOKE-DELETE-$ridDelete"}'::jsonb, NOW(), NOW(), NOW());
+('$jobIdDelete', NULL, '$dedupDelete', 'queued', 100, jsonb_build_object('idRecurso',$ridDelete,'site_id','madrid','protocol','P1','expediente','SMOKE-DELETE-$ridDelete'), NOW(), NOW(), NOW());
 "@
     $insDelete = Run-Psql -Sql $sqlDelete
     if ($insDelete.ExitCode -ne 0) {
