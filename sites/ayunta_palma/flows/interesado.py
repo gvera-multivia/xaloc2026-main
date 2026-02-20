@@ -4,8 +4,6 @@ Flujo para registrar al interesado en Ayunta Palma.
 
 from __future__ import annotations
 
-import logging
-
 from playwright.async_api import Locator, Page, TimeoutError as PlaywrightTimeoutError, expect
 
 from sites.ayunta_palma.config import AyuntaPalmaConfig, AyuntaPalmaSelectors
@@ -13,7 +11,6 @@ from sites.ayunta_palma.data_models import AyuntaPalmaTarget
 
 PALMA_CONTACT_EMAIL = "info@xvia-serviciosjuridicos.com"
 PALMA_CONTACT_PHONE = "722761154"
-logger = logging.getLogger(__name__)
 
 
 async def _abrir_modal_nuevo_interesado(page: Page, selectors: AyuntaPalmaSelectors, delay_ms: int) -> None:
@@ -24,87 +21,45 @@ async def _abrir_modal_nuevo_interesado(page: Page, selectors: AyuntaPalmaSelect
     except PlaywrightTimeoutError:
         pass
 
-    # Evitar clics durante cargas parciales.
-    try:
-        await page.wait_for_selector(selectors.velo, state="hidden", timeout=6000)
-    except PlaywrightTimeoutError:
-        pass
-
-    # El problema observado era un disparo en cascada (button + hidden + postback)
-    # que acababa refrescando la misma pagina y perdiendo el estado.
-    # Aqui hacemos UN solo disparo por intento y validamos apertura del modal.
-    await page.wait_for_timeout(5000)
-    opened = False
-    for mode in ("button", "hidden", "postback"):
-        before_url = page.url
-        before_token = await page.evaluate(
-            """() => {
-                const t = document.getElementById("ctl00_ctl00_hfPeticionUnica");
-                return t ? (t.value || "") : "";
-            }"""
-        )
-        fired = await page.evaluate(
-            """(m) => {
-                const hidden = document.getElementById("ctl00_ctl00_cphM_cph_btnListaInteresadosOpcionesNuevo");
-                if (!hidden) return false;
-                const wrapper = hidden.closest(".btn-bar-horizontal-centrada-inner");
-                const button = wrapper ? wrapper.querySelector("button.btn-icono[data-icono='plus.svg']") : null;
-                if (m === "button") {
-                    if (!button) return false;
-                    try { button.click(); return true; } catch { return false; }
-                }
-                if (m === "hidden") {
-                    try { hidden.click(); return true; } catch { return false; }
-                }
-                if (m === "postback") {
-                    try {
-                        if (typeof window.__doPostBack === "function") {
-                            window.__doPostBack("ctl00$ctl00$cphM$cph$btnListaInteresadosOpcionesNuevo", "");
-                            return true;
-                        }
-                    } catch {}
-                    return false;
-                }
-                return false;
-            }""",
-            mode,
-        )
-        await page.wait_for_timeout(800)
-        after_url = page.url
-        after_token = await page.evaluate(
-            """() => {
-                const t = document.getElementById("ctl00_ctl00_hfPeticionUnica");
-                return t ? (t.value || "") : "";
-            }"""
-        )
-        logger.info(
-            "[AP-DIAG] Nuevo interesado: modo=%s fired=%s url_before=%s url_after=%s token_changed=%s",
-            mode,
-            fired,
-            before_url,
-            after_url,
-            bool(before_token != after_token),
-        )
-        if not fired:
-            continue
+    async def _try_open_once() -> None:
+        # Evitar clics durante cargas parciales.
         try:
-            try:
-                await page.wait_for_selector(selectors.velo, state="hidden", timeout=12000)
-            except Exception:
-                pass
-            await tipo_usuario.wait_for(state="visible", timeout=15000)
-            opened = True
-            break
+            await page.wait_for_selector(selectors.velo, state="hidden", timeout=6000)
         except PlaywrightTimeoutError:
-            logger.warning(
-                "[AP-DIAG] Nuevo interesado: modo=%s fired pero no aparece selector persona a tiempo. current_url=%s",
-                mode,
-                page.url,
-            )
-            continue
+            pass
 
-    if not opened:
-        await tipo_usuario.wait_for(state="visible", timeout=20000)
+        boton_nuevo = page.locator(selectors.btn_nuevo_interesado).first
+        if await boton_nuevo.count() > 0 and await boton_nuevo.is_visible():
+            try:
+                await boton_nuevo.click()
+            except Exception:
+                await boton_nuevo.click(force=True)
+        else:
+            input_nuevo = page.locator(selectors.input_nuevo_interesado).first
+            if await input_nuevo.count() > 0:
+                if await input_nuevo.is_visible():
+                    await input_nuevo.click()
+                else:
+                    await page.evaluate(
+                        """(selector) => {
+                            const el = document.querySelector(selector);
+                            if (!el) return false;
+                            el.click();
+                            return true;
+                        }""",
+                        selectors.input_nuevo_interesado,
+                    )
+
+    for _ in range(3):
+        await _try_open_once()
+        try:
+            await tipo_usuario.wait_for(state="visible", timeout=7000)
+            await page.wait_for_timeout(delay_ms)
+            return
+        except PlaywrightTimeoutError:
+            await page.wait_for_timeout(800)
+
+    await tipo_usuario.wait_for(state="visible", timeout=20000)
     await page.wait_for_timeout(delay_ms)
 
 
@@ -213,28 +168,10 @@ async def registrar_interesado(
     await _fill_email(page, selectors, PALMA_CONTACT_EMAIL)
     await _fill_telefono(page, selectors, PALMA_CONTACT_PHONE)
 
-    aceptar = page.locator(selectors.btn_aceptar_modal_visible).first
-    aceptar_alt = page.locator(selectors.btn_aceptar_modal).first
-    try:
-        await aceptar.wait_for(state="visible", timeout=4000)
-    except PlaywrightTimeoutError:
-        await aceptar_alt.wait_for(state="visible", timeout=4000)
-
-    await page.wait_for_timeout(5000)
-    try:
-        await aceptar.click(timeout=5000)
-    except Exception:
-        if await aceptar_alt.count() > 0:
-            try:
-                await aceptar_alt.click(force=True, timeout=5000)
-            except Exception:
-                await page.evaluate(
-                    """(sel) => {
-                        const el = document.querySelector(sel);
-                        if (el) el.click();
-                    }""",
-                    selectors.input_aceptar_modal_persona,
-                )
+    aceptar = page.locator(selectors.btn_aceptar_modal)
+    await aceptar.wait_for(state="visible")
+    await aceptar.click()
     await _wait_for_velo_to_vanish(page, selectors)
     await page.wait_for_timeout(config.delay_ms)
     return page
+
