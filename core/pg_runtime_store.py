@@ -152,6 +152,15 @@ class PgRuntimeStore:
                 row = cur.fetchone()
                 return int(row[0] if row and row[0] is not None else 0)
 
+    def get_job_status(self, *, job_id: str) -> Optional[str]:
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT status FROM jobs WHERE job_id = %s LIMIT 1", (str(job_id),))
+                row = cur.fetchone()
+                if not row or row[0] is None:
+                    return None
+                return str(row[0]).strip().lower()
+
     # Worker runtime API
     def upsert_worker_runtime(
         self,

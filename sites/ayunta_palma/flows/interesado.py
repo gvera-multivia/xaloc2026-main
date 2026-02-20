@@ -1,4 +1,4 @@
-"""
+﻿"""
 Flujo para registrar al interesado en Ayunta Palma.
 """
 
@@ -174,4 +174,3 @@ async def registrar_interesado(
     await _wait_for_velo_to_vanish(page, selectors)
     await page.wait_for_timeout(config.delay_ms)
     return page
-

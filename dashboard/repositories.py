@@ -489,3 +489,60 @@ class PostgresQueueRepository:
             return {"day": day, "completed_count": 0, "last_completed_at": None, "marker": "0|"}
         finally:
             conn.close()
+
+    def cancel_queue_item(self, *, site_id: str, resource_id: int) -> dict[str, Any]:
+        conn = self._conn()
+        if conn is None:
+            return {"removed": False, "reason": "pg_unavailable"}
+        site_expr = self._site_expr()
+        resource_expr = self._resource_expr()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT id, job_id, status
+                    FROM jobs
+                    WHERE status IN ('queued', 'processing')
+                      AND {site_expr} = %s
+                      AND {resource_expr} = %s
+                    ORDER BY COALESCE(queued_at, started_at, created_at) DESC, id DESC
+                    LIMIT 1
+                    FOR UPDATE
+                    """,
+                    (str(site_id), int(resource_id)),
+                )
+                row = cur.fetchone()
+                if not row:
+                    conn.rollback()
+                    return {"removed": False, "reason": "not_found"}
+
+                row_id = int(row[0])
+                job_id = str(row[1] or "")
+                status = str(row[2] or "").strip().lower()
+                if status == "processing":
+                    conn.rollback()
+                    return {"removed": False, "reason": "processing", "job_id": job_id}
+
+                cur.execute(
+                    """
+                    UPDATE jobs
+                    SET status = 'cancelled',
+                        error_message = COALESCE(error_message, 'cancelled_by_dashboard'),
+                        finished_at = COALESCE(finished_at, NOW()),
+                        updated_at = NOW()
+                    WHERE id = %s
+                      AND status = 'queued'
+                    """,
+                    (row_id,),
+                )
+                removed = cur.rowcount > 0
+                conn.commit()
+                if not removed:
+                    return {"removed": False, "reason": "state_conflict", "job_id": job_id}
+                return {"removed": True, "reason": "removed", "job_id": job_id}
+        except Exception as exc:
+            conn.rollback()
+            self.logger.warning("Error cancelando item de cola en PG: %s", exc)
+            return {"removed": False, "reason": "error"}
+        finally:
+            conn.close()

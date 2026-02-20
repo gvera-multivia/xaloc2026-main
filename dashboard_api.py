@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from dashboard import DashboardService
+from dashboard.services import DashboardService, DashboardConflictError, DashboardNotFoundError
 from dashboard.process_manager import ProcessManager
 from core.xvia_auth import create_authenticated_session_in_place
 from core.xvia_deselect import deselect_resource
@@ -864,7 +864,10 @@ async def api_pending_auth_list(
     authorization_type: str | None = Query(None),
     _user: dict = Depends(require_user),
 ) -> dict:
-    return service.list_pending_authorizations(authorization_type=authorization_type)
+    try:
+        return service.list_pending_authorizations(authorization_type=authorization_type)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/pending-auth/{pending_id}/approve")
@@ -877,6 +880,10 @@ async def api_pending_auth_approve(
             pending_id=pending_id,
             authorized_by=str(user.get("username") or "admin"),
         )
+    except DashboardNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DashboardConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -896,6 +903,10 @@ async def api_pending_auth_reject(
             reason=reason,
             rejected_by=str(user.get("username") or "admin"),
         )
+    except DashboardNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DashboardConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

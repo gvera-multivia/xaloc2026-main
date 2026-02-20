@@ -1,13 +1,8 @@
-from .base_automation import BaseAutomation
-from .base_config import BaseConfig, BrowserConfig, Timeouts
-from .site_registry import get_site, get_site_controller, list_sites
+"""
+Lightweight core package exports.
 
-__all__ = [
-    "BaseAutomation",
-    "BaseConfig",
-    "BrowserConfig",
-    "Timeouts",
-    "get_site",
-    "get_site_controller",
-    "list_sites",
-]
+No heavy imports at package import time, to avoid side-effects (e.g. Playwright).
+Import concrete modules directly where needed.
+"""
+
+__all__ = []

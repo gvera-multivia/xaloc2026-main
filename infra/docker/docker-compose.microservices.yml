@@ -35,16 +35,14 @@ services:
       retries: 10
 
   jobs-service:
-    image: python:3.11-slim
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile.py-service
+    image: xaloc/python-service:dev
     container_name: xaloc-jobs-service
     restart: unless-stopped
     working_dir: /app
-    command: >
-      sh -c "apt-get update &&
-             apt-get install -y --no-install-recommends unixodbc unixodbc-dev freetds-bin tdsodbc gcc g++ &&
-             rm -rf /var/lib/apt/lists/* &&
-             pip install --no-cache-dir -r requirements.txt &&
-             uvicorn services.jobs.app:app --host 0.0.0.0 --port 8103"
+    command: /opt/venv/bin/uvicorn services.jobs.app:app --host 0.0.0.0 --port 8103
     environment:
       USE_PG_SOURCE_OF_TRUTH: "1"
       QUEUE_MODE: redis_streams
@@ -58,13 +56,14 @@ services:
         condition: service_healthy
 
   auth-rbac-service:
-    image: python:3.11-slim
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile.py-service
+    image: xaloc/python-service:dev
     container_name: xaloc-auth-rbac
     restart: unless-stopped
     working_dir: /app
-    command: >
-      sh -c "pip install --no-cache-dir fastapi uvicorn pyjwt psycopg[binary] &&
-             uvicorn services.auth_rbac.app:app --host 0.0.0.0 --port 8101"
+    command: /opt/venv/bin/uvicorn services.auth_rbac.app:app --host 0.0.0.0 --port 8101
     environment:
       DASHBOARD_JWT_ISSUER: xaloc-dashboard
       DASHBOARD_JWT_AUDIENCE: xaloc-dashboard-clients
@@ -79,16 +78,14 @@ services:
       - "8101:8101"
 
   dashboard-backend-service:
-    image: python:3.11-slim
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile.py-service
+    image: xaloc/python-service:dev
     container_name: xaloc-dashboard-backend
     restart: unless-stopped
     working_dir: /app
-    command: >
-      sh -c "apt-get update &&
-             apt-get install -y --no-install-recommends unixodbc unixodbc-dev freetds-bin tdsodbc gcc g++ &&
-             rm -rf /var/lib/apt/lists/* &&
-             pip install --no-cache-dir -r requirements.txt &&
-             uvicorn services.dashboard_backend.app:app --host 0.0.0.0 --port 8788"
+    command: /opt/venv/bin/uvicorn services.dashboard_backend.app:app --host 0.0.0.0 --port 8788
     environment:
       DASHBOARD_ENABLE_FRONTEND_PROXY: "0"
       AUTH_RBAC_SERVICE_URL: http://auth-rbac-service:8101
@@ -107,24 +104,26 @@ services:
         condition: service_started
 
   api-gateway:
-    image: python:3.11-slim
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile.api-gateway
+    image: xaloc/api-gateway:dev
     container_name: xaloc-api-gateway
     restart: unless-stopped
     working_dir: /app
     command: >
-      sh -c "apt-get update &&
-             apt-get install -y --no-install-recommends nodejs npm unixodbc unixodbc-dev freetds-bin tdsodbc gcc g++ &&
-             rm -rf /var/lib/apt/lists/* &&
-             pip install --no-cache-dir -r requirements.txt &&
+      sh -c "cd /app/dashboard-frontend &&
+             if [ ! -x /app/dashboard-frontend/node_modules/.bin/next ]; then
+               npm install --include=dev --include=optional;
+             fi &&
              cd /app/dashboard-frontend &&
-             npm install --include=dev --include=optional &&
              if [ ! -f /app/dashboard-frontend/node_modules/lightningcss-linux-x64-gnu/lightningcss.linux-x64-gnu.node ]; then
                echo '[api-gateway] reparando lightningcss nativo para linux' &&
                npm rebuild lightningcss --include=optional &&
                npm install lightningcss-linux-x64-gnu@1.30.2 --no-save;
              fi &&
              cd /app &&
-             uvicorn services.api_gateway.app:app --host 0.0.0.0 --port 8080"
+             /opt/venv/bin/uvicorn services.api_gateway.app:app --host 0.0.0.0 --port 8080"
     environment:
       DASHBOARD_BACKEND_URL: http://dashboard-backend-service:8788
       DASHBOARD_FRONTEND_HOST: 0.0.0.0
@@ -141,16 +140,14 @@ services:
         condition: service_started
 
   brain-claim-service:
-    image: python:3.11-slim
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile.py-service
+    image: xaloc/python-service:dev
     container_name: xaloc-brain-claim
     restart: unless-stopped
     working_dir: /app
-    command: >
-      sh -c "apt-get update &&
-             apt-get install -y --no-install-recommends unixodbc unixodbc-dev freetds-bin tdsodbc gcc g++ &&
-             rm -rf /var/lib/apt/lists/* &&
-             pip install --no-cache-dir -r requirements.txt &&
-             python -m services.brain_claim.app"
+    command: /opt/venv/bin/python -m services.brain_claim.app
     environment:
       USE_PG_SOURCE_OF_TRUTH: "1"
       REDIS_ENABLED: "1"
@@ -169,16 +166,14 @@ services:
         condition: service_healthy
 
   payload-validator-service:
-    image: python:3.11-slim
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile.py-service
+    image: xaloc/python-service:dev
     container_name: xaloc-payload-validator
     restart: unless-stopped
     working_dir: /app
-    command: >
-      sh -c "apt-get update &&
-             apt-get install -y --no-install-recommends unixodbc unixodbc-dev freetds-bin tdsodbc gcc g++ &&
-             rm -rf /var/lib/apt/lists/* &&
-             pip install --no-cache-dir -r requirements.txt &&
-             python -m services.payload_validator.app"
+    command: /opt/venv/bin/python -m services.payload_validator.app
     environment:
       USE_PG_SOURCE_OF_TRUTH: "1"
       REDIS_ENABLED: "1"
@@ -196,16 +191,14 @@ services:
         condition: service_healthy
 
   batcher-dispatcher-service:
-    image: python:3.11-slim
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile.py-service
+    image: xaloc/python-service:dev
     container_name: xaloc-batcher-dispatcher
     restart: unless-stopped
     working_dir: /app
-    command: >
-      sh -c "apt-get update &&
-             apt-get install -y --no-install-recommends unixodbc unixodbc-dev freetds-bin tdsodbc gcc g++ &&
-             rm -rf /var/lib/apt/lists/* &&
-             pip install --no-cache-dir -r requirements.txt &&
-             python -m services.batcher_dispatcher.app"
+    command: /opt/venv/bin/python -m services.batcher_dispatcher.app
     environment:
       USE_PG_SOURCE_OF_TRUTH: "1"
       REDIS_ENABLED: "1"
@@ -225,16 +218,14 @@ services:
         condition: service_healthy
 
   worker-orchestrator-service:
-    image: python:3.11-slim
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile.py-service
+    image: xaloc/python-service:dev
     container_name: xaloc-worker-orchestrator
     restart: unless-stopped
     working_dir: /app
-    command: >
-      sh -c "apt-get update &&
-             apt-get install -y --no-install-recommends unixodbc unixodbc-dev freetds-bin tdsodbc gcc g++ &&
-             rm -rf /var/lib/apt/lists/* &&
-             pip install --no-cache-dir -r requirements.txt &&
-             python -m services.worker_orchestrator.app"
+    command: /opt/venv/bin/python -m services.worker_orchestrator.app
     environment:
       USE_PG_SOURCE_OF_TRUTH: "1"
       REDIS_ENABLED: "1"
@@ -260,16 +251,14 @@ services:
         condition: service_started
 
   playwright-runner-service:
-    image: mcr.microsoft.com/playwright/python:v1.52.0-jammy
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile.playwright-runner
+    image: xaloc/playwright-runner:dev
     container_name: xaloc-playwright-runner
     restart: unless-stopped
     working_dir: /app
-    command: >
-      sh -c "apt-get update &&
-             apt-get install -y --no-install-recommends unixodbc unixodbc-dev freetds-bin tdsodbc gcc g++ &&
-             rm -rf /var/lib/apt/lists/* &&
-             pip install --no-cache-dir -r requirements.txt fastapi uvicorn &&
-             uvicorn services.playwright_runner.app:app --host 0.0.0.0 --port 8111"
+    command: /opt/venv/bin/uvicorn services.playwright_runner.app:app --host 0.0.0.0 --port 8111
     environment:
       XALOC_HEADLESS: "1"
       PYTHONUNBUFFERED: "1"
@@ -280,13 +269,14 @@ services:
       - "8111:8111"
 
   signing-service:
-    image: python:3.11-slim
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile.py-service
+    image: xaloc/python-service:dev
     container_name: xaloc-signing-service
     restart: unless-stopped
     working_dir: /app
-    command: >
-      sh -c "pip install --no-cache-dir fastapi uvicorn &&
-             uvicorn services.signing.app:app --host 0.0.0.0 --port 8112"
+    command: /opt/venv/bin/uvicorn services.signing.app:app --host 0.0.0.0 --port 8112
     environment:
       SIGNING_CERT_PATH: /data/certificates/certificate.pfx
       PYTHONUNBUFFERED: "1"
@@ -306,5 +296,5 @@ volumes:
     driver: local
     driver_opts:
       type: cifs
-      o: username=${SMB_USER},password=${SMB_PASS},vers=${SMB_VERS:-3.0},rw,iocharset=utf8
-      device: "//${SMB_SERVER}/${SMB_SHARE}"
+      o: username=${SMB_USER:?SMB_USER missing},password=${SMB_PASS:?SMB_PASS missing},vers=${SMB_VERS:-3.0},rw,iocharset=utf8
+      device: "//${SMB_SERVER:?SMB_SERVER missing}/${SMB_SHARE:?SMB_SHARE missing}"

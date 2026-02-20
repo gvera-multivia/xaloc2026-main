@@ -66,11 +66,11 @@ Si tu certificado es `.p12`, copialo con nombre `certificate.pfx`.
      ```
 4. Arranca contenedores:
    ```powershell
-   docker compose -f infra/docker/docker-compose.microservices.yml up -d
+   docker compose --env-file .env -f infra/docker/docker-compose.microservices.yml up -d
    ```
 5. Verifica que el `signing-service` ve el certificado:
    ```powershell
-   docker compose -f infra/docker/docker-compose.microservices.yml exec signing-service sh -lc "ls -l /data/certificates"
+   docker compose --env-file .env -f infra/docker/docker-compose.microservices.yml exec signing-service sh -lc "ls -l /data/certificates"
    ```
    Debes ver `certificate.pfx`.
 
@@ -239,14 +239,14 @@ cd ..
 ## 5.1 Levantar stack Docker
 
 ```powershell
-docker compose -f infra/docker/docker-compose.microservices.yml up -d
+docker compose --env-file .env -f infra/docker/docker-compose.microservices.yml up -d
 ```
 
 Modo por defecto actual: **Docker completo**.
 Se levanta todo en Docker con un unico comando:
 
 ```powershell
-docker compose -f infra/docker/docker-compose.microservices.yml up -d
+docker compose --env-file .env -f infra/docker/docker-compose.microservices.yml up -d
 ```
 
 ## 5.2 Accesos
@@ -271,35 +271,35 @@ Usa esta guia rapida segun el tipo de cambio.
 
 - Cambios en `.env`:
   ```powershell
-  docker compose -f infra/docker/docker-compose.microservices.yml up -d --force-recreate
+  docker compose --env-file .env -f infra/docker/docker-compose.microservices.yml up -d --force-recreate
   ```
 - Cambios en `docker-compose.microservices.yml`:
   ```powershell
-  docker compose -f infra/docker/docker-compose.microservices.yml down
-  docker compose -f infra/docker/docker-compose.microservices.yml up -d
+  docker compose --env-file .env -f infra/docker/docker-compose.microservices.yml down
+  docker compose --env-file .env -f infra/docker/docker-compose.microservices.yml up -d
   ```
 - Cambios en servicios dockerizados (`playwright-runner-service`, `signing-service`):
   ```powershell
-  docker compose -f infra/docker/docker-compose.microservices.yml up -d --build playwright-runner-service signing-service
+  docker compose --env-file .env -f infra/docker/docker-compose.microservices.yml up -d --build playwright-runner-service signing-service
   ```
 - Reiniciar solo infraestructura (`postgres`, `redis`):
   ```powershell
-  docker compose -f infra/docker/docker-compose.microservices.yml restart postgres redis
+  docker compose --env-file .env -f infra/docker/docker-compose.microservices.yml restart postgres redis
   ```
 - Apagar todo Docker de este proyecto:
   ```powershell
-  docker compose -f infra/docker/docker-compose.microservices.yml down
+  docker compose --env-file .env -f infra/docker/docker-compose.microservices.yml down
   ```
 - Apagar todo + borrar volúmenes (reset total local):
   ```powershell
-  docker compose -f infra/docker/docker-compose.microservices.yml down -v
+  docker compose --env-file .env -f infra/docker/docker-compose.microservices.yml down -v
   ```
   Advertencia: esto borra datos locales de PostgreSQL y Redis.
 
 Chequeo rápido después de reiniciar:
 
 ```powershell
-docker compose -f infra/docker/docker-compose.microservices.yml ps
+docker compose --env-file .env -f infra/docker/docker-compose.microservices.yml ps
 curl.exe http://localhost:8101/health
 curl.exe http://localhost:8788/health
 curl.exe http://localhost:8080/health
@@ -314,22 +314,26 @@ La persistencia de estado runtime es exclusivamente PostgreSQL y Redis Streams.
 ## 7. Comprobacion rapida de salud
 
 ```powershell
-docker compose -f infra/docker/docker-compose.microservices.yml ps
-docker compose -f infra/docker/docker-compose.microservices.yml logs -f --tail=100
+docker compose --env-file .env -f infra/docker/docker-compose.microservices.yml ps
+docker compose --env-file .env -f infra/docker/docker-compose.microservices.yml logs -f --tail=100
 ```
 
 ## 8. Troubleshooting minimo
 
-- Montaje de carpeta de clientes en Docker (host Linux):
-  - monta primero el SMB en el host, por ejemplo en `/mnt/clientes`.
+- Montaje SMB de carpeta de clientes (modelo recomendado en este proyecto):
   - define en `.env`:
     ```env
-    CLIENT_DOCS_HOST_PATH=/mnt/clientes
+    SMB_SERVER=SERVER-DOC
+    SMB_SHARE=clientes
+    SMB_USER=tu_usuario
+    SMB_PASS=tu_password
+    SMB_VERS=3.0
+    CLIENT_DOCS_BASE_PATH=/mnt/clientes
     ```
-  - los contenedores usan `CLIENT_DOCS_BASE_PATH=/mnt/clientes`.
-  - verifica desde contenedor:
+  - el volumen `clientes_smb` se monta en `/mnt/clientes`.
+  - usa siempre `--env-file .env` tambien en `exec` para evitar warnings de interpolacion:
     ```powershell
-    docker compose -f infra/docker/docker-compose.microservices.yml exec worker-orchestrator-service sh -lc "ls -la /mnt/clientes | head"
+    docker compose --env-file .env -f infra/docker/docker-compose.microservices.yml exec worker-orchestrator-service sh -lc "ls -la /mnt/clientes | head"
     ```
 
 - Error Redis/cola:
@@ -372,7 +376,7 @@ docker compose -f infra/docker/docker-compose.microservices.yml logs -f --tail=1
     - `/app/dashboard-frontend/.next`
   - reconstruye solo el gateway:
     ```powershell
-    docker compose -f infra/docker/docker-compose.microservices.yml up -d --build api-gateway
+    docker compose --env-file .env -f infra/docker/docker-compose.microservices.yml up -d --build api-gateway
     ```
 
 ## 9. Nota de red en Docker

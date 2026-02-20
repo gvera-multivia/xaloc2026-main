@@ -113,6 +113,18 @@ class RedisStreamsQueueGateway(QueueGateway):
         attempt = int(str(fields.get("attempt") or "0").strip() or "0")
         max_attempts = int(str(fields.get("max_attempts") or self.max_attempts_default).strip() or str(self.max_attempts_default))
 
+        if job_id:
+            status = None
+            try:
+                status = self.db.get_job_status(job_id=job_id)
+            except Exception:
+                status = None
+            if status in {"cancelled", "completed", "failed", "dead", "succeeded"}:
+                await self.streams.ack(stream=self.stream_key, group=self.group, message_id=message.message_id)
+                if self.delete_on_ack:
+                    await self.streams.delete(stream=self.stream_key, message_id=message.message_id)
+                return None
+
         if site_id and self.db.is_site_processing_paused(site_id=site_id):
             await self.streams.ack(stream=self.stream_key, group=self.group, message_id=message.message_id)
             await self.streams.publish_json(

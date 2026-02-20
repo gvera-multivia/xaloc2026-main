@@ -10,7 +10,9 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from core.client_documentation import check_requires_gesdoc
 from core.pg_control_plane_store import PgControlPlaneStore
+from core.pg_pending_authorization_store import PgPendingAuthorizationStore
 from core.redis_client import get_redis_client
 from shared.queue import RedisStreamsClient
 
@@ -25,6 +27,7 @@ class PayloadValidatorService:
             raise RuntimeError("Redis requerido para payload-validator-service.")
         self.streams = RedisStreamsClient(redis, logger=logger)
         self.store = PgControlPlaneStore.from_env(logger=logger)
+        self.pending_auth_store = PgPendingAuthorizationStore.from_env(logger=logger)
 
         self.candidates_stream = (os.getenv("CANDIDATES_STREAM_KEY") or "candidates").strip() or "candidates"
         self.validated_stream = (os.getenv("VALIDATED_STREAM_KEY") or "validated").strip() or "validated"
@@ -106,6 +109,19 @@ class PayloadValidatorService:
                 "validated_at": fields.get("claimed_at") or "",
             }
 
+            disable_gesdoc = bool(normalized_payload.get("disable_gesdoc"))
+            if not disable_gesdoc:
+                requires_gesdoc, gesdoc_reason = check_requires_gesdoc(normalized_payload)
+                if requires_gesdoc:
+                    self.pending_auth_store.insert_pending_authorization(
+                        site_id=organism_id,
+                        payload=normalized_payload,
+                        authorization_type="gesdoc",
+                        reason=(gesdoc_reason or "").strip() or "Requiere autorizacion GESDOC",
+                    )
+                    await self.streams.ack(stream=self.candidates_stream, group=self.group, message_id=msg.message_id)
+                    return True
+
             draft = self.store.save_job_draft(
                 organism_id=organism_id,
                 external_resource_id=normalized_payload["external_resource_id"],
@@ -179,4 +195,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

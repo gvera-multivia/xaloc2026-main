@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
 import json
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
@@ -13,7 +15,9 @@ import requests
 from core.runtime_flags import get_queue_mode, get_report_pg_dsn, is_pg_source_of_truth_enabled
 from core.sqlserver_utils import build_sqlserver_connection_string
 from core.pg_admin_store import PgAdminStore
+from core.pg_pending_authorization_store import PgPendingAuthorizationStore
 from core.pg_runtime_store import PgRuntimeStore
+from core.queue_gateway import build_queue_gateway
 from core.xvia_auth import LOGIN_URL, extract_csrf_token
 from .repositories import (
     PostgresQueueRepository,
@@ -25,6 +29,14 @@ from .repositories import (
 
 XVIA_HOME_URL = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/home"
 USER_RE = re.compile(r'<i class="fa fa-user-circle"[^>]*></i>\s*([^<]+)')
+
+
+class DashboardNotFoundError(ValueError):
+    pass
+
+
+class DashboardConflictError(ValueError):
+    pass
 
 
 def _fetch_xvia_assigned_user(email: str, password: str, logger: logging.Logger) -> Optional[str]:
@@ -156,6 +168,33 @@ class DashboardService:
         self.queue_backend = resolved_queue_mode
         self.runtime_store = PgRuntimeStore(pg_dsn_value, logger=self.logger)
         self.admin_store = PgAdminStore(pg_dsn_value, logger=self.logger)
+        self.pending_auth_store = PgPendingAuthorizationStore(pg_dsn_value, logger=self.logger)
+
+    @staticmethod
+    def _run_coro_sync(coro):
+        try:
+            asyncio.get_running_loop()
+            loop_running = True
+        except RuntimeError:
+            loop_running = False
+
+        if not loop_running:
+            return asyncio.run(coro)
+
+        result: dict[str, Any] = {"value": None, "error": None}
+
+        def _runner() -> None:
+            try:
+                result["value"] = asyncio.run(coro)
+            except Exception as exc:
+                result["error"] = exc
+
+        t = threading.Thread(target=_runner, daemon=True)
+        t.start()
+        t.join()
+        if result["error"] is not None:
+            raise result["error"]
+        return result["value"]
 
     def _ensure_site_config_exists(self, site_id: str) -> bool:
         site = (site_id or "").strip()
@@ -385,7 +424,58 @@ class DashboardService:
         except Exception as exc:
             raise ValueError("resource_id debe ser entero.") from exc
 
-        raise ValueError("remove_queue_item legado eliminado. Usa control de estados/pausas en PostgreSQL.")
+        remove_result = self.queue_repo.cancel_queue_item(site_id=site, resource_id=rid)
+        if remove_result.get("removed"):
+            return {
+                "removed": True,
+                "site_id": site,
+                "resource_id": rid,
+                "reason": remove_result.get("reason") or "removed",
+                "job_id": remove_result.get("job_id"),
+                "recovered_processing": False,
+                "recovery_attempted": False,
+                "recovery_reason": None,
+                "recovery_heartbeat_timeout_seconds": None,
+            }
+
+        reason = str(remove_result.get("reason") or "unknown")
+        if reason != "processing":
+            return {
+                "removed": False,
+                "site_id": site,
+                "resource_id": rid,
+                "reason": reason,
+                "recovered_processing": False,
+                "recovery_attempted": False,
+                "recovery_reason": None,
+                "recovery_heartbeat_timeout_seconds": None,
+            }
+
+        recovery = self.recover_queue_item_processing(site_id=site, resource_id=rid)
+        if not recovery.get("released"):
+            return {
+                "removed": False,
+                "site_id": site,
+                "resource_id": rid,
+                "reason": "processing_owner_alive_or_not_recoverable",
+                "recovered_processing": False,
+                "recovery_attempted": True,
+                "recovery_reason": recovery.get("reason"),
+                "recovery_heartbeat_timeout_seconds": recovery.get("heartbeat_timeout_seconds"),
+            }
+
+        remove_result_after = self.queue_repo.cancel_queue_item(site_id=site, resource_id=rid)
+        return {
+            "removed": bool(remove_result_after.get("removed")),
+            "site_id": site,
+            "resource_id": rid,
+            "reason": remove_result_after.get("reason") or "unknown",
+            "job_id": remove_result_after.get("job_id"),
+            "recovered_processing": True,
+            "recovery_attempted": True,
+            "recovery_reason": recovery.get("reason"),
+            "recovery_heartbeat_timeout_seconds": recovery.get("heartbeat_timeout_seconds"),
+        }
 
     def list_blacklist(self, *, site_id: str | None = None) -> list[dict[str, Any]]:
         return self.admin_store.list_blocked_resources(site_id=site_id)
@@ -465,12 +555,66 @@ class DashboardService:
     def list_pending_authorizations(
         self, *, authorization_type: str | None = None
     ) -> dict[str, Any]:
-        raise ValueError("pending_authorization legacy eliminado (dependia de SQLite).")
+        auth_type = (authorization_type or "").strip() or None
+        items = self.pending_auth_store.list_pending_authorizations(authorization_type=auth_type)
+        return {
+            "items": items,
+            "total": len(items),
+        }
 
     def approve_pending_authorization(
         self, *, pending_id: int, authorized_by: str = "dashboard"
     ) -> dict[str, Any]:
-        raise ValueError("approve_pending_authorization legacy eliminado (dependia de SQLite).")
+        pid = int(pending_id)
+        user = (authorized_by or "").strip() or "dashboard"
+
+        pending = self.pending_auth_store.get_pending_authorization(pending_id=pid)
+        if not pending:
+            raise DashboardNotFoundError(f"pending_id no existe: {pid}")
+        if str(pending.get("status") or "").strip().lower() != "pending":
+            raise DashboardConflictError(f"pending_id {pid} no esta en estado pending.")
+
+        site_id = str(pending.get("site_id") or "").strip()
+        if not site_id:
+            raise ValueError(f"pending_id {pid} sin site_id.")
+        payload = dict(pending.get("payload") or {})
+        if not payload:
+            raise ValueError(f"pending_id {pid} sin payload.")
+
+        protocol = payload.get("protocol") or payload.get("naturaleza")
+        if protocol is not None:
+            protocol = str(protocol).strip() or None
+        if site_id == "base_online" and protocol:
+            protocol = str(protocol).upper()
+        if site_id == "base_online" and not protocol:
+            raise ValueError(f"pending_id {pid}: falta protocol para site_id=base_online.")
+
+        queue_gateway = build_queue_gateway(backend=self.queue_backend, db=self.runtime_store)
+        enqueued, job_id = self._run_coro_sync(
+            queue_gateway.enqueue(
+                site_id=site_id,
+                protocol=protocol,
+                payload=payload,
+            )
+        )
+        notes = f"job_id={job_id};enqueued={bool(enqueued)}"
+        marked = self.pending_auth_store.mark_pending_as_moved_to_queue(
+            pending_id=pid,
+            authorized_by=user,
+            notes=notes,
+        )
+        if not marked:
+            raise DashboardConflictError(f"pending_id {pid} no pudo marcarse como moved_to_queue (estado no pending).")
+        return {
+            "ok": True,
+            "pending_id": pid,
+            "authorized_by": user,
+            "site_id": site_id,
+            "resource_id": pending.get("resource_id"),
+            "job_id": job_id,
+            "enqueued": bool(enqueued),
+            "moved_to_queue": True,
+        }
 
     def reject_pending_authorization(
         self,
@@ -479,7 +623,30 @@ class DashboardService:
         reason: str,
         rejected_by: str = "dashboard",
     ) -> dict[str, Any]:
-        raise ValueError("reject_pending_authorization legacy eliminado (dependia de SQLite).")
+        pid = int(pending_id)
+        reject_reason = (reason or "").strip()
+        user = (rejected_by or "").strip() or "dashboard"
+        if not reject_reason:
+            raise ValueError("reason es obligatorio.")
+        pending = self.pending_auth_store.get_pending_authorization(pending_id=pid)
+        if not pending:
+            raise DashboardNotFoundError(f"pending_id no existe: {pid}")
+        if str(pending.get("status") or "").strip().lower() != "pending":
+            raise DashboardConflictError(f"pending_id {pid} no esta en estado pending.")
+        rejected = self.pending_auth_store.reject_pending_authorization(
+            pending_id=pid,
+            reason=reject_reason,
+            rejected_by=user,
+        )
+        if not rejected:
+            raise DashboardConflictError(f"pending_id {pid} no pudo rechazarse (estado no pending).")
+        return {
+            "ok": True,
+            "pending_id": pid,
+            "rejected_by": user,
+            "reason": reject_reason,
+            "rejected": True,
+        }
 
     # ==========================================================================
     # CLIENT FOLDER RESOLVER

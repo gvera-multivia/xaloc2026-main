@@ -1,5 +1,5 @@
-"""
-Configuraci?n del sitio Ayunta Palma.
+﻿"""
+Configuración del sitio Ayunta Palma.
 """
 
 from __future__ import annotations
@@ -41,8 +41,8 @@ class AyuntaPalmaSelectors:
     btn_firmar: str = "button:has-text(\"Firmar\")"
     input_firmar: str = "#ctl00_ctl00_cphM_cph_btnFirmar"
     btn_signar_tots_documents: str = "button:has-text(\"Signar tots els documents\")"
-    btn_anadir_documento: str = ".btn-bar-horizontal-centrada-inner button:has-text(\"A\\u00f1adir\"), .btn-bar-horizontal-centrada-inner button:has-text(\"Afegir\")"
-    btn_confirmar_archivo: str = ".panel-dialog button:has-text(\"Aceptar\"), .panel-dialog button:has-text(\"Acceptar\")"
+    btn_anadir_documento: str = ".btn-bar-horizontal-centrada-inner button:has-text(\"Añadir\")"
+    btn_confirmar_archivo: str = ".panel-dialog button:has-text(\"Aceptar\")"
     velo: str = "#velo"
     alegaciones_frame: str = "#ventanaModal"
     alegaciones_input: str = "input[type='text'].form-control"
@@ -59,4 +59,3 @@ class AyuntaPalmaConfig(BaseConfig):
         "returnUrl=https%3a%2f%2fpalma.sedipualba.es%2fcarpetaciudadana%2fnueva_entrada.aspx%3fidtramite%3d13809"
     )
     selectors: AyuntaPalmaSelectors = field(default_factory=AyuntaPalmaSelectors)
-
