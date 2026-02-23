@@ -1,4 +1,4 @@
-﻿import aiohttp
+import aiohttp
 import logging
 from pathlib import Path
 from dataclasses import dataclass

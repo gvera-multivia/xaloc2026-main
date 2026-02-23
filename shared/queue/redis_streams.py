@@ -83,6 +83,51 @@ class RedisStreamsClient:
             fields=normalized,
         )
 
+    async def autoclaim_one(
+        self,
+        *,
+        stream: str,
+        group: str,
+        consumer: str,
+        min_idle_ms: int,
+        start_id: str = "0-0",
+    ) -> Optional[RedisStreamMessage]:
+        try:
+            result = await self.redis.xautoclaim(
+                name=stream,
+                groupname=group,
+                consumername=consumer,
+                min_idle_time=max(1, int(min_idle_ms)),
+                start_id=start_id,
+                count=1,
+            )
+        except Exception as exc:
+            text = str(exc).upper()
+            if "NOGROUP" in text:
+                await self.ensure_group(stream=stream, group=group)
+                return None
+            raise
+
+        if not result:
+            return None
+
+        # redis-py: (next_start_id, [(id, fields), ...], [deleted_ids?])
+        messages = []
+        try:
+            messages = result[1] if len(result) > 1 else []
+        except Exception:
+            messages = []
+        if not messages:
+            return None
+
+        message_id, fields = messages[0]
+        normalized = {str(k): str(v) for k, v in (fields or {}).items()}
+        return RedisStreamMessage(
+            stream=str(stream),
+            message_id=str(message_id),
+            fields=normalized,
+        )
+
     async def ack(self, *, stream: str, group: str, message_id: str) -> int:
         return int(await self.redis.xack(stream, group, message_id) or 0)
 

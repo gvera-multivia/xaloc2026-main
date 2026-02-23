@@ -25,10 +25,28 @@ from core.worker.utils import int_env, purge_invalid_incidents_if_supported
 
 logger = logging.getLogger("worker")
 
+def _resolve_incident_resource_id(job) -> Optional[int]:
+    rid = getattr(job, "resource_id", None)
+    try:
+        if rid is not None:
+            return int(rid)
+    except Exception:
+        pass
+
+    payload = getattr(job, "payload", {}) or {}
+    raw = payload.get("idRecurso")
+    if raw is None:
+        raw = payload.get("resource_id")
+    try:
+        return int(raw) if raw is not None else None
+    except Exception:
+        return None
+
 async def run_worker_loop():
     global logger
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:8]
     logger = setup_worker_logging(run_id)
+    load_dotenv()
 
     db = PgRuntimeStore.from_env(logger=logger)
     realtime_store = build_realtime_store(logger=logger)
@@ -40,6 +58,7 @@ async def run_worker_loop():
     worker_instance_id = f"worker-{uuid.uuid4().hex}"
     worker_pid = os.getpid()
     logger.info("Worker UUID runtime: %s (pid=%s)", worker_instance_id, worker_pid)
+    enforce_singleton = (os.getenv("WORKER_ENFORCE_SINGLETON") or "1").strip().lower() in {"1", "true", "yes", "on"}
 
     heartbeat_seconds = int_env("WORKER_HEARTBEAT_SECONDS", 5, minimum=1)
     heartbeat_timeout_seconds = int_env("WORKER_HEARTBEAT_TIMEOUT_SECONDS", 90, minimum=5)
@@ -86,8 +105,6 @@ async def run_worker_loop():
                 await asyncio.sleep(5)
 
     async def _runtime_reconcile_loop() -> None:
-        if queue_backend != "sqlite":
-            return
         while not shutdown_event.is_set():
             try:
                 result = db.reconcile_processing_with_worker_runtime(
@@ -109,6 +126,17 @@ async def run_worker_loop():
                 logger.error("Fallo en UUID reconcile de processing: %s", exc)
                 await asyncio.sleep(5)
 
+    if enforce_singleton:
+        while not shutdown_event.is_set():
+            if db.try_acquire_worker_singleton_lock():
+                logger.info("Lock singleton de worker adquirido (solo un worker activo).")
+                break
+            logger.warning("Otro worker activo detectado; esperando lock singleton...")
+            try:
+                await asyncio.wait_for(shutdown_event.wait(), timeout=5)
+            except asyncio.TimeoutError:
+                continue
+
     db.upsert_worker_runtime(
         worker_id=worker_instance_id,
         run_id=run_id,
@@ -120,7 +148,6 @@ async def run_worker_loop():
     reconcile_task = asyncio.create_task(_runtime_reconcile_loop())
 
     # Cargar credenciales
-    load_dotenv()
     auth_email = os.getenv("XVIA_EMAIL")
     auth_password = os.getenv("XVIA_PASSWORD")
 
@@ -246,7 +273,7 @@ async def run_worker_loop():
                                 site_id=job.site_id,
                                 incident_type="RETRY_WITHOUT_ATTEMPT",
                                 reason=outcome.error or "release_without_attempt",
-                                resource_id=job.resource_id,
+                                resource_id=_resolve_incident_resource_id(job),
                                 expediente=_extraer_n_expediente(job.payload),
                                 payload=job.payload,
                                 started_at=started_at,
@@ -294,10 +321,12 @@ async def run_worker_loop():
                             retryable=True,
                         )
                     if outcome.success and job.site_id == "madrid" and job.payload.get("madrid_tramite_enviado") and not job.payload.get("madrid_justificante_descargado", True):
+                        incident_resource_id = _resolve_incident_resource_id(job)
                         anotacion = str(job.payload.get("madrid_numero_anotacion") or "").strip()
                         refresh_count = job.payload.get("madrid_post_envio_refresh_count")
                         motivo = (
                             "Trámite enviado correctamente en Madrid, pero justificante no descargado. "
+                            f"Recurso: #{incident_resource_id if incident_resource_id is not None else 'N/A'}. "
                             f"Número de anotación: {anotacion or 'N/A'}. "
                             f"Refrescos aplicados: {refresh_count if refresh_count is not None else 'N/A'}."
                         )
@@ -305,7 +334,7 @@ async def run_worker_loop():
                             site_id=job.site_id,
                             incident_type="MADRID_TRAMITE_ENVIADO_SIN_JUSTIFICANTE",
                             reason=motivo,
-                            resource_id=job.resource_id,
+                            resource_id=incident_resource_id,
                             expediente=_extraer_n_expediente(job.payload),
                             payload=job.payload,
                             started_at=started_at,
@@ -365,6 +394,8 @@ async def run_worker_loop():
             await auth_session.close()
 
         db.mark_worker_runtime_offline(worker_id=worker_instance_id)
+        if enforce_singleton:
+            db.release_worker_singleton_lock()
         logger.info(
             "Resumen ejecución run=%s processed=%s success=%s failed=%s",
             run_id,

@@ -47,6 +47,25 @@ class PayloadValidatorService:
             return default
 
     @staticmethod
+    def _normalize_resource_id_str(value: Any) -> str:
+        if value is None:
+            return ""
+        raw = str(value).strip()
+        if not raw:
+            return ""
+        try:
+            return str(int(raw))
+        except Exception:
+            pass
+        try:
+            as_float = float(raw)
+            if as_float.is_integer():
+                return str(int(as_float))
+        except Exception:
+            pass
+        return raw
+
+    @staticmethod
     def _normalize_job_type(raw_payload: dict[str, Any]) -> str:
         protocol = str(raw_payload.get("protocol") or "").strip().upper()
         if protocol:
@@ -76,7 +95,7 @@ class PayloadValidatorService:
         try:
             fields = msg.fields
             organism_id = str(fields.get("organism_id") or "").strip()
-            external_resource_id = str(fields.get("external_resource_id") or "").strip()
+            external_resource_id = self._normalize_resource_id_str(fields.get("external_resource_id"))
             raw_payload = self._safe_json(fields.get("raw_payload"), {})
             trace_id = str(fields.get("trace_id") or "").strip() or str(uuid.uuid4())
 
@@ -91,9 +110,10 @@ class PayloadValidatorService:
             except Exception:
                 priority = 100
 
+            normalized_resource_id = self._normalize_resource_id_str(raw_payload.get("idRecurso"))
             dedup_key = self.store.build_dedup_key(
                 organism_id=organism_id,
-                external_resource_id=external_resource_id or str(raw_payload.get("idRecurso") or ""),
+                external_resource_id=external_resource_id or normalized_resource_id,
                 job_type=job_type,
             )
 
@@ -101,7 +121,7 @@ class PayloadValidatorService:
                 **raw_payload,
                 "trace_id": trace_id,
                 "organism_id": organism_id,
-                "external_resource_id": external_resource_id or str(raw_payload.get("idRecurso") or ""),
+                "external_resource_id": external_resource_id or normalized_resource_id,
                 "job_type": job_type,
                 "cert_profile": cert_profile,
                 "priority": priority,

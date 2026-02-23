@@ -99,11 +99,11 @@ def _clear_redis_plane(env_file: Path, compose_file: Path) -> None:
         compose_file,
         "redis-cli DEL candidates validated jobs dlq:candidates dlq:validated dlq:jobs >/dev/null",
     )
-    # Dedupe keys
+    # Dedupe keys (cola + claim)
     _exec_redis(
         env_file,
         compose_file,
-        "keys=$(redis-cli --scan --pattern 'dedupe:resource:*'); if [ -n \"$keys\" ]; then echo \"$keys\" | xargs -r redis-cli DEL >/dev/null; fi",
+        "keys=$(redis-cli --scan --pattern 'dedupe:resource:*'); if [ -n \"$keys\" ]; then echo \"$keys\" | xargs -r redis-cli DEL >/dev/null; fi; keys=$(redis-cli --scan --pattern 'brain-claim:resource:*'); if [ -n \"$keys\" ]; then echo \"$keys\" | xargs -r redis-cli DEL >/dev/null; fi",
     )
 
 
@@ -192,7 +192,7 @@ def main() -> int:
     if not args.yes:
         print("Se va a hacer HARD RESET del control-plane.")
         print("- Pausar brain/worker en PG runtime controls")
-        print("- Limpiar Redis streams: candidates/validated/jobs/dlq:* + dedupe:resource:*")
+        print("- Limpiar Redis streams: candidates/validated/jobs/dlq:* + dedupe:resource:* + brain-claim:resource:*")
         print("- Cancelar jobs activos y drafts activos en PostgreSQL")
         if not args.no_clear_pending_auth:
             print("- Rechazar pending auth pendientes")

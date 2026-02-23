@@ -1,4 +1,4 @@
-﻿"""
+"""
 Flujo de rellenado del formulario STA
 """
 

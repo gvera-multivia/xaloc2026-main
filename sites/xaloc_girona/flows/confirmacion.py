@@ -1,4 +1,4 @@
-﻿"""
+"""
 Flujo de confirmación final con pausa interactiva y envío real
 """
 

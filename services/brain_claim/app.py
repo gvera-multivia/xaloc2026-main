@@ -74,6 +74,9 @@ class BrainClaimService:
         self.candidates_stream = (os.getenv("CANDIDATES_STREAM_KEY") or "candidates").strip() or "candidates"
         self.max_claims = int((os.getenv("BRAIN_CLAIM_MAX_PER_TICK") or "500").strip() or "500")
         self.sync_interval = int((os.getenv("BRAIN_CLAIM_SYNC_SECONDS") or "30").strip() or "30")
+        self.claim_dedupe_ttl_seconds = int(
+            (os.getenv("BRAIN_CLAIM_DEDUPE_TTL_SECONDS") or "7200").strip() or "7200"
+        )
 
         self.adapters: dict[str, SiteAdapter] = {
             "madrid": MadridAdapter(),
@@ -239,6 +242,51 @@ class BrainClaimService:
             await asyncio.sleep(delays_seconds[min(attempt, len(delays_seconds) - 1)])
         return False
 
+    @staticmethod
+    def _claim_dedupe_key(*, site_id: str, resource_id: int) -> str:
+        return f"brain-claim:resource:{site_id}:{int(resource_id)}"
+
+    async def _reserve_claim_slot(self, *, site_id: str, resource_id: int) -> bool:
+        key = self._claim_dedupe_key(site_id=site_id, resource_id=resource_id)
+        try:
+            ok = await self.redis.set(key, "1", ex=self.claim_dedupe_ttl_seconds, nx=True)
+            return bool(ok)
+        except Exception as exc:
+            logger.warning(
+                "[%s] no se pudo aplicar dedupe claim para idRecurso=%s: %s",
+                site_id,
+                resource_id,
+                exc,
+            )
+            return True
+
+    async def _reserve_claim_slot_with_stale_recovery(self, *, site_id: str, resource_id: int) -> bool:
+        reserved = await self._reserve_claim_slot(site_id=site_id, resource_id=resource_id)
+        if reserved:
+            return True
+
+        # If there is no active queued/processing job, the claim dedupe key is stale.
+        if self.runtime_store.has_active_job_for_resource(site_id=site_id, resource_id=resource_id):
+            return False
+
+        await self._release_claim_slot(site_id=site_id, resource_id=resource_id)
+        reserved_after_release = await self._reserve_claim_slot(site_id=site_id, resource_id=resource_id)
+        if reserved_after_release:
+            logger.warning(
+                "[%s] dedupe-claim stale recuperado para idRecurso=%s (sin job activo).",
+                site_id,
+                resource_id,
+            )
+            return True
+        return False
+
+    async def _release_claim_slot(self, *, site_id: str, resource_id: int) -> None:
+        key = self._claim_dedupe_key(site_id=site_id, resource_id=resource_id)
+        try:
+            await self.redis.delete(key)
+        except Exception:
+            pass
+
     def get_active_configs(self) -> list[dict[str, Any]]:
         return self.admin_store.get_active_organismo_configs()
 
@@ -271,7 +319,13 @@ class BrainClaimService:
                     try:
                         rid = int(rid_raw)
                     except Exception:
-                        continue
+                        try:
+                            rid_float = float(str(rid_raw).strip())
+                            if not rid_float.is_integer():
+                                continue
+                            rid = int(rid_float)
+                        except Exception:
+                            continue
                     if not self.is_still_claimable_in_db(rid):
                         logger.info("[%s] descartado idRecurso=%s por no estar reclamable en SQL Server (revalidacion).", site_id, rid)
                         continue
@@ -284,50 +338,63 @@ class BrainClaimService:
                             rid,
                         )
                         continue
-                    expediente = str(cand.get("Expedient") or "").strip()
-                    ok = await adapter.ensure_claimed(self, cand)
-                    if not ok:
-                        stats["errors"] += 1
-                        continue
-                    stats["claimed"] += 1
-                    remaining -= 1
-
-                    payloads = await adapter.build_payloads([cand], on_discard=None)
-                    if not payloads:
-                        logger.warning(
-                            "[%s] idRecurso=%s reclamado pero descartado por adapter.build_payloads (payload invalido).",
+                    if not await self._reserve_claim_slot_with_stale_recovery(site_id=site_id, resource_id=rid):
+                        logger.info(
+                            "[%s] dedupe-claim activo para idRecurso=%s; se omite republicacion.",
                             site_id,
                             rid,
                         )
                         continue
 
-                    for payload in payloads:
-                        trace_id = str(uuid.uuid4())
-                        rid_payload = payload.get("idRecurso")
-                        try:
-                            rid_payload_int = int(rid_payload) if rid_payload is not None else rid
-                        except Exception:
-                            rid_payload_int = rid
-                        candidate_payload = {
-                            "candidate_id": str(uuid.uuid4()),
-                            "organism_id": site_id,
-                            "external_resource_id": str(rid_payload_int),
-                            "raw_payload": json.loads(json.dumps(payload, default=str)),
-                            "claimed_at": payload.get("claimed_at") or cand.get("claimed_at") or "",
-                            "trace_id": trace_id,
-                            "expediente": str(payload.get("expediente") or expediente),
-                        }
-                        await self.streams.publish_json(
-                            stream=self.candidates_stream,
-                            payload=candidate_payload,
-                            maxlen=int((os.getenv("CANDIDATES_STREAM_MAXLEN") or "200000").strip() or "200000"),
-                        )
-                        stats["published_candidates"] += 1
+                    keep_claim_slot = False
+                    try:
+                        expediente = str(cand.get("Expedient") or "").strip()
+                        ok = await adapter.ensure_claimed(self, cand)
+                        if not ok:
+                            stats["errors"] += 1
+                            continue
+                        stats["claimed"] += 1
+                        remaining -= 1
+
+                        payloads = await adapter.build_payloads([cand], on_discard=None)
+                        if not payloads:
+                            logger.warning(
+                                "[%s] idRecurso=%s reclamado pero descartado por adapter.build_payloads (payload invalido).",
+                                site_id,
+                                rid,
+                            )
+                            continue
+
+                        for payload in payloads:
+                            trace_id = str(uuid.uuid4())
+                            rid_payload = payload.get("idRecurso")
+                            try:
+                                rid_payload_int = int(rid_payload) if rid_payload is not None else rid
+                            except Exception:
+                                rid_payload_int = rid
+                            candidate_payload = {
+                                "candidate_id": str(uuid.uuid4()),
+                                "organism_id": site_id,
+                                "external_resource_id": str(rid_payload_int),
+                                "raw_payload": json.loads(json.dumps(payload, default=str)),
+                                "claimed_at": payload.get("claimed_at") or cand.get("claimed_at") or "",
+                                "trace_id": trace_id,
+                                "expediente": str(payload.get("expediente") or expediente),
+                            }
+                            await self.streams.publish_json(
+                                stream=self.candidates_stream,
+                                payload=candidate_payload,
+                                maxlen=int((os.getenv("CANDIDATES_STREAM_MAXLEN") or "200000").strip() or "200000"),
+                            )
+                            stats["published_candidates"] += 1
+                            keep_claim_slot = True
+                    finally:
+                        if not keep_claim_slot:
+                            await self._release_claim_slot(site_id=site_id, resource_id=rid)
             except Exception as exc:
                 logger.exception("[%s] fallo en run_tick claim-only: %s", site_id, exc)
                 stats["errors"] += 1
-            finally:
-                await self.close_session()
+        await self.close_session()
         return stats
 
     async def run_forever(self) -> None:

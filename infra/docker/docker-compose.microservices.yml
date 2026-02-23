@@ -182,8 +182,10 @@ services:
       VALIDATED_STREAM_KEY: validated
       VALIDATOR_STREAM_GROUP: validator_group
       REPORT_PG_DSN: postgresql://xaloc:xaloc_dev_password@postgres:5432/xaloc
+      CLIENT_DOCS_BASE_PATH: /mnt/clientes
     volumes:
       - ../../:/app
+      - clientes_smb:/mnt/clientes:rw
     depends_on:
       postgres:
         condition: service_healthy
@@ -272,21 +274,24 @@ services:
       XALOC_CERT_DEBUG: ${XALOC_CERT_DEBUG:-1}
       XALOC_BROWSER_DEBUG: ${XALOC_BROWSER_DEBUG:-1}
       XALOC_CHROMIUM_NETLOG: ${XALOC_CHROMIUM_NETLOG:-0}
+      XALOC_BROWSER_CHANNEL: ${XALOC_BROWSER_CHANNEL:-chromium}
       XALOC_CERT_AUTOSELECT_VIA_POLICY: "1"
       XALOC_CERT_AUTOSELECT_CLI_FALLBACK: "1"
       XALOC_CERT_FILTER_BY_CN: "0"
-      PLAYWRIGHT_USE_CLIENT_CERTIFICATES: "0"
-      PLAYWRIGHT_CLIENT_CERT_ORIGINS: "https://cert.valid.aoc.cat,https://valid.aoc.cat"
+      PLAYWRIGHT_USE_CLIENT_CERTIFICATES: ${PLAYWRIGHT_USE_CLIENT_CERTIFICATES:-1}
+      PLAYWRIGHT_CLIENT_CERT_ORIGINS: ${PLAYWRIGHT_CLIENT_CERT_ORIGINS:-https://sede.madrid.es,https://servcla.madrid.es,https://servpub.madrid.es,https://www.xalocgirona.cat,https://seu.xalocgirona.cat,https://www.base.cat,https://www.baseonline.cat,https://valid.aoc.cat,https://cert.valid.aoc.cat,https://cas.madrid.es,https://pasarela.clave.gob.es,https://palma.sedipualba.es,https://identificacionssl.sedipualba.es}
       PLAYWRIGHT_CERT_PATH: /data/certificates/certificate.pfx
       PLAYWRIGHT_PROFILE_DIR: /app/profiles/worker
-      PLAYWRIGHT_NSS_DB_DIR: /app/profiles/worker
+      PLAYWRIGHT_NSS_DB_DIR: ${PLAYWRIGHT_NSS_DB_DIR:-/root/.pki/nssdb}
       PLAYWRIGHT_GLOBAL_NSS_DB_DIR: /root/.pki/nssdb
       PLAYWRIGHT_CERT_REQUIRED: ${PLAYWRIGHT_CERT_REQUIRED:-1}
       PLAYWRIGHT_CERT_PASSWORD: ${PLAYWRIGHT_CERT_PASSWORD:-}
+      CLIENT_DOCS_BASE_PATH: /mnt/clientes
     volumes:
       - ../../:/app
       - artifacts_data:/data/artifacts
       - ../../certificates:/data/certificates:ro
+      - clientes_smb:/mnt/clientes:rw
     ports:
       - "8111:8111"
       - "6080:6080"

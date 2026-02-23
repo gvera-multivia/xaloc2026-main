@@ -53,54 +53,18 @@ async def _sobrescribir_contacto_representante(page: Page, config: AyuntaPalmaCo
 async def indicar_representante(page: Page, config: AyuntaPalmaConfig) -> Page:
     selectors = config.selectors
 
-    boton = page.locator(selectors.btn_indicar_representante_visible).first
-    boton_alt = page.locator(selectors.btn_indicar_representante).first
-    await boton_alt.wait_for(state="visible")
-    dialog_titulo = page.locator(".ui-dialog-title", has_text="Nuevo/a representante del/de la interesado/a").first
-
-    await page.wait_for_timeout(5000)
-    if await boton.count() > 0:
-        try:
-            await boton.click(timeout=5000)
-        except Exception:
-            await boton.click(force=True, timeout=5000)
-    else:
-        try:
-            await boton_alt.click(timeout=5000)
-        except Exception:
-            await page.evaluate(
-                """(sel) => {
-                    const el = document.querySelector(sel);
-                    if (el) el.click();
-                }""",
-                selectors.input_indicar_representante,
-            )
+    boton = page.locator(selectors.btn_indicar_representante)
+    await boton.wait_for(state="visible")
+    await boton.click()
     await page.wait_for_timeout(config.delay_ms)
 
+    dialog_titulo = page.locator(".ui-dialog-title", has_text="Nuevo/a representante del/de la interesado/a")
     await dialog_titulo.wait_for(state="visible", timeout=15000)
     await _sobrescribir_contacto_representante(page, config)
 
-    aceptar = page.locator(selectors.btn_aceptar_modal_visible).first
-    aceptar_alt = page.locator(selectors.btn_aceptar_modal).first
-    try:
-        await aceptar.wait_for(state="visible", timeout=4000)
-    except PlaywrightTimeoutError:
-        await aceptar_alt.wait_for(state="visible", timeout=4000)
-
-    await page.wait_for_timeout(5000)
-    try:
-        await aceptar.click(timeout=5000)
-    except Exception:
-        if await aceptar_alt.count() > 0:
-            try:
-                await aceptar_alt.click(force=True, timeout=5000)
-            except Exception:
-                await page.evaluate(
-                    """(sel) => {
-                        const el = document.querySelector(sel);
-                        if (el) el.click();
-                    }""",
-                    selectors.input_aceptar_modal_persona,
-                )
+    aceptar = page.locator(selectors.btn_aceptar_modal)
+    await aceptar.wait_for(state="visible")
+    await aceptar.scroll_into_view_if_needed()
+    await aceptar.click()
     await page.wait_for_timeout(config.delay_ms)
     return page

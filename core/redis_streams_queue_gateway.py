@@ -12,6 +12,22 @@ from core.redis_client import get_redis_client
 from shared.queue import RedisStreamsClient
 
 
+def _to_int_like(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except Exception:
+        pass
+    try:
+        as_float = float(str(value).strip())
+        if as_float.is_integer():
+            return int(as_float)
+    except Exception:
+        pass
+    return None
+
+
 class RedisStreamsQueueGateway(QueueGateway):
     def __init__(self, db: Any):
         self._redis = get_redis_client()
@@ -27,6 +43,7 @@ class RedisStreamsQueueGateway(QueueGateway):
         self.dedupe_ttl_seconds = int((os.getenv("QUEUE_DEDUPE_TTL_SECONDS") or "86400").strip() or "86400")
         self.trim_maxlen = int((os.getenv("QUEUE_STREAM_MAXLEN") or "200000").strip() or "200000")
         self.delete_on_ack = (os.getenv("QUEUE_STREAM_DELETE_ON_ACK") or "1").strip().lower() in {"1", "true", "yes", "on"}
+        self.pending_claim_min_idle_ms = int((os.getenv("QUEUE_STREAM_PENDING_CLAIM_MIN_IDLE_MS") or "60000").strip() or "60000")
         self.streams = RedisStreamsClient(self._redis, logger=self.logger)
 
     async def _ensure_group(self) -> None:
@@ -38,11 +55,7 @@ class RedisStreamsQueueGateway(QueueGateway):
         job_id = str(payload.get("job_id") or uuid.uuid4())
         payload["job_id"] = job_id
 
-        resource_id = payload.get("idRecurso")
-        try:
-            resource_id = int(resource_id) if resource_id is not None else None
-        except Exception:
-            resource_id = None
+        resource_id = _to_int_like(payload.get("idRecurso"))
 
         if resource_id is not None:
             dedupe_key = f"dedupe:resource:{site_id}:{resource_id}"
@@ -82,126 +95,115 @@ class RedisStreamsQueueGateway(QueueGateway):
     async def reserve(self, *, timeout_seconds: int = 10, worker_id: Optional[str] = None) -> Optional[QueueJob]:
         await self._ensure_group()
         consumer = (worker_id or f"worker-{uuid.uuid4().hex[:12]}").strip()
-        message = await self.streams.read_group(
-            stream=self.stream_key,
-            group=self.group,
-            consumer=consumer,
-            block_ms=max(1, int(timeout_seconds)) * 1000,
-            count=1,
-        )
-        if message is None:
-            return None
+        deadline = time.time() + max(1, int(timeout_seconds))
 
-        fields = message.fields
-        job_id = str(fields.get("job_id") or "").strip()
-        site_id = str(fields.get("site_id") or "").strip()
-        protocol = str(fields.get("protocol") or "").strip() or None
+        async def _requeue_message() -> None:
+            await self.streams.ack(stream=self.stream_key, group=self.group, message_id=message.message_id)
+            if self.delete_on_ack:
+                await self.streams.delete(stream=self.stream_key, message_id=message.message_id)
+            await self.streams.publish_json(
+                stream=self.stream_key,
+                payload={
+                    "job_id": job_id,
+                    "site_id": site_id,
+                    "protocol": protocol or "",
+                    "payload": payload,
+                    "resource_id": resource_id,
+                    "attempt": attempt,
+                    "max_attempts": max_attempts,
+                    "created_at": int(time.time()),
+                },
+                maxlen=self.trim_maxlen,
+            )
 
-        payload_raw = fields.get("payload") or "{}"
-        try:
-            payload = json.loads(payload_raw)
-        except Exception:
-            payload = {}
-        payload["job_id"] = job_id
-
-        resource_raw = fields.get("resource_id")
-        try:
-            resource_id = int(resource_raw) if resource_raw not in {None, "", "null"} else None
-        except Exception:
-            resource_id = None
-
-        attempt = int(str(fields.get("attempt") or "0").strip() or "0")
-        max_attempts = int(str(fields.get("max_attempts") or self.max_attempts_default).strip() or str(self.max_attempts_default))
-
-        if job_id:
-            status = None
-            try:
-                status = self.db.get_job_status(job_id=job_id)
-            except Exception:
-                status = None
-            if status in {"cancelled", "completed", "failed", "dead", "succeeded"}:
-                await self.streams.ack(stream=self.stream_key, group=self.group, message_id=message.message_id)
-                if self.delete_on_ack:
-                    await self.streams.delete(stream=self.stream_key, message_id=message.message_id)
+        while True:
+            remaining_ms = int(max(0.0, (deadline - time.time()) * 1000.0))
+            if remaining_ms <= 0:
                 return None
 
-        site_active_check = getattr(self.db, "is_site_active", None)
-        is_site_active = True
-        if callable(site_active_check) and site_id:
-            is_site_active = bool(site_active_check(site_id=site_id))
-        if site_id and not is_site_active:
-            await self.streams.ack(stream=self.stream_key, group=self.group, message_id=message.message_id)
-            await self.streams.publish_json(
+            # Recuperar primero jobs "atascados" en PEL de consumers muertos/antiguos.
+            message = await self.streams.autoclaim_one(
                 stream=self.stream_key,
-                payload={
-                    "job_id": job_id,
-                    "site_id": site_id,
-                    "protocol": protocol or "",
-                    "payload": payload,
-                    "resource_id": resource_id,
-                    "attempt": attempt,
-                    "max_attempts": max_attempts,
-                    "created_at": int(time.time()),
-                },
-                maxlen=self.trim_maxlen,
+                group=self.group,
+                consumer=consumer,
+                min_idle_ms=self.pending_claim_min_idle_ms,
+                start_id="0-0",
             )
-            return None
+            if message is None:
+                message = await self.streams.read_group(
+                    stream=self.stream_key,
+                    group=self.group,
+                    consumer=consumer,
+                    block_ms=max(1, min(1000, remaining_ms)),
+                    count=1,
+                )
+            if message is None:
+                return None
 
-        if site_id and self.db.is_site_processing_paused(site_id=site_id):
-            await self.streams.ack(stream=self.stream_key, group=self.group, message_id=message.message_id)
-            await self.streams.publish_json(
-                stream=self.stream_key,
-                payload={
-                    "job_id": job_id,
-                    "site_id": site_id,
-                    "protocol": protocol or "",
-                    "payload": payload,
-                    "resource_id": resource_id,
-                    "attempt": attempt,
-                    "max_attempts": max_attempts,
-                    "created_at": int(time.time()),
-                },
-                maxlen=self.trim_maxlen,
+            fields = message.fields
+            job_id = str(fields.get("job_id") or "").strip()
+            site_id = str(fields.get("site_id") or "").strip()
+            protocol = str(fields.get("protocol") or "").strip() or None
+
+            payload_raw = fields.get("payload") or "{}"
+            try:
+                payload = json.loads(payload_raw)
+            except Exception:
+                payload = {}
+            payload["job_id"] = job_id
+
+            resource_id = _to_int_like(fields.get("resource_id"))
+
+            attempt = int(str(fields.get("attempt") or "0").strip() or "0")
+            max_attempts = int(str(fields.get("max_attempts") or self.max_attempts_default).strip() or str(self.max_attempts_default))
+
+            if job_id:
+                status = None
+                try:
+                    status = self.db.get_job_status(job_id=job_id)
+                except Exception:
+                    status = None
+                if status in {"cancelled", "completed", "failed", "dead", "succeeded"}:
+                    await self.streams.ack(stream=self.stream_key, group=self.group, message_id=message.message_id)
+                    if self.delete_on_ack:
+                        await self.streams.delete(stream=self.stream_key, message_id=message.message_id)
+                    continue
+
+            site_active_check = getattr(self.db, "is_site_active", None)
+            is_site_active = True
+            if callable(site_active_check) and site_id:
+                is_site_active = bool(site_active_check(site_id=site_id))
+            if site_id and not is_site_active:
+                await _requeue_message()
+                continue
+
+            if site_id and self.db.is_site_processing_paused(site_id=site_id):
+                await _requeue_message()
+                continue
+
+            if site_id and resource_id is not None and self.db.is_resource_processing_paused(site_id=site_id, resource_id=resource_id):
+                await _requeue_message()
+                continue
+
+            self.db.update_job_run_state(
+                job_id,
+                "processing",
+                started=True,
+                attempt=attempt,
+                worker_id=consumer,
             )
-            return None
-
-        if site_id and resource_id is not None and self.db.is_resource_processing_paused(site_id=site_id, resource_id=resource_id):
-            await self.streams.ack(stream=self.stream_key, group=self.group, message_id=message.message_id)
-            await self.streams.publish_json(
-                stream=self.stream_key,
-                payload={
-                    "job_id": job_id,
-                    "site_id": site_id,
-                    "protocol": protocol or "",
-                    "payload": payload,
-                    "resource_id": resource_id,
-                    "attempt": attempt,
-                    "max_attempts": max_attempts,
-                    "created_at": int(time.time()),
-                },
-                maxlen=self.trim_maxlen,
+            # Guardar el mensaje id en payload interno para ACK/NACK.
+            payload["_stream_message_id"] = message.message_id
+            return QueueJob(
+                job_id=job_id,
+                site_id=site_id,
+                protocol=protocol,
+                payload=payload,
+                resource_id=resource_id,
+                attempt=attempt,
+                max_attempts=max_attempts,
+                queue_ref=None,
             )
-            return None
-
-        self.db.update_job_run_state(
-            job_id,
-            "processing",
-            started=True,
-            attempt=attempt,
-            worker_id=consumer,
-        )
-        # Guardar el mensaje id en payload interno para ACK/NACK.
-        payload["_stream_message_id"] = message.message_id
-        return QueueJob(
-            job_id=job_id,
-            site_id=site_id,
-            protocol=protocol,
-            payload=payload,
-            resource_id=resource_id,
-            attempt=attempt,
-            max_attempts=max_attempts,
-            queue_ref=None,
-        )
 
     async def ack(self, job: QueueJob, *, result: Optional[dict[str, Any]] = None, screenshot: Optional[str] = None) -> None:
         message_id = str(job.payload.get("_stream_message_id") or "").strip()

@@ -20,7 +20,12 @@ from .runner_client import execute_via_runner_service, use_remote_playwright_run
 logger = logging.getLogger("worker.task_orchestrator")
 
 
-async def _append_required_client_docs(payload: dict, archivos_para_subir: list[Path]) -> list[Path]:
+async def _append_required_client_docs(
+    payload: dict,
+    archivos_para_subir: list[Path],
+    *,
+    site_id: Optional[str] = None,
+) -> list[Path]:
     require_client_docs = (os.getenv("REQUIRE_CLIENT_DOCS") or "1").strip().lower() not in {"0", "false", "no", "off"}
     disable_gesdoc = bool(payload.get("disable_gesdoc"))
     merge_client_docs = (os.getenv("CLIENT_DOCS_MERGE") or "0").strip().lower() not in {"0", "false", "no", "off"}
@@ -39,7 +44,26 @@ async def _append_required_client_docs(payload: dict, archivos_para_subir: list[
     )
 
     existing = {str(Path(p).resolve()).lower() for p in archivos_para_subir}
+    is_madrid = str(site_id or "").strip().lower() == "madrid"
+    max_madrid_doc_bytes = 10 * 1024 * 1024
     for p in extra_docs:
+        if is_madrid:
+            try:
+                size_bytes = int(p.stat().st_size)
+            except Exception as e:
+                logger.warning(
+                    "Madrid: no se pudo leer tamano de documento de cliente, se omite: %s (%s)",
+                    p,
+                    e,
+                )
+                continue
+            if size_bytes >= max_madrid_doc_bytes:
+                logger.info(
+                    "Madrid: documento de cliente omitido por tamano >=10MB: %s (%s bytes)",
+                    p,
+                    size_bytes,
+                )
+                continue
         key = str(Path(p).resolve()).lower()
         if key not in existing:
             archivos_para_subir.append(p)
@@ -69,7 +93,11 @@ async def process_task(
             raise ValueError("auth_session es requerido para descargar documentos.")
 
         archivos_para_subir = await download_document_and_attachments(payload=payload, auth_session=auth_session)
-        archivos_para_subir = await _append_required_client_docs(payload, archivos_para_subir)
+        archivos_para_subir = await _append_required_client_docs(
+            payload,
+            archivos_para_subir,
+            site_id=site_id,
+        )
 
         if site_id == "ayunta_palma":
             pdf_unico = bundle_documents_to_single_pdf_for_palma(

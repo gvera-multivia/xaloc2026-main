@@ -152,7 +152,6 @@ class RedisQueueGateway(QueueGateway):
         await self._reap_expired_inflight()
 
         deadline = time.time() + max(1, int(timeout_seconds))
-        paused_seen = 0
         while True:
             remaining = int(max(1, deadline - time.time()))
             result = await self._redis.brpop(self.ready_key, timeout=remaining)
@@ -175,20 +174,16 @@ class RedisQueueGateway(QueueGateway):
                 is_site_active = bool(site_active_check(site_id=site_id))
             if site_id and not is_site_active:
                 await self._redis.zrem(self.inflight_key, job_id)
-                await self._redis.rpush(self.ready_key, job_id)
-                paused_seen += 1
-                if paused_seen >= 10 or time.time() >= deadline:
-                    await asyncio.sleep(0.2)
-                    return None
+                # BRPOP+RPUSH mantiene el mismo job al final y puede hambrunar otros sites.
+                # Rotamos al inicio para dar paso al resto de la cola.
+                await self._redis.lpush(self.ready_key, job_id)
+                await asyncio.sleep(0.05)
                 continue
 
             if site_id and self.db.is_site_processing_paused(site_id=site_id):
                 await self._redis.zrem(self.inflight_key, job_id)
-                await self._redis.rpush(self.ready_key, job_id)
-                paused_seen += 1
-                if paused_seen >= 10 or time.time() >= deadline:
-                    await asyncio.sleep(0.2)
-                    return None
+                await self._redis.lpush(self.ready_key, job_id)
+                await asyncio.sleep(0.05)
                 continue
 
             payload = json.loads(raw.get("payload") or "{}")
@@ -201,11 +196,8 @@ class RedisQueueGateway(QueueGateway):
                 resource_id = None
             if site_id and resource_id is not None and self.db.is_resource_processing_paused(site_id=site_id, resource_id=resource_id):
                 await self._redis.zrem(self.inflight_key, job_id)
-                await self._redis.rpush(self.ready_key, job_id)
-                paused_seen += 1
-                if paused_seen >= 10 or time.time() >= deadline:
-                    await asyncio.sleep(0.2)
-                    return None
+                await self._redis.lpush(self.ready_key, job_id)
+                await asyncio.sleep(0.05)
                 continue
 
             attempt = int(raw.get("attempt") or 0)

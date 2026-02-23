@@ -75,7 +75,16 @@ class PostgresHistoryRepository:
                 total = int(cur.fetchone()[0] or 0)
                 cur.execute(
                     """
-                    SELECT site_id, resource_id, expediente, incident_type, reason,
+                    SELECT site_id,
+                           COALESCE(
+                             resource_id,
+                             CASE
+                               WHEN (payload->>'idRecurso') ~ '^[0-9]+$' THEN (payload->>'idRecurso')::bigint
+                               WHEN (payload->>'resource_id') ~ '^[0-9]+$' THEN (payload->>'resource_id')::bigint
+                               ELSE NULL
+                             END
+                           ) AS resource_id,
+                           expediente, incident_type, reason,
                            day::text, started_at, ended_at, payload
                     FROM realtime_incidents
                     WHERE day = %s::date
@@ -322,7 +331,9 @@ class PostgresQueueRepository:
         return (
             "COALESCE("
             "CASE WHEN (payload_json->>'idRecurso') ~ '^[0-9]+$' THEN (payload_json->>'idRecurso')::bigint END,"
+            "CASE WHEN (payload_json->>'idRecurso') ~ '^[0-9]+\\.0+$' THEN ((payload_json->>'idRecurso')::numeric)::bigint END,"
             "CASE WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+$' THEN split_part(dedup_key, ':', 2)::bigint END"
+            ",CASE WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+\\.0+$' THEN (split_part(dedup_key, ':', 2)::numeric)::bigint END"
             ")"
         )
 

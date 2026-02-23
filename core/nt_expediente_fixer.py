@@ -1,4 +1,4 @@
-﻿"""
+"""
 nt_expediente_fixer.py - Correccion de expedientes con formato NT/ incorrecto.
 
 Detecta registros NT/... y sustituye por expediente valido encontrado en

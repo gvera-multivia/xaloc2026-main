@@ -1,4 +1,4 @@
-﻿"""
+"""
 BaseAutomation: orquestador reusable (Playwright + perfil persistente).
 """
 
@@ -53,8 +53,19 @@ class BaseAutomation:
         "https://identificacionssl.sedipualba.es/*",
     )
     _DEFAULT_CLIENT_CERT_ORIGINS: tuple[str, ...] = (
+        "https://sede.madrid.es",
+        "https://servcla.madrid.es",
+        "https://servpub.madrid.es",
+        "https://www.xalocgirona.cat",
+        "https://seu.xalocgirona.cat",
+        "https://www.base.cat",
+        "https://www.baseonline.cat",
         "https://cert.valid.aoc.cat",
         "https://valid.aoc.cat",
+        "https://cas.madrid.es",
+        "https://pasarela.clave.gob.es",
+        "https://palma.sedipualba.es",
+        "https://identificacionssl.sedipualba.es",
     )
 
     def __init__(self, config: BaseConfig):
@@ -215,6 +226,11 @@ class BaseAutomation:
             if passphrase:
                 item["passphrase"] = passphrase
             certs.append(item)
+        self.logger.info(
+            "client_certificates habilitado con %s origen(es): %s",
+            len(certs),
+            ", ".join(origins),
+        )
         return certs
 
     def _prepare_protocol_preferences(self, user_data_dir: str) -> None:
@@ -314,25 +330,32 @@ class BaseAutomation:
             cert_password = os.getenv("PLAYWRIGHT_CERT_PASSWORD") or ""
             try:
                 if cert_path.exists():
-                    subprocess.run(["certutil", "-N", "--empty-password", "-d", f"sql:{tmp}"], check=True)
+                    # Chromium puede consultar NSS en rutas distintas segun build/runtime:
+                    # perfil directo o $HOME/.pki/nssdb. Preparamos ambas en el perfil temporal.
+                    db_dirs = [tmp, tmp / ".pki" / "nssdb"]
+                    for db_dir in db_dirs:
+                        db_dir.mkdir(parents=True, exist_ok=True)
+                        subprocess.run(["certutil", "-N", "--empty-password", "-d", f"sql:{db_dir}"], check=True)
+
                     p12_pass = tmp / ".p12_pass.txt"
                     db_pass = tmp / ".db_pass.txt"
                     p12_pass.write_text(cert_password, encoding="utf-8")
                     db_pass.write_text("\n", encoding="utf-8")
-                    subprocess.run(
-                        [
-                            "pk12util",
-                            "-i",
-                            str(cert_path),
-                            "-d",
-                            f"sql:{tmp}",
-                            "-w",
-                            str(p12_pass),
-                            "-k",
-                            str(db_pass),
-                        ],
-                        check=True,
-                    )
+                    for db_dir in db_dirs:
+                        subprocess.run(
+                            [
+                                "pk12util",
+                                "-i",
+                                str(cert_path),
+                                "-d",
+                                f"sql:{db_dir}",
+                                "-w",
+                                str(p12_pass),
+                                "-k",
+                                str(db_pass),
+                            ],
+                            check=True,
+                        )
             except Exception as e:
                 self.logger.warning("No se pudo importar certificado en perfil temporal: %s", e)
             return str(tmp)
@@ -352,44 +375,93 @@ class BaseAutomation:
         # En runner docker evitamos heredar locks huérfanos entre tareas/contenedores.
         if (os.getenv("XALOC_FORCE_UNLOCK_PROFILE") or "1").strip().lower() in {"1", "true", "yes", "on"}:
             _cleanup_chromium_singleton_lockfiles()
-        try:
-            return await self.playwright.chromium.launch_persistent_context(**launch_kwargs)
-        except Exception as exc:
-            msg = str(exc).lower()
-            if (
-                "failed to load client certificate" in msg
-                or "unsupported tls certificate" in msg
-                or "legacy provider" in msg
-            ) and "client_certificates" in launch_kwargs:
-                self.logger.warning(
-                    "Playwright no pudo cargar client_certificates (OpenSSL legacy). "
-                    "Reintentando usando solo NSS del perfil."
-                )
-                launch_kwargs.pop("client_certificates", None)
+        cert_retry_done = False
+        lock_retry_done = False
+        ephemeral_used = False
+        channel_fallback_done = False
+        display_fallback_done = False
+        allow_headless_on_display_error = (
+            os.getenv("XALOC_ALLOW_HEADLESS_FALLBACK_ON_DISPLAY_ERROR", "0").strip().lower()
+            in {"1", "true", "yes", "on"}
+        )
+
+        while True:
+            try:
                 return await self.playwright.chromium.launch_persistent_context(**launch_kwargs)
-            if (
-                "processsingleton" in msg
-                or "process_singleton" in msg
-                or "profile appears to be in use" in msg
-                or "singleton" in msg
-            ):
-                self.logger.warning("Chromium profile lock detectado. Limpiando lockfiles y reintentando...")
-                _cleanup_chromium_singleton_lockfiles()
-                await asyncio.sleep(0.2)
-                try:
-                    return await self.playwright.chromium.launch_persistent_context(**launch_kwargs)
-                except Exception:
-                    self.logger.warning("Persisten locks del perfil. Fallback a perfil temporal clonado.")
-                    launch_kwargs["user_data_dir"] = _build_ephemeral_profile_with_cert_db()
-                    return await self.playwright.chromium.launch_persistent_context(**launch_kwargs)
-            if "msedge" in msg and ("is not found" in msg or "distribution" in msg):
-                self.logger.warning(
-                    "Canal '%s' no disponible en este entorno. Fallback automatico a Chromium.",
-                    self.config.navegador.canal,
-                )
-                launch_kwargs.pop("channel", None)
-                return await self.playwright.chromium.launch_persistent_context(**launch_kwargs)
-            raise
+            except Exception as exc:
+                msg = str(exc).lower()
+
+                if (
+                    not cert_retry_done
+                    and "client_certificates" in launch_kwargs
+                    and (
+                        "failed to load client certificate" in msg
+                        or "unsupported tls certificate" in msg
+                        or "legacy provider" in msg
+                    )
+                ):
+                    self.logger.warning(
+                        "Playwright no pudo cargar client_certificates (OpenSSL legacy). "
+                        "Reintentando usando solo NSS del perfil."
+                    )
+                    launch_kwargs.pop("client_certificates", None)
+                    cert_retry_done = True
+                    continue
+
+                if (
+                    "processsingleton" in msg
+                    or "process_singleton" in msg
+                    or "profile appears to be in use" in msg
+                    or "singleton" in msg
+                ):
+                    if not lock_retry_done:
+                        self.logger.warning(
+                            "Chromium profile lock detectado. Limpiando lockfiles y reintentando..."
+                        )
+                        _cleanup_chromium_singleton_lockfiles()
+                        await asyncio.sleep(0.2)
+                        lock_retry_done = True
+                        continue
+                    if not ephemeral_used:
+                        self.logger.warning("Persisten locks del perfil. Fallback a perfil temporal clonado.")
+                        launch_kwargs["user_data_dir"] = _build_ephemeral_profile_with_cert_db()
+                        ephemeral_used = True
+                        lock_retry_done = False
+                        continue
+
+                if (
+                    not channel_fallback_done
+                    and "channel" in launch_kwargs
+                    and "msedge" in msg
+                    and ("is not found" in msg or "distribution" in msg)
+                ):
+                    self.logger.warning(
+                        "Canal '%s' no disponible en este entorno. Fallback automatico a Chromium.",
+                        self.config.navegador.canal,
+                    )
+                    launch_kwargs.pop("channel", None)
+                    channel_fallback_done = True
+                    continue
+
+                if (
+                    allow_headless_on_display_error
+                    and not display_fallback_done
+                    and not bool(launch_kwargs.get("headless", False))
+                    and (
+                        "missing x server or $display" in msg
+                        or "the platform failed to initialize" in msg
+                        or "ozone_platform_x11" in msg
+                    )
+                ):
+                    self.logger.warning(
+                        "No hay DISPLAY/X server disponible para Chromium. "
+                        "Reintentando en modo headless para evitar caida del runner."
+                    )
+                    launch_kwargs["headless"] = True
+                    display_fallback_done = True
+                    continue
+
+                raise
 
     async def __aenter__(self):
         await self._start_browser()

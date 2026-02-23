@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python
+#!/usr/bin/env python
 """
 claim_one_resource_base_online.py - Reclama UN solo recurso de BASE Online y lo encola para el worker.
 

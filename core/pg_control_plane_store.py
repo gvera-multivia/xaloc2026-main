@@ -27,6 +27,25 @@ class PgControlPlaneStore:
         return psycopg.connect(self.dsn)
 
     @staticmethod
+    def _normalize_resource_id_str(value: Any) -> str:
+        if value is None:
+            return ""
+        raw = str(value).strip()
+        if not raw:
+            return ""
+        try:
+            return str(int(raw))
+        except Exception:
+            pass
+        try:
+            as_float = float(raw)
+            if as_float.is_integer():
+                return str(int(as_float))
+        except Exception:
+            pass
+        return raw
+
+    @staticmethod
     def build_dedup_key(*, organism_id: str, external_resource_id: Optional[str], job_type: str) -> str:
         return f"{(organism_id or '').strip()}:{(external_resource_id or '').strip() or 'none'}:{(job_type or '').strip()}"
 
@@ -112,8 +131,67 @@ class PgControlPlaneStore:
         payload: dict[str, Any],
     ) -> dict[str, Any]:
         now = datetime.now().isoformat()
+        site_id = str(payload.get("site_id") or payload.get("organism_id") or "").strip()
+        resource_id = self._normalize_resource_id_str(
+            payload.get("idRecurso") if payload.get("idRecurso") is not None else payload.get("external_resource_id")
+        )
+        try:
+            resource_id_int = int(resource_id) if resource_id else None
+        except Exception:
+            resource_id_int = None
         with self._conn() as conn:
             with conn.cursor() as cur:
+                # Guard extra: dedupe operacional por site+resource para estados activos,
+                # incluso si el dedup_key cambia por tipo/protocolo.
+                if site_id and resource_id_int is not None:
+                    cur.execute(
+                        """
+                        SELECT job_id, status
+                        FROM jobs
+                        WHERE status IN ('queued', 'processing')
+                          AND COALESCE(payload_json->>'site_id', split_part(dedup_key, ':', 1), '') = %s
+                          AND COALESCE(
+                                CASE
+                                    WHEN (payload_json->>'idRecurso') ~ '^[0-9]+$'
+                                        THEN (payload_json->>'idRecurso')::bigint
+                                    WHEN (payload_json->>'idRecurso') ~ '^[0-9]+\\.0+$'
+                                        THEN ((payload_json->>'idRecurso')::numeric)::bigint
+                                    ELSE NULL
+                                END,
+                                CASE
+                                    WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+$'
+                                        THEN split_part(dedup_key, ':', 2)::bigint
+                                    WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+\\.0+$'
+                                        THEN (split_part(dedup_key, ':', 2)::numeric)::bigint
+                                    ELSE NULL
+                                END
+                          ) = %s
+                        ORDER BY updated_at DESC
+                        LIMIT 1
+                        """,
+                        (site_id, resource_id_int),
+                    )
+                    active_for_resource = cur.fetchone()
+                    if active_for_resource and active_for_resource[0]:
+                        job_id = str(active_for_resource[0])
+                        job_status = str(active_for_resource[1] or "").strip().lower() or "queued"
+                        cur.execute(
+                            """
+                            UPDATE job_drafts
+                            SET status = 'dedup_active',
+                                job_id = %s,
+                                updated_at = %s::timestamptz
+                            WHERE draft_id = %s
+                            """,
+                            (job_id, now, draft_id),
+                        )
+                        conn.commit()
+                        return {
+                            "job_id": job_id,
+                            "dispatch": False,
+                            "job_status": job_status,
+                        }
+
                 cur.execute("SELECT job_id, status FROM jobs WHERE dedup_key = %s LIMIT 1", (dedup_key,))
                 existing = cur.fetchone()
                 existing_status = str(existing[1] or "").strip().lower() if existing and existing[1] is not None else None

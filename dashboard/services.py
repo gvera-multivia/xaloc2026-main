@@ -13,6 +13,7 @@ from typing import Any, Optional
 import requests
 
 from core.runtime_flags import get_queue_mode, get_report_pg_dsn, is_pg_source_of_truth_enabled
+from core.redis_client import get_redis_client
 from core.sqlserver_utils import build_sqlserver_connection_string
 from core.pg_admin_store import PgAdminStore
 from core.pg_pending_authorization_store import PgPendingAuthorizationStore
@@ -218,6 +219,41 @@ class DashboardService:
             return self.admin_store.get_organismo_config(site) is not None
         except Exception:
             return False
+
+    async def _clear_resource_dedupe_keys_async(self, *, site_id: str, resource_id: int) -> None:
+        site = (site_id or "").strip()
+        rid = int(resource_id)
+        if not site:
+            return
+        redis = get_redis_client()
+        if redis is None:
+            return
+        keys = (
+            f"dedupe:resource:{site}:{rid}",
+            f"brain-claim:resource:{site}:{rid}",
+        )
+        try:
+            await redis.delete(*keys)
+        except Exception as exc:
+            self.logger.warning(
+                "No se pudieron limpiar dedupe keys site=%s resource_id=%s: %s",
+                site,
+                rid,
+                exc,
+            )
+
+    def _clear_resource_dedupe_keys(self, *, site_id: str, resource_id: int) -> None:
+        try:
+            self._run_coro_sync(
+                self._clear_resource_dedupe_keys_async(site_id=site_id, resource_id=resource_id)
+            )
+        except Exception as exc:
+            self.logger.warning(
+                "Fallo limpiando dedupe keys site=%s resource_id=%s: %s",
+                site_id,
+                resource_id,
+                exc,
+            )
 
     @staticmethod
     def _worker_runtime_timeout_seconds() -> int:
@@ -426,6 +462,7 @@ class DashboardService:
 
         remove_result = self.queue_repo.cancel_queue_item(site_id=site, resource_id=rid)
         if remove_result.get("removed"):
+            self._clear_resource_dedupe_keys(site_id=site, resource_id=rid)
             return {
                 "removed": True,
                 "site_id": site,
@@ -465,6 +502,8 @@ class DashboardService:
             }
 
         remove_result_after = self.queue_repo.cancel_queue_item(site_id=site, resource_id=rid)
+        if remove_result_after.get("removed"):
+            self._clear_resource_dedupe_keys(site_id=site, resource_id=rid)
         return {
             "removed": bool(remove_result_after.get("removed")),
             "site_id": site,
@@ -512,6 +551,8 @@ class DashboardService:
         except Exception as exc:
             raise ValueError("resource_id debe ser entero.") from exc
         removed = self.admin_store.unblock_resource(site_id=site, resource_id=rid)
+        if removed:
+            self._clear_resource_dedupe_keys(site_id=site, resource_id=rid)
         return {"site_id": site, "resource_id": rid, "unblocked": bool(removed)}
 
     def list_organismo_configs(self) -> list[dict[str, Any]]:
@@ -706,9 +747,9 @@ class DashboardService:
             from core.client_documentation import (
                 client_identity_from_payload,
             )
-            from core.client_paths import get_ruta_cliente_documentacion
+            from core.client_paths import get_ruta_cliente_documentacion, resolve_client_docs_base_path
 
-            base_path = os.getenv("CLIENT_DOCS_BASE_PATH") or r"\\SERVER-DOC\clientes"
+            base_path = resolve_client_docs_base_path()
             client = client_identity_from_payload(payload)
             ruta_base = get_ruta_cliente_documentacion(client, base_path=base_path)
             ruta = ruta_base / "RECURSOS TELEMATICOS"

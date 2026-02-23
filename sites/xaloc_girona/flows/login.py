@@ -1,4 +1,4 @@
-﻿"""
+"""
 Flujo de autenticación VÀLid para Xaloc.
 """
 

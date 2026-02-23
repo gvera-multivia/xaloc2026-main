@@ -1,4 +1,4 @@
-﻿"""
+"""
 Flujo de navegaciÃ³n para Madrid Ayuntamiento.
 Implementa los 11 pasos documentados en explore-html/madrid-guide.md
 """

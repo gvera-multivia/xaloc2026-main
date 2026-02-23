@@ -1,4 +1,4 @@
-﻿"""
+"""
 ConfiguraciÃ³n base reutilizable para cualquier sitio.
 """
 

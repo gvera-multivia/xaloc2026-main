@@ -23,6 +23,8 @@ class PgRuntimeStore:
         self.logger = logger or logging.getLogger("pg_runtime_store")
         self.job_store = build_pg_job_store(logger=self.logger)
         self.admin_store = PgAdminStore(dsn=dsn, logger=self.logger)
+        self._worker_singleton_lock_conn: Any | None = None
+        self._worker_singleton_lock_key: int = 20260223
         self.ensure_schema()
 
     @classmethod
@@ -180,10 +182,25 @@ class PgRuntimeStore:
                     FROM jobs
                     WHERE status IN ('queued', 'processing')
                       AND COALESCE(payload_json->>'site_id', split_part(dedup_key, ':', 1), '') = %s
-                      AND COALESCE(payload_json->>'idRecurso', split_part(dedup_key, ':', 2), '') = %s
+                      AND COALESCE(
+                            CASE
+                                WHEN (payload_json->>'idRecurso') ~ '^[0-9]+$'
+                                    THEN (payload_json->>'idRecurso')::bigint
+                                WHEN (payload_json->>'idRecurso') ~ '^[0-9]+\\.0+$'
+                                    THEN ((payload_json->>'idRecurso')::numeric)::bigint
+                                ELSE NULL
+                            END,
+                            CASE
+                                WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+$'
+                                    THEN split_part(dedup_key, ':', 2)::bigint
+                                WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+\\.0+$'
+                                    THEN (split_part(dedup_key, ':', 2)::numeric)::bigint
+                                ELSE NULL
+                            END
+                      ) = %s
                     LIMIT 1
                     """,
-                    (str(site_id), str(int(resource_id))),
+                    (str(site_id), int(resource_id)),
                 )
                 return cur.fetchone() is not None
 
@@ -229,6 +246,57 @@ class PgRuntimeStore:
                 )
             conn.commit()
 
+    def try_acquire_worker_singleton_lock(self) -> bool:
+        """Acquire a global DB-level lock so only one worker can run at a time."""
+        if self._worker_singleton_lock_conn is not None:
+            try:
+                with self._worker_singleton_lock_conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+                return True
+            except Exception:
+                try:
+                    self._worker_singleton_lock_conn.close()
+                except Exception:
+                    pass
+                self._worker_singleton_lock_conn = None
+
+        conn = None
+        try:
+            conn = self._conn()
+            with conn.cursor() as cur:
+                cur.execute("SELECT pg_try_advisory_lock(%s)", (self._worker_singleton_lock_key,))
+                row = cur.fetchone()
+                acquired = bool(row and row[0])
+            if acquired:
+                self._worker_singleton_lock_conn = conn
+                return True
+            conn.close()
+            return False
+        except Exception as exc:
+            self.logger.warning("No se pudo adquirir lock singleton de worker: %s", exc)
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            return False
+
+    def release_worker_singleton_lock(self) -> None:
+        conn = self._worker_singleton_lock_conn
+        if conn is None:
+            return
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT pg_advisory_unlock(%s)", (self._worker_singleton_lock_key,))
+        except Exception:
+            pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            self._worker_singleton_lock_conn = None
+
     def reconcile_processing_with_worker_runtime(
         self,
         *,
@@ -237,8 +305,154 @@ class PgRuntimeStore:
         site_id: str | None = None,
         resource_id: int | None = None,
     ) -> dict[str, Any]:
-        # No-op until full worker/job_attempt owner-tracking migration is completed in PG.
-        return {"recovered": 0, "alive_workers": 0, "items": []}
+        timeout = max(1, int(heartbeat_timeout_seconds))
+        scan_limit = max(1, int(limit))
+        site_filter = (site_id or "").strip() or None
+        rid_filter = int(resource_id) if resource_id is not None else None
+
+        site_expr = "COALESCE(payload_json->>'site_id', NULLIF(split_part(dedup_key, ':', 1), ''), 'unknown')"
+        resource_expr = (
+            "COALESCE("
+            "CASE WHEN (payload_json->>'idRecurso') ~ '^[0-9]+$' THEN (payload_json->>'idRecurso')::bigint END,"
+            "CASE WHEN (payload_json->>'idRecurso') ~ '^[0-9]+\\.0+$' THEN ((payload_json->>'idRecurso')::numeric)::bigint END,"
+            "CASE WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+$' THEN split_part(dedup_key, ':', 2)::bigint END,"
+            "CASE WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+\\.0+$' THEN (split_part(dedup_key, ':', 2)::numeric)::bigint END"
+            ")"
+        )
+
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT worker_id, current_job_id
+                    FROM worker_runtime
+                    WHERE status = 'online'
+                      AND last_heartbeat_at >= NOW() - (%s * INTERVAL '1 second')
+                    """,
+                    (timeout,),
+                )
+                alive_worker_ids: set[str] = set()
+                alive_current_job_ids: set[str] = set()
+                for row in cur.fetchall():
+                    if not row:
+                        continue
+                    worker_value = str(row[0] or "").strip()
+                    if worker_value:
+                        alive_worker_ids.add(worker_value)
+                    current_job_value = str(row[1] or "").strip()
+                    if current_job_value:
+                        alive_current_job_ids.add(current_job_value)
+
+                clauses = ["status = 'processing'"]
+                params: list[Any] = []
+                if site_filter:
+                    clauses.append(f"{site_expr} = %s")
+                    params.append(site_filter)
+                if rid_filter is not None:
+                    clauses.append(f"{resource_expr} = %s")
+                    params.append(rid_filter)
+                where_sql = " AND ".join(clauses)
+
+                cur.execute(
+                    f"""
+                    SELECT
+                        id,
+                        job_id,
+                        {site_expr} AS site_id,
+                        {resource_expr} AS resource_id
+                    FROM jobs
+                    WHERE {where_sql}
+                    ORDER BY COALESCE(started_at, queued_at, created_at) ASC, id ASC
+                    LIMIT %s
+                    FOR UPDATE SKIP LOCKED
+                    """,
+                    (*params, scan_limit),
+                )
+                rows = cur.fetchall()
+                recovered_items: list[dict[str, Any]] = []
+
+                for row in rows:
+                    job_row_id = int(row[0])
+                    job_id_value = str(row[1] or "").strip()
+                    site_value = str(row[2] or "").strip() or "unknown"
+                    resource_value = int(row[3]) if row[3] is not None else None
+
+                    cur.execute(
+                        """
+                        SELECT worker_id
+                        FROM job_attempts
+                        WHERE job_id = %s
+                        ORDER BY attempt_no DESC, id DESC
+                        LIMIT 1
+                        """,
+                        (job_row_id,),
+                    )
+                    attempt_row = cur.fetchone()
+                    owner_worker_id = str(attempt_row[0]).strip() if (attempt_row and attempt_row[0]) else None
+
+                    keep_processing = bool(owner_worker_id and owner_worker_id in alive_worker_ids)
+                    if not keep_processing and job_id_value and job_id_value in alive_current_job_ids:
+                        keep_processing = True
+                    if keep_processing:
+                        continue
+
+                    reason = "missing_job_attempt_or_owner"
+                    if owner_worker_id and owner_worker_id not in alive_worker_ids:
+                        reason = "owner_worker_offline_or_stale_heartbeat"
+                    elif job_id_value and job_id_value not in alive_current_job_ids:
+                        reason = "job_not_held_by_alive_worker_runtime"
+                    recovery_msg = f"Recovered by UUID-runtime reconciliation: {reason}."
+
+                    cur.execute(
+                        """
+                        UPDATE jobs
+                        SET status = 'queued',
+                            queued_at = NOW(),
+                            started_at = NULL,
+                            updated_at = NOW(),
+                            error_message = %s
+                        WHERE id = %s
+                          AND status = 'processing'
+                        """,
+                        (recovery_msg, job_row_id),
+                    )
+                    if cur.rowcount <= 0:
+                        continue
+
+                    cur.execute(
+                        """
+                        UPDATE job_attempts
+                        SET status = 'queued',
+                            error_message = %s,
+                            ended_at = COALESCE(ended_at, NOW())
+                        WHERE id = (
+                            SELECT id
+                            FROM job_attempts
+                            WHERE job_id = %s
+                            ORDER BY attempt_no DESC, id DESC
+                            LIMIT 1
+                        )
+                        """,
+                        (recovery_msg, job_row_id),
+                    )
+                    recovered_items.append(
+                        {
+                            "queue_ref": job_row_id,
+                            "job_id": job_id_value or None,
+                            "site_id": site_value,
+                            "resource_id": resource_value,
+                            "owner_worker_id": owner_worker_id,
+                            "reason": reason,
+                        }
+                    )
+            conn.commit()
+
+        return {
+            "alive_workers": len(alive_worker_ids),
+            "scanned": len(rows),
+            "recovered": len(recovered_items),
+            "items": recovered_items,
+        }
 
     # Process runtime control API
     def _normalize_process_name(self, process_name: str) -> str:

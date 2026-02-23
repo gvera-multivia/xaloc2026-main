@@ -6,6 +6,7 @@ import json
 import logging
 from typing import Any, Optional
 from pathlib import Path
+from datetime import datetime, timezone
 
 import aiohttp
 from fastapi import FastAPI, Query, HTTPException, Body, Request, WebSocket, WebSocketDisconnect, Header, Depends, status
@@ -57,6 +58,7 @@ FRONTEND_DEV = (os.getenv("DASHBOARD_FRONTEND_DEV") or "0").strip().lower() not 
 _frontend_process: asyncio.subprocess.Process | None = None
 _proxy_session: aiohttp.ClientSession | None = None
 _prev_loop_exception_handler = None
+_FRONTEND_LOG_PATH = Path("logs") / "frontend_out.log"
 
 
 def _is_windows_connection_reset(context: dict[str, Any]) -> bool:
@@ -84,6 +86,7 @@ async def _drain_frontend_logs(proc: asyncio.subprocess.Process) -> None:
     stream = proc.stdout
     if stream is None:
         return
+    _FRONTEND_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     try:
         while True:
             line = await stream.readline()
@@ -91,9 +94,28 @@ async def _drain_frontend_logs(proc: asyncio.subprocess.Process) -> None:
                 break
             msg = line.decode("utf-8", errors="replace").rstrip()
             if msg:
-                print(f"[frontend] {msg}")
+                ts = datetime.now(timezone.utc).isoformat()
+                line_out = f"{ts} [frontend] {msg}"
+                print(line_out)
+                try:
+                    with _FRONTEND_LOG_PATH.open("a", encoding="utf-8") as fh:
+                        fh.write(f"{line_out}\n")
+                except Exception:
+                    pass
     except Exception:
         return
+
+
+def _tail_text_file(path: Path, lines: int) -> list[str]:
+    if not path.exists():
+        return []
+    safe_lines = min(max(int(lines), 1), 2000)
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as fh:
+            all_lines = fh.readlines()
+        return [ln.rstrip("\n") for ln in all_lines[-safe_lines:]]
+    except Exception:
+        return []
 
 
 async def _wait_frontend_ready(timeout_seconds: float = 45.0) -> None:
@@ -500,10 +522,30 @@ async def api_incidents_pending(
     # For now, return incidents from today as "pending" list
     result = service.list_history_incidents(day=None, page=page, page_size=page_size)
     items = list(result.get("items") or [])
-    incident_ids = [f"{it.get('site_id')}:{it.get('resource_id')}" for it in items]
+
+    def _resolve_incident_resource(item: dict[str, Any]) -> Optional[int]:
+        raw = item.get("resource_id")
+        if raw is None:
+            payload = item.get("payload") or {}
+            if isinstance(payload, dict):
+                raw = payload.get("idRecurso")
+                if raw is None:
+                    raw = payload.get("resource_id")
+        try:
+            return int(raw) if raw is not None else None
+        except Exception:
+            return None
+
+    incident_ids = []
+    for it in items:
+        rid = _resolve_incident_resource(it)
+        it["resource_id"] = rid
+        incident_ids.append(f"{it.get('site_id')}:{rid if rid is not None else 'none'}")
+
     locks = service.runtime_store.get_incident_locks(incident_ids=incident_ids)
     for item in items:
-        incident_id = f"{item.get('site_id')}:{item.get('resource_id')}"
+        rid = item.get("resource_id")
+        incident_id = f"{item.get('site_id')}:{rid if rid is not None else 'none'}"
         lock_info = locks.get(incident_id)
         if lock_info:
             item["locked"] = True
@@ -573,11 +615,24 @@ _LIVE_FRAME_PATH = _Path(__file__).parent.absolute() / "screenshots" / "live_fra
 
 
 @app.get("/api/queue/live-screenshot")
-async def api_queue_live_screenshot(_user: dict = Depends(require_user)):
+async def api_queue_live_screenshot(request: Request, _user: dict = Depends(require_user)):
     """Devuelve el ultimo frame JPEG del screencast CDP del worker."""
     if not _LIVE_FRAME_PATH.exists():
         raise HTTPException(status_code=404, detail="No hay frame en vivo")
     try:
+        stat = _LIVE_FRAME_PATH.stat()
+        frame_tag = f'{stat.st_mtime_ns}-{stat.st_size}'
+        if request.headers.get("if-none-match") == frame_tag:
+            return Response(
+                status_code=304,
+                headers={
+                    "ETag": frame_tag,
+                    "X-Frame-Stamp": frame_tag,
+                    "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+                    "Pragma": "no-cache",
+                    "Expires": "0",
+                },
+            )
         content = _LIVE_FRAME_PATH.read_bytes()
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="No hay frame en vivo")
@@ -588,6 +643,8 @@ async def api_queue_live_screenshot(_user: dict = Depends(require_user)):
         content=content,
         media_type="image/jpeg",
         headers={
+            "ETag": frame_tag,
+            "X-Frame-Stamp": frame_tag,
             "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
             "Pragma": "no-cache",
             "Expires": "0",
@@ -662,8 +719,22 @@ async def api_logs_process(
     lines: int = Query(100, ge=1, le=2000),
     _admin: dict = Depends(require_admin),
 ) -> dict:
+    pname = str(process_name or "").strip().lower()
+    if pname == "frontend":
+        status = "stopped"
+        if _frontend_process and _frontend_process.returncode is None:
+            status = "running"
+        elif _frontend_process and _frontend_process.returncode not in (0, None):
+            status = "error"
+        return {
+            "name": "frontend",
+            "status": status,
+            "lines": min(max(int(lines), 1), 2000),
+            "stdout": _tail_text_file(_FRONTEND_LOG_PATH, lines),
+            "stderr": [],
+        }
     try:
-        return process_manager.get_logs(process_name, lines=lines)
+        return process_manager.get_logs(pname, lines=lines)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

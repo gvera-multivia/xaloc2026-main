@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from core.base_automation import BaseAutomation
 from sites.xaloc_girona.config import XalocConfig

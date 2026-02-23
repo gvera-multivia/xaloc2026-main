@@ -24,6 +24,7 @@ async def execute_browser_flow(
     payload: dict,
     archivos_para_subir: list[Path],
 ) -> ProcessOutcome:
+    original_payload = dict(payload)
     prev_keep_browser_open = os.getenv("XALOC_KEEP_BROWSER_OPEN")
     prev_keep_tab_open = os.getenv("XALOC_KEEP_TAB_OPEN")
     try:
@@ -85,6 +86,7 @@ async def execute_browser_flow(
                     error=f"RestartRequiredError: {e}",
                     screenshot=str(screenshot_path) if screenshot_path else None,
                     release_without_attempt=True,
+                    payload_updates=payload,
                 )
             except RetryWithoutAttemptError as e:
                 screenshot_path = None
@@ -101,15 +103,36 @@ async def execute_browser_flow(
                     error=str(e),
                     screenshot=str(screenshot_path) if screenshot_path else None,
                     release_without_attempt=True,
+                    payload_updates=payload,
                 )
-            except PlaywrightTimeoutError:
-                return ProcessOutcome(success=False, error="Timeout de Playwright")
+            except PlaywrightTimeoutError as e:
+                screenshot_path = None
+                try:
+                    screenshot_path = await bot.capture_error_screenshot("playwright_timeout.png")
+                except Exception:
+                    pass
+                error_detail = str(e).strip()
+                error_msg = "Timeout de Playwright"
+                if error_detail:
+                    error_msg = f"{error_msg}: {error_detail[:260]}"
+                return ProcessOutcome(
+                    success=False,
+                    error=error_msg,
+                    screenshot=str(screenshot_path) if screenshot_path else None,
+                    payload_updates=payload,
+                )
             except PlaywrightError as e:
-                return ProcessOutcome(success=False, error=f"Error de Playwright: {e}")
+                return ProcessOutcome(
+                    success=False,
+                    error=f"Error de Playwright: {e}",
+                    payload_updates=payload,
+                )
             else:
+                payload_updates = payload if payload != original_payload else {}
                 return ProcessOutcome(
                     success=True,
                     screenshot=str(screenshot_path) if screenshot_path else None,
+                    payload_updates=payload_updates,
                 )
             finally:
                 try:
