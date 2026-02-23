@@ -42,6 +42,13 @@ logger = logging.getLogger("worker")
 GESDOC_USER = os.getenv("GESDOC_USER")
 GESDOC_PWD = os.getenv("GESDOC_PWD")
 
+
+def _should_reuse_browser(site_id: str) -> bool:
+    if site_id not in {"madrid", "base_online", "ayunta_palma"}:
+        return False
+    default = "1" if sys.platform == "win32" else "0"
+    return (os.getenv("XALOC_REUSE_BROWSER", default) or "").strip() == "1"
+
 @dataclass
 class ProcessOutcome:
     success: bool
@@ -317,9 +324,12 @@ async def process_task(
 
         # 6. EJECUTAR LA AUTOMATIZACIÓN
         logger.info(f"Iniciando automatización para {site_id}...")
-        if site_id in ["madrid", "base_online", "ayunta_palma"]:
+        if _should_reuse_browser(site_id):
             os.environ["XALOC_KEEP_BROWSER_OPEN"] = "1"
             os.environ["XALOC_KEEP_TAB_OPEN"] = "0" if site_id == "ayunta_palma" else "1"
+        else:
+            os.environ["XALOC_KEEP_BROWSER_OPEN"] = "0"
+            os.environ["XALOC_KEEP_TAB_OPEN"] = "0"
 
         async with AutomationCls(config) as bot:
             # Iniciar screencast en vivo para el dashboard (CDP).

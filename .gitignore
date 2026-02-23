@@ -48,4 +48,5 @@ test_files/*.docx
 Thumbs.db
 
 # Configuración local
+certificates/*
 config_local.py

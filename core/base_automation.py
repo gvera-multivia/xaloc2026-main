@@ -89,7 +89,73 @@ class BaseAutomation:
             args.append("--protocol-handler-registration-mode=auto")
             args.append("--enable-features=ExternalProtocolDialogShowAlwaysOpenCheckbox")
 
+        if self.config.netlog_path:
+            args.append(f"--log-net-log={self.config.netlog_path}")
+            args.append(f"--net-log-capture-mode={self.config.netlog_capture_mode}")
+
         return args
+
+    def _build_client_certificates(self) -> Optional[list[dict]]:
+        if not self.config.client_cert_enabled and not self.config.client_cert_required:
+            return None
+
+        self.config.ensure_client_cert_origins()
+        cert_path = (self.config.client_cert_path or "").strip()
+        cert_password = self.config.client_cert_password
+        cert_origins = list(self.config.client_cert_origins or [])
+
+        if not cert_path:
+            msg = (
+                "Certificado cliente habilitado pero falta ruta. "
+                "Configura PLAYWRIGHT_CLIENT_CERT_PATH o SIGNING_CERT_PATH."
+            )
+            if self.config.client_cert_required:
+                raise RuntimeError(msg)
+            self.logger.warning(msg)
+            return None
+
+        cert_file = Path(cert_path)
+        if not cert_file.exists():
+            msg = f"No existe certificado cliente en la ruta configurada: {cert_path}"
+            if self.config.client_cert_required:
+                raise RuntimeError(msg)
+            self.logger.warning(msg)
+            return None
+
+        if not cert_origins:
+            msg = (
+                "No hay origins para client certificates. "
+                "Configura PLAYWRIGHT_CLIENT_CERT_ORIGINS o usa una url_base con origin valido."
+            )
+            if self.config.client_cert_required:
+                raise RuntimeError(msg)
+            self.logger.warning(msg)
+            return None
+
+        self.logger.info("Client certificate activo para origins: %s", ", ".join(cert_origins))
+        return [
+            {
+                "origin": origin,
+                "pfxPath": str(cert_file),
+                "passphrase": cert_password,
+            }
+            for origin in cert_origins
+        ]
+
+    def _build_launch_context_kwargs(self, user_data_dir: str, args: list[str], viewport_kwargs: dict) -> dict:
+        kwargs = {
+            "user_data_dir": user_data_dir,
+            "channel": self.config.navegador.canal,
+            "headless": self.config.navegador.headless,
+            "args": args,
+            "ignore_https_errors": True,
+            "accept_downloads": True,
+            **viewport_kwargs,
+        }
+        client_certificates = self._build_client_certificates()
+        if client_certificates:
+            kwargs["client_certificates"] = client_certificates
+        return kwargs
 
     def _prepare_protocol_preferences(self, user_data_dir: str) -> None:
         if not self.config.autofirma_auto_open:
@@ -174,8 +240,17 @@ class BaseAutomation:
             viewport_kwargs = {"viewport": {"width": 1920, "height": 1080}}
         else:
             viewport_kwargs = {"no_viewport": True}
+        launch_kwargs = self._build_launch_context_kwargs(user_data_dir, args, viewport_kwargs)
 
-        fingerprint = (user_data_dir, self.config.navegador.canal, self.config.navegador.headless, tuple(args))
+        fingerprint = (
+            user_data_dir,
+            self.config.navegador.canal,
+            self.config.navegador.headless,
+            tuple(args),
+            self.config.client_cert_enabled,
+            self.config.client_cert_path,
+            tuple(self.config.client_cert_origins or []),
+        )
 
         keep_open = os.getenv("XALOC_KEEP_BROWSER_OPEN") == "1"
         if keep_open:
@@ -234,15 +309,7 @@ class BaseAutomation:
 
                 self.logger.info("Iniciando navegador con perfil persistente (compartido)...")
                 self.playwright = await async_playwright().start()
-                self.context = await self.playwright.chromium.launch_persistent_context(
-                    user_data_dir=user_data_dir,
-                    channel=self.config.navegador.canal,
-                    headless=self.config.navegador.headless,
-                    args=args,
-                    ignore_https_errors=True,
-                    accept_downloads=True,
-                    **viewport_kwargs,
-                )
+                self.context = await self.playwright.chromium.launch_persistent_context(**launch_kwargs)
 
                 BaseAutomation._shared_playwright = self.playwright
                 BaseAutomation._shared_context = self.context
@@ -277,15 +344,7 @@ class BaseAutomation:
 
         self.logger.info("Iniciando navegador con perfil persistente...")
         self.playwright = await async_playwright().start()
-        self.context = await self.playwright.chromium.launch_persistent_context(
-            user_data_dir=user_data_dir,
-            channel=self.config.navegador.canal,
-            headless=self.config.navegador.headless,
-            args=args,
-            ignore_https_errors=True,
-            accept_downloads=True,
-            **viewport_kwargs,
-        )
+        self.context = await self.playwright.chromium.launch_persistent_context(**launch_kwargs)
 
         if self.config.stealth_disable_webdriver:
             try:
