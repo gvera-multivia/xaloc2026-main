@@ -271,6 +271,11 @@ Write-Output ("summary edge_clicked=" + $edgeClicked + " cert_clicked=" + $certC
         summary.timed_out = True
         proc.kill()
         await proc.wait()
+    except asyncio.CancelledError:
+        if proc.returncode is None:
+            proc.kill()
+            await proc.wait()
+        raise
     finally:
         await out_task
         await err_task

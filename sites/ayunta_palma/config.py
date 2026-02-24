@@ -32,6 +32,8 @@ class AyuntaPalmaSelectors:
     telefono_selector: str = "#ctl00_ctl00_cphM_cph_ddlPersonaTelefonoMovilSelector"
     telefono_input: str = "#ctl00_ctl00_cphM_cph_txtPersonaTelefonoMovil"
     btn_aceptar_modal: str = ".ui-dialog:visible .btn-bar-horizontal-centrada-inner button:has-text(\"Aceptar\")"
+    btn_aceptar_modal_visible: str = ".ui-dialog:visible .btn-bar-horizontal-centrada-inner button.btn-bl1"
+    input_aceptar_modal_persona: str = "#ctl00_ctl00_cphM_cph_btnAceptarPersona"
     btn_indicar_representante: str = "button:has-text(\"Indicar representante\")"
     btn_siguiente: str = ".btn-bar-horizontal-centrada-inner button:has-text(\"Siguiente\")"
     input_siguiente: str = "#ctl00_ctl00_cphM_cph_btnSiguiente"

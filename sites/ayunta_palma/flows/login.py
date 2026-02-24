@@ -47,7 +47,7 @@ async def _abrir_nueva_instancia(page: Page, config: AyuntaPalmaConfig) -> None:
     else:
         clickable_url = await input_submit.get_attribute("data-clickable-url")
         if clickable_url:
-            await page.goto(clickable_url, wait_until="networkidle")
+            await page.goto(clickable_url, wait_until="domcontentloaded")
     await page.wait_for_timeout(config.delay_ms)
 
 
@@ -61,7 +61,7 @@ async def ejecutar_login(page: Page, config: AyuntaPalmaConfig) -> Page:
         await _abrir_nueva_instancia(page, config)
         return page
 
-    await page.goto(config.url_base, wait_until="networkidle")
+    await page.goto(config.url_base, wait_until="domcontentloaded")
     await page.wait_for_timeout(config.delay_ms)
     if _is_post_login_url(page.url):
         await _abrir_nueva_instancia(page, config)

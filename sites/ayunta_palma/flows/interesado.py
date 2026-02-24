@@ -14,52 +14,71 @@ PALMA_CONTACT_PHONE = "722761154"
 
 
 async def _abrir_modal_nuevo_interesado(page: Page, selectors: AyuntaPalmaSelectors, delay_ms: int) -> None:
+    # Primero, intentar ver si el modal de persona ya esta abierto
+    modal_persona = page.locator("#ctl00_ctl00_cphM_cph_pnlPersona").first
     tipo_usuario = page.locator(selectors.persona_tipo_usuario).first
     try:
-        await tipo_usuario.wait_for(state="visible", timeout=2000)
+        await modal_persona.wait_for(state="visible", timeout=2000)
+        await tipo_usuario.wait_for(state="visible", timeout=1000)
         return
     except PlaywrightTimeoutError:
         pass
 
     async def _try_open_once() -> None:
-        # Evitar clics durante cargas parciales.
         try:
             await page.wait_for_selector(selectors.velo, state="hidden", timeout=6000)
         except PlaywrightTimeoutError:
             pass
 
+        # 1. Chequear si ya existe un interesado en el borrador, intentar editarlo
+        btn_editar = page.locator("button:has-text('Editar interesado/a')").first
+        hidden_editar = "input[id$='_btnListaInteresadosItemEditarInteresado']"
+        
+        if await btn_editar.count() > 0 and await btn_editar.is_visible():
+            try:
+                await btn_editar.click(timeout=3000)
+                return
+            except Exception:
+                await btn_editar.click(force=True, timeout=3000)
+                return
+        else:
+            # Fallback evaluate para editar
+            clicked_editar = await page.evaluate(f"""() => {{
+                const el = document.querySelector("{hidden_editar}");
+                if (el) {{ el.click(); return true; }}
+                return false;
+            }}""")
+            if clicked_editar:
+                return
+
+        # 2. Si no hay interesado para editar, pulsar Nuevo interesado
         boton_nuevo = page.locator(selectors.btn_nuevo_interesado).first
         if await boton_nuevo.count() > 0 and await boton_nuevo.is_visible():
             try:
-                await boton_nuevo.click()
+                await boton_nuevo.click(timeout=3000)
             except Exception:
-                await boton_nuevo.click(force=True)
+                await boton_nuevo.click(force=True, timeout=3000)
         else:
-            input_nuevo = page.locator(selectors.input_nuevo_interesado).first
-            if await input_nuevo.count() > 0:
-                if await input_nuevo.is_visible():
-                    await input_nuevo.click()
-                else:
-                    await page.evaluate(
-                        """(selector) => {
-                            const el = document.querySelector(selector);
-                            if (!el) return false;
-                            el.click();
-                            return true;
-                        }""",
-                        selectors.input_nuevo_interesado,
-                    )
+            await page.evaluate(
+                """(selector) => {
+                    const el = document.querySelector(selector);
+                    if (el) el.click();
+                }""",
+                selectors.input_nuevo_interesado,
+            )
 
     for _ in range(3):
         await _try_open_once()
         try:
-            await tipo_usuario.wait_for(state="visible", timeout=7000)
+            await modal_persona.wait_for(state="visible", timeout=7000)
+            await tipo_usuario.wait_for(state="visible", timeout=3000)
             await page.wait_for_timeout(delay_ms)
             return
         except PlaywrightTimeoutError:
             await page.wait_for_timeout(800)
 
-    await tipo_usuario.wait_for(state="visible", timeout=20000)
+    await modal_persona.wait_for(state="visible", timeout=15000)
+    await tipo_usuario.wait_for(state="visible", timeout=10000)
     await page.wait_for_timeout(delay_ms)
 
 
@@ -168,9 +187,22 @@ async def registrar_interesado(
     await _fill_email(page, selectors, PALMA_CONTACT_EMAIL)
     await _fill_telefono(page, selectors, PALMA_CONTACT_PHONE)
 
-    aceptar = page.locator(selectors.btn_aceptar_modal)
-    await aceptar.wait_for(state="visible")
-    await aceptar.click()
+    # Usar el selector oculto de aceptar porque el texto de los botones a veces no coincide
+    clicked_aceptar = await page.evaluate(f"""() => {{
+        const btn = document.querySelector("{selectors.input_aceptar_modal_persona}");
+        if (btn) {{
+            btn.click();
+            return true;
+        }}
+        return false;
+    }}""")
+    
+    if not clicked_aceptar:
+        # Fallback extremo si no se halla el oculto
+        aceptar = page.locator(selectors.btn_aceptar_modal).first
+        if await aceptar.count() > 0:
+            await aceptar.click(force=True)
+
     await _wait_for_velo_to_vanish(page, selectors)
     await page.wait_for_timeout(config.delay_ms)
     return page

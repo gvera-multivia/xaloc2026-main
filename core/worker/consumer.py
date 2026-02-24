@@ -222,18 +222,57 @@ async def run_worker_loop():
                     started = time.perf_counter()
                     started_at = datetime.now(timezone.utc)
 
+                    stopped_from_ui = False
+                    process_task_future: Optional[asyncio.Task] = None
                     try:
-                        outcome = await process_task(
-                            job.queue_ref,
-                            job.site_id,
-                            job.protocol,
-                            job.payload,
-                            auth_session,
+                        process_task_future = asyncio.create_task(
+                            process_task(
+                                job.queue_ref,
+                                job.site_id,
+                                job.protocol,
+                                job.payload,
+                                auth_session,
+                            )
                         )
+                        while True:
+                            try:
+                                outcome = await asyncio.wait_for(
+                                    asyncio.shield(process_task_future),
+                                    timeout=1,
+                                )
+                                break
+                            except asyncio.TimeoutError:
+                                if not db.is_process_enabled(process_name="worker"):
+                                    stopped_from_ui = True
+                                    logger.warning(
+                                        "Stop solicitado desde UI: cancelando job en curso %s y devolviendolo a cola.",
+                                        job.job_id,
+                                    )
+                                    process_task_future.cancel()
+                                    with contextlib.suppress(asyncio.CancelledError):
+                                        await process_task_future
+                                    await queue_gateway.release(
+                                        job,
+                                        reason="Stop solicitado desde UI durante la ejecucion",
+                                    )
+                                    break
                     except asyncio.CancelledError:
+                        if process_task_future is not None:
+                            process_task_future.cancel()
+                            with contextlib.suppress(asyncio.CancelledError):
+                                await process_task_future
                         logger.warning("Job interrumpido por shutdown.")
                         await queue_gateway.release(job, reason="Shutdown del worker")
                         break
+
+                    if stopped_from_ui:
+                        runtime_state["current_job_id"] = None
+                        current_job = None
+                        try:
+                            await asyncio.wait_for(shutdown_event.wait(), timeout=2)
+                        except asyncio.TimeoutError:
+                            pass
+                        continue
 
                     elapsed = time.perf_counter() - started
                     ended_at = datetime.now(timezone.utc)

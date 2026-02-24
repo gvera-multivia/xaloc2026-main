@@ -886,20 +886,50 @@ async def subir_documentos(
         return page
 
     selectors = config.selectors
-    boton_anadir = page.locator(selectors.btn_anadir_documento)
-    await boton_anadir.wait_for(state="visible")
-    await boton_anadir.click()
+    
+    await page.wait_for_timeout(3000)
+    
+    # Buscar el boton Añadir (hidden input) en vez del boton volatil
+    clicked_anadir = await page.evaluate("""() => {
+        const els = document.querySelectorAll("input[id$='_btnDocumentoAPresentarNuevoFichero']");
+        if (els.length > 0) {
+            els[els.length - 1].click();
+            return true;
+        }
+        return false;
+    }""")
+    
+    if not clicked_anadir:
+        boton_anadir = page.locator(selectors.btn_anadir_documento).first
+        if await boton_anadir.count() > 0:
+            await boton_anadir.click(force=True)
+
     await page.wait_for_timeout(config.delay_ms)
     logger.info("[AP-DIAG] Dialogo de anadir documento abierto.")
+
+    # Esperar explícitamente a que el panel del nuevo fichero sea visible
+    modal_fichero = page.locator("#ctl00_ctl00_cphM_cph_pnlNuevoFichero").first
+    await modal_fichero.wait_for(state="visible", timeout=15000)
 
     ruta = [str(p) for p in archivos]
     await page.set_input_files(selectors.archivo_input, ruta)
     await _esperar_subida_completa(page, config)
     logger.info("[AP-DIAG] Upload de archivos completado.")
 
-    confirmar = page.locator(selectors.btn_confirmar_archivo)
-    await confirmar.wait_for(state="visible", timeout=config.timeouts.general)
-    await confirmar.click(timeout=config.timeouts.subida_archivo)
+    clicked_aceptar = await page.evaluate("""() => {
+        const btn = document.querySelector("input[id$='_btnNuevoFicheroAceptar']");
+        if (btn) {
+            btn.click();
+            return true;
+        }
+        return false;
+    }""")
+    
+    if not clicked_aceptar:
+        confirmar = page.locator(selectors.btn_confirmar_archivo).first
+        if await confirmar.count() > 0:
+            await confirmar.click(force=True)
+            
     await page.wait_for_timeout(config.delay_ms)
     logger.info("[AP-DIAG] Confirmacion de archivo subida pulsada.")
 
