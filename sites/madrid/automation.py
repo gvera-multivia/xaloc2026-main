@@ -1,4 +1,4 @@
-﻿"""
+"""
 AutomatizaciÃ³n principal para Madrid Ayuntamiento.
 """
 

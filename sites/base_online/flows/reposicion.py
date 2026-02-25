@@ -1,4 +1,4 @@
-﻿"""
+"""
 Flujo para el formulario de Recurso de Reposición (P3).
 """
 

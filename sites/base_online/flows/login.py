@@ -1,4 +1,4 @@
-﻿"""
+"""
 Flujo de autenticación para BASE On-line (landing -> VÀLid -> Common Desktop).
 """
 

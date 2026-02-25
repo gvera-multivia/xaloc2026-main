@@ -12,7 +12,7 @@ export interface QueueItem {
 
 export interface Incident {
     site_id: SiteID;
-    resource_id: number | string;
+    resource_id: number | string | null;
     incident_type?: string;
     reason?: string;
     started_at: string;

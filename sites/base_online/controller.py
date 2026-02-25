@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from sites.base_online.config import BaseOnlineConfig
@@ -73,6 +74,27 @@ class BaseOnlineController:
                 raise ValueError(f"base_online: falta '{name}'.")
             return v
 
+        def _resolve_contact_phones() -> tuple[str, str | None]:
+            movil = (p1_telefon_mobil or "").strip()
+            fijo = (p1_telefon_fix or "").strip()
+            if not movil and not fijo:
+                fallback = (os.getenv("BASE_ONLINE_DEFAULT_PHONE") or "").strip() or "932531411"
+                if fallback:
+                    movil = fallback
+            if not movil and not fijo:
+                raise ValueError("base_online: falta telefono de contacto (p1_telefon_mobil o p1_telefon_fix).")
+            if not movil:
+                movil = fijo
+            return movil, (fijo or None)
+
+        def _resolve_contact_email() -> str:
+            email = (p1_correu or "").strip()
+            if not email:
+                email = (os.getenv("BASE_ONLINE_DEFAULT_EMAIL") or "").strip() or "info@xvia-serviciosjuridicos.com"
+            if not email:
+                raise ValueError("base_online: falta correo de contacto (p1_correu).")
+            return email
+
         def _require_paths(name: str, value: list[Path] | list[str] | None) -> list[Path]:
             if not value:
                 raise ValueError(f"base_online: falta '{name}' (al menos 1 archivo).")
@@ -86,10 +108,12 @@ class BaseOnlineController:
             raise ValueError("base_online: 'protocol' inválido (usa P1, P2 o P3).")
 
         if protocol_norm == "P1":
+            telefon_mobil, telefon_fix = _resolve_contact_phones()
+            correu = _resolve_contact_email()
             contacte = BaseOnlineP1ContactData(
-                telefon_mobil=_require("p1_telefon_mobil", p1_telefon_mobil),
-                telefon_fix=(p1_telefon_fix or "").strip() or None,
-                correu=_require("p1_correu", p1_correu),
+                telefon_mobil=telefon_mobil,
+                telefon_fix=telefon_fix,
+                correu=correu,
             )
 
             adreca = (p1_adreca or "").strip() or None
@@ -129,10 +153,12 @@ class BaseOnlineController:
             return BaseOnlineTarget(protocol=protocol_norm, p1=p1, payload=payload)
 
         if protocol_norm == "P2":
+            telefon_mobil, telefon_fix = _resolve_contact_phones()
+            correu = _resolve_contact_email()
             contacte = BaseOnlineP1ContactData(
-                telefon_mobil=_require("p1_telefon_mobil", p1_telefon_mobil),
-                telefon_fix=(p1_telefon_fix or "").strip() or None,
-                correu=_require("p1_correu", p1_correu),
+                telefon_mobil=telefon_mobil,
+                telefon_fix=telefon_fix,
+                correu=correu,
             )
 
             # El flujo valida que exista expediente o butlletí; aquí exigimos lo mismo.
@@ -171,9 +197,31 @@ class BaseOnlineController:
         """
         return {
             "payload": data,
-            "p1_telefon_mobil": data.get("p1_telefon_mobil") or data.get("user_phone"),
-            "p1_telefon_fix": data.get("p1_telefon_fix"),
-            "p1_correu": data.get("p1_correu") or data.get("user_email"),
+            "p1_telefon_mobil": (
+                data.get("p1_telefon_mobil")
+                or data.get("user_phone")
+                or data.get("telefono")
+                or data.get("telefono1")
+                or data.get("cliente_tel1")
+                or data.get("cliente_movil")
+                or data.get("movil")
+                or data.get("mobile")
+            ),
+            "p1_telefon_fix": (
+                data.get("p1_telefon_fix")
+                or data.get("telefono2")
+                or data.get("cliente_tel2")
+                or data.get("phone")
+            ),
+            "p1_correu": (
+                data.get("p1_correu")
+                or data.get("user_email")
+                or data.get("email")
+                or data.get("correo")
+                or data.get("cliente_email")
+                or (os.getenv("BASE_ONLINE_DEFAULT_EMAIL") or "").strip()
+                or "info@xvia-serviciosjuridicos.com"
+            ),
             "p1_matricula": data.get("p1_matricula") or data.get("plate_number"),
             "p1_expedient_id_ens": data.get("p1_expedient_id_ens") or data.get("expediente_id_ens"),
             "p1_expedient_any": data.get("p1_expedient_any") or data.get("expediente_any"),
@@ -184,9 +232,9 @@ class BaseOnlineController:
             "p1_llicencia_conduccio": data.get("p1_llicencia_conduccio") or data.get("llicencia_conduccio"),
             "p1_nom_complet": data.get("p1_nom_complet"),
             "p1_adreca": data.get("p1_adreca"),
-            "p1_address_sigla": data.get("p1_address_sigla") or data.get("address_sigla"),
+            "p1_address_sigla": data.get("p1_address_sigla") or data.get("address_sigla") or "CL",
             "p1_address_street": data.get("p1_address_street") or data.get("address_street"),
-            "p1_address_number": data.get("p1_address_number") or data.get("address_number"),
+            "p1_address_number": data.get("p1_address_number") or data.get("address_number") or "S/N",
             "p1_address_zip": data.get("p1_address_zip") or data.get("address_zip"),
             "p1_address_city": data.get("p1_address_city") or data.get("address_city"),
             "p1_address_province": data.get("p1_address_province") or data.get("address_province"),

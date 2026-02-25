@@ -8,7 +8,7 @@ import { sileo } from 'sileo';
 
 type Incident = {
     site_id: string;
-    resource_id: number;
+    resource_id: number | string | null;
     expediente?: string;
     incident_type: string;
     reason: string;
@@ -27,6 +27,8 @@ export default function IncidentsPage() {
     const [incidents, setIncidents] = useState<Incident[]>([]);
     const [loading, setLoading] = useState(true);
     const [locks, setLocks] = useState<Record<string, string>>({}); // incident_id -> user_id/username
+    const fmtRid = (rid: number | string | null | undefined) => (rid === null || rid === undefined || rid === '' ? 'N/A' : String(rid));
+    const idRid = (rid: number | string | null | undefined) => (rid === null || rid === undefined || rid === '' ? 'none' : String(rid));
 
     const fetchIncidents = async () => {
         setLoading(true);
@@ -36,7 +38,7 @@ export default function IncidentsPage() {
             setIncidents(nextItems);
             const nextLocks: Record<string, string> = {};
             for (const item of nextItems) {
-                const incidentId = `${item.site_id}:${item.resource_id}`;
+                const incidentId = `${item.site_id}:${idRid(item.resource_id)}`;
                 const locked = Boolean(item.locked);
                 if (locked) {
                     const lockedBy = item.lock_username || item.lock_user_id || 'unknown';
@@ -72,7 +74,7 @@ export default function IncidentsPage() {
     }, [lastMessage]);
 
     const handleClaim = async (incident: Incident) => {
-        const id = `${incident.site_id}:${incident.resource_id}`;
+        const id = `${incident.site_id}:${idRid(incident.resource_id)}`;
         try {
             await incidentsApi.claim(id);
             sileo.success({ title: 'Incidencia capturada', description: 'Has tomado el control de la incidencia.' });
@@ -82,7 +84,7 @@ export default function IncidentsPage() {
     };
 
     const handleRelease = async (incident: Incident) => {
-        const id = `${incident.site_id}:${incident.resource_id}`;
+        const id = `${incident.site_id}:${idRid(incident.resource_id)}`;
         try {
             await incidentsApi.release(id);
             sileo.success({ title: 'Incidencia liberada', description: 'La incidencia vuelve a estar disponible.' });
@@ -123,14 +125,14 @@ export default function IncidentsPage() {
                     </thead>
                     <tbody className="divide-y divide-[rgba(255,255,255,0.06)]">
                         {incidents.map((inc, i) => {
-                            const id = `${inc.site_id}:${inc.resource_id}`;
+                            const id = `${inc.site_id}:${idRid(inc.resource_id)}`;
                             const lockedBy = locks[id];
                             return (
                                 <tr key={i} className="hover:bg-[rgba(255,255,255,0.03)] transition-colors">
                                     <td className="px-6 py-4">
                                         <div className="flex flex-col">
                                             <span className="text-xs font-black uppercase">{inc.site_id}</span>
-                                            <span className="text-[10px] font-mono text-muted-foreground">#{inc.resource_id}</span>
+                                            <span className="text-[10px] font-mono text-muted-foreground">#{fmtRid(inc.resource_id)}</span>
                                         </div>
                                     </td>
                                     <td className="px-6 py-4 text-xs text-muted-foreground/90 max-w-md truncate" title={inc.reason}>

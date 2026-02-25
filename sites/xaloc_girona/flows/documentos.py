@@ -1,4 +1,4 @@
-﻿"""
+"""
 Flujo de subida de documentos (adjuntos) vía popup uploader.
 """
 

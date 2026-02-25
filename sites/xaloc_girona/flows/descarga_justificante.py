@@ -1,11 +1,10 @@
-﻿"""
+"""
 Flujo de descarga del justificante de registro tras el envío del trámite.
 """
 
 from __future__ import annotations
 
 import logging
-import os
 import re
 import shutil
 import unicodedata
@@ -21,6 +20,7 @@ from core.client_documentation import (
     client_identity_from_payload,
     get_ruta_cliente_documentacion,
 )
+from core.client_paths import find_or_create_normalized_subfolder, resolve_client_docs_base_path
 
 logger = logging.getLogger(__name__)
 
@@ -269,17 +269,18 @@ def _construir_ruta_recursos_telematicos(payload: dict, fase_procedimiento: Any 
     # Obtener identidad del cliente desde el payload
     client = client_identity_from_payload(payload)
     
-    # Obtener base_path desde variables de entorno o usar valor por defecto
-    base_path = os.getenv("CLIENT_DOCS_BASE_PATH") or r"\\SERVER-DOC\clientes"
+    # Resolver base_path con fallback seguro por plataforma.
+    base_path = resolve_client_docs_base_path()
     
     # Obtener ruta base del cliente (incluye: base_path / letra / nombre_cliente)
     ruta_cliente_base = get_ruta_cliente_documentacion(client, base_path=base_path)
     
-    # Crear carpeta RECURSOS TELEMATICOS al mismo nivel (como hermana de DOCUMENTACION)
-    ruta_recursos = ruta_cliente_base / "RECURSOS TELEMATICOS"
-    
-    # Crear carpeta base si no existe
-    ruta_recursos.mkdir(parents=True, exist_ok=True)
+    # Reusar carpeta equivalente si existe (ej. "RECURSOS TELEMÁTICOS")
+    # para evitar duplicados por tildes.
+    ruta_recursos = find_or_create_normalized_subfolder(
+        ruta_cliente_base,
+        "RECURSOS TELEMÁTICOS",
+    )
     
     logger.info(f"Ruta RECURSOS TELEMATICOS: {ruta_recursos}")
     

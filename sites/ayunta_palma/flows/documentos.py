@@ -5,23 +5,20 @@ Subida de documentos en el flujo de Ayunta Palma.
 from __future__ import annotations
 
 import asyncio
-import base64
-import json
 import logging
 import os
 import re
 import shutil
-import subprocess
 import sys
-import tempfile
 import unicodedata
-import urllib.parse
 from pathlib import Path
 
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
 from core.client_documentation import client_identity_from_payload, get_ruta_cliente_documentacion
+from core.client_paths import resolve_client_docs_base_path
 from sites.ayunta_palma.config import AyuntaPalmaConfig
+from sites.ayunta_palma.flows.firma_programatica import firmar_programaticamente
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +77,63 @@ async def _run_ps_diagnostic(step_name: str, ps_script: str, timeout_s: int = 45
             logger.warning("[AP-DIAG][%s] PowerShell returncode=%s sin stderr.", step_name, proc.returncode)
     except Exception as e:
         logger.warning("[AP-DIAG][%s] Error ejecutando PowerShell: %s", step_name, e)
+
+
+async def _aceptar_dialogo_xdg_open_linux(timeout_s: int = 95) -> None:
+    """
+    Fallback Linux: intenta aceptar el popup de Chromium
+    "Open xdg-open?" para que no bloquee el flujo de firma.
+    """
+    if sys.platform.startswith("win"):
+        return
+
+    bash_script = rf"""
+set -e
+if ! command -v xdotool >/dev/null 2>&1; then
+  echo "xdg-open-watcher-skip: xdotool-no-disponible"
+  exit 0
+fi
+end_ts=$((SECONDS+{timeout_s}))
+while [ $SECONDS -lt $end_ts ]; do
+  ids="$(xdotool search --name "Open xdg-open\?|wants to open this application|xdg-open" 2>/dev/null || true)"
+  for id in $ids; do
+    xdotool windowactivate --sync "$id" 2>/dev/null || true
+    # Intento primario: atajo del boton "Open xdg-open"
+    xdotool key --window "$id" Alt+o 2>/dev/null || true
+    sleep 0.12
+    # Fallback: navegar al siguiente boton y confirmar
+    xdotool key --window "$id" Tab Return 2>/dev/null || true
+    echo "xdg-open-accepted window=$id"
+    exit 0
+  done
+  sleep 0.2
+done
+echo "xdg-open-timeout"
+"""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "bash",
+            "-lc",
+            bash_script,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            out_b, err_b = await asyncio.wait_for(proc.communicate(), timeout=timeout_s + 5)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            logger.warning("[AP-DIAG][xdg_open_dialog] Timeout tras %ss", timeout_s)
+            return
+
+        out = (out_b or b"").decode("utf-8", errors="ignore").strip()
+        err = (err_b or b"").decode("utf-8", errors="ignore").strip()
+        if out:
+            logger.info("[AP-DIAG][xdg_open_dialog][OUT] %s", out)
+        if err:
+            logger.warning("[AP-DIAG][xdg_open_dialog][ERR] %s", err)
+    except Exception as e:
+        logger.warning("[AP-DIAG][xdg_open_dialog] Error ejecutando watcher Linux: %s", e)
 
 
 async def _esperar_subida_completa(page: Page, config: AyuntaPalmaConfig) -> None:
@@ -426,37 +480,141 @@ def _find_or_create_subfolder(base_path: Path, folder_name: str) -> Path:
     return new_folder
 
 
+_MOTIVO_TO_FOLDER = {
+    "identificacion": "IDENTIFICACIONES",
+    "denuncia": "ALEGACIONES",
+    "propuesta de resolucion": "ALEGACIONES",
+    "extraordinario de revision": "EXTRAORDINARIOS DE REVISIÃ“N",
+    "subsanacion": "SUBSANACIONES",
+    "reclamaciones": "RECLAMACIONES",
+    "requerimiento embargo": "EMBARGOS",
+    "sancion": "SANCIONES",
+    "apremio": "APREMIOS",
+    "embargo": "EMBARGOS",
+}
+
+_MOTIVO_ALIASES = {
+    "identificacion": [
+        "identificacion",
+        "identificacio",
+        "identificar conductor",
+    ],
+    "denuncia": [
+        "denuncia",
+        "alegacion",
+        "alegaciones",
+        "al legacio",
+        "al legacions",
+        "allegacio",
+        "allegacions",
+        "allegacions recursos multes",
+    ],
+    "propuesta de resolucion": [
+        "propuesta de resolucion",
+        "proposta de resolucio",
+        "alegaciones propuesta resolucion",
+    ],
+    "extraordinario de revision": [
+        "extraordinario de revision",
+        "extraordinari de revisio",
+        "revision extraordinaria",
+    ],
+    "subsanacion": [
+        "subsanacion",
+        "esmena",
+        "subsanacio",
+    ],
+    "reclamaciones": [
+        "reclamaciones",
+        "reclamacion economico administrativa",
+        "reclamacio economico administrativa",
+    ],
+    "requerimiento embargo": [
+        "requerimiento embargo",
+        "requerimiento de pago",
+        "requeriment embargament",
+    ],
+    "sancion": [
+        "sancion",
+        "sancio",
+        "resolucion sancionadora",
+        "resolucio sancionadora",
+    ],
+    "apremio": [
+        "apremio",
+        "providencia de apremio",
+        "providencia d apremi",
+    ],
+    "embargo": [
+        "embargo",
+        "embargament",
+        "diligencia de embargo",
+    ],
+}
+
+
 def _get_folder_name_from_fase(fase_raw: str | None) -> str:
-    motivo_to_folder = {
-        "identificacion": "IDENTIFICACIONES",
-        "denuncia": "ALEGACIONES",
-        "propuesta de resolucion": "ALEGACIONES",
-        "extraordinario de revision": "EXTRAORDINARIOS DE REVISIÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“N",
-        "subsanacion": "SUBSANACIONES",
-        "reclamaciones": "RECLAMACIONES",
-        "requerimiento embargo": "EMBARGOS",
-        "sancion": "SANCIONES",
-        "apremio": "APREMIOS",
-        "embargo": "EMBARGOS",
-    }
-    fase_norm = _normalize_text(fase_raw or "")
-    for motivo_key, folder_name in motivo_to_folder.items():
-        if motivo_key in fase_norm:
+    fase_norm = _normalize_text(fase_raw or "").replace("·", " ").strip()
+    if not fase_norm:
+        return ""
+
+    # 1) Match exacto/cercano por aliases (como el resto de sites).
+    for motivo_key, aliases in _MOTIVO_ALIASES.items():
+        folder = _MOTIVO_TO_FOLDER.get(motivo_key, "")
+        if not folder:
+            continue
+        for alias in aliases:
+            alias_norm = _normalize_text(alias).replace("·", " ").strip()
+            if not alias_norm:
+                continue
+            if fase_norm == alias_norm or alias_norm in fase_norm:
+                return folder
+
+    # 2) Match por key canonica de config_motivos.
+    for motivo_key, folder_name in _MOTIVO_TO_FOLDER.items():
+        key_norm = _normalize_text(motivo_key).replace("·", " ").strip()
+        if key_norm and (fase_norm == key_norm or key_norm in fase_norm):
             return folder_name
+
+    # 3) Fallback por keywords amplias.
+    if any(k in fase_norm for k in ("allegac", "alegac", "denuncia", "proposta de resoluc", "propuesta de resoluc")):
+        return "ALEGACIONES"
+    if any(k in fase_norm for k in ("identific",)):
+        return "IDENTIFICACIONES"
+    if any(k in fase_norm for k in ("subsan", "esmena")):
+        return "SUBSANACIONES"
+    if any(k in fase_norm for k in ("reclam", "economico administrativa", "economico-administrativa")):
+        return "RECLAMACIONES"
+    if any(k in fase_norm for k in ("apremi",)):
+        return "APREMIOS"
+    if any(k in fase_norm for k in ("embarg",)):
+        return "EMBARGOS"
+    if any(k in fase_norm for k in ("sancio", "sancion")):
+        return "SANCIONES"
+    if any(k in fase_norm for k in ("revision",)):
+        return "EXTRAORDINARIOS DE REVISIÃ“N"
     return ""
 
 
 def _construir_ruta_recursos_telematicos(payload: dict | None) -> Path:
     payload = payload or {}
     client = client_identity_from_payload(payload)
-    base_path = r"\\SERVER-DOC\clientes"
+    # Importante: resolver ruta base por plataforma.
+    # En Linux/Docker debe usar /mnt/clientes (CLIENT_DOCS_BASE_PATH) y nunca UNC literal.
+    base_path = resolve_client_docs_base_path()
     ruta_cliente_base = get_ruta_cliente_documentacion(client, base_path=base_path)
     ruta_recursos = _find_or_create_subfolder(ruta_cliente_base, "RECURSOS TELEMATICOS")
+    logger.info("[AP-DIAG] Carpeta base cliente: %s", ruta_cliente_base)
+    logger.info("[AP-DIAG] Carpeta recursos telematicos: %s", ruta_recursos)
 
     fase = payload.get("fase_procedimiento")
     folder_name = _get_folder_name_from_fase(fase)
     if folder_name:
-        return _find_or_create_subfolder(ruta_recursos, folder_name)
+        destino = _find_or_create_subfolder(ruta_recursos, folder_name)
+        logger.info("[AP-DIAG] Carpeta destino por fase (%s): %s", fase, destino)
+        return destino
+    if fase:
+        logger.warning("[AP-DIAG] Fase sin mapeo de carpeta especifica (%s). Se usa RECURSOS TELEMATICOS.", fase)
     return ruta_recursos
 
 
@@ -487,338 +645,67 @@ def _extraer_n_expediente(payload: dict | None) -> str:
     return "UNKNOWN"
 
 
-def _b64decode_loose(value: str) -> bytes:
-    value = (value or "").strip()
-    if not value:
-        return b""
-    padded = value + ("=" * ((4 - len(value) % 4) % 4))
-    return base64.b64decode(padded)
-
-
-def _firmar_localmente_cli(afirma_url: str, config: AyuntaPalmaConfig) -> str | None:
-    cli_path = str(
-        getattr(config, "autofirma_cli_path", "")
-        or os.getenv("XALOC_AUTOFIRMA_CLI_PATH", r"C:\Program Files\AutoFirma\AutoFirma\AutoFirmaCommandLine.exe")
-    ).strip()
-    alias = str(
-        getattr(config, "autofirma_cli_alias", "")
-        or os.getenv("XALOC_AUTOFIRMA_CLI_ALIAS", "")
-        or config.navegador.certificado_cn
-        or ""
-    ).strip()
-    if not cli_path or not os.path.exists(cli_path):
-        logger.error("[AP-DIAG] AutoFirma CLI no encontrado: %s", cli_path)
-        return None
-    if not alias:
-        logger.error("[AP-DIAG] Alias de certificado vacio (XALOC_AUTOFIRMA_CLI_ALIAS/certificado_cn).")
-        return None
-
-    input_file = None
-    output_file = None
-    try:
-        url_body = afirma_url.replace("afirma://sign?", "").replace("afirma://", "")
-        parsed = urllib.parse.parse_qs(url_body)
-        encoded_params = parsed.get("params", [None])[0]
-        if not encoded_params:
-            logger.error("[AP-DIAG] URL afirma:// interceptada sin parametro 'params'.")
-            return None
-
-        params_json = _b64decode_loose(encoded_params).decode("utf-8", errors="replace")
-        params_dict = json.loads(params_json)
-        content_b64 = params_dict.get("content") or params_dict.get("data")
-        formato = str(params_dict.get("format") or "CAdES")
-        if not content_b64:
-            logger.error("[AP-DIAG] Parametros de firma sin campo content/data.")
-            return None
-
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".dat") as tmp_in:
-            tmp_in.write(_b64decode_loose(str(content_b64)))
-            input_file = tmp_in.name
-        output_file = input_file + ".sig"
-
-        cmd = [
-            cli_path,
-            "sign",
-            "-i",
-            input_file,
-            "-o",
-            output_file,
-            "-store",
-            "WINDOWS",
-            "-alias",
-            alias,
-            "-format",
-            formato,
-            "-algorithm",
-            "SHA256withRSA",
-            "-config",
-            "mode=implicit",
-        ]
-        creationflags = 0x08000000 if sys.platform.startswith("win") else 0
-        res = subprocess.run(cmd, capture_output=True, text=True, creationflags=creationflags)
-        if res.returncode != 0:
-            logger.error("[AP-DIAG] Error firmando con AutoFirma CLI (code=%s): %s", res.returncode, (res.stderr or "").strip())
-            return None
-        if not os.path.exists(output_file):
-            logger.error("[AP-DIAG] AutoFirma CLI no genero archivo de salida.")
-            return None
-        with open(output_file, "rb") as f:
-            return base64.b64encode(f.read()).decode("utf-8")
-    except Exception as e:
-        logger.error("[AP-DIAG] Excepcion en firma CLI: %s", e)
-        return None
-    finally:
-        try:
-            if input_file and os.path.exists(input_file):
-                os.remove(input_file)
-            if output_file and os.path.exists(output_file):
-                os.remove(output_file)
-        except Exception:
-            pass
-
-
-async def _get_sedipualba_firma_frame(page: Page, timeout_ms: int = 20000):
-    waited = 0
-    step = 400
-    while waited < timeout_ms:
-        for fr in page.frames:
-            try:
-                if "firmar.aspx" in (fr.url or "").lower():
-                    return fr
-            except Exception:
-                continue
-        await page.wait_for_timeout(step)
-        waited += step
-    return None
-
-
-async def _firmar_por_intercepcion_cli(page: Page, config: AyuntaPalmaConfig) -> bool:
-    logger.info("[AP-DIAG] Firma CLI: Preparando trampa de protocolo...")
-
-    try:
-        await page.locator("#ventanaModal").first.wait_for(state="visible", timeout=20000)
-    except Exception:
-        logger.warning("[AP-DIAG] Firma CLI: modal #ventanaModal no visible.")
-        return False
-
-    firma_frame = await _get_sedipualba_firma_frame(page, timeout_ms=20000)
-    if firma_frame is None:
-        logger.warning("[AP-DIAG] Firma CLI: no se encontro iframe firmar.aspx.")
-        return False
-
-    try:
-        await firma_frame.evaluate(
-            """() => {
-                window.__apCapturedAfirmaUrl = null;
-
-                const captureAfirma = (value, source) => {
-                    const s = String(value || '');
-                    if (s.startsWith('afirma://')) {
-                        console.log('INTERCEPTADO: ' + source);
-                        window.__apCapturedAfirmaUrl = s;
-                        return true;
-                    }
-                    return false;
-                };
-
-                const originalOpen = window.open;
-                window.open = function(url, name, features) {
-                    if (captureAfirma(url, 'window.open')) {
-                        return null;
-                    }
-                    return originalOpen ? originalOpen.apply(this, arguments) : null;
-                };
-
-                try {
-                    let _lastUrl = String(window.location && window.location.href ? window.location.href : '');
-                    Object.defineProperty(window, 'location', {
-                        set: function(val) {
-                            if (captureAfirma(val, 'window.location=')) {
-                                return;
-                            }
-                            _lastUrl = String(val || '');
-                        },
-                        get: function() { return _lastUrl; },
-                        configurable: true
-                    });
-                } catch (e) {
-                    console.error('No se pudo parchear window.location', e);
-                }
-
-                try {
-                    Object.defineProperty(document, 'location', {
-                        set: function(val) {
-                            if (captureAfirma(val, 'document.location=')) {
-                                return;
-                            }
-                        },
-                        get: function() {
-                            return window.location;
-                        },
-                        configurable: true
-                    });
-                } catch (e) {
-                    console.error('No se pudo parchear document.location', e);
-                }
-
-                try {
-                    const locProto = Object.getPrototypeOf(window.location);
-                    if (locProto) {
-                        const hrefDesc = Object.getOwnPropertyDescriptor(locProto, 'href');
-                        if (hrefDesc && hrefDesc.set) {
-                            const origHrefSetter = hrefDesc.set;
-                            const origHrefGetter = hrefDesc.get;
-                            Object.defineProperty(locProto, 'href', {
-                                get: function() {
-                                    return origHrefGetter ? origHrefGetter.call(this) : '';
-                                },
-                                set: function(v) {
-                                    if (captureAfirma(v, 'location.href=')) {
-                                        return;
-                                    }
-                                    return origHrefSetter.call(this, v);
-                                },
-                                configurable: true
-                            });
-                        }
-                    }
-                } catch (e) {
-                    console.error('No se pudo parchear location.href', e);
-                }
-
-                document.addEventListener('click', (e) => {
-                    const link = e.target && e.target.closest ? e.target.closest('a') : null;
-                    if (link && link.href && link.href.startsWith('afirma://')) {
-                        console.log('INTERCEPTADO: click en enlace');
-                        e.preventDefault();
-                        e.stopPropagation();
-                        if (typeof e.stopImmediatePropagation === 'function') {
-                            e.stopImmediatePropagation();
-                        }
-                        window.__apCapturedAfirmaUrl = link.href;
-                    }
-                }, true);
-
-                console.log('Trampa de firma activada.');
-            }"""
-        )
-    except Exception as e:
-        logger.warning("[AP-DIAG] Error inyectando trampa JS: %s", e)
-        return False
-
-    logger.info("[AP-DIAG] Firma CLI: disparando boton de firma...")
-    await _click_signar_tots_documents(page, config)
-
-    afirma_url = None
-    for _ in range(60):
-        try:
-            afirma_url = await firma_frame.evaluate("window.__apCapturedAfirmaUrl")
-            if afirma_url:
-                logger.info("[AP-DIAG] CAPTURA EXITOSA: URL afirma:// detectada.")
-                break
-
-            input_val = await firma_frame.evaluate(
-                """() => {
-                    const inputs = document.querySelectorAll('input[type="hidden"]');
-                    for (const i of inputs) {
-                        if (i.value && i.value.startsWith('afirma://')) {
-                            return i.value;
-                        }
-                    }
-                    return null;
-                }"""
-            )
-            if input_val:
-                afirma_url = input_val
-                logger.info("[AP-DIAG] CAPTURA EXITOSA: URL encontrada en input oculto (Plan B).")
-                break
-        except Exception:
-            pass
-        await asyncio.sleep(0.5)
-
-    if not afirma_url:
-        logger.warning("[AP-DIAG] Firma CLI: Timeout. No se capturo el protocolo afirma://.")
-        return False
-
-    logger.info("[AP-DIAG] Firma CLI: ejecutando AutoFirmaCommandLine.")
-    firma_b64 = await asyncio.to_thread(_firmar_localmente_cli, str(afirma_url), config)
-    if not firma_b64:
-        logger.error("[AP-DIAG] Fallo al generar firma con CLI.")
-        return False
-
-    try:
-        res_inject = await firma_frame.evaluate(
-            """(sig) => {
-                const candidates = ['ctl00_ctl01_cphM_cph_hfFirma', 'hfFirma', 'signature', 'sign'];
-                let target = null;
-
-                for (const id of candidates) {
-                    const el = document.getElementById(id);
-                    if (el) { target = el; break; }
-                }
-
-                if (!target) {
-                    const hiddens = document.querySelectorAll('input[type="hidden"]');
-                    for (const h of hiddens) {
-                        const id = (h.id || '').toUpperCase();
-                        if (!id.includes('VIEWSTATE') && !id.includes('EVENTVALIDATION') && h.value === '') {
-                            target = h;
-                            break;
-                        }
-                    }
-                }
-
-                if (!target && document.forms[0]) {
-                    target = document.createElement('input');
-                    target.type = 'hidden';
-                    target.id = 'ctl00_ctl01_cphM_cph_hfFirma';
-                    target.name = 'ctl00$ctl01$cphM$cph$hfFirma';
-                    document.forms[0].appendChild(target);
-                }
-
-                if (target) {
-                    target.value = sig;
-                    if (document.forms[0]) {
-                        document.forms[0].submit();
-                        return 'SUBMIT_OK';
-                    }
-                }
-                return 'ERROR_NO_TARGET';
-            }""",
-            firma_b64,
-        )
-        logger.info("[AP-DIAG] Resultado inyeccion JS: %s", res_inject)
-    except Exception as e:
-        logger.warning("[AP-DIAG] Error inyectando firma: %s", e)
-        return False
-
-    try:
-        await page.locator("#ventanaModal").first.wait_for(state="hidden", timeout=30000)
-        logger.info("[AP-DIAG] Firma CLI: modal cerrado. Exito.")
-        return True
-    except Exception:
-        logger.warning("[AP-DIAG] Firma CLI: modal no se cerro tras submit.")
-        return False
-
-
 async def _esperar_exito_firma_o_refrescar(page: Page, config: AyuntaPalmaConfig) -> None:
     """
-    Espera el texto de exito de firma.
+    Espera evidencia de exito de firma.
     Si en 2 minutos no aparece, refresca la pagina (caso pantalla gris) y reintenta.
     """
-    success_js = """() => {
+    success_diag_js = """() => {
         const t = (document.body?.innerText || "")
             .normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").toLowerCase();
-        return t.includes("instancia firmada correctamente");
+        const estadoEl =
+            document.getElementById("ctl00_ctl00_cphM_cph_txtDescripcionEstado")
+            || document.querySelector("span[id*='txtDescripcionEstado']");
+        const estado = ((estadoEl?.textContent || ""))
+            .normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").toLowerCase().trim();
+
+        const okByBanner =
+            t.includes("instancia firmada correctamente")
+            || t.includes("instancia signada correctament")
+            || t.includes("signatura realitzada");
+        const okByEstado =
+            estado.includes("completada")
+            || estado.includes("completat")
+            || estado.includes("registrada")
+            || estado.includes("registrat");
+        return {
+            ok: okByBanner || okByEstado,
+            by_banner: okByBanner,
+            by_estado: okByEstado,
+            estado,
+            text_sample: t.slice(0, 220),
+        };
     }"""
 
+    async def _wait_success_with_diag(timeout_ms: int, attempt_label: str) -> None:
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + (timeout_ms / 1000)
+        last_diag: dict | None = None
+        while loop.time() < deadline:
+            try:
+                diag = await page.evaluate(success_diag_js)
+                if isinstance(diag, dict):
+                    last_diag = diag
+                    if bool(diag.get("ok")):
+                        logger.info(
+                            "[AP-DIAG] Exito de firma detectado (%s): by_banner=%s by_estado=%s estado=%s",
+                            attempt_label,
+                            bool(diag.get("by_banner")),
+                            bool(diag.get("by_estado")),
+                            diag.get("estado", ""),
+                        )
+                        return
+            except Exception:
+                pass
+            await page.wait_for_timeout(1000)
+        raise PlaywrightTimeoutError(f"[AP-DIAG] Timeout exito firma ({attempt_label}). last_diag={last_diag}")
+
     try:
-        logger.info("[AP-DIAG] Esperando texto de exito de firma (intento 1, 120s)...")
-        await page.wait_for_function(success_js, timeout=120000)
-        logger.info("[AP-DIAG] Texto de exito detectado en intento 1.")
+        logger.info("[AP-DIAG] Esperando evidencia de exito de firma (intento 1, 120s)...")
+        await _wait_success_with_diag(timeout_ms=120000, attempt_label="intento-1")
         return
-    except Exception:
-        logger.warning("[AP-DIAG] No se detecto exito en 120s. Probable pantalla gris; refrescando.")
+    except Exception as e:
+        logger.warning("[AP-DIAG] No se detecto exito en 120s. Probable pantalla gris; refrescando. detalle=%s", e)
 
     try:
         await page.reload(wait_until="domcontentloaded", timeout=60000)
@@ -828,16 +715,15 @@ async def _esperar_exito_firma_o_refrescar(page: Page, config: AyuntaPalmaConfig
     except Exception:
         logger.warning("[AP-DIAG] Error durante reload previo a reintento de exito.")
 
-    await page.wait_for_function(success_js, timeout=120000)
-    logger.info("[AP-DIAG] Texto de exito detectado en intento 2.")
+    await _wait_success_with_diag(timeout_ms=120000, attempt_label="intento-2")
 
 
 async def _descargar_justificante_instancia(page: Page, payload: dict | None) -> Path:
     """
-    Descarga el justificante de la fila "Instancia/InstÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ncia ..." y lo guarda
+    Descarga el justificante de la fila "Instancia/InstÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ncia ..." y lo guarda
     en RECURSOS TELEMATICOS del cliente.
     """
-    logger.info("[AP-DIAG] Buscando fila de justificante 'Instancia/InstÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â ncia'...")
+    logger.info("[AP-DIAG] Buscando fila de justificante 'Instancia/InstÃƒÆ’Ã‚Â ncia'...")
     rows = page.locator("table.tabla-ficheros tbody tr")
     row_count = await rows.count()
     logger.info("[AP-DIAG] Filas de tabla de ficheros detectadas: %s", row_count)
@@ -855,7 +741,7 @@ async def _descargar_justificante_instancia(page: Page, payload: dict | None) ->
             break
 
     if target_row is None:
-        raise RuntimeError("No se encontro la fila del justificante 'Instancia/InstÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ncia'.")
+        raise RuntimeError("No se encontro la fila del justificante 'Instancia/InstÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ncia'.")
 
     download_input = target_row.locator("input[id$='_btnDescargar']").first
     if await download_input.count() == 0:
@@ -891,6 +777,17 @@ async def _descargar_justificante_instancia(page: Page, payload: dict | None) ->
         final_path.unlink()
     shutil.copy2(tmp_path, final_path)
     tmp_path.unlink(missing_ok=True)
+    logger.info("[AP-DIAG] Justificante guardado en carpeta cliente: %s", final_path)
+    try:
+        base_docs = Path(resolve_client_docs_base_path())
+        if os.name != "nt" and not str(final_path).startswith(str(base_docs)):
+            logger.warning(
+                "[AP-DIAG] El justificante no quedo bajo CLIENT_DOCS_BASE_PATH. base=%s final=%s",
+                base_docs,
+                final_path,
+            )
+    except Exception:
+        pass
     return final_path
 
 
@@ -907,49 +804,62 @@ async def _esperar_velo_oculto(page: Page, config: AyuntaPalmaConfig) -> None:
 
 async def _click_siguiente(page: Page, config: AyuntaPalmaConfig) -> None:
     selectors = config.selectors
-    btn = page.locator(selectors.btn_siguiente).first
-    if await btn.count() > 0 and await btn.is_visible():
-        await btn.click()
-    else:
-        hidden_input = page.locator(selectors.input_siguiente).first
-        if await hidden_input.count() > 0:
-            if await hidden_input.is_visible():
-                await hidden_input.click()
-            else:
-                await page.evaluate(
-                    """(selector) => {
-                        const el = document.querySelector(selector);
-                        if (!el) return false;
-                        el.click();
-                        return true;
-                    }""",
-                    selectors.input_siguiente,
-                )
+    
+    clicked = False
+    try:
+        clicked = await page.evaluate(
+            f"""() => {{
+                const el = document.querySelector("{selectors.input_siguiente}");
+                if (el) {{
+                    el.click();
+                    return true;
+                }}
+                return false;
+            }}"""
+        )
+    except Exception as e:
+        logger.info("[AP-DIAG] Excepcion al clickar Siguiente (probablemente recarga/ajax exitosa): %s", e)
+        clicked = True
+
+    if not clicked:
+        btn = page.locator(selectors.btn_siguiente).first
+        if await btn.count() > 0:
+            try:
+                await btn.click(force=True)
+            except Exception as e:
+                logger.info("[AP-DIAG] Excepcion fallback al clickar Siguiente: %s", e)
+            
     await page.wait_for_timeout(config.delay_ms)
     await _esperar_velo_oculto(page, config)
 
 
 async def _click_confirmar(page: Page, config: AyuntaPalmaConfig) -> None:
     selectors = config.selectors
-    btn_confirmar = page.locator(selectors.btn_confirmar).first
-    if await btn_confirmar.count() > 0 and await btn_confirmar.is_visible():
-        await btn_confirmar.click()
-    else:
-        # En esta pantalla "Confirmar" puede reutilizar el input hidden de btnSiguiente.
-        hidden_input = page.locator(selectors.input_siguiente).first
-        if await hidden_input.count() > 0:
-            if await hidden_input.is_visible():
-                await hidden_input.click()
-            else:
-                await page.evaluate(
-                    """(selector) => {
-                        const el = document.querySelector(selector);
-                        if (!el) return false;
-                        el.click();
-                        return true;
-                    }""",
-                    selectors.input_siguiente,
-                )
+    
+    clicked = False
+    try:
+        clicked = await page.evaluate(
+            f"""() => {{
+                const el = document.querySelector("{selectors.input_siguiente}");
+                if (el) {{
+                    el.click();
+                    return true;
+                }}
+                return false;
+            }}"""
+        )
+    except Exception as e:
+        logger.info("[AP-DIAG] Excepcion al clickar Confirmar (probablemente recarga/ajax exitosa): %s", e)
+        clicked = True
+
+    if not clicked:
+        btn_confirmar = page.locator(selectors.btn_confirmar).first
+        if await btn_confirmar.count() > 0:
+            try:
+                await btn_confirmar.click(force=True)
+            except Exception as e:
+                logger.info("[AP-DIAG] Excepcion fallback al clickar Confirmar: %s", e)
+
     await page.wait_for_timeout(config.delay_ms)
     await _esperar_velo_oculto(page, config)
 
@@ -1045,6 +955,7 @@ async def _click_firmar_con_reintentos(page: Page, config: AyuntaPalmaConfig, ma
         logger.info("[AP-DIAG] Pre-firma: modal de firma ya lista, se omite click en 'Firmar'.")
         return
 
+    edge_hint_task: asyncio.Task | None = None
     for intento in range(1, max_intentos + 1):
         logger.info("[AP-DIAG] Pre-firma intento %s/%s: click en Firmar.", intento, max_intentos)
         await _click_firmar(page, config)
@@ -1065,6 +976,9 @@ async def _click_firmar_con_reintentos(page: Page, config: AyuntaPalmaConfig, ma
             return
 
         logger.warning("[AP-DIAG] Pre-firma: boton Firmar sigue visible tras intento %s.", intento)
+        if edge_hint_task is None or edge_hint_task.done():
+            logger.info("[AP-DIAG] Pre-firma: lanzando watcher Edge en background (no bloqueante).")
+            edge_hint_task = asyncio.create_task(_aceptar_dialogo_edge_abrir_autofirma())
         await page.wait_for_timeout(1200)
 
     logger.warning("[AP-DIAG] Pre-firma: agotados reintentos; continuamos con flujo y watchers.")
@@ -1160,7 +1074,7 @@ async def _click_signar_tots_documents(page: Page, config: AyuntaPalmaConfig) ->
         }"""
     )
     if not clicked:
-        raise PlaywrightTimeoutError("No se localizÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³ el botÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³n 'Signar tots els documents' en la pÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡gina/frames.")
+        raise PlaywrightTimeoutError("No se localizÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³ el botÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³n 'Signar tots els documents' en la pÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡gina/frames.")
     await page.wait_for_timeout(config.delay_ms)
     await _esperar_velo_oculto(page, config)
 
@@ -1184,73 +1098,18 @@ async def _verificar_firma_realizada(page: Page, config: AyuntaPalmaConfig) -> N
         estado_fecha = ""
     logger.info("[AP-DIAG] Estado post-firma: estado='%s' estado_fecha='%s'", estado, estado_fecha)
 
-    if ("pendiente de firma" in estado) or ("no registrado" in estado_fecha):
+    pending_estado = (
+        ("pendiente de firma" in estado)
+        or ("pendent de signatura" in estado)
+    )
+    pending_fecha = (
+        ("no registrado" in estado_fecha)
+        or ("no registrat" in estado_fecha)
+    )
+    if pending_estado or pending_fecha:
         raise PlaywrightTimeoutError(
             "Firma no confirmada: la pagina sigue indicando estado pendiente/no registrado."
         )
-
-
-async def _abrir_dialogo_anadir_documento(page: Page, config: AyuntaPalmaConfig) -> None:
-    selectors = config.selectors
-    boton_anadir = page.locator(selectors.btn_anadir_documento).first
-    hidden_anadir = page.locator("input[id*='btnDocumentoAPresentarNuevoFichero']").first
-    archivo_input = page.locator(selectors.archivo_input).first
-
-    async def _dialogo_abierto() -> bool:
-        try:
-            return await archivo_input.count() > 0 and await archivo_input.is_visible()
-        except Exception:
-            return False
-
-    for intento in range(1, 5):
-        if await _dialogo_abierto():
-            return
-
-        clicked = False
-        try:
-            if await boton_anadir.count() > 0 and await boton_anadir.is_visible():
-                await boton_anadir.click()
-                clicked = True
-        except Exception:
-            pass
-
-        if not clicked:
-            try:
-                if await hidden_anadir.count() > 0:
-                    if await hidden_anadir.is_visible():
-                        await hidden_anadir.click()
-                    else:
-                        await page.evaluate(
-                            """() => {
-                                const el = document.querySelector("input[id*='btnDocumentoAPresentarNuevoFichero']");
-                                if (el) el.click();
-                            }"""
-                        )
-                    clicked = True
-            except Exception:
-                pass
-
-        await page.wait_for_timeout(config.delay_ms)
-        if await _dialogo_abierto():
-            return
-
-        # Si seguimos en el paso anterior, intentar avanzar una vez y reintentar abrir.
-        try:
-            await _click_siguiente(page, config)
-            await page.wait_for_timeout(config.delay_ms)
-        except Exception:
-            pass
-
-        logger.info("[AP-DIAG] Reintento abrir dialogo de subida (%s/4).", intento)
-
-    step_val = ""
-    try:
-        step_val = await page.locator("#ctl00_ctl00_cphM_cph_hfStep").first.input_value()
-    except Exception:
-        pass
-    raise PlaywrightTimeoutError(
-        f"No se pudo abrir el dialogo de añadir documentos. url={page.url} hfStep={step_val}"
-    )
 
 
 async def subir_documentos(
@@ -1265,24 +1124,78 @@ async def subir_documentos(
         return page
 
     selectors = config.selectors
-    await _abrir_dialogo_anadir_documento(page, config)
+    
+    await page.wait_for_timeout(3000)
+    
+    clicked_anadir = False
+    try:
+        clicked_anadir = await page.evaluate("""() => {
+            const els = document.querySelectorAll("input[id$='_btnDocumentoAPresentarNuevoFichero']");
+            if (els.length > 0) {
+                els[els.length - 1].click();
+                return true;
+            }
+            return false;
+        }""")
+    except Exception as e:
+        logger.info("[AP-DIAG] Excepcion al clickar Anadir: %s", e)
+        clicked_anadir = True
+        
+    if not clicked_anadir:
+        boton_anadir = page.locator(selectors.btn_anadir_documento).first
+        if await boton_anadir.count() > 0:
+            try:
+                await boton_anadir.click(force=True)
+            except Exception as e:
+                logger.info("[AP-DIAG] Excepcion fallback al clickar Anadir: %s", e)
+
+    await page.wait_for_timeout(config.delay_ms)
     logger.info("[AP-DIAG] Dialogo de anadir documento abierto.")
+
+    # Esperar explícitamente a que el panel del nuevo fichero sea visible
+    modal_fichero = page.locator("#ctl00_ctl00_cphM_cph_pnlNuevoFichero").first
+    await modal_fichero.wait_for(state="visible", timeout=15000)
 
     ruta = [str(p) for p in archivos]
     await page.set_input_files(selectors.archivo_input, ruta)
     await _esperar_subida_completa(page, config)
     logger.info("[AP-DIAG] Upload de archivos completado.")
 
-    confirmar = page.locator(selectors.btn_confirmar_archivo)
-    await confirmar.wait_for(state="visible", timeout=config.timeouts.general)
-    await confirmar.click(timeout=config.timeouts.subida_archivo)
+    clicked_aceptar = False
+    try:
+        clicked_aceptar = await page.evaluate("""() => {
+            const btn = document.querySelector("input[id$='_btnNuevoFicheroAceptar']");
+            if (btn) {
+                btn.click();
+                return true;
+            }
+            return false;
+        }""")
+    except Exception as e:
+        logger.info("[AP-DIAG] Excepcion al clickar Aceptar fichero: %s", e)
+        clicked_aceptar = True
+
+    if not clicked_aceptar:
+        confirmar = page.locator(selectors.btn_confirmar_archivo).first
+        if await confirmar.count() > 0:
+            try:
+                await confirmar.click(force=True)
+            except Exception as e:
+                logger.info("[AP-DIAG] Excepcion fallback al clickar Aceptar fichero: %s", e)
+            
+    # CRITICO: Esperar a que el modal se cierre (la carga/ajax termino)
+    try:
+        await modal_fichero.wait_for(state="hidden", timeout=30000)
+    except Exception as e:
+        logger.info("[AP-DIAG] Modal no se oculto tras aceptar fichero: %s", e)
+            
     await page.wait_for_timeout(config.delay_ms)
     logger.info("[AP-DIAG] Confirmacion de archivo subida pulsada.")
 
     # 1) Avanzar tras aceptar el documento subido.
     await _click_siguiente(page, config)
 
-    # 2) Marcar protecciÃ³n de datos y avanzar.
+    # 2) Marcar protecciÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³n de datos y avanzar.
     await page.wait_for_timeout(config.delay_ms)
     await _marcar_proteccion_datos(page, config)
     await _click_siguiente(page, config)
@@ -1293,19 +1206,69 @@ async def subir_documentos(
     await _click_confirmar(page, config)
     logger.info("[AP-DIAG] Navegacion previa a firma completada.")
 
-    # 4) Ir a firma y lanzar firma de todos los documentos.
-    await page.wait_for_timeout(config.delay_ms)
-    await page.wait_for_timeout(2000)
-    logger.info("[AP-DIAG] Pre-firma: click/reintentos en boton Firmar.")
+    # 4) Firma — cross-platform
+    #
+    # En Linux/Docker: intercept the afirma:// URL via JS, call AutoFirmaCommandLine,
+    # inject the signature back into the page.
+    #
+    # En Windows: fallback a los watchers de UIAutomation existentes.
+    logger.info("[AP-DIAG] Pre-firma: click en boton Firmar.")
     await _click_firmar_con_reintentos(page, config, max_intentos=3)
-    logger.info("[AP-DIAG] Firma invisible: intercepcion de protocolo + AutoFirma CLI.")
-    firma_cli_ok = await _firmar_por_intercepcion_cli(page, config)
-    if not firma_cli_ok:
-        raise RuntimeError("Fallo en firma invisible por intercepcion/CLI; no se usa fallback UI.")
+
+    if sys.platform.startswith("win"):
+        # ── Windows path (original UIAutomation approach) ──────────────────
+        logger.info("[AP-DIAG] Plataforma Windows: usando watchers UIAutomation.")
+        logger.info("[AP-DIAG] Lanzando watcher edge_open_dialog en background.")
+        edge_task = asyncio.create_task(_aceptar_dialogo_edge_abrir_autofirma())
+        await _launch_autofirma_cert_acceptor()
+        logger.info("[AP-DIAG] Arrancando watcher de certificado Windows en paralelo.")
+        cert_task = asyncio.create_task(_aceptar_certificado_windows())
+        await page.wait_for_timeout(2000)
+        logger.info("[AP-DIAG] Firma modal: click en 'Signar tots els documents'.")
+        await _click_signar_tots_documents(page, config)
+        if not edge_task.done():
+            logger.info("[AP-DIAG] edge_open_dialog sigue activo en background.")
+        logger.info("[AP-DIAG] Esperando resultado del watcher de certificado Windows.")
+        try:
+            await cert_task
+        except Exception as e:
+            logger.warning("[AP-DIAG] Watcher certificado devolvio error: %s", e)
+        if not edge_task.done():
+            logger.info("[AP-DIAG] edge_open_dialog no ha terminado; esperamos 3s finales.")
+            try:
+                await asyncio.wait_for(edge_task, timeout=3)
+            except Exception:
+                logger.warning("[AP-DIAG] edge_open_dialog sigue pendiente tras 3s; continuamos.")
+    else:
+        # ── Linux/Docker path (programmatic signing) ────────────────────────
+        logger.info("[AP-DIAG] Plataforma Linux/Docker: usando firma programatica.")
+        logger.info("[AP-DIAG] Lanzando watcher Linux xdg_open_dialog en background.")
+        xdg_task = asyncio.create_task(_aceptar_dialogo_xdg_open_linux(timeout_s=95))
+        # Click the inner iframe "Signar tots els documents" button first to
+        # trigger the afirma:// URL emission, while our intercept is already armed
+        # inside firmar_programaticamente().
+        try:
+            signed = await firmar_programaticamente(page)
+            if not signed:
+                # AutoFirmaCommandLine not available — try clicking the button anyway
+                # and hope the environment has a different mechanism.
+                logger.warning(
+                    "[AP-DIAG] Firma programatica no disponible; intentando click en 'Signar tots els documents' directamente."
+                )
+                await _click_signar_tots_documents(page, config)
+            if not xdg_task.done():
+                try:
+                    await asyncio.wait_for(xdg_task, timeout=2)
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.error("[AP-DIAG] Error en firma programatica: %s", e)
+            if not xdg_task.done():
+                xdg_task.cancel()
+            raise
     logger.info("[AP-DIAG] Validando firma real.")
     await _verificar_firma_realizada(page, config)
     logger.info("[AP-DIAG] Firma validada; iniciando descarga de justificante.")
     justificante_path = await _descargar_justificante_instancia(page, payload)
     logger.info("ayunta_palma: Justificante guardado en: %s", justificante_path)
     return page
-

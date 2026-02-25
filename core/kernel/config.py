@@ -32,6 +32,14 @@ class BrainSettings(BaseSettings):
 class WorkerSettings(BaseSettings):
     heartbeat_seconds: int = Field(default=5, alias="WORKER_HEARTBEAT_SECONDS")
     heartbeat_timeout: int = Field(default=90, alias="WORKER_HEARTBEAT_TIMEOUT_SECONDS")
+    queue_mode: str = Field(default="redis_streams", alias="QUEUE_MODE")
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+
+class FeatureFlagSettings(BaseSettings):
+    use_pg_source_of_truth: bool = Field(default=True, alias="USE_PG_SOURCE_OF_TRUTH")
+    queue_mode: str = Field(default="redis_streams", alias="QUEUE_MODE")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -44,6 +52,7 @@ class AppSettings(BaseSettings):
     xvia: XviaSettings = Field(default_factory=XviaSettings)
     brain: BrainSettings = Field(default_factory=BrainSettings)
     worker: WorkerSettings = Field(default_factory=WorkerSettings)
+    flags: FeatureFlagSettings = Field(default_factory=FeatureFlagSettings)
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

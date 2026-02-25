@@ -1,0 +1,341 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: xaloc-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: xaloc
+      POSTGRES_USER: xaloc
+      POSTGRES_PASSWORD: xaloc_dev_password
+      TZ: Europe/Madrid
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xaloc -d xaloc"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: xaloc-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1000"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  jobs-service:
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile.py-service
+    image: xaloc/python-service:dev
+    container_name: xaloc-jobs-service
+    restart: unless-stopped
+    working_dir: /app
+    command: /opt/venv/bin/uvicorn services.jobs.app:app --host 0.0.0.0 --port 8103
+    environment:
+      USE_PG_SOURCE_OF_TRUTH: "1"
+      QUEUE_MODE: redis_streams
+      REPORT_PG_DSN: postgresql://xaloc:xaloc_dev_password@postgres:5432/xaloc
+    volumes:
+      - ../../:/app
+    ports:
+      - "8103:8103"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  auth-rbac-service:
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile.py-service
+    image: xaloc/python-service:dev
+    container_name: xaloc-auth-rbac
+    restart: unless-stopped
+    working_dir: /app
+    command: /opt/venv/bin/uvicorn services.auth_rbac.app:app --host 0.0.0.0 --port 8101
+    environment:
+      DASHBOARD_JWT_ISSUER: xaloc-dashboard
+      DASHBOARD_JWT_AUDIENCE: xaloc-dashboard-clients
+      DASHBOARD_TOKEN_EXPIRE_MINUTES: "480"
+      DASHBOARD_ADMIN_USERNAME: ${DASHBOARD_ADMIN_USERNAME:-admin}
+      DASHBOARD_ADMIN_PASSWORD: ${DASHBOARD_ADMIN_PASSWORD:-admin1234}
+      USE_PG_SOURCE_OF_TRUTH: ${USE_PG_SOURCE_OF_TRUTH:-1}
+      REPORT_PG_DSN: ${REPORT_PG_DSN:-postgresql://xaloc:xaloc_dev_password@postgres:5432/xaloc}
+    volumes:
+      - ../../:/app
+    ports:
+      - "8101:8101"
+
+  dashboard-backend-service:
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile.py-service
+    image: xaloc/python-service:dev
+    container_name: xaloc-dashboard-backend
+    restart: unless-stopped
+    working_dir: /app
+    command: /opt/venv/bin/uvicorn services.dashboard_backend.app:app --host 0.0.0.0 --port 8788
+    environment:
+      DASHBOARD_ENABLE_FRONTEND_PROXY: "0"
+      AUTH_RBAC_SERVICE_URL: http://auth-rbac-service:8101
+      USE_PG_SOURCE_OF_TRUTH: "1"
+      QUEUE_MODE: redis_streams
+      DASHBOARD_HISTORY_SOURCE: ${DASHBOARD_HISTORY_SOURCE:-pg}
+      REPORT_PG_DSN: ${REPORT_PG_DSN:-postgresql://xaloc:xaloc_dev_password@postgres:5432/xaloc}
+      CLIENT_DOCS_BASE_PATH: /mnt/clientes
+    volumes:
+      - ../../:/app
+      - clientes_smb:/mnt/clientes:rw
+    ports:
+      - "8788:8788"
+    depends_on:
+      auth-rbac-service:
+        condition: service_started
+
+  api-gateway:
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile.api-gateway
+    image: xaloc/api-gateway:dev
+    container_name: xaloc-api-gateway
+    restart: unless-stopped
+    working_dir: /app
+    command: >
+      sh -c "cd /app/dashboard-frontend &&
+             if [ ! -x /app/dashboard-frontend/node_modules/.bin/next ]; then
+               npm install --include=dev --include=optional;
+             fi &&
+             cd /app/dashboard-frontend &&
+             if [ ! -f /app/dashboard-frontend/node_modules/lightningcss-linux-x64-gnu/lightningcss.linux-x64-gnu.node ]; then
+               echo '[api-gateway] reparando lightningcss nativo para linux' &&
+               npm rebuild lightningcss --include=optional &&
+               npm install lightningcss-linux-x64-gnu@1.30.2 --no-save;
+             fi &&
+             cd /app &&
+             /opt/venv/bin/uvicorn services.api_gateway.app:app --host 0.0.0.0 --port 8080"
+    environment:
+      DASHBOARD_BACKEND_URL: http://dashboard-backend-service:8788
+      DASHBOARD_FRONTEND_HOST: 0.0.0.0
+      DASHBOARD_FRONTEND_PORT: "3000"
+      DASHBOARD_FRONTEND_DEV: ${DASHBOARD_FRONTEND_DEV:-0}
+    volumes:
+      - ../../:/app
+      - dashboard_frontend_node_modules:/app/dashboard-frontend/node_modules
+      - dashboard_frontend_next:/app/dashboard-frontend/.next
+    ports:
+      - "8080:8080"
+    depends_on:
+      dashboard-backend-service:
+        condition: service_started
+
+  brain-claim-service:
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile.py-service
+    image: xaloc/python-service:dev
+    container_name: xaloc-brain-claim
+    restart: unless-stopped
+    working_dir: /app
+    command: /opt/venv/bin/python -m services.brain_claim.app
+    environment:
+      USE_PG_SOURCE_OF_TRUTH: "1"
+      REDIS_ENABLED: "1"
+      REDIS_URL: redis://redis:6379/0
+      CANDIDATES_STREAM_KEY: candidates
+      REPORT_PG_DSN: postgresql://xaloc:xaloc_dev_password@postgres:5432/xaloc
+      QUEUE_MODE: redis_streams
+      CLIENT_DOCS_BASE_PATH: /mnt/clientes
+    volumes:
+      - ../../:/app
+      - clientes_smb:/mnt/clientes:rw
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  payload-validator-service:
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile.py-service
+    image: xaloc/python-service:dev
+    container_name: xaloc-payload-validator
+    restart: unless-stopped
+    working_dir: /app
+    command: /opt/venv/bin/python -m services.payload_validator.app
+    environment:
+      USE_PG_SOURCE_OF_TRUTH: "1"
+      REDIS_ENABLED: "1"
+      REDIS_URL: redis://redis:6379/0
+      CANDIDATES_STREAM_KEY: candidates
+      VALIDATED_STREAM_KEY: validated
+      VALIDATOR_STREAM_GROUP: validator_group
+      REPORT_PG_DSN: postgresql://xaloc:xaloc_dev_password@postgres:5432/xaloc
+      CLIENT_DOCS_BASE_PATH: /mnt/clientes
+    volumes:
+      - ../../:/app
+      - clientes_smb:/mnt/clientes:rw
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  batcher-dispatcher-service:
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile.py-service
+    image: xaloc/python-service:dev
+    container_name: xaloc-batcher-dispatcher
+    restart: unless-stopped
+    working_dir: /app
+    command: /opt/venv/bin/python -m services.batcher_dispatcher.app
+    environment:
+      USE_PG_SOURCE_OF_TRUTH: "1"
+      REDIS_ENABLED: "1"
+      REDIS_URL: redis://redis:6379/0
+      VALIDATED_STREAM_KEY: validated
+      QUEUE_STREAM_JOBS_KEY: jobs
+      DLQ_VALIDATED_STREAM_KEY: dlq:validated
+      BATCH_WINDOW_SECONDS: "30"
+      BATCHER_STREAM_GROUP: batcher_group
+      REPORT_PG_DSN: postgresql://xaloc:xaloc_dev_password@postgres:5432/xaloc
+    volumes:
+      - ../../:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker-orchestrator-service:
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile.py-service
+    image: xaloc/python-service:dev
+    container_name: xaloc-worker-orchestrator
+    restart: unless-stopped
+    working_dir: /app
+    command: /opt/venv/bin/python -m services.worker_orchestrator.app
+    environment:
+      USE_PG_SOURCE_OF_TRUTH: "1"
+      REDIS_ENABLED: "1"
+      REDIS_URL: redis://redis:6379/0
+      QUEUE_MODE: redis_streams
+      USE_PLAYWRIGHT_RUNNER_SERVICE: "1"
+      PLAYWRIGHT_RUNNER_URL: http://playwright-runner-service:8111
+      QUEUE_STREAM_JOBS_KEY: jobs
+      QUEUE_STREAM_GROUP: worker_group
+      QUEUE_STREAM_DLQ_KEY: dlq:jobs
+      REPORT_PG_DSN: postgresql://xaloc:xaloc_dev_password@postgres:5432/xaloc
+      CLIENT_DOCS_BASE_PATH: /mnt/clientes
+    volumes:
+      - ../../:/app
+      - artifacts_data:/data/artifacts
+      - clientes_smb:/mnt/clientes:rw
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      playwright-runner-service:
+        condition: service_started
+
+  playwright-runner-service:
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile.playwright-runner
+    image: xaloc/playwright-runner:dev
+    container_name: xaloc-playwright-runner
+    restart: unless-stopped
+    working_dir: /app
+    command: /opt/venv/bin/uvicorn services.playwright_runner.app:app --host 0.0.0.0 --port 8111
+    environment:
+      HOME: /root
+      DISPLAY: ":99"
+      XALOC_HEADLESS: ${XALOC_HEADLESS:-0}
+      XALOC_VISUAL_DEBUG: ${XALOC_VISUAL_DEBUG:-1}
+      UI_WIDTH: ${XALOC_UI_WIDTH:-2560}
+      UI_HEIGHT: ${XALOC_UI_HEIGHT:-1440}
+      UI_DEPTH: ${XALOC_UI_DEPTH:-24}
+      XALOC_VNC_PORT: ${XALOC_VNC_PORT:-5900}
+      XALOC_NOVNC_PORT: ${XALOC_NOVNC_PORT:-6080}
+      XALOC_NOVNC_PUBLIC_URL: ${XALOC_NOVNC_PUBLIC_URL:-}
+      XALOC_NOVNC_PUBLIC_PORT: ${XALOC_NOVNC_PUBLIC_PORT:-6080}
+      PYTHONUNBUFFERED: "1"
+      XALOC_DISABLE_KEEP_BROWSER_OPEN: "1"
+      XALOC_FORCE_UNLOCK_PROFILE: "1"
+      XALOC_CERT_DEBUG: ${XALOC_CERT_DEBUG:-1}
+      XALOC_BROWSER_DEBUG: ${XALOC_BROWSER_DEBUG:-1}
+      XALOC_CHROMIUM_NETLOG: ${XALOC_CHROMIUM_NETLOG:-0}
+      XALOC_CHROMIUM_DEVICE_SCALE_FACTOR: ${XALOC_CHROMIUM_DEVICE_SCALE_FACTOR:-1.0}
+      XALOC_CHROMIUM_REMOTE_DEBUG: ${XALOC_CHROMIUM_REMOTE_DEBUG:-0}
+      XALOC_CHROMIUM_REMOTE_DEBUG_PORT: ${XALOC_CHROMIUM_REMOTE_DEBUG_PORT:-9222}
+      XALOC_BROWSER_CHANNEL: ${XALOC_BROWSER_CHANNEL:-chromium}
+      XALOC_CERT_AUTOSELECT_VIA_POLICY: "1"
+      XALOC_CERT_AUTOSELECT_CLI_FALLBACK: "1"
+      XALOC_CERT_FILTER_BY_CN: "0"
+      PLAYWRIGHT_USE_CLIENT_CERTIFICATES: ${PLAYWRIGHT_USE_CLIENT_CERTIFICATES:-1}
+      PLAYWRIGHT_CLIENT_CERT_ORIGINS: ${PLAYWRIGHT_CLIENT_CERT_ORIGINS:-https://sede.madrid.es,https://servcla.madrid.es,https://servpub.madrid.es,https://www.xalocgirona.cat,https://seu.xalocgirona.cat,https://www.base.cat,https://www.baseonline.cat,https://valid.aoc.cat,https://cert.valid.aoc.cat,https://cas.madrid.es,https://pasarela.clave.gob.es,https://palma.sedipualba.es,https://identificacionssl.sedipualba.es}
+      PLAYWRIGHT_CERT_PATH: /data/certificates/certificate.pfx
+      PLAYWRIGHT_PROFILE_DIR: /app/profiles/worker
+      PLAYWRIGHT_NSS_DB_DIR: ${PLAYWRIGHT_NSS_DB_DIR:-/root/.pki/nssdb}
+      PLAYWRIGHT_GLOBAL_NSS_DB_DIR: /root/.pki/nssdb
+      PLAYWRIGHT_CERT_REQUIRED: ${PLAYWRIGHT_CERT_REQUIRED:-1}
+      PLAYWRIGHT_CERT_PASSWORD: ${PLAYWRIGHT_CERT_PASSWORD:-}
+      SIGNING_PFX_PATH: /data/certificates/certificate.pfx
+      SIGNING_PFX_PASSWORD: ${PLAYWRIGHT_CERT_PASSWORD:-}
+      SIGNING_PFX_ALIAS: ${SIGNING_PFX_ALIAS:-35059210b_maria_teresa_morente__r__b62798210_}
+      CLIENT_DOCS_BASE_PATH: /mnt/clientes
+    volumes:
+      - ../../:/app
+      - artifacts_data:/data/artifacts
+      - ../../certificates:/data/certificates:ro
+      - clientes_smb:/mnt/clientes:rw
+    ports:
+      - "8111:8111"
+      - "6080:6080"
+      - "5900:5900"
+      - "9222:9222"
+
+  signing-service:
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile.py-service
+    image: xaloc/python-service:dev
+    container_name: xaloc-signing-service
+    restart: unless-stopped
+    working_dir: /app
+    command: /opt/venv/bin/uvicorn services.signing.app:app --host 0.0.0.0 --port 8112
+    environment:
+      SIGNING_CERT_PATH: /data/certificates/certificate.pfx
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ../../:/app
+      - ../../certificates:/data/certificates:ro
+    ports:
+      - "8112:8112"
+
+volumes:
+  postgres_data:
+  redis_data:
+  artifacts_data:
+  dashboard_frontend_node_modules:
+  dashboard_frontend_next:
+  clientes_smb:
+    driver: local
+    driver_opts:
+      type: cifs
+      o: username=${SMB_USER:-},password=${SMB_PASS:-},vers=${SMB_VERS:-3.0},rw,iocharset=utf8
+      device: "//${SMB_SERVER:-SERVER-DOC}/${SMB_SHARE:-clientes}"

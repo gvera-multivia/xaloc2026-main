@@ -36,5 +36,5 @@ if __name__ == "__main__":
     else:
         port = find_free_port(host=host, start_port=start_port, end_port=end_port)
     os.environ["DASHBOARD_PORT_FIXED"] = str(port)
-    print(f"Dashboard listening on http://{host}:{port}")
-    uvicorn.run("dashboard_api:app", host=host, port=port, reload=False)
+    print(f"Dashboard Gateway listening on http://{host}:{port}")
+    uvicorn.run("services.api_gateway.app:app", host=host, port=port, reload=False)

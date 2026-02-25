@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+from core.runtime_flags import get_report_pg_dsn, is_pg_source_of_truth_enabled
 
 try:
     import psycopg
@@ -82,17 +83,12 @@ class PostgresConfig:
 
     @classmethod
     def from_env(cls) -> Optional["PostgresConfig"]:
-        dsn = (os.getenv("REPORT_PG_DSN") or "").strip()
+        if not is_pg_source_of_truth_enabled():
+            return None
+        dsn = get_report_pg_dsn()
         if not dsn:
             return None
-        lowered = dsn.lower()
-        # Defensive guard: env flags like "1"/"true" are common and are not valid DSN values.
-        if lowered in {"0", "1", "true", "false", "yes", "no", "on", "off", "enabled", "disabled"}:
-            return None
-        # Accept URL-style DSN (postgresql://...) or keyword DSN (host=... dbname=...).
-        if "://" in dsn or "=" in dsn:
-            return cls(dsn=dsn)
-        return None
+        return cls(dsn=dsn)
 
 
 class PostgresRealtimeStore:
@@ -689,13 +685,4 @@ def build_realtime_store(logger: Optional[logging.Logger] = None):
             return store
         except Exception as exc:
             log.error("No se pudo inicializar esquema PostgreSQL realtime: %s", exc)
-
-    sqlite_db_path = (os.getenv("SQLITE_DB_PATH") or "db/xaloc_database.db").strip() or "db/xaloc_database.db"
-    sqlite_store = SqliteRealtimeStore(sqlite_db_path=sqlite_db_path, logger=log)
-    try:
-        sqlite_store.ensure_schema()
-        log.info("Realtime store activo en SQLite: %s", sqlite_db_path)
-        return sqlite_store
-    except Exception as exc:
-        log.error("No se pudo inicializar esquema SQLite realtime: %s", exc)
-        return NullRealtimeStore()
+    raise RuntimeError("Realtime store requiere PostgreSQL activo. Fallback SQLite eliminado.")

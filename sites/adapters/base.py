@@ -12,6 +12,7 @@ import pyodbc
 
 from .site_adapter import SiteAdapter
 from core.address_classifier import classify_address_fallback
+from core.sqlserver_utils import build_sqlserver_connection_string
 
 logger = logging.getLogger("brain")
 
@@ -509,6 +510,9 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
 
             expone, solicita = self._get_motivos_base(fase_raw, expediente_raw, r.get("SujetoRecurso"))
             data_denuncia = self._format_date_ddmmyyyy(r.get("dia_denuncia")) or self._format_date_ddmmyyyy(r.get("FAlta"))
+            contact_mobile = "722761154"
+            contact_fixed = "932531411"
+            contact_email = "info@xvia-serviciosjuridicos.com"
 
             payload = {
                 "idRecurso": self._convert_value(r["idRecurso"]),
@@ -517,8 +521,11 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 "fase_procedimiento": fase_raw,
                 "expediente": expediente_raw,
                 "protocol": protocolo,
-                "user_phone": "932531411",
-                "user_email": "info@xvia-serviciosjuridicos.com",
+                "user_phone": contact_mobile,
+                "p1_telefon_mobil": contact_mobile,
+                "p1_telefon_fix": contact_fixed,
+                "user_email": contact_email,
+                "p1_correu": contact_email,
                 "plate_number": self._clean_str(r.get("matricula")),
                 "data_denuncia": data_denuncia,
                 "nif": nif,
@@ -537,7 +544,6 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
             }
 
             try:
-                from brain import build_sqlserver_connection_string
                 from core.client_documentation import build_required_client_documents_for_payload
 
                 conn_str = build_sqlserver_connection_string()

@@ -21,12 +21,14 @@ import { sileo } from 'sileo';
 export default function MonitorPage() {
   const UI_REFRESH_MS = 1000;
   const INCIDENT_MARKER_POLL_MS = 1000;
+  const LIVE_STREAM_GRACE_MS = 8000;
 
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [nowTs, setNowTs] = useState(Date.now());
+  const [lastLiveSeenTs, setLastLiveSeenTs] = useState(0);
   const completionMarkerRef = useRef<string>('');
   const [recovering, setRecovering] = useState(false);
 
@@ -112,6 +114,13 @@ export default function MonitorPage() {
   }, [today]);
 
   const liveItem = useMemo(() => queue.find(x => (x.state || '').toLowerCase() === 'processing') || null, [queue]);
+  useEffect(() => {
+    if (liveItem) {
+      setLastLiveSeenTs(Date.now());
+    }
+  }, [liveItem]);
+  const liveStreamEnabled = !!liveItem || (lastLiveSeenTs > 0 && nowTs - lastLiveSeenTs <= LIVE_STREAM_GRACE_MS);
+  const formatResource = (resourceId: unknown) => (resourceId === null || resourceId === undefined || resourceId === '' ? 'N/A' : String(resourceId));
 
   const ringProgress = useMemo(() => {
     if (!liveItem?.started_at) return 0;
@@ -176,13 +185,13 @@ export default function MonitorPage() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         {/* Left */}
         <div className="lg:col-span-8 space-y-8">
-          <LiveScreencast live={!!liveItem} />
+          <LiveScreencast live={liveStreamEnabled} />
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             <SlaRing
               progress={ringProgress}
               elapsed={elapsed}
-              label={liveItem ? `${liveItem.site_id} #${liveItem.resource_id}` : "Sistema en Espera"}
+              label={liveItem ? `${liveItem.site_id} #${formatResource(liveItem.resource_id)}` : "Sistema en Espera"}
             />
 
             {/* Live metrics card */}
@@ -203,7 +212,7 @@ export default function MonitorPage() {
                     ID_RECURSO
                   </span>
                   <span className="text-sm font-black text-foreground">
-                    {liveItem ? `#${liveItem.resource_id}` : "VOID"}
+                    {liveItem ? `#${formatResource(liveItem.resource_id)}` : "VOID"}
                   </span>
                 </div>
 
@@ -317,7 +326,7 @@ export default function MonitorPage() {
                     </div>
                     <div className="min-w-0">
                       <h5 className="text-xs font-black truncate text-foreground/90 uppercase">
-                        {inc.site_id} / #{inc.resource_id}
+                        {inc.site_id} / #{formatResource(inc.resource_id)}
                       </h5>
                       <p className="text-[11px] text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
                         {inc.reason || "Error en flujo de automatización"}

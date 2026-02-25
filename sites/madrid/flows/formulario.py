@@ -1,4 +1,4 @@
-﻿"""
+"""
 Flujo de rellenado del formulario de Madrid.
 Implementa las secciones documentadas en explore-html/llenar formulario-madrid.md
 """

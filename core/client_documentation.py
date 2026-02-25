@@ -20,7 +20,8 @@ from core.authorization_fetcher import (
 )
 from core.client_paths import (
     ClientIdentity,
-    get_ruta_cliente_documentacion
+    get_ruta_cliente_documentacion,
+    resolve_client_docs_base_path,
 )
 
 logger = logging.getLogger(__name__)
@@ -352,7 +353,7 @@ async def build_required_client_documents_for_payload(
         raise identity_error or RequiredClientDocumentsError("No se pudo inferir la identidad del cliente.")
     
     # Intentar seleccionar documentos
-    base_path = os.getenv("CLIENT_DOCS_BASE_PATH") or r"\\SERVER-DOC\clientes"
+    base_path = resolve_client_docs_base_path()
     ruta = get_ruta_cliente_documentacion(client, base_path=base_path)
     
     try:
@@ -478,7 +479,7 @@ async def fetch_missing_authorization_via_gesdoc(
     )
     
     # Calculamos rutas de destino
-    base_path = os.getenv("CLIENT_DOCS_BASE_PATH") or r"\\SERVER-DOC\clientes"
+    base_path = resolve_client_docs_base_path()
     client_root = get_ruta_cliente_documentacion(client, base_path)
     
     # Las subcarpetas estándar son DOCUMENTACION y DOCUMENTACION RECURSOS (o similar)
@@ -550,7 +551,7 @@ def check_requires_gesdoc(payload: dict, base_path: str | None = None) -> tuple[
     
     Args:
         payload: Datos del trámite (debe incluir datos del cliente)
-        base_path: Ruta base de clientes (default: CLIENT_DOCS_BASE_PATH o \\SERVER-DOC\clientes)
+        base_path: Ruta base de clientes (default: helper cross-platform seguro)
     
     Returns:
         (requires_gesdoc: bool, reason: str | None)
@@ -558,7 +559,8 @@ def check_requires_gesdoc(payload: dict, base_path: str | None = None) -> tuple[
         - (True, "motivo") si SÍ requiere GESDOC
     """
     if base_path is None:
-        base_path = os.getenv("CLIENT_DOCS_BASE_PATH") or r"\\SERVER-DOC\clientes"
+        base_path = resolve_client_docs_base_path()
+    base_root = Path(base_path)
     
     # 1. Intentar obtener identidad del cliente
     try:
@@ -575,6 +577,17 @@ def check_requires_gesdoc(payload: dict, base_path: str | None = None) -> tuple[
     
     # 3. Verificar si la carpeta existe
     if not ruta_docu.exists():
+        # Diagnóstico de montaje SMB: diferenciamos "carpeta cliente no existe"
+        # de "el share no está realmente montado/accesible".
+        try:
+            root_entries = [p for p in base_root.iterdir() if p.is_dir()]
+        except Exception:
+            return (True, f"Compartido de clientes inaccesible/no montado: {base_root}")
+
+        expected_alpha_dirs = {"0-9 (NUMEROS)", "A-C", "D-E", "F-J", "K-L", "M-O", "P-U", "V-Z"}
+        visible_alpha_dirs = {p.name for p in root_entries if p.name in expected_alpha_dirs}
+        if not visible_alpha_dirs:
+            return (True, f"Compartido de clientes vacío/no montado en runtime: {base_root}")
         return (True, f"Carpeta de documentación no existe: {ruta_docu}")
     
     # 4. Buscar AUT en la carpeta (solo verificamos existencia, no seleccionamos)

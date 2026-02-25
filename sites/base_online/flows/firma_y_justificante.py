@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import logging
 import re
@@ -12,7 +12,12 @@ import asyncio
 import base64
 from playwright.async_api import Page, TimeoutError
 
-from core.client_documentation import client_identity_from_payload, get_ruta_cliente_documentacion
+from core.client_documentation import client_identity_from_payload
+from core.client_paths import (
+    find_or_create_normalized_subfolder,
+    get_ruta_cliente_documentacion,
+    resolve_client_docs_base_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,32 +32,6 @@ def _normalize_text(text: str) -> str:
     text = str(text).strip().lower()
     text = "".join(c for c in unicodedata.normalize("NFD", text) if unicodedata.category(c) != "Mn")
     return text
-
-
-def _folder_matches(folder_name: str, target_name: str) -> bool:
-    folder_norm = _normalize_text(folder_name)
-    target_norm = _normalize_text(target_name)
-    if folder_norm == target_norm:
-        return True
-    target_words = set(target_norm.split())
-    folder_words = set(folder_norm.split())
-    if target_words.issubset(folder_words):
-        return True
-    target_singular = {w.rstrip("s") for w in target_words}
-    folder_singular = {w.rstrip("s") for w in folder_words}
-    return target_singular == folder_singular
-
-
-def _find_or_create_subfolder(base_path: Path, folder_name: str) -> Path:
-    if not folder_name:
-        return base_path
-    if base_path.exists():
-        for item in base_path.iterdir():
-            if item.is_dir() and _folder_matches(item.name, folder_name):
-                return item
-    new_folder = base_path / folder_name
-    new_folder.mkdir(parents=True, exist_ok=True)
-    return new_folder
 
 
 def _get_folder_name_from_fase(fase_raw: Any) -> str:
@@ -77,14 +56,15 @@ def _get_folder_name_from_fase(fase_raw: Any) -> str:
 
 def _construir_ruta_recursos_telematicos(payload: dict, fase_procedimiento: Any = None) -> Path:
     client = client_identity_from_payload(payload)
-    base_path = r"\\SERVER-DOC\clientes"
+    base_path = resolve_client_docs_base_path()
     ruta_cliente_base = get_ruta_cliente_documentacion(client, base_path=base_path)
+    logger.info("[BASE] Ruta cliente base resuelta a: %s", ruta_cliente_base)
 
-    ruta_recursos = _find_or_create_subfolder(ruta_cliente_base, "RECURSOS TELEMATICOS")
+    ruta_recursos = find_or_create_normalized_subfolder(ruta_cliente_base, "RECURSOS TELEMÁTICOS")
     if fase_procedimiento:
         folder = _get_folder_name_from_fase(fase_procedimiento)
         if folder:
-            return _find_or_create_subfolder(ruta_recursos, folder)
+            return find_or_create_normalized_subfolder(ruta_recursos, folder)
     return ruta_recursos
 
 

@@ -28,6 +28,7 @@ SELECT
     rs.numclient,
     rs.SujetoRecurso,
     rs.FaseProcedimiento,
+    rs.FUsuarioCompletado,
     rs.UsuarioAsignado,
     
     e.matricula,     -- Ahora viene de la tabla expedientes
@@ -52,6 +53,7 @@ LEFT JOIN attachments_resource_documents att ON rs.automatic_id = att.automatic_
 WHERE {organisme_like_clause}
   AND rs.TExp IN ({texp_list})
   AND rs.Estado IN (0, 1)
+  AND rs.FUsuarioCompletado IS NULL
   AND rs.Expedient IS NOT NULL
 ORDER BY rs.Estado ASC, rs.idRecurso ASC
 """
@@ -253,6 +255,24 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 expediente_raw = self._clean_str(recurso.get("Expedient"))
                 estado = int(recurso.get("Estado") or 0)
                 usuario = self._clean_str(recurso.get("UsuarioAsignado"))
+                fecha_completado = recurso.get("FUsuarioCompletado")
+
+                # Excluir de forma defensiva recursos ya completados.
+                if fecha_completado is not None and str(fecha_completado).strip():
+                    if on_discard:
+                        try:
+                            on_discard(
+                                {
+                                    "site_id": self.site_id,
+                                    "idRecurso": rid,
+                                    "Expedient": expediente_raw,
+                                    "tipo_incidencia": "COMPLETED_DISCARDED",
+                                    "motivo": "Recurso descartado por FUsuarioCompletado informado.",
+                                }
+                            )
+                        except Exception:
+                            pass
+                    continue
                 
                 # 1. Validar formato y aplicar correcciones
                 expediente = expediente_raw

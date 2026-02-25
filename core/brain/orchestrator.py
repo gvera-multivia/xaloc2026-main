@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from core.sqlite_db import SQLiteDatabase
 from core.queue_gateway import build_queue_gateway
 from core.realtime_store import build_realtime_store
+from core.runtime_flags import get_queue_mode
 from core.xvia_auth import create_authenticated_session_in_place
 from core.nt_expediente_fixer import is_nt_pattern, fix_nt_expediente
 from core.client_documentation import check_requires_gesdoc
@@ -30,7 +31,8 @@ SYNC_INTERVAL_SECONDS = int(os.getenv("BRAIN_SYNC_INTERVAL", 500))
 TICK_INTERVAL_SECONDS = int(os.getenv("BRAIN_TICK_SECONDS", 5))
 MAX_CLAIMS_PER_CYCLE = int(os.getenv("BRAIN_MAX_CLAIMS", 999999))
 ENABLED_SITES_CSV = os.getenv("BRAIN_ENABLED_SITES", "").strip()
-QUEUE_BACKEND = (os.getenv("QUEUE_BACKEND", "sqlite") or "sqlite").strip().lower()
+QUEUE_BACKEND = (os.getenv("QUEUE_BACKEND", "redis_streams") or "redis_streams").strip().lower()
+QUEUE_MODE = get_queue_mode(QUEUE_BACKEND)
 
 XVIA_EMAIL = os.getenv("XVIA_EMAIL")
 XVIA_PASSWORD = os.getenv("XVIA_PASSWORD")
@@ -111,7 +113,7 @@ class BrainOrchestrator:
         self.logger = logger
         self.session: Optional[aiohttp.ClientSession] = None
         self.authenticated_user: Optional[str] = None
-        self.queue_backend = QUEUE_BACKEND
+        self.queue_backend = QUEUE_MODE
         self.queue_gateway = build_queue_gateway(backend=self.queue_backend, db=self.db)
         self.realtime_store = build_realtime_store(logger=self.logger)
 
@@ -711,6 +713,7 @@ class BrainOrchestrator:
                 filtered_candidates: list[dict] = []
                 skipped_duplicates = 0
                 skipped_blocked = 0
+                skipped_already_completed = 0
                 for cand in candidates:
                     rid = cand.get("idRecurso")
                     try:
@@ -722,12 +725,33 @@ class BrainOrchestrator:
                         if self._is_resource_blocked(site_id=site_id, resource_id=rid_int):
                             skipped_blocked += 1
                             continue
+                        has_successful = False
+                        has_success_check = getattr(self.db, "has_successful_job_for_resource", None)
+                        if callable(has_success_check):
+                            try:
+                                has_successful = bool(
+                                    has_success_check(site_id=site_id, resource_id=rid_int)
+                                )
+                            except Exception:
+                                has_successful = False
+                        if has_successful:
+                            skipped_already_completed += 1
+                            self.logger.info(
+                                "[%s] idRecurso=%s omitido: ya consta como completado/succeeded en PG.",
+                                site_id,
+                                rid_int,
+                            )
+                            continue
                         filtered_candidates.append(cand)
 
                 if skipped_duplicates > 0:
                     self.logger.info(f"[{site_id}] {skipped_duplicates} duplicados omitidos ya presentes en la cola.")
                 if skipped_blocked > 0:
                     self.logger.info(f"[{site_id}] {skipped_blocked} recursos bloqueados omitidos (retry agotado previo).")
+                if skipped_already_completed > 0:
+                    self.logger.info(
+                        f"[{site_id}] {skipped_already_completed} recursos omitidos por ya completados anteriormente."
+                    )
 
                 if not filtered_candidates:
                     continue

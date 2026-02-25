@@ -1,4 +1,4 @@
-﻿"""
+"""
 BaseAutomation: orquestador reusable (Playwright + perfil persistente).
 """
 
@@ -10,9 +10,11 @@ import json
 import logging
 import os
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 from playwright.async_api import async_playwright, BrowserContext, Page
 
@@ -30,6 +32,41 @@ class BaseAutomation:
     _shared_fingerprint: Optional[tuple] = None
     _shared_home_page: Optional[Page] = None
     _shared_lock: Optional[asyncio.Lock] = None
+    _DEFAULT_CERT_PATTERNS: tuple[str, ...] = (
+        "https://sede.madrid.es/*",
+        "https://servcla.madrid.es/*",
+        "https://servpub.madrid.es/*",
+        "https://www.xalocgirona.cat/*",
+        "https://seu.xalocgirona.cat/*",
+        "https://www.base.cat/*",
+        "https://www.baseonline.cat/*",
+        "https://valid.aoc.cat/*",
+        "https://cert.valid.aoc.cat/*",
+        "https://cas.madrid.es/*",
+        "https://pasarela.clave.gob.es/*",
+        "https://[*.]madrid.es/*",
+        "https://[*.]clave.gob.es/*",
+        "https://cas.madrid.es:443/*",
+        "https://pasarela.clave.gob.es:443/*",
+        "https://cert.valid.aoc.cat:443/*",
+        "https://palma.sedipualba.es/*",
+        "https://identificacionssl.sedipualba.es/*",
+    )
+    _DEFAULT_CLIENT_CERT_ORIGINS: tuple[str, ...] = (
+        "https://sede.madrid.es",
+        "https://servcla.madrid.es",
+        "https://servpub.madrid.es",
+        "https://www.xalocgirona.cat",
+        "https://seu.xalocgirona.cat",
+        "https://www.base.cat",
+        "https://www.baseonline.cat",
+        "https://cert.valid.aoc.cat",
+        "https://valid.aoc.cat",
+        "https://cas.madrid.es",
+        "https://pasarela.clave.gob.es",
+        "https://palma.sedipualba.es",
+        "https://identificacionssl.sedipualba.es",
+    )
 
     def __init__(self, config: BaseConfig):
         self.config = config
@@ -75,21 +112,160 @@ class BaseAutomation:
             args.append("--window-size=1920,1080")
 
         if self.config.auto_select_certificate:
-            policy = f'{{"pattern":"{self.config.auto_select_certificate_pattern}","filter":{{}}}}'
-            args.append(f"--auto-select-certificate-for-urls=[{policy}]")
+            use_policy = (os.getenv("XALOC_CERT_AUTOSELECT_VIA_POLICY") or "1").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+            cli_fallback = (os.getenv("XALOC_CERT_AUTOSELECT_CLI_FALLBACK") or "1").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+            should_add_cli_arg = (not use_policy) or cli_fallback
+            if should_add_cli_arg:
+                cert_rules_json = (os.getenv("XALOC_CERT_AUTOSELECT_RULES_JSON") or "").strip()
+                if cert_rules_json:
+                    cert_cn = (self.config.navegador.certificado_cn or "").strip()
+                    rendered = (
+                        cert_rules_json
+                        .replace("__CERT_CN__", cert_cn)
+                        .replace("${CERTIFICADO_CN}", cert_cn)
+                    )
+                    try:
+                        parsed = json.loads(rendered)
+                        normalized = json.dumps(parsed, ensure_ascii=False, separators=(",", ":"))
+                        args.append(f"--auto-select-certificate-for-urls={normalized}")
+                    except Exception as e:
+                        self.logger.warning(
+                            "XALOC_CERT_AUTOSELECT_RULES_JSON invalido (%s). Se aplica fallback de pattern unico.",
+                            e,
+                        )
+                        cert_rules_json = ""
+                if not cert_rules_json:
+                    cert_cn = (self.config.navegador.certificado_cn or "").strip()
+                    cert_filter = {"SUBJECT": {"CN": cert_cn}} if cert_cn else {}
+                    pattern_from_env = (os.getenv("XALOC_CERT_AUTOSELECT_PATTERN") or "").strip()
+                    patterns = [pattern_from_env] if pattern_from_env else list(self._DEFAULT_CERT_PATTERNS)
+                    policy = json.dumps(
+                        [{"pattern": p, "filter": cert_filter} for p in patterns],
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                    args.append(f"--auto-select-certificate-for-urls={policy}")
 
         if self.config.lang:
             args.append(f"--lang={self.config.lang}")
 
+        disable_features: list[str] = []
         if self.config.disable_translate_ui:
-            args.append("--disable-features=TranslateUI")
-
+            disable_features.append("TranslateUI")
         if self.config.autofirma_auto_open:
-            # Intentar reducir prompts al abrir protocolos externos (afirma://).
+            # Evitar bloqueo por dialogo de protocolo externo (afirma://) en Linux/headless.
+            disable_features.append("ExternalProtocolDialog")
             args.append("--protocol-handler-registration-mode=auto")
-            args.append("--enable-features=ExternalProtocolDialogShowAlwaysOpenCheckbox")
+            args.append("--disable-popup-blocking")
+
+        if disable_features:
+            merged_disable_features: list[str] = []
+            existing_args: list[str] = []
+            for arg in args:
+                if arg.startswith("--disable-features="):
+                    current = arg.split("=", 1)[1]
+                    merged_disable_features.extend(
+                        [f.strip() for f in current.split(",") if f.strip()]
+                    )
+                else:
+                    existing_args.append(arg)
+
+            for feature in disable_features:
+                if feature not in merged_disable_features:
+                    merged_disable_features.append(feature)
+
+            args = existing_args
+            args.append(
+                f"--disable-features={','.join(merged_disable_features)}"
+            )
+
+        device_scale_factor = (os.getenv("XALOC_CHROMIUM_DEVICE_SCALE_FACTOR") or "").strip()
+        if device_scale_factor:
+            args.append(f"--force-device-scale-factor={device_scale_factor}")
+
+        if (os.getenv("XALOC_BROWSER_DEBUG") or "0").strip().lower() in {"1", "true", "yes", "on"}:
+            args.extend(
+                [
+                    "--enable-logging=stderr",
+                    "--log-level=0",
+                    "--v=1",
+                ]
+            )
+            if (os.getenv("XALOC_CHROMIUM_NETLOG") or "0").strip().lower() in {"1", "true", "yes", "on"}:
+                args.extend(
+                    [
+                        "--log-net-log=/tmp/chromium-netlog.json",
+                        "--net-log-capture-mode=IncludeSensitive",
+                    ]
+                )
+        if (os.getenv("XALOC_CHROMIUM_REMOTE_DEBUG") or "0").strip().lower() in {"1", "true", "yes", "on"}:
+            remote_debug_port = (os.getenv("XALOC_CHROMIUM_REMOTE_DEBUG_PORT") or "9222").strip() or "9222"
+            args.extend(
+                [
+                    "--remote-debugging-address=0.0.0.0",
+                    f"--remote-debugging-port={remote_debug_port}",
+                ]
+            )
 
         return args
+
+    def _build_client_certificates(self) -> list[dict]:
+        enabled = (os.getenv("PLAYWRIGHT_USE_CLIENT_CERTIFICATES") or "1").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if not enabled:
+            return []
+
+        cert_path = (os.getenv("PLAYWRIGHT_CERT_PATH") or "/data/certificates/certificate.pfx").strip()
+        if not cert_path or not Path(cert_path).exists():
+            return []
+
+        origins_raw = (os.getenv("PLAYWRIGHT_CLIENT_CERT_ORIGINS") or "").strip()
+        if origins_raw:
+            raw_list = [o.strip() for o in origins_raw.split(",") if o.strip()]
+        else:
+            raw_list = list(self._DEFAULT_CLIENT_CERT_ORIGINS)
+
+        origins: list[str] = []
+        for raw in raw_list:
+            try:
+                parsed = urlparse(raw)
+                if parsed.scheme and parsed.netloc:
+                    origin = f"{parsed.scheme}://{parsed.netloc}"
+                    if origin not in origins:
+                        origins.append(origin)
+            except Exception:
+                continue
+
+        if not origins:
+            return []
+
+        passphrase = (os.getenv("PLAYWRIGHT_CERT_PASSWORD") or "").strip()
+        certs: list[dict] = []
+        for origin in origins:
+            item: dict = {"origin": origin, "pfxPath": cert_path}
+            if passphrase:
+                item["passphrase"] = passphrase
+            certs.append(item)
+        self.logger.info(
+            "client_certificates habilitado con %s origen(es): %s",
+            len(certs),
+            ", ".join(origins),
+        )
+        return certs
 
     def _prepare_protocol_preferences(self, user_data_dir: str) -> None:
         if not self.config.autofirma_auto_open:
@@ -147,6 +323,197 @@ class BaseAutomation:
             )
         except Exception as e:
             self.logger.warning("No se pudieron preparar preferencias de protocolo para AutoFirma: %s", e)
+
+    async def _launch_persistent_context_with_fallback(
+        self,
+        *,
+        user_data_dir: str,
+        args: list[str],
+        viewport_kwargs: dict,
+    ) -> BrowserContext:
+        def _cleanup_chromium_singleton_lockfiles() -> None:
+            try:
+                base = Path(user_data_dir)
+                for name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+                    p = base / name
+                    if p.exists():
+                        try:
+                            p.unlink()
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+        def _build_ephemeral_profile_with_cert_db() -> str:
+            src = Path(user_data_dir)
+            tmp = Path(tempfile.mkdtemp(prefix="xaloc_profile_", dir=str(src.parent)))
+            # Mantener prefs mínimas si existen.
+            for name in ("Local State", "Preferences"):
+                for candidate in (src / name, src / "Default" / name):
+                    if not candidate.exists():
+                        continue
+                    dest = tmp / Path("Default") / name if candidate.parent.name == "Default" else tmp / name
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    try:
+                        shutil.copy2(candidate, dest)
+                    except Exception:
+                        pass
+
+            # Importar certificado directamente en NSS del perfil temporal.
+            cert_path = Path(os.getenv("PLAYWRIGHT_CERT_PATH") or "/data/certificates/certificate.pfx")
+            cert_password = os.getenv("PLAYWRIGHT_CERT_PASSWORD") or ""
+            try:
+                if cert_path.exists():
+                    # Chromium puede consultar NSS en rutas distintas segun build/runtime:
+                    # perfil directo o $HOME/.pki/nssdb. Preparamos ambas en el perfil temporal.
+                    db_dirs = [tmp, tmp / ".pki" / "nssdb"]
+                    for db_dir in db_dirs:
+                        db_dir.mkdir(parents=True, exist_ok=True)
+                        subprocess.run(["certutil", "-N", "--empty-password", "-d", f"sql:{db_dir}"], check=True)
+
+                    p12_pass = tmp / ".p12_pass.txt"
+                    db_pass = tmp / ".db_pass.txt"
+                    p12_pass.write_text(cert_password, encoding="utf-8")
+                    db_pass.write_text("\n", encoding="utf-8")
+                    for db_dir in db_dirs:
+                        subprocess.run(
+                            [
+                                "pk12util",
+                                "-i",
+                                str(cert_path),
+                                "-d",
+                                f"sql:{db_dir}",
+                                "-w",
+                                str(p12_pass),
+                                "-k",
+                                str(db_pass),
+                            ],
+                            check=True,
+                        )
+            except Exception as e:
+                self.logger.warning("No se pudo importar certificado en perfil temporal: %s", e)
+            return str(tmp)
+
+        launch_kwargs = dict(
+            user_data_dir=user_data_dir,
+            channel=self.config.navegador.canal,
+            headless=self.config.navegador.headless,
+            args=args,
+            ignore_https_errors=True,
+            accept_downloads=True,
+            **viewport_kwargs,
+        )
+        client_certs = self._build_client_certificates()
+        if client_certs:
+            launch_kwargs["client_certificates"] = client_certs
+        # En runner docker evitamos heredar locks huérfanos entre tareas/contenedores.
+        if (os.getenv("XALOC_FORCE_UNLOCK_PROFILE") or "1").strip().lower() in {"1", "true", "yes", "on"}:
+            _cleanup_chromium_singleton_lockfiles()
+        cert_retry_done = False
+        lock_retry_done = False
+        ephemeral_used = False
+        crash_retry_done = False
+        channel_fallback_done = False
+        display_fallback_done = False
+        allow_headless_on_display_error = (
+            os.getenv("XALOC_ALLOW_HEADLESS_FALLBACK_ON_DISPLAY_ERROR", "0").strip().lower()
+            in {"1", "true", "yes", "on"}
+        )
+
+        while True:
+            try:
+                return await self.playwright.chromium.launch_persistent_context(**launch_kwargs)
+            except Exception as exc:
+                msg = str(exc).lower()
+
+                if (
+                    not cert_retry_done
+                    and "client_certificates" in launch_kwargs
+                    and (
+                        "failed to load client certificate" in msg
+                        or "unsupported tls certificate" in msg
+                        or "legacy provider" in msg
+                    )
+                ):
+                    self.logger.warning(
+                        "Playwright no pudo cargar client_certificates (OpenSSL legacy). "
+                        "Reintentando usando solo NSS del perfil."
+                    )
+                    launch_kwargs.pop("client_certificates", None)
+                    cert_retry_done = True
+                    continue
+
+                if (
+                    "processsingleton" in msg
+                    or "process_singleton" in msg
+                    or "profile appears to be in use" in msg
+                    or "singleton" in msg
+                ):
+                    if not lock_retry_done:
+                        self.logger.warning(
+                            "Chromium profile lock detectado. Limpiando lockfiles y reintentando..."
+                        )
+                        _cleanup_chromium_singleton_lockfiles()
+                        await asyncio.sleep(0.2)
+                        lock_retry_done = True
+                        continue
+                    if not ephemeral_used:
+                        self.logger.warning("Persisten locks del perfil. Fallback a perfil temporal clonado.")
+                        launch_kwargs["user_data_dir"] = _build_ephemeral_profile_with_cert_db()
+                        ephemeral_used = True
+                        lock_retry_done = False
+                        continue
+
+                if (
+                    not crash_retry_done
+                    and "target page, context or browser has been closed" in msg
+                    and ("processsingleton" in msg or "singleton" in msg)
+                ):
+                    self.logger.warning(
+                        "Chromium se cerró durante launch con señal de ProcessSingleton. "
+                        "Limpiando locks y reintentando con perfil temporal."
+                    )
+                    _cleanup_chromium_singleton_lockfiles()
+                    if not ephemeral_used:
+                        launch_kwargs["user_data_dir"] = _build_ephemeral_profile_with_cert_db()
+                        ephemeral_used = True
+                    crash_retry_done = True
+                    await asyncio.sleep(0.2)
+                    continue
+
+                if (
+                    not channel_fallback_done
+                    and "channel" in launch_kwargs
+                    and "msedge" in msg
+                    and ("is not found" in msg or "distribution" in msg)
+                ):
+                    self.logger.warning(
+                        "Canal '%s' no disponible en este entorno. Fallback automatico a Chromium.",
+                        self.config.navegador.canal,
+                    )
+                    launch_kwargs.pop("channel", None)
+                    channel_fallback_done = True
+                    continue
+
+                if (
+                    allow_headless_on_display_error
+                    and not display_fallback_done
+                    and not bool(launch_kwargs.get("headless", False))
+                    and (
+                        "missing x server or $display" in msg
+                        or "the platform failed to initialize" in msg
+                        or "ozone_platform_x11" in msg
+                    )
+                ):
+                    self.logger.warning(
+                        "No hay DISPLAY/X server disponible para Chromium. "
+                        "Reintentando en modo headless para evitar caida del runner."
+                    )
+                    launch_kwargs["headless"] = True
+                    display_fallback_done = True
+                    continue
+
+                raise
 
     async def __aenter__(self):
         await self._start_browser()
@@ -234,14 +601,10 @@ class BaseAutomation:
 
                 self.logger.info("Iniciando navegador con perfil persistente (compartido)...")
                 self.playwright = await async_playwright().start()
-                self.context = await self.playwright.chromium.launch_persistent_context(
+                self.context = await self._launch_persistent_context_with_fallback(
                     user_data_dir=user_data_dir,
-                    channel=self.config.navegador.canal,
-                    headless=self.config.navegador.headless,
                     args=args,
-                    ignore_https_errors=True,
-                    accept_downloads=True,
-                    **viewport_kwargs,
+                    viewport_kwargs=viewport_kwargs,
                 )
 
                 BaseAutomation._shared_playwright = self.playwright
@@ -277,14 +640,10 @@ class BaseAutomation:
 
         self.logger.info("Iniciando navegador con perfil persistente...")
         self.playwright = await async_playwright().start()
-        self.context = await self.playwright.chromium.launch_persistent_context(
+        self.context = await self._launch_persistent_context_with_fallback(
             user_data_dir=user_data_dir,
-            channel=self.config.navegador.canal,
-            headless=self.config.navegador.headless,
             args=args,
-            ignore_https_errors=True,
-            accept_downloads=True,
-            **viewport_kwargs,
+            viewport_kwargs=viewport_kwargs,
         )
 
         if self.config.stealth_disable_webdriver:

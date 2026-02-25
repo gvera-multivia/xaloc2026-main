@@ -14,9 +14,11 @@ from core.errors import RestartWithProfileResetError, RetryWithoutAttemptError
 if TYPE_CHECKING:
     from sites.madrid.config import MadridConfig
 
-from core.client_documentation import (
-    client_identity_from_payload,
+from core.client_documentation import client_identity_from_payload
+from core.client_paths import (
+    find_or_create_normalized_subfolder,
     get_ruta_cliente_documentacion,
+    resolve_client_docs_base_path,
 )
 
 logger = logging.getLogger(__name__)
@@ -96,50 +98,18 @@ def _get_folder_name_from_fase(fase_raw: Any) -> str:
     return ""
 
 
-def _folder_matches(folder_name: str, target_name: str) -> bool:
-    folder_norm = _normalize_text(folder_name)
-    target_norm = _normalize_text(target_name)
-    if folder_norm == target_norm:
-        return True
-
-    target_words = set(target_norm.split())
-    folder_words = set(folder_norm.split())
-    if target_words.issubset(folder_words):
-        return True
-
-    target_singular = {w.rstrip("s") for w in target_words}
-    folder_singular = {w.rstrip("s") for w in folder_words}
-    if target_singular == folder_singular:
-        return True
-
-    return False
-
-
-def _find_or_create_subfolder(base_path: Path, folder_name: str) -> Path:
-    if not folder_name:
-        return base_path
-
-    if base_path.exists():
-        for item in base_path.iterdir():
-            if item.is_dir() and _folder_matches(item.name, folder_name):
-                return item
-
-    new_folder = base_path / folder_name
-    new_folder.mkdir(parents=True, exist_ok=True)
-    return new_folder
-
-
 def _construir_ruta_recursos_telematicos(payload: dict, fase_procedimiento: Any = None) -> Path:
     client = client_identity_from_payload(payload)
-    base_path = r"\\SERVER-DOC\clientes"
+    base_path = resolve_client_docs_base_path()
     ruta_cliente_base = get_ruta_cliente_documentacion(client, base_path=base_path)
+    logger.info("Madrid justificante: ruta cliente base resuelta a %s", ruta_cliente_base)
 
-    ruta_recursos = _find_or_create_subfolder(ruta_cliente_base, "RECURSOS TELEMATICOS")
+    ruta_recursos = find_or_create_normalized_subfolder(ruta_cliente_base, "RECURSOS TELEMÁTICOS")
 
     if fase_procedimiento:
         folder_name = _get_folder_name_from_fase(fase_procedimiento)
         if folder_name:
-            return _find_or_create_subfolder(ruta_recursos, folder_name)
+            return find_or_create_normalized_subfolder(ruta_recursos, folder_name)
 
     return ruta_recursos
 
@@ -430,6 +400,49 @@ async def ejecutar_firma_madrid(
     fase = payload.get("fase_procedimiento")
     id_recurso = payload.get("idRecurso") or destino_descarga.stem
     tmp_dir = Path("tmp") / "madrid" / "justificantes" / str(id_recurso)
+    pendiente_descarga = (
+        bool(payload.get("madrid_tramite_enviado"))
+        and not bool(payload.get("madrid_justificante_descargado", False))
+    )
+    anotacion_pendiente = str(payload.get("madrid_numero_anotacion") or "").strip()
+    if pendiente_descarga and anotacion_pendiente:
+        logger.info(
+            "Madrid: detectado reintento post-envio con justificante pendiente. "
+            "Se intenta descargar directamente desde carpeta (anotacion=%s).",
+            anotacion_pendiente,
+        )
+        expediente_nombre = _extraer_n_expediente(payload)
+        try:
+            tmp_pdf_path = await _descargar_justificante_post_envio_con_recuperacion(
+                page=page,
+                anotacion=anotacion_pendiente,
+                expediente_nombre=expediente_nombre,
+                tmp_dir=tmp_dir,
+            )
+        except MadridJustificantePostEnvioNoDisponible as e:
+            payload["madrid_tramite_enviado"] = True
+            payload["madrid_justificante_descargado"] = False
+            payload["madrid_numero_anotacion"] = e.anotacion
+            payload["madrid_post_envio_refresh_count"] = POST_SEND_REFRESH_ATTEMPTS
+            payload["madrid_post_envio_refresh_wait_seconds"] = int(POST_SEND_REFRESH_WAIT_MS / 1000)
+            payload["madrid_justificante_error"] = str(e)
+            raise
+
+        ruta_recursos = _construir_ruta_recursos_telematicos(payload, fase)
+        try:
+            _mover_justificante_a_destino(tmp_pdf_path, destino_dir=ruta_recursos)
+        except Exception as e:
+            raise MadridFirmaNonFatalError(
+                f"Tramite enviado, pero no se pudo mover el justificante a la carpeta final: {e}"
+            ) from e
+
+        payload["madrid_tramite_enviado"] = True
+        payload["madrid_justificante_descargado"] = True
+        payload["madrid_numero_anotacion"] = anotacion_pendiente
+        payload.pop("madrid_justificante_error", None)
+        logger.info("Madrid: justificante pendiente recuperado correctamente en reintento.")
+        return page
+
     if await _detectar_tramite_en_curso(page):
         raise RestartWithProfileResetError(
             "Madrid: pantalla de 'tramite en curso' detectada antes de iniciar firma."
@@ -539,6 +552,10 @@ async def ejecutar_firma_madrid(
         raise MadridFirmaNonFatalError(
             f"Tramite enviado, pero no se pudo mover el justificante a la carpeta final: {e}"
         ) from e
+    payload["madrid_tramite_enviado"] = True
+    payload["madrid_justificante_descargado"] = True
+    payload["madrid_numero_anotacion"] = anotacion
+    payload.pop("madrid_justificante_error", None)
 
     logger.info("=" * 80)
     logger.info("PROCESO DE FIRMA Y ENVIO COMPLETADO CON EXITO")

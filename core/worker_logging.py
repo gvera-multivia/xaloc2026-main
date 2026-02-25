@@ -8,6 +8,7 @@ def setup_worker_logging(run_id: str) -> logging.Logger:
     logs_dir = Path("logs")
     logs_dir.mkdir(parents=True, exist_ok=True)
     log_path = logs_dir / f"worker_run_{run_id}.log"
+    stable_log_path = logs_dir / "worker_out.log"
 
     root = logging.getLogger()
     for handler in list(root.handlers):
@@ -38,8 +39,16 @@ def setup_worker_logging(run_id: str) -> logging.Logger:
         )
     )
 
+    # Archivo estable para UI (/api/logs/worker)
+    stable_file_handler = logging.FileHandler(stable_log_path, encoding="utf-8")
+    stable_file_handler.setLevel(logging.DEBUG)
+    stable_file_handler.setFormatter(
+        logging.Formatter("%(asctime)s - [WORKER] - %(levelname)s - %(message)s")
+    )
+
     root.addHandler(stream_handler)
     root.addHandler(file_handler)
+    root.addHandler(stable_file_handler)
 
     logger = logging.getLogger("worker")
     logger.setLevel(logging.DEBUG)

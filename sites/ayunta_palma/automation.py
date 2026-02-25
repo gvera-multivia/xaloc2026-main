@@ -14,6 +14,7 @@ from sites.ayunta_palma.flows import (
     registrar_interesado,
     subir_documentos,
 )
+from sites.ayunta_palma.flows.firma_programatica import preparar_captura_afirma_context
 
 
 class AyuntaPalmaAutomation(BaseAutomation):
@@ -26,6 +27,9 @@ class AyuntaPalmaAutomation(BaseAutomation):
             raise RuntimeError("Automation no inicializada (usar 'async with').")
 
         try:
+            if self.context is not None:
+                await preparar_captura_afirma_context(self.context)
+
             self.logger.info("FASE 1: LOGIN EN AYUNTA PALMA")
             self.page = await ejecutar_login(self.page, self.config)
             await self.sync_screencast_with_page()

@@ -1,0 +1,123 @@
+﻿{
+    "result":  "FAILED",
+    "started_at_utc":  "2026-02-20T08:28:14.3280087Z",
+    "finished_at_utc":  "2026-02-20T08:28:19.2839983Z",
+    "duration_seconds":  4.956,
+    "counts":  {
+                   "checks":  21,
+                   "ok":  14,
+                   "warn":  0,
+                   "fail":  7
+               },
+    "files":  {
+                  "log":  "C:\\Users\\Guillem Vera\\Desktop\\Proyectos\\xaloc2026-main\\logs\\migration_validation_20260220_092814.log",
+                  "summary":  "C:\\Users\\Guillem Vera\\Desktop\\Proyectos\\xaloc2026-main\\logs\\migration_validation_20260220_092814.summary.json"
+              },
+    "checks":  [
+                   {
+                       "timestamp":  "2026-02-20T08:28:14.9182988Z",
+                       "level":  "OK",
+                       "message":  "docker compose up ejecutado"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:28:15.3846468Z",
+                       "level":  "OK",
+                       "message":  "dashboard-backend-service recreado"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:28:15.5091901Z",
+                       "level":  "OK",
+                       "message":  "auth-rbac-service listo (http://localhost:8101/health)"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:28:15.5998655Z",
+                       "level":  "OK",
+                       "message":  "dashboard-backend-service listo (http://localhost:8788/openapi.json)"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:28:15.6224099Z",
+                       "level":  "OK",
+                       "message":  "api-gateway listo (http://localhost:8080/health)"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:28:15.6515552Z",
+                       "level":  "OK",
+                       "message":  "playwright-runner-service listo (http://localhost:8111/health)"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:28:15.6767469Z",
+                       "level":  "OK",
+                       "message":  "signing-service listo (http://localhost:8112/health)"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:28:16.1200161Z",
+                       "level":  "OK",
+                       "message":  "Conexion PostgreSQL OK (docker exec psql)"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:28:16.3476888Z",
+                       "level":  "OK",
+                       "message":  "Login dashboard OK (user=TheMorrigan)"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:28:16.4350832Z",
+                       "level":  "OK",
+                       "message":  "/api/auth/me OK"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:28:16.4866651Z",
+                       "level":  "FAIL",
+                       "message":  "/api/pending-auth list fallo: HTTP 500"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:28:16.5573710Z",
+                       "level":  "OK",
+                       "message":  "/api/queue/current OK"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:28:17.0305194Z",
+                       "level":  "OK",
+                       "message":  "pending-auth preparado para approve (id=For more help on how to use Docker, head to https://docs.docker.com/go/guides/)"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:28:17.0375188Z",
+                       "level":  "FAIL",
+                       "message":  "/api/pending-auth/For more help on how to use Docker, head to https://docs.docker.com/go/guides//approve fallo: HTTP 404 "
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:28:17.4728697Z",
+                       "level":  "FAIL",
+                       "message":  "pending-auth For more help on how to use Docker, head to https://docs.docker.com/go/guides/ estado inesperado tras approve: for more help on how to use docker, head to https://docs.docker.com/go/guides/"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:28:17.9273439Z",
+                       "level":  "OK",
+                       "message":  "pending-auth preparado para reject (id=For more help on how to use Docker, head to https://docs.docker.com/go/guides/)"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:28:17.9333241Z",
+                       "level":  "FAIL",
+                       "message":  "/api/pending-auth/For more help on how to use Docker, head to https://docs.docker.com/go/guides//reject fallo: HTTP 404 "
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:28:18.3865101Z",
+                       "level":  "FAIL",
+                       "message":  "pending-auth For more help on how to use Docker, head to https://docs.docker.com/go/guides/ estado inesperado tras reject: for more help on how to use docker, head to https://docs.docker.com/go/guides/"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:28:18.8122631Z",
+                       "level":  "OK",
+                       "message":  "queue item preparado para DELETE (resource_id=1771596758)"
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:28:18.8553354Z",
+                       "level":  "FAIL",
+                       "message":  "/api/queue/items/madrid/1771596758 DELETE fallo: HTTP 400 "
+                   },
+                   {
+                       "timestamp":  "2026-02-20T08:28:19.2809961Z",
+                       "level":  "FAIL",
+                       "message":  "Tabla pending_authorization_queue no existe en PG"
+                   }
+               ]
+}

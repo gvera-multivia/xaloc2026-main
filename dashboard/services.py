@@ -1,29 +1,43 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
 import json
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
 import requests
 
-from core.sqlite_db import SQLiteDatabase
+from core.runtime_flags import get_queue_mode, get_report_pg_dsn, is_pg_source_of_truth_enabled
+from core.redis_client import get_redis_client
 from core.sqlserver_utils import build_sqlserver_connection_string
+from core.pg_admin_store import PgAdminStore
+from core.pg_pending_authorization_store import PgPendingAuthorizationStore
+from core.pg_runtime_store import PgRuntimeStore
+from core.queue_gateway import build_queue_gateway
 from core.xvia_auth import LOGIN_URL, extract_csrf_token
 from .repositories import (
+    PostgresQueueRepository,
     PostgresHistoryRepository,
     SQLServerHistoryRepository,
-    SqliteHistoryRepository,
-    SqliteQueueRepository,
     utc_today_iso,
 )
 
 
 XVIA_HOME_URL = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/home"
 USER_RE = re.compile(r'<i class="fa fa-user-circle"[^>]*></i>\s*([^<]+)')
+
+
+class DashboardNotFoundError(ValueError):
+    pass
+
+
+class DashboardConflictError(ValueError):
+    pass
 
 
 def _fetch_xvia_assigned_user(email: str, password: str, logger: logging.Logger) -> Optional[str]:
@@ -87,6 +101,13 @@ def resolve_dashboard_assigned_user(logger: logging.Logger) -> Optional[str]:
     return _run_fetch_user_sync(email, password, logger)
 
 
+def resolve_dashboard_history_source() -> str:
+    raw = (os.getenv("DASHBOARD_HISTORY_SOURCE") or "pg").strip().lower()
+    if raw in {"sqlserver", "pg", "auto"}:
+        return raw
+    return "pg"
+
+
 class DashboardService:
     def __init__(
         self,
@@ -96,7 +117,6 @@ class DashboardService:
         pg_dsn: str | None = None,
     ):
         self.logger = logging.getLogger("dashboard.service")
-        sqlite_path = sqlite_db_path or os.getenv("SQLITE_DB_PATH", "db/xaloc_database.db")
         sqlserver_assigned_user = resolve_dashboard_assigned_user(self.logger) or ""
         if sqlserver_assigned_user:
             self.logger.info("Filtro de historico SQL Server por UsuarioAsignado=%s", sqlserver_assigned_user)
@@ -107,47 +127,81 @@ class DashboardService:
         except Exception:
             sqlserver_conn_str = ""
 
-        pg_dsn_value = (pg_dsn or os.getenv("REPORT_PG_DSN") or "").strip()
-        lowered = pg_dsn_value.lower()
-        has_valid_pg_dsn = bool(
-            pg_dsn_value
-            and lowered not in {"0", "1", "true", "false", "yes", "no", "on", "off", "enabled", "disabled"}
-            and ("://" in pg_dsn_value or "=" in pg_dsn_value)
-        )
+        pg_dsn_value = get_report_pg_dsn(pg_dsn)
+        has_valid_pg_dsn = bool(pg_dsn_value) and is_pg_source_of_truth_enabled()
+        if not has_valid_pg_dsn:
+            raise RuntimeError("DashboardService requiere PostgreSQL activo. SQLite eliminado.")
         has_valid_sqlserver = bool(sqlserver_conn_str)
-        if has_valid_sqlserver:
+        history_source = resolve_dashboard_history_source()
+        if history_source == "pg" and has_valid_pg_dsn:
+            self.success_history_repo = PostgresHistoryRepository(
+                pg_dsn=pg_dsn_value,
+                logger=self.logger,
+            )
+        elif history_source == "sqlserver" and has_valid_sqlserver:
             self.success_history_repo = SQLServerHistoryRepository(
                 conn_str=sqlserver_conn_str,
                 assigned_user=sqlserver_assigned_user,
                 logger=self.logger,
             )
-        elif has_valid_pg_dsn:
-            self.success_history_repo = PostgresHistoryRepository(
-                pg_dsn=pg_dsn_value,
-                logger=self.logger,
-            )
+        elif history_source == "auto":
+            if has_valid_pg_dsn:
+                self.success_history_repo = PostgresHistoryRepository(
+                    pg_dsn=pg_dsn_value,
+                    logger=self.logger,
+                )
+            elif has_valid_sqlserver:
+                self.success_history_repo = SQLServerHistoryRepository(
+                    conn_str=sqlserver_conn_str,
+                    assigned_user=sqlserver_assigned_user,
+                    logger=self.logger,
+                )
+            else:
+                self.success_history_repo = PostgresHistoryRepository(pg_dsn=pg_dsn_value, logger=self.logger)
         else:
-            self.success_history_repo = SqliteHistoryRepository(
-                sqlite_db_path=sqlite_path,
-                logger=self.logger,
-            )
-        self.incidents_history_repo = SqliteHistoryRepository(
-            sqlite_db_path=sqlite_path,
+            self.success_history_repo = PostgresHistoryRepository(pg_dsn=pg_dsn_value, logger=self.logger)
+        self.incidents_history_repo = PostgresHistoryRepository(pg_dsn=pg_dsn_value, logger=self.logger)
+        resolved_queue_mode = get_queue_mode(queue_backend)
+        self.queue_repo = PostgresQueueRepository(
+            pg_dsn=pg_dsn_value,
             logger=self.logger,
         )
-        self.queue_repo = SqliteQueueRepository(
-            sqlite_db_path=sqlite_path,
-            queue_backend=queue_backend or os.getenv("QUEUE_BACKEND", "sqlite"),
-            logger=self.logger,
-        )
-        self.queue_backend = (queue_backend or os.getenv("QUEUE_BACKEND", "sqlite")).strip().lower()
-        self.db = SQLiteDatabase(db_path=sqlite_path)
+        self.queue_backend = resolved_queue_mode
+        self.runtime_store = PgRuntimeStore(pg_dsn_value, logger=self.logger)
+        self.admin_store = PgAdminStore(pg_dsn_value, logger=self.logger)
+        self.pending_auth_store = PgPendingAuthorizationStore(pg_dsn_value, logger=self.logger)
+
+    @staticmethod
+    def _run_coro_sync(coro):
+        try:
+            asyncio.get_running_loop()
+            loop_running = True
+        except RuntimeError:
+            loop_running = False
+
+        if not loop_running:
+            return asyncio.run(coro)
+
+        result: dict[str, Any] = {"value": None, "error": None}
+
+        def _runner() -> None:
+            try:
+                result["value"] = asyncio.run(coro)
+            except Exception as exc:
+                result["error"] = exc
+
+        t = threading.Thread(target=_runner, daemon=True)
+        t.start()
+        t.join()
+        if result["error"] is not None:
+            raise result["error"]
+        return result["value"]
 
     def _ensure_site_config_exists(self, site_id: str) -> bool:
         site = (site_id or "").strip()
         if not site:
             return False
-        if self.db.get_organismo_config(site):
+        if self.admin_store is not None and self.admin_store.get_organismo_config(site):
             return True
 
         cfg_path = Path("organismo_config.json")
@@ -161,10 +215,45 @@ class DashboardService:
             match = next((c for c in configs if str(c.get("site_id") or "").strip() == site), None)
             if not isinstance(match, dict):
                 return False
-            self.db.upsert_organismo_config(match)
-            return self.db.get_organismo_config(site) is not None
+            self.admin_store.upsert_organismo_config(match)
+            return self.admin_store.get_organismo_config(site) is not None
         except Exception:
             return False
+
+    async def _clear_resource_dedupe_keys_async(self, *, site_id: str, resource_id: int) -> None:
+        site = (site_id or "").strip()
+        rid = int(resource_id)
+        if not site:
+            return
+        redis = get_redis_client()
+        if redis is None:
+            return
+        keys = (
+            f"dedupe:resource:{site}:{rid}",
+            f"brain-claim:resource:{site}:{rid}",
+        )
+        try:
+            await redis.delete(*keys)
+        except Exception as exc:
+            self.logger.warning(
+                "No se pudieron limpiar dedupe keys site=%s resource_id=%s: %s",
+                site,
+                rid,
+                exc,
+            )
+
+    def _clear_resource_dedupe_keys(self, *, site_id: str, resource_id: int) -> None:
+        try:
+            self._run_coro_sync(
+                self._clear_resource_dedupe_keys_async(site_id=site_id, resource_id=resource_id)
+            )
+        except Exception as exc:
+            self.logger.warning(
+                "Fallo limpiando dedupe keys site=%s resource_id=%s: %s",
+                site_id,
+                resource_id,
+                exc,
+            )
 
     @staticmethod
     def _worker_runtime_timeout_seconds() -> int:
@@ -219,7 +308,7 @@ class DashboardService:
         return self.queue_repo.get_completion_marker(day=day_value)
 
     def list_processing_pauses(self, *, active_only: bool = True) -> list[dict[str, Any]]:
-        return self.db.list_site_processing_pauses(active_only=active_only)
+        return self.runtime_store.list_site_processing_pauses(active_only=active_only)
 
     def pause_site_processing(
         self,
@@ -238,7 +327,7 @@ class DashboardService:
                 raise ValueError("minutes debe ser > 0.")
             expires_at = (datetime.now() + timedelta(minutes=int(minutes))).isoformat()
 
-        self.db.set_site_processing_pause(
+        self.runtime_store.set_site_processing_pause(
             site_id=site,
             reason=(reason or "").strip() or None,
             expires_at=expires_at,
@@ -254,11 +343,11 @@ class DashboardService:
         site = (site_id or "").strip()
         if not site:
             raise ValueError("site_id es obligatorio.")
-        removed = self.db.clear_site_processing_pause(site_id=site)
+        removed = self.runtime_store.clear_site_processing_pause(site_id=site)
         return {"site_id": site, "paused": False, "removed": bool(removed)}
 
     def list_item_processing_pauses(self, *, active_only: bool = True) -> list[dict[str, Any]]:
-        return self.db.list_resource_processing_pauses(active_only=active_only)
+        return self.runtime_store.list_resource_processing_pauses(active_only=active_only)
 
     def pause_queue_item_processing(
         self,
@@ -282,7 +371,7 @@ class DashboardService:
                 raise ValueError("minutes debe ser > 0.")
             expires_at = (datetime.now() + timedelta(minutes=int(minutes))).isoformat()
 
-        self.db.set_resource_processing_pause(
+        self.runtime_store.set_resource_processing_pause(
             site_id=site,
             resource_id=rid,
             reason=(reason or "").strip() or None,
@@ -305,7 +394,7 @@ class DashboardService:
         except Exception as exc:
             raise ValueError("resource_id debe ser entero.") from exc
 
-        removed = self.db.clear_resource_processing_pause(site_id=site, resource_id=rid)
+        removed = self.runtime_store.clear_resource_processing_pause(site_id=site, resource_id=rid)
         return {"site_id": site, "resource_id": rid, "paused": False, "removed": bool(removed)}
 
     def recover_stuck_queue_items(
@@ -317,7 +406,7 @@ class DashboardService:
         resource_id: int | None = None,
     ) -> dict[str, Any]:
         timeout = int(heartbeat_timeout_seconds or self._worker_runtime_timeout_seconds())
-        result = self.db.reconcile_processing_with_worker_runtime(
+        result = self.runtime_store.reconcile_processing_with_worker_runtime(
             heartbeat_timeout_seconds=timeout,
             limit=max(1, int(limit)),
             site_id=(site_id or "").strip() or None,
@@ -342,7 +431,7 @@ class DashboardService:
             raise ValueError("resource_id debe ser entero.") from exc
 
         timeout = int(heartbeat_timeout_seconds or self._worker_runtime_timeout_seconds())
-        result = self.db.reconcile_processing_with_worker_runtime(
+        result = self.runtime_store.reconcile_processing_with_worker_runtime(
             heartbeat_timeout_seconds=timeout,
             limit=100,
             site_id=site,
@@ -371,41 +460,64 @@ class DashboardService:
         except Exception as exc:
             raise ValueError("resource_id debe ser entero.") from exc
 
-        if self.queue_backend != "sqlite":
-            raise ValueError("Eliminar elementos de cola solo esta soportado en QUEUE_BACKEND=sqlite.")
+        remove_result = self.queue_repo.cancel_queue_item(site_id=site, resource_id=rid)
+        if remove_result.get("removed"):
+            self._clear_resource_dedupe_keys(site_id=site, resource_id=rid)
+            return {
+                "removed": True,
+                "site_id": site,
+                "resource_id": rid,
+                "reason": remove_result.get("reason") or "removed",
+                "job_id": remove_result.get("job_id"),
+                "recovered_processing": False,
+                "recovery_attempted": False,
+                "recovery_reason": None,
+                "recovery_heartbeat_timeout_seconds": None,
+            }
 
-        result = self.db.remove_pending_queue_item(site_id=site, resource_id=rid)
-        if not result.get("removed") and (result.get("reason") or "") == "status_processing":
-            recovered = self.recover_queue_item_processing(
-                site_id=site,
-                resource_id=rid,
-            )
-            if recovered.get("released"):
-                result = self.db.remove_pending_queue_item(site_id=site, resource_id=rid)
-                if result.get("removed"):
-                    result["recovered_processing"] = True
-                else:
-                    result["recovered_processing"] = True
-                    result["recovered_but_not_removed"] = True
-            else:
-                result["recovery_attempted"] = True
-                result["recovery_reason"] = recovered.get("reason")
-                result["recovery_heartbeat_timeout_seconds"] = recovered.get("heartbeat_timeout_seconds")
+        reason = str(remove_result.get("reason") or "unknown")
+        if reason != "processing":
+            return {
+                "removed": False,
+                "site_id": site,
+                "resource_id": rid,
+                "reason": reason,
+                "recovered_processing": False,
+                "recovery_attempted": False,
+                "recovery_reason": None,
+                "recovery_heartbeat_timeout_seconds": None,
+            }
 
-        if result.get("removed"):
-            self.db.clear_resource_processing_pause(site_id=site, resource_id=rid)
-            job_id = result.get("job_id")
-            if job_id:
-                self.db.update_job_run_state(
-                    str(job_id),
-                    "cancelled",
-                    finished=True,
-                    error_message="Cancelado manualmente desde dashboard.",
-                )
-        return result
+        recovery = self.recover_queue_item_processing(site_id=site, resource_id=rid)
+        if not recovery.get("released"):
+            return {
+                "removed": False,
+                "site_id": site,
+                "resource_id": rid,
+                "reason": "processing_owner_alive_or_not_recoverable",
+                "recovered_processing": False,
+                "recovery_attempted": True,
+                "recovery_reason": recovery.get("reason"),
+                "recovery_heartbeat_timeout_seconds": recovery.get("heartbeat_timeout_seconds"),
+            }
+
+        remove_result_after = self.queue_repo.cancel_queue_item(site_id=site, resource_id=rid)
+        if remove_result_after.get("removed"):
+            self._clear_resource_dedupe_keys(site_id=site, resource_id=rid)
+        return {
+            "removed": bool(remove_result_after.get("removed")),
+            "site_id": site,
+            "resource_id": rid,
+            "reason": remove_result_after.get("reason") or "unknown",
+            "job_id": remove_result_after.get("job_id"),
+            "recovered_processing": True,
+            "recovery_attempted": True,
+            "recovery_reason": recovery.get("reason"),
+            "recovery_heartbeat_timeout_seconds": recovery.get("heartbeat_timeout_seconds"),
+        }
 
     def list_blacklist(self, *, site_id: str | None = None) -> list[dict[str, Any]]:
-        return self.db.list_blocked_resources(site_id=site_id)
+        return self.admin_store.list_blocked_resources(site_id=site_id)
 
     def block_blacklist(
         self,
@@ -422,7 +534,7 @@ class DashboardService:
             rid = int(resource_id)
         except Exception as exc:
             raise ValueError("resource_id debe ser entero.") from exc
-        self.db.block_resource(
+        self.admin_store.block_resource(
             site_id=site,
             resource_id=rid,
             reason=(reason or "").strip() or None,
@@ -438,11 +550,16 @@ class DashboardService:
             rid = int(resource_id)
         except Exception as exc:
             raise ValueError("resource_id debe ser entero.") from exc
-        removed = self.db.unblock_resource(site_id=site, resource_id=rid)
+        removed = self.admin_store.unblock_resource(site_id=site, resource_id=rid)
+        if removed:
+            self._clear_resource_dedupe_keys(site_id=site, resource_id=rid)
         return {"site_id": site, "resource_id": rid, "unblocked": bool(removed)}
 
     def list_organismo_configs(self) -> list[dict[str, Any]]:
-        return self.db.list_organismo_configs()
+        seeded = self.admin_store.seed_organismo_config_if_empty()
+        if seeded:
+            self.logger.info("Seed organismo_config en PG: %s", seeded)
+        return self.admin_store.list_organismo_configs()
 
     def update_organismo_config(self, *, site_id: str, updates: dict[str, Any]) -> dict[str, Any]:
         site = (site_id or "").strip()
@@ -450,26 +567,26 @@ class DashboardService:
             raise ValueError("site_id es obligatorio.")
         if "active" in updates:
             updates["active"] = 1 if bool(updates["active"]) else 0
-        updated = self.db.update_organismo_config(site_id=site, updates=updates)
+        updated = self.admin_store.update_organismo_config(site_id=site, updates=updates)
         if not updated:
             raise ValueError("No se actualizo configuracion: site no existe o payload vacio.")
-        row = self.db.get_organismo_config(site)
+        row = self.admin_store.get_organismo_config(site)
         return {"updated": True, "item": row}
 
     def set_organismo_active(self, *, site_id: str, active: bool) -> dict[str, Any]:
         site = (site_id or "").strip()
         if not site:
             raise ValueError("site_id es obligatorio.")
-        row = self.db.get_organismo_config(site)
+        row = self.admin_store.get_organismo_config(site)
         if not row:
             created = self._ensure_site_config_exists(site)
             if not created:
                 raise ValueError(f"site_id no existe en organismo_config: {site}")
-            row = self.db.get_organismo_config(site)
-        updated = self.db.update_organismo_config(site_id=site, updates={"active": 1 if bool(active) else 0})
+            row = self.admin_store.get_organismo_config(site)
+        updated = self.admin_store.update_organismo_config(site_id=site, updates={"active": bool(active)})
         if not updated:
             raise ValueError("No se pudo actualizar el estado activo del organismo.")
-        row = self.db.get_organismo_config(site)
+        row = self.admin_store.get_organismo_config(site)
         return {"updated": True, "item": row}
 
     # ==========================================================================
@@ -479,24 +596,86 @@ class DashboardService:
     def list_pending_authorizations(
         self, *, authorization_type: str | None = None
     ) -> dict[str, Any]:
-        items = self.db.get_pending_authorizations(authorization_type=authorization_type)
-        return {"items": items, "total": len(items)}
+        auth_type = (authorization_type or "").strip() or None
+        items = self.pending_auth_store.list_pending_authorizations(authorization_type=auth_type)
+        return {
+            "items": items,
+            "total": len(items),
+        }
 
     def approve_pending_authorization(
         self, *, pending_id: int, authorized_by: str = "dashboard"
     ) -> dict[str, Any]:
-        new_task_id = self.db.authorize_and_move_to_queue(
-            pending_id=pending_id,
-            authorized_by=authorized_by,
-        )
-        if new_task_id is None:
-            raise ValueError(
-                f"No se pudo aprobar la tarea {pending_id}: no encontrada o ya procesada."
+        pid = int(pending_id)
+        user = (authorized_by or "").strip() or "dashboard"
+
+        pending = self.pending_auth_store.get_pending_authorization(pending_id=pid)
+        if not pending:
+            return {
+                "ok": True,
+                "pending_id": pid,
+                "noop": True,
+                "reason": "pending_not_found",
+            }
+        if str(pending.get("status") or "").strip().lower() != "pending":
+            return {
+                "ok": True,
+                "pending_id": pid,
+                "noop": True,
+                "reason": "pending_not_in_pending_status",
+            }
+
+        site_id = str(pending.get("site_id") or "").strip()
+        if not site_id:
+            raise ValueError(f"pending_id {pid} sin site_id.")
+        payload = dict(pending.get("payload") or {})
+        if not payload:
+            raise ValueError(f"pending_id {pid} sin payload.")
+
+        protocol = payload.get("protocol") or payload.get("naturaleza")
+        if protocol is not None:
+            protocol = str(protocol).strip() or None
+        if site_id == "base_online" and protocol:
+            protocol = str(protocol).upper()
+        if site_id == "base_online" and not protocol:
+            protocol = "GENERIC"
+
+        queue_gateway = build_queue_gateway(backend=self.queue_backend, db=self.runtime_store)
+        enqueued, job_id = self._run_coro_sync(
+            queue_gateway.enqueue(
+                site_id=site_id,
+                protocol=protocol,
+                payload=payload,
             )
+        )
+        notes = f"job_id={job_id};enqueued={bool(enqueued)}"
+        marked = self.pending_auth_store.mark_pending_as_moved_to_queue(
+            pending_id=pid,
+            authorized_by=user,
+            notes=notes,
+        )
+        if not marked:
+            return {
+                "ok": True,
+                "pending_id": pid,
+                "authorized_by": user,
+                "site_id": site_id,
+                "resource_id": pending.get("resource_id"),
+                "job_id": job_id,
+                "enqueued": bool(enqueued),
+                "moved_to_queue": False,
+                "noop": True,
+                "reason": "pending_state_changed_before_mark",
+            }
         return {
-            "approved": True,
-            "pending_id": pending_id,
-            "new_task_id": new_task_id,
+            "ok": True,
+            "pending_id": pid,
+            "authorized_by": user,
+            "site_id": site_id,
+            "resource_id": pending.get("resource_id"),
+            "job_id": job_id,
+            "enqueued": bool(enqueued),
+            "moved_to_queue": True,
         }
 
     def reject_pending_authorization(
@@ -506,16 +685,48 @@ class DashboardService:
         reason: str,
         rejected_by: str = "dashboard",
     ) -> dict[str, Any]:
-        ok = self.db.reject_pending_authorization(
-            pending_id=pending_id,
-            reason=reason,
-            rejected_by=rejected_by,
+        pid = int(pending_id)
+        reject_reason = (reason or "").strip()
+        user = (rejected_by or "").strip() or "dashboard"
+        if not reject_reason:
+            raise ValueError("reason es obligatorio.")
+        pending = self.pending_auth_store.get_pending_authorization(pending_id=pid)
+        if not pending:
+            return {
+                "ok": True,
+                "pending_id": pid,
+                "noop": True,
+                "reason": "pending_not_found",
+            }
+        if str(pending.get("status") or "").strip().lower() != "pending":
+            return {
+                "ok": True,
+                "pending_id": pid,
+                "noop": True,
+                "reason": "pending_not_in_pending_status",
+            }
+        rejected = self.pending_auth_store.reject_pending_authorization(
+            pending_id=pid,
+            reason=reject_reason,
+            rejected_by=user,
         )
-        if not ok:
-            raise ValueError(
-                f"No se pudo rechazar la tarea {pending_id}: no encontrada o ya procesada."
-            )
-        return {"rejected": True, "pending_id": pending_id}
+        if not rejected:
+            return {
+                "ok": True,
+                "pending_id": pid,
+                "rejected_by": user,
+                "reason": reject_reason,
+                "rejected": False,
+                "noop": True,
+                "state_changed": True,
+            }
+        return {
+            "ok": True,
+            "pending_id": pid,
+            "rejected_by": user,
+            "reason": reject_reason,
+            "rejected": True,
+        }
 
     # ==========================================================================
     # CLIENT FOLDER RESOLVER
@@ -536,9 +747,9 @@ class DashboardService:
             from core.client_documentation import (
                 client_identity_from_payload,
             )
-            from core.client_paths import get_ruta_cliente_documentacion
+            from core.client_paths import get_ruta_cliente_documentacion, resolve_client_docs_base_path
 
-            base_path = os.getenv("CLIENT_DOCS_BASE_PATH") or r"\\SERVER-DOC\clientes"
+            base_path = resolve_client_docs_base_path()
             client = client_identity_from_payload(payload)
             ruta_base = get_ruta_cliente_documentacion(client, base_path=base_path)
             ruta = ruta_base / "RECURSOS TELEMATICOS"
