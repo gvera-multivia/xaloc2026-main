@@ -159,13 +159,39 @@ class BaseAutomation:
         if self.config.lang:
             args.append(f"--lang={self.config.lang}")
 
+        disable_features: list[str] = []
         if self.config.disable_translate_ui:
-            args.append("--disable-features=TranslateUI")
-
+            disable_features.append("TranslateUI")
         if self.config.autofirma_auto_open:
-            # Intentar reducir prompts al abrir protocolos externos (afirma://).
+            # Evitar bloqueo por dialogo de protocolo externo (afirma://) en Linux/headless.
+            disable_features.append("ExternalProtocolDialog")
             args.append("--protocol-handler-registration-mode=auto")
-            args.append("--enable-features=ExternalProtocolDialogShowAlwaysOpenCheckbox")
+            args.append("--disable-popup-blocking")
+
+        if disable_features:
+            merged_disable_features: list[str] = []
+            existing_args: list[str] = []
+            for arg in args:
+                if arg.startswith("--disable-features="):
+                    current = arg.split("=", 1)[1]
+                    merged_disable_features.extend(
+                        [f.strip() for f in current.split(",") if f.strip()]
+                    )
+                else:
+                    existing_args.append(arg)
+
+            for feature in disable_features:
+                if feature not in merged_disable_features:
+                    merged_disable_features.append(feature)
+
+            args = existing_args
+            args.append(
+                f"--disable-features={','.join(merged_disable_features)}"
+            )
+
+        device_scale_factor = (os.getenv("XALOC_CHROMIUM_DEVICE_SCALE_FACTOR") or "").strip()
+        if device_scale_factor:
+            args.append(f"--force-device-scale-factor={device_scale_factor}")
 
         if (os.getenv("XALOC_BROWSER_DEBUG") or "0").strip().lower() in {"1", "true", "yes", "on"}:
             args.extend(
@@ -182,6 +208,14 @@ class BaseAutomation:
                         "--net-log-capture-mode=IncludeSensitive",
                     ]
                 )
+        if (os.getenv("XALOC_CHROMIUM_REMOTE_DEBUG") or "0").strip().lower() in {"1", "true", "yes", "on"}:
+            remote_debug_port = (os.getenv("XALOC_CHROMIUM_REMOTE_DEBUG_PORT") or "9222").strip() or "9222"
+            args.extend(
+                [
+                    "--remote-debugging-address=0.0.0.0",
+                    f"--remote-debugging-port={remote_debug_port}",
+                ]
+            )
 
         return args
 
@@ -378,6 +412,7 @@ class BaseAutomation:
         cert_retry_done = False
         lock_retry_done = False
         ephemeral_used = False
+        crash_retry_done = False
         channel_fallback_done = False
         display_fallback_done = False
         allow_headless_on_display_error = (
@@ -428,6 +463,23 @@ class BaseAutomation:
                         ephemeral_used = True
                         lock_retry_done = False
                         continue
+
+                if (
+                    not crash_retry_done
+                    and "target page, context or browser has been closed" in msg
+                    and ("processsingleton" in msg or "singleton" in msg)
+                ):
+                    self.logger.warning(
+                        "Chromium se cerró durante launch con señal de ProcessSingleton. "
+                        "Limpiando locks y reintentando con perfil temporal."
+                    )
+                    _cleanup_chromium_singleton_lockfiles()
+                    if not ephemeral_used:
+                        launch_kwargs["user_data_dir"] = _build_ephemeral_profile_with_cert_db()
+                        ephemeral_used = True
+                    crash_retry_done = True
+                    await asyncio.sleep(0.2)
+                    continue
 
                 if (
                     not channel_fallback_done

@@ -4,6 +4,7 @@ import asyncio
 import os
 import json
 import logging
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from typing import Any, Optional
 from pathlib import Path
 from datetime import datetime, timezone
@@ -612,6 +613,38 @@ async def api_queue_completion_marker(
 from pathlib import Path as _Path
 
 _LIVE_FRAME_PATH = _Path(__file__).parent.absolute() / "screenshots" / "live_frame.jpg"
+
+
+def _novnc_force_local_scale(url: str) -> str:
+    """Force noVNC local scaling (resize=scale) as default behavior."""
+    parts = urlsplit(url)
+    query_pairs = parse_qsl(parts.query, keep_blank_values=True)
+    filtered_pairs = [(k, v) for k, v in query_pairs if k.lower() != "resize"]
+    filtered_pairs.append(("resize", "scale"))
+    new_query = urlencode(filtered_pairs, doseq=True)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, parts.fragment))
+
+
+@app.get("/api/queue/live-viewer")
+async def api_queue_live_viewer(request: Request, _user: dict = Depends(require_user)) -> dict:
+    visual_enabled = (os.getenv("XALOC_VISUAL_DEBUG") or "1").strip().lower() in {"1", "true", "yes", "on"}
+    if not visual_enabled:
+        return {"enabled": False, "novnc_url": None}
+
+    explicit_url = (os.getenv("XALOC_NOVNC_PUBLIC_URL") or "").strip()
+    if explicit_url:
+        return {"enabled": True, "novnc_url": _novnc_force_local_scale(explicit_url)}
+
+    scheme = request.url.scheme or "http"
+    host = request.url.hostname or "localhost"
+    port = int((os.getenv("XALOC_NOVNC_PUBLIC_PORT") or "6080").strip() or "6080")
+    novnc_quality = (os.getenv("XALOC_NOVNC_QUALITY") or "9").strip() or "9"
+    novnc_compression = (os.getenv("XALOC_NOVNC_COMPRESSION") or "0").strip() or "0"
+    novnc_url = (
+        f"{scheme}://{host}:{port}/vnc.html"
+        f"?autoconnect=1&quality={novnc_quality}&compression={novnc_compression}&resize=scale"
+    )
+    return {"enabled": True, "novnc_url": novnc_url}
 
 
 @app.get("/api/queue/live-screenshot")

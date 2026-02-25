@@ -204,6 +204,37 @@ class PgRuntimeStore:
                 )
                 return cur.fetchone() is not None
 
+    def has_successful_job_for_resource(self, *, site_id: str, resource_id: int) -> bool:
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT 1
+                    FROM jobs
+                    WHERE status IN ('completed', 'succeeded')
+                      AND COALESCE(payload_json->>'site_id', split_part(dedup_key, ':', 1), '') = %s
+                      AND COALESCE(
+                            CASE
+                                WHEN (payload_json->>'idRecurso') ~ '^[0-9]+$'
+                                    THEN (payload_json->>'idRecurso')::bigint
+                                WHEN (payload_json->>'idRecurso') ~ '^[0-9]+\\.0+$'
+                                    THEN ((payload_json->>'idRecurso')::numeric)::bigint
+                                ELSE NULL
+                            END,
+                            CASE
+                                WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+$'
+                                    THEN split_part(dedup_key, ':', 2)::bigint
+                                WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+\\.0+$'
+                                    THEN (split_part(dedup_key, ':', 2)::numeric)::bigint
+                                ELSE NULL
+                            END
+                      ) = %s
+                    LIMIT 1
+                    """,
+                    (str(site_id), int(resource_id)),
+                )
+                return cur.fetchone() is not None
+
     # Worker runtime API
     def upsert_worker_runtime(
         self,

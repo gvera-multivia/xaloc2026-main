@@ -27,6 +27,12 @@ async def execute_browser_flow(
     original_payload = dict(payload)
     prev_keep_browser_open = os.getenv("XALOC_KEEP_BROWSER_OPEN")
     prev_keep_tab_open = os.getenv("XALOC_KEEP_TAB_OPEN")
+    screencast_enabled = (os.getenv("XALOC_ENABLE_CDP_SCREENCAST") or "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     try:
         controller = get_site_controller(site_id)
         AutomationCls = get_site(site_id)
@@ -62,10 +68,11 @@ async def execute_browser_flow(
             os.environ["XALOC_KEEP_TAB_OPEN"] = "0" if site_id == "ayunta_palma" else "1"
 
         async with AutomationCls(config) as bot:
-            try:
-                await bot.start_screencast()
-            except Exception as exc:
-                logger.warning("No se pudo iniciar screencast: %s", exc)
+            if screencast_enabled:
+                try:
+                    await bot.start_screencast()
+                except Exception as exc:
+                    logger.warning("No se pudo iniciar screencast: %s", exc)
             try:
                 screenshot_path = await bot.ejecutar_flujo_completo(datos)
             except RestartRequiredError as e:
@@ -135,10 +142,11 @@ async def execute_browser_flow(
                     payload_updates=payload_updates,
                 )
             finally:
-                try:
-                    await bot.stop_screencast()
-                except Exception:
-                    pass
+                if screencast_enabled:
+                    try:
+                        await bot.stop_screencast()
+                    except Exception:
+                        pass
     finally:
         if prev_keep_browser_open is None:
             os.environ.pop("XALOC_KEEP_BROWSER_OPEN", None)

@@ -2,29 +2,45 @@
 
 import React, { useEffect, useState } from "react";
 import { Monitor } from "lucide-react";
+import { queueApi } from "@/lib/api";
 
 interface LiveScreencastProps {
   live?: boolean;
 }
 
-const STREAM_POLL_MS = 700;
-
 export default function LiveScreencast({ live = false }: LiveScreencastProps) {
-  const [tick, setTick] = useState(0);
+  const [viewerUrl, setViewerUrl] = useState("");
+  const [viewerEnabled, setViewerEnabled] = useState(false);
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
-  const frameSrc = live ? `/api/queue/live-screenshot?t=${tick}` : "";
 
   useEffect(() => {
-    if (!live) {
-      return;
-    }
-    setTimeout(() => setTick(Date.now()), 0);
-    const timer = setInterval(() => setTick(Date.now()), STREAM_POLL_MS);
+    let mounted = true;
+    (async () => {
+      try {
+        const cfg = await queueApi.getLiveViewer();
+        if (!mounted) {
+          return;
+        }
+        setViewerEnabled(!!cfg.enabled);
+        setViewerUrl(cfg.novnc_url || "");
+        setError(!cfg.enabled || !cfg.novnc_url);
+      } catch {
+        if (mounted) {
+          setViewerEnabled(false);
+          setViewerUrl("");
+          setError(true);
+        }
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    })();
     return () => {
-      clearInterval(timer);
+      mounted = false;
     };
-  }, [live]);
+  }, []);
 
   return (
     <div
@@ -80,27 +96,26 @@ export default function LiveScreencast({ live = false }: LiveScreencastProps) {
             </div>
           </div>
         </div>
-      ) : error && !frameSrc ? (
-        <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <p className="text-sm text-white/40 tracking-widest uppercase">No Signal</p>
-        </div>
-      ) : !frameSrc ? (
+      ) : loading ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center">
           <p className="text-sm text-white/40 tracking-widest uppercase">Connecting...</p>
         </div>
+      ) : error || !viewerEnabled ? (
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <p className="text-sm text-white/40 tracking-widest uppercase">Viewer Unavailable</p>
+        </div>
       ) : (
-        <img
-          src={frameSrc}
-          alt="Live Stream"
-          className="absolute inset-0 w-full h-full object-contain transition-opacity duration-300"
+        <iframe
+          src={viewerUrl}
+          title="Playwright noVNC Viewer"
+          className="absolute inset-0 w-full h-full border-0 transition-opacity duration-300"
+          allow="clipboard-read; clipboard-write"
           onLoad={() => {
             setLoading(false);
             setError(false);
           }}
-          onError={() => {
-            setError(true);
-          }}
-          style={{ opacity: loading ? 0.35 : 1 }}
+          onError={() => setError(true)}
+          style={{ opacity: loading ? 0.35 : 1, background: "#050608" }}
         />
       )}
 

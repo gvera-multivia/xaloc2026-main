@@ -11,6 +11,8 @@ AUTOSELECT_POLICY_ENABLED="${XALOC_CERT_AUTOSELECT_VIA_POLICY:-1}"
 AUTOSELECT_RULES_JSON="${XALOC_CERT_AUTOSELECT_RULES_JSON:-}"
 AUTOSELECT_PATTERN="${XALOC_CERT_AUTOSELECT_PATTERN:-}"
 URL_CERT_CONFIG_BAT="${XALOC_URL_CERT_CONFIG_BAT_PATH:-/app/url-cert-config.bat}"
+AFIRMA_ORIGIN="${XALOC_AUTOFIRMA_ORIGIN:-https://palma.sedipualba.es}"
+AFIRMA_PROTOCOL_POLICY_ENABLED="${XALOC_AUTOFIRMA_PROTOCOL_POLICY_ENABLED:-1}"
 
 # En algunos entornos compose/Windows, HOME puede llegar corrupto (ej. C:Users...).
 # Forzamos un HOME Linux estable para que Chromium localice NSS correctamente.
@@ -25,7 +27,7 @@ write_autoselect_policy() {
     return 0
   fi
 
-  mkdir -p /etc/chromium/policies/managed /etc/opt/chrome/policies/managed /etc/opt/chrome_for_testing/policies/managed
+  mkdir -p /etc/chromium/policies/managed /etc/opt/chrome/policies/managed /etc/opt/chrome_for_testing/policies/managed /etc/opt/edge/policies/managed
 
   local filter_mode="none"
   if [[ "${CERT_FILTER_BY_CN,,}" == "1" || "${CERT_FILTER_BY_CN,,}" == "true" || "${CERT_FILTER_BY_CN,,}" == "yes" || "${CERT_FILTER_BY_CN,,}" == "on" ]]; then
@@ -105,6 +107,7 @@ for out_file in [
     pathlib.Path("/etc/chromium/policies/managed/xaloc-cert-policy.json"),
     pathlib.Path("/etc/opt/chrome/policies/managed/xaloc-cert-policy.json"),
     pathlib.Path("/etc/opt/chrome_for_testing/policies/managed/xaloc-cert-policy.json"),
+    pathlib.Path("/etc/opt/edge/policies/managed/xaloc-cert-policy.json"),
 ]:
     out_file.parent.mkdir(parents=True, exist_ok=True)
     out_file.write_text(json.dumps(policy_doc, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -115,6 +118,55 @@ print("[playwright-runner] filter_mode =", filter_mode)
 if cert_cn:
     print("[playwright-runner] CERT_CN =", cert_cn)
 PY
+}
+
+write_afirma_protocol_policy() {
+  if [[ "${AFIRMA_PROTOCOL_POLICY_ENABLED,,}" != "1" && "${AFIRMA_PROTOCOL_POLICY_ENABLED,,}" != "true" && "${AFIRMA_PROTOCOL_POLICY_ENABLED,,}" != "yes" && "${AFIRMA_PROTOCOL_POLICY_ENABLED,,}" != "on" ]]; then
+    echo "[playwright-runner] AutoLaunchProtocolsFromOrigins desactivada (XALOC_AUTOFIRMA_PROTOCOL_POLICY_ENABLED=$AFIRMA_PROTOCOL_POLICY_ENABLED)."
+    return 0
+  fi
+
+  mkdir -p /etc/chromium/policies/managed /etc/opt/chrome/policies/managed /etc/opt/chrome_for_testing/policies/managed /etc/opt/edge/policies/managed
+  export AFIRMA_ORIGIN
+  python3 <<'PY'
+import json
+import os
+import pathlib
+
+origin = (os.getenv("AFIRMA_ORIGIN") or "https://palma.sedipualba.es").strip()
+policy_doc = {
+    "AutoLaunchProtocolsFromOrigins": [
+        {
+            "protocol": "afirma",
+            "allowed_origins": [origin],
+        }
+    ]
+}
+
+for out_file in [
+    pathlib.Path("/etc/chromium/policies/managed/xaloc-afirma-policy.json"),
+    pathlib.Path("/etc/opt/chrome/policies/managed/xaloc-afirma-policy.json"),
+    pathlib.Path("/etc/opt/chrome_for_testing/policies/managed/xaloc-afirma-policy.json"),
+    pathlib.Path("/etc/opt/edge/policies/managed/xaloc-afirma-policy.json"),
+]:
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    out_file.write_text(json.dumps(policy_doc, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"[playwright-runner] Policy escrita: {out_file}")
+
+print("[playwright-runner] AutoLaunchProtocolsFromOrigins aplicado para origin:", origin)
+PY
+}
+
+register_afirma_xdg_handler() {
+  local app_file="/usr/share/applications/xaloc-afirma-handler.desktop"
+  if [[ ! -f "$app_file" ]]; then
+    echo "[playwright-runner] Handler desktop no encontrado: $app_file"
+    return 0
+  fi
+
+  update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
+  xdg-mime default xaloc-afirma-handler.desktop x-scheme-handler/afirma >/dev/null 2>&1 || true
+  echo "[playwright-runner] x-scheme-handler/afirma registrado con xaloc-afirma-handler.desktop"
 }
 
 if [[ ! -f "$CERT_PATH" ]]; then
@@ -129,6 +181,8 @@ fi
 
 mkdir -p "$NSS_DB_DIR" "$GLOBAL_NSS_DB_DIR"
 write_autoselect_policy
+write_afirma_protocol_policy
+register_afirma_xdg_handler
 
 if [[ ! -f "$NSS_DB_DIR/cert9.db" ]]; then
   certutil -N --empty-password -d "sql:$NSS_DB_DIR"

@@ -4,13 +4,20 @@ Flujo para indicar representante dentro del sitio Ayunta Palma.
 
 from __future__ import annotations
 
-import re
+import asyncio
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
 from sites.ayunta_palma.config import AyuntaPalmaConfig
 
 REPRESENTANTE_EMAIL = "info@xvia-serviciosjuridicos.com"
 REPRESENTANTE_TELEFONO = "722761154"
+
+
+async def _esperar_velo_oculto(page: Page, config: AyuntaPalmaConfig, timeout_ms: int = 6000) -> None:
+    try:
+        await page.wait_for_selector(config.selectors.velo, state="hidden", timeout=timeout_ms)
+    except PlaywrightTimeoutError:
+        pass
 
 
 async def _sobrescribir_contacto_representante(page: Page, config: AyuntaPalmaConfig) -> None:
@@ -32,8 +39,10 @@ async def _sobrescribir_contacto_representante(page: Page, config: AyuntaPalmaCo
     telefono_selector = page.locator(selectors.telefono_selector).first
     telefono_input = page.locator(selectors.telefono_input).first
 
-    await email_input.wait_for(state="visible", timeout=20000)
-    await email_confirm.wait_for(state="visible", timeout=20000)
+    await asyncio.gather(
+        email_input.wait_for(state="visible", timeout=12000),
+        email_confirm.wait_for(state="visible", timeout=12000),
+    )
     await email_input.fill(REPRESENTANTE_EMAIL)
     await email_confirm.fill(REPRESENTANTE_EMAIL)
 
@@ -47,14 +56,14 @@ async def _sobrescribir_contacto_representante(page: Page, config: AyuntaPalmaCo
         except PlaywrightTimeoutError:
             pass
 
-    await telefono_input.wait_for(state="visible", timeout=20000)
+    await telefono_input.wait_for(state="visible", timeout=12000)
     await telefono_input.fill(REPRESENTANTE_TELEFONO)
 
 
 async def indicar_representante(page: Page, config: AyuntaPalmaConfig) -> Page:
     selectors = config.selectors
 
-    await page.wait_for_timeout(3000)
+    await _esperar_velo_oculto(page, config, timeout_ms=6000)
 
     # Buscar el boton de indicar representante interactuando con DOM, 
     # buscando su etiqueta y el input subyacente de submit
@@ -137,5 +146,9 @@ async def indicar_representante(page: Page, config: AyuntaPalmaConfig) -> Page:
         if await aceptar.count() > 0:
             await aceptar.click(force=True)
             
-    await page.wait_for_timeout(config.delay_ms)
+    await _esperar_velo_oculto(page, config, timeout_ms=max(3000, config.delay_ms * 6))
+    try:
+        await page.locator(".ui-dialog:visible").last.wait_for(state="hidden", timeout=2500)
+    except PlaywrightTimeoutError:
+        pass
     return page

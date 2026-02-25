@@ -56,6 +56,20 @@ class RedisStreamsQueueGateway(QueueGateway):
         payload["job_id"] = job_id
 
         resource_id = _to_int_like(payload.get("idRecurso"))
+        if resource_id is not None:
+            has_success_check = getattr(self.db, "has_successful_job_for_resource", None)
+            if callable(has_success_check):
+                try:
+                    if bool(has_success_check(site_id=site_id, resource_id=resource_id)):
+                        self.logger.info(
+                            "Redis Streams enqueue omitido: site_id=%s resource_id=%s ya completado/succeeded en PG",
+                            site_id,
+                            resource_id,
+                        )
+                        return False, job_id
+                except Exception:
+                    # No bloquear el flujo por fallo en consulta de guardia.
+                    pass
 
         if resource_id is not None:
             dedupe_key = f"dedupe:resource:{site_id}:{resource_id}"

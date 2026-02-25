@@ -10,17 +10,38 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       python3-venv unixodbc unixodbc-dev freetds-bin tdsodbc gcc g++ ca-certificates libnss3-tools \
-      xvfb x11vnc fluxbox novnc websockify && \
+      xvfb x11vnc openbox novnc websockify xterm curl \
+      openjdk-17-jre-headless wget unzip xdg-utils desktop-file-utils xdotool && \
     rm -rf /var/lib/apt/lists/*
+
+# Install AutoFirma CLI for programmatic signing (Linux/Docker)
+# .deb is pre-downloaded in infra/docker/ (downloaded from firmaelectronica.gob.es v1.9)
+# Two-pass dpkg: first pass registers; apt-get -f resolves deps; second pass completes.
+COPY infra/docker/autofirma_1_9.deb /tmp/autofirma_1_9.deb
+RUN dpkg -i /tmp/autofirma_1_9.deb || true && \
+    apt-get install -f -y && \
+    dpkg -i /tmp/autofirma_1_9.deb && \
+    rm -f /tmp/autofirma_1_9.deb && \
+    ln -sf /usr/bin/autofirma /usr/local/bin/AutoFirmaCommandLine && \
+    autofirma version 2>&1 || true && \
+    echo "[xaloc] AutoFirma CLI listo"
 
 WORKDIR /app
 
 COPY requirements.txt /tmp/requirements.txt
 COPY infra/docker/playwright-runner-entrypoint.sh /usr/local/bin/playwright-runner-entrypoint.sh
 COPY infra/docker/playwright-runner-visual-entrypoint.sh /usr/local/bin/playwright-runner-visual-entrypoint.sh
+COPY infra/docker/start-ui.sh /usr/local/bin/start-ui.sh
+COPY infra/docker/afirma-handler.sh /usr/local/bin/afirma-handler.sh
+COPY infra/docker/xaloc-afirma-handler.desktop /usr/share/applications/xaloc-afirma-handler.desktop
 
 RUN python -m venv /opt/venv && \
     /opt/venv/bin/pip install --no-cache-dir --upgrade pip && \
     /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt && \
+    sed -i 's/\r$//' /usr/local/bin/playwright-runner-entrypoint.sh /usr/local/bin/playwright-runner-visual-entrypoint.sh /usr/local/bin/start-ui.sh /usr/local/bin/afirma-handler.sh && \
     chmod +x /usr/local/bin/playwright-runner-entrypoint.sh && \
-    chmod +x /usr/local/bin/playwright-runner-visual-entrypoint.sh
+    chmod +x /usr/local/bin/playwright-runner-visual-entrypoint.sh && \
+    chmod +x /usr/local/bin/start-ui.sh && \
+    chmod +x /usr/local/bin/afirma-handler.sh
+
+ENTRYPOINT ["/usr/local/bin/start-ui.sh"]

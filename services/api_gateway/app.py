@@ -156,6 +156,52 @@ def _backend_ws_url(path: str) -> str:
     return BACKEND_BASE_URL + path
 
 
+def _frontend_ws_url(path: str, query: str = "") -> str:
+    base = f"ws://{FRONTEND_HOST}:{FRONTEND_PORT}{path}"
+    return f"{base}?{query}" if query else base
+
+
+async def _proxy_websocket(websocket: WebSocket, upstream_url: str, *, include_auth_headers: bool = False) -> None:
+    await websocket.accept()
+    headers: dict[str, str] = {}
+    if include_auth_headers and websocket.headers.get("authorization"):
+        headers["Authorization"] = str(websocket.headers.get("authorization"))
+    if websocket.headers.get("cookie"):
+        headers["Cookie"] = str(websocket.headers.get("cookie"))
+
+    session = await _ensure_proxy_session()
+    try:
+        async with session.ws_connect(upstream_url, headers=headers) as upstream_ws:
+            async def _client_to_upstream() -> None:
+                while True:
+                    msg = await websocket.receive()
+                    msg_type = msg.get("type")
+                    if msg_type == "websocket.disconnect":
+                        await upstream_ws.close()
+                        break
+                    if msg_type != "websocket.receive":
+                        continue
+                    if msg.get("text") is not None:
+                        await upstream_ws.send_str(str(msg["text"]))
+                    elif msg.get("bytes") is not None:
+                        await upstream_ws.send_bytes(bytes(msg["bytes"]))
+
+            async def _upstream_to_client() -> None:
+                async for msg in upstream_ws:
+                    if msg.type == aiohttp.WSMsgType.TEXT:
+                        await websocket.send_text(msg.data)
+                    elif msg.type == aiohttp.WSMsgType.BINARY:
+                        await websocket.send_bytes(msg.data)
+                    elif msg.type in {aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR}:
+                        break
+
+            await asyncio.gather(_client_to_upstream(), _upstream_to_client())
+    except WebSocketDisconnect:
+        return
+    except Exception:
+        await websocket.close(code=1011, reason="ws proxy error")
+
+
 @app.on_event("startup")
 async def app_startup() -> None:
     await _start_frontend_server()
@@ -177,35 +223,14 @@ async def health() -> dict[str, Any]:
 
 @app.websocket("/ws/dashboard")
 async def proxy_ws_dashboard(websocket: WebSocket) -> None:
-    await websocket.accept()
-    backend_ws_url = _backend_ws_url("/ws/dashboard")
-    headers: dict[str, str] = {}
-    if websocket.headers.get("authorization"):
-        headers["Authorization"] = str(websocket.headers.get("authorization"))
-    if websocket.headers.get("cookie"):
-        headers["Cookie"] = str(websocket.headers.get("cookie"))
-    session = await _ensure_proxy_session()
-    try:
-        async with session.ws_connect(backend_ws_url, headers=headers) as upstream_ws:
-            async def _client_to_upstream() -> None:
-                while True:
-                    data = await websocket.receive_text()
-                    await upstream_ws.send_str(data)
+    await _proxy_websocket(websocket, _backend_ws_url("/ws/dashboard"), include_auth_headers=True)
 
-            async def _upstream_to_client() -> None:
-                async for msg in upstream_ws:
-                    if msg.type == aiohttp.WSMsgType.TEXT:
-                        await websocket.send_text(msg.data)
-                    elif msg.type == aiohttp.WSMsgType.BINARY:
-                        await websocket.send_bytes(msg.data)
-                    elif msg.type in {aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR}:
-                        break
 
-            await asyncio.gather(_client_to_upstream(), _upstream_to_client())
-    except WebSocketDisconnect:
-        return
-    except Exception:
-        await websocket.close(code=1011, reason="ws proxy error")
+@app.websocket("/_next/webpack-hmr")
+async def proxy_ws_frontend_hmr(websocket: WebSocket) -> None:
+    # Next.js dev HMR channel.
+    query = str(websocket.url.query or "")
+    await _proxy_websocket(websocket, _frontend_ws_url("/_next/webpack-hmr", query), include_auth_headers=False)
 
 
 @app.api_route("/api/{rest_of_path:path}", methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])

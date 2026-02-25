@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import re
 from pathlib import Path
 
 
@@ -85,7 +86,8 @@ def bundle_documents_to_single_pdf_for_palma(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     rid = str(id_recurso or "unknown").strip()
-    out_path = output_dir / f"ayunta_palma_{rid}_bundle.pdf"
+    safe_rid = re.sub(r"[^A-Za-z0-9._-]+", "_", rid) or "unknown"
+    out_path = output_dir / f"{safe_rid}_bundle.pdf"
 
     try:
         backend_kind, backend_cls = _load_pdf_backend()

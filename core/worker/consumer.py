@@ -66,6 +66,20 @@ async def run_worker_loop():
     reconcile_batch_size = int_env("WORKER_RECONCILE_BATCH_SIZE", 200, minimum=1)
 
     runtime_state: dict[str, Optional[str]] = {"current_job_id": None}
+    runtime_status: dict[str, str] = {"value": "online"}
+
+    def _push_runtime_state_now() -> None:
+        """Best-effort immediate sync to avoid stale runtime current_job_id."""
+        try:
+            db.upsert_worker_runtime(
+                worker_id=worker_instance_id,
+                run_id=run_id,
+                pid=worker_pid,
+                status=runtime_status["value"],
+                current_job_id=runtime_state.get("current_job_id"),
+            )
+        except Exception as exc:
+            logger.debug("No se pudo sincronizar runtime inmediato: %s", exc)
 
     # -- GESTION DE PARADA ORDENADA --
     shutdown_event = asyncio.Event()
@@ -88,13 +102,7 @@ async def run_worker_loop():
     async def _runtime_heartbeat_loop() -> None:
         while not shutdown_event.is_set():
             try:
-                db.upsert_worker_runtime(
-                    worker_id=worker_instance_id,
-                    run_id=run_id,
-                    pid=worker_pid,
-                    status="online",
-                    current_job_id=runtime_state.get("current_job_id"),
-                )
+                _push_runtime_state_now()
                 await asyncio.wait_for(shutdown_event.wait(), timeout=heartbeat_seconds)
             except asyncio.TimeoutError:
                 continue # Tick normal
@@ -137,13 +145,7 @@ async def run_worker_loop():
             except asyncio.TimeoutError:
                 continue
 
-    db.upsert_worker_runtime(
-        worker_id=worker_instance_id,
-        run_id=run_id,
-        pid=worker_pid,
-        status="online",
-        current_job_id=None,
-    )
+    _push_runtime_state_now()
     heartbeat_task = asyncio.create_task(_runtime_heartbeat_loop())
     reconcile_task = asyncio.create_task(_runtime_reconcile_loop())
 
@@ -187,9 +189,11 @@ async def run_worker_loop():
         # Bucle principal de procesamiento
         while not shutdown_event.is_set():
             current_job = None
+            current_job_finalized = False
             try:
                 if not db.is_process_enabled(process_name="worker"):
                     runtime_state["current_job_id"] = None
+                    _push_runtime_state_now()
                     try:
                         await asyncio.wait_for(shutdown_event.wait(), timeout=2)
                     except asyncio.TimeoutError:
@@ -210,6 +214,7 @@ async def run_worker_loop():
                 if job:
                     current_job = job
                     runtime_state["current_job_id"] = job.job_id
+                    _push_runtime_state_now()
                     processed_jobs += 1
                     logger.info(
                         "Procesando job %s (intento %s/%s) site=%s resource=%s",
@@ -255,6 +260,7 @@ async def run_worker_loop():
                                         job,
                                         reason="Stop solicitado desde UI durante la ejecucion",
                                     )
+                                    current_job_finalized = True
                                     break
                     except asyncio.CancelledError:
                         if process_task_future is not None:
@@ -263,6 +269,7 @@ async def run_worker_loop():
                                 await process_task_future
                         logger.warning("Job interrumpido por shutdown.")
                         await queue_gateway.release(job, reason="Shutdown del worker")
+                        current_job_finalized = True
                         break
 
                     if stopped_from_ui:
@@ -283,6 +290,7 @@ async def run_worker_loop():
                             result={"screenshot_path": outcome.screenshot} if outcome.screenshot else None,
                             screenshot=outcome.screenshot,
                         )
+                        current_job_finalized = True
                         realtime_store.record_task_success(
                             payload=job.payload,
                             site_id=job.site_id,
@@ -308,6 +316,7 @@ async def run_worker_loop():
                                 job,
                                 reason=outcome.error or "release_without_attempt",
                             )
+                            current_job_finalized = True
                             realtime_store.record_incident_once(
                                 site_id=job.site_id,
                                 incident_type="RETRY_WITHOUT_ATTEMPT",
@@ -359,6 +368,7 @@ async def run_worker_loop():
                             error=outcome.error or "unknown_error",
                             retryable=True,
                         )
+                        current_job_finalized = True
                     if outcome.success and job.site_id == "madrid" and job.payload.get("madrid_tramite_enviado") and not job.payload.get("madrid_justificante_descargado", True):
                         incident_resource_id = _resolve_incident_resource_id(job)
                         anotacion = str(job.payload.get("madrid_numero_anotacion") or "").strip()
@@ -388,6 +398,7 @@ async def run_worker_loop():
                         pass
                 else:
                     runtime_state["current_job_id"] = None
+                    _push_runtime_state_now()
                     try:
                         await asyncio.wait_for(shutdown_event.wait(), timeout=10)
                     except asyncio.TimeoutError:
@@ -396,16 +407,24 @@ async def run_worker_loop():
             except KeyboardInterrupt:
                 logger.info("Interrupción de teclado capturada en bucle principal.")
                 shutdown_event.set()
-                if current_job is not None:
+                if current_job is not None and not current_job_finalized:
                      try:
                         await queue_gateway.release(
                             current_job,
                             reason="Interrumpido por operador (Ctrl+C). Devuelto a pendiente.",
                         )
+                        current_job_finalized = True
                         logger.info("Job %s liberado.", current_job.job_id)
                      except Exception:
                          pass
             except asyncio.CancelledError:
+                 if current_job is not None and not current_job_finalized:
+                     with contextlib.suppress(Exception):
+                         await queue_gateway.release(
+                             current_job,
+                             reason="Worker cancelado sin finalizar job; devuelto a pendiente.",
+                         )
+                     current_job_finalized = True
                  logger.info("Worker loop cancelado.")
                  shutdown_event.set()
                  break
@@ -414,13 +433,31 @@ async def run_worker_loop():
                 logger.error(f"💥 Error inesperado en el bucle principal ({error_type}): {e}")
                 logger.error(traceback.format_exc())
                 logger.info("⚡ El worker continuará procesando tareas después de este error...")
+                if current_job is not None and not current_job_finalized:
+                    try:
+                        await queue_gateway.release(
+                            current_job,
+                            reason=f"Error inesperado en worker loop ({error_type}); devuelto a pendiente.",
+                        )
+                        current_job_finalized = True
+                        logger.warning("Job %s devuelto a cola tras error inesperado.", current_job.job_id)
+                    except Exception as release_exc:
+                        logger.error("No se pudo devolver job %s a cola tras error inesperado: %s", current_job.job_id, release_exc)
                 runtime_state["current_job_id"] = None
+                _push_runtime_state_now()
                 try:
                     await asyncio.wait_for(shutdown_event.wait(), timeout=5)
                 except asyncio.TimeoutError:
                     pass
+            finally:
+                if current_job is not None:
+                    runtime_state["current_job_id"] = None
+                    _push_runtime_state_now()
 
     finally:
+        runtime_status["value"] = "offline"
+        runtime_state["current_job_id"] = None
+        _push_runtime_state_now()
         shutdown_event.set()
 
         for task in (heartbeat_task, reconcile_task):

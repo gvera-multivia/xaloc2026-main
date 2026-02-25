@@ -713,6 +713,7 @@ class BrainOrchestrator:
                 filtered_candidates: list[dict] = []
                 skipped_duplicates = 0
                 skipped_blocked = 0
+                skipped_already_completed = 0
                 for cand in candidates:
                     rid = cand.get("idRecurso")
                     try:
@@ -724,12 +725,33 @@ class BrainOrchestrator:
                         if self._is_resource_blocked(site_id=site_id, resource_id=rid_int):
                             skipped_blocked += 1
                             continue
+                        has_successful = False
+                        has_success_check = getattr(self.db, "has_successful_job_for_resource", None)
+                        if callable(has_success_check):
+                            try:
+                                has_successful = bool(
+                                    has_success_check(site_id=site_id, resource_id=rid_int)
+                                )
+                            except Exception:
+                                has_successful = False
+                        if has_successful:
+                            skipped_already_completed += 1
+                            self.logger.info(
+                                "[%s] idRecurso=%s omitido: ya consta como completado/succeeded en PG.",
+                                site_id,
+                                rid_int,
+                            )
+                            continue
                         filtered_candidates.append(cand)
 
                 if skipped_duplicates > 0:
                     self.logger.info(f"[{site_id}] {skipped_duplicates} duplicados omitidos ya presentes en la cola.")
                 if skipped_blocked > 0:
                     self.logger.info(f"[{site_id}] {skipped_blocked} recursos bloqueados omitidos (retry agotado previo).")
+                if skipped_already_completed > 0:
+                    self.logger.info(
+                        f"[{site_id}] {skipped_already_completed} recursos omitidos por ya completados anteriormente."
+                    )
 
                 if not filtered_candidates:
                     continue
