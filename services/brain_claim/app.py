@@ -17,11 +17,14 @@ from dotenv import load_dotenv
 from core.redis_client import get_redis_client
 from core.pg_admin_store import PgAdminStore
 from core.pg_runtime_store import PgRuntimeStore
+from core.realtime_store import build_realtime_store
+from core.repositories import ResourceRepository
 from core.sqlserver_utils import build_sqlserver_connection_string
 from core.xvia_auth import create_authenticated_session_in_place
 from shared.queue import RedisStreamsClient
 from sites.adapters import MadridAdapter, XalocAdapter, BaseOnlineAdapter, AyuntaPalmaAdapter
 from sites.adapters.site_adapter import SiteAdapter
+from services.brain_claim.processable_validator import validate_candidate
 
 load_dotenv()
 
@@ -67,13 +70,15 @@ class BrainClaimService:
         if seeded:
             logger.info("[brain-claim] seeded organismo_config en PG: %s", seeded)
         self.sqlserver_conn_str = build_sqlserver_connection_string()
+        self.resource_repo = ResourceRepository(conn_str=self.sqlserver_conn_str, logger=logger)
+        self.realtime_store = build_realtime_store(logger=logger)
         self.redis = get_redis_client()
         if self.redis is None:
             raise RuntimeError("Redis requerido para brain-claim-service (REDIS_ENABLED=1, REDIS_URL).")
         self.streams = RedisStreamsClient(self.redis, logger=logger)
         self.candidates_stream = (os.getenv("CANDIDATES_STREAM_KEY") or "candidates").strip() or "candidates"
         self.max_claims = int((os.getenv("BRAIN_CLAIM_MAX_PER_TICK") or "500").strip() or "500")
-        self.sync_interval = int((os.getenv("BRAIN_CLAIM_SYNC_SECONDS") or "30").strip() or "30")
+        self.sync_interval = int((os.getenv("BRAIN_CLAIM_SYNC_SECONDS") or "60").strip() or "60")
         self.claim_dedupe_ttl_seconds = int(
             (os.getenv("BRAIN_CLAIM_DEDUPE_TTL_SECONDS") or "7200").strip() or "7200"
         )
@@ -290,8 +295,40 @@ class BrainClaimService:
     def get_active_configs(self) -> list[dict[str, Any]]:
         return self.admin_store.get_active_organismo_configs()
 
+    def _record_incident(
+        self,
+        *,
+        site_id: str,
+        error_code: str,
+        description: str,
+        candidate: dict[str, Any],
+    ) -> None:
+        resource_id: int | None = None
+        rid_raw = candidate.get("idRecurso")
+        if rid_raw is not None:
+            try:
+                resource_id = int(rid_raw)
+            except Exception:
+                resource_id = None
+        expediente = str(candidate.get("Expedient") or "").strip()
+        payload = {"candidate": json.loads(json.dumps(candidate, default=str))}
+        try:
+            self.realtime_store.record_incident_once(
+                site_id=site_id,
+                incident_type=error_code,
+                reason=description,
+                resource_id=resource_id,
+                expediente=expediente,
+                payload=payload,
+                error_code=error_code,
+                status="NEW",
+                screenshot_path=None,
+            )
+        except Exception as exc:
+            logger.warning("[%s] No se pudo registrar incidencia %s: %s", site_id, error_code, exc)
+
     async def run_tick(self) -> dict[str, Any]:
-        stats = {"claimed": 0, "published_candidates": 0, "errors": 0}
+        stats = {"claimed": 0, "published_candidates": 0, "incidents_logged": 0, "errors": 0}
         configs = {cfg["site_id"]: cfg for cfg in self.get_active_configs()}
         remaining = self.max_claims
 
@@ -305,12 +342,24 @@ class BrainClaimService:
                 continue
             try:
                 await self.init_session(config["login_url"])
+                def _on_discard(item: dict[str, Any]) -> None:
+                    error_code = str(item.get("tipo_incidencia") or "SITE_RULE_DISCARDED").strip() or "SITE_RULE_DISCARDED"
+                    reason = str(item.get("motivo") or "Recurso descartado por regla de negocio/sede.").strip()
+                    self._record_incident(
+                        site_id=str(item.get("site_id") or site_id),
+                        error_code=error_code,
+                        description=reason,
+                        candidate=item,
+                    )
+                    stats["incidents_logged"] += 1
+
                 candidates = adapter.fetch_candidates(
                     config=config,
                     conn_str=self.sqlserver_conn_str,
                     authenticated_user=self.authenticated_user,
                     limit=remaining,
-                    on_discard=None,
+                    on_discard=_on_discard,
+                    resource_repo=self.resource_repo,
                 )
                 for cand in candidates:
                     if remaining <= 0:
@@ -328,6 +377,19 @@ class BrainClaimService:
                             continue
                     if not self.is_still_claimable_in_db(rid):
                         logger.info("[%s] descartado idRecurso=%s por no estar reclamable en SQL Server (revalidacion).", site_id, rid)
+                        continue
+                    validation = validate_candidate(
+                        site_id=site_id,
+                        candidate=cand,
+                        runtime_store=self.runtime_store,
+                        admin_store=self.admin_store,
+                    )
+                    if not validation.processable:
+                        error_code = str(validation.error_code or "NOT_PROCESSABLE")
+                        reason = str(validation.description or "Recurso no procesable por validación previa.")
+                        self._record_incident(site_id=site_id, error_code=error_code, description=reason, candidate=cand)
+                        stats["incidents_logged"] += 1
+                        logger.info("[%s] idRecurso=%s no procesable: %s - %s", site_id, rid, error_code, reason)
                         continue
                     if self.admin_store.is_resource_blocked(site_id=site_id, resource_id=rid):
                         continue
@@ -356,7 +418,7 @@ class BrainClaimService:
                         stats["claimed"] += 1
                         remaining -= 1
 
-                        payloads = await adapter.build_payloads([cand], on_discard=None)
+                        payloads = await adapter.build_payloads([cand], on_discard=_on_discard)
                         if not payloads:
                             logger.warning(
                                 "[%s] idRecurso=%s reclamado pero descartado por adapter.build_payloads (payload invalido).",

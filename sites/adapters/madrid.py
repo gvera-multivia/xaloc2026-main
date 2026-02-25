@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -9,7 +8,8 @@ from typing import Any, Optional
 
 import pyodbc
 
-from core.address_classifier import classify_address_fallback, classify_addresses_batch_with_ai
+from core.address_classifier import classify_address_fallback
+from core.guardians import GroqTokenGuardian, ResourceContext
 from .site_adapter import SiteAdapter
 
 logger = logging.getLogger("brain")
@@ -89,6 +89,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         super().__init__(site_id="madrid", priority=0)
         self._regex_expediente_cache: dict[str, re.Pattern[str]] = {}
         self._regex_expediente_fallback = re.compile(self.DEFAULT_REGEX_EXPEDIENTE)
+        self._groq_guardian = GroqTokenGuardian(logger=logger)
 
     @staticmethod
     def _clean_str(v: Any) -> str:
@@ -127,6 +128,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         authenticated_user: Optional[str],
         limit: int,
         on_discard: Optional[SiteAdapter.DiscardCallback] = None,
+        resource_repo: Any | None = None,
     ) -> list[dict]:
         regex_pattern = self._clean_str(config.get("regex_expediente")) or self.DEFAULT_REGEX_EXPEDIENTE
         regex = self._regex_expediente_cache.get(regex_pattern)
@@ -137,6 +139,80 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 logger.warning(f"[madrid] Regex invalido en config.regex_expediente: {regex_pattern!r}. Usando fallback.")
                 regex = self._regex_expediente_fallback
             self._regex_expediente_cache[regex_pattern] = regex
+
+        if resource_repo is not None:
+            recursos_map: dict[int, dict] = {}
+            resources = resource_repo.get_pending_resources(site_id=self.site_id, config=config, limit=limit)
+            for resource in resources:
+                record = dict(resource.metadata or {})
+                rid = record.get("idRecurso")
+                if not rid:
+                    continue
+                rid_int = int(rid)
+                adjuntos: list[dict[str, Any]] = []
+                for adj in list(record.get("adjuntos") or []):
+                    adj_copy = dict(adj or {})
+                    adj_id = adj_copy.get("id")
+                    if adj_id is not None and "url" not in adj_copy:
+                        adj_copy["url"] = self.ADJUNTO_URL_TEMPLATE.format(id=int(adj_id))
+                    adjuntos.append(adj_copy)
+                record["adjuntos"] = adjuntos
+                recursos_map[rid_int] = record
+
+            out: list[dict] = []
+            for _, recurso in recursos_map.items():
+                if limit and len(out) >= limit:
+                    break
+
+                expediente = self._clean_str(recurso.get("Expedient")).upper()
+                expediente = re.sub(r"\s+", "", expediente)
+                if not expediente or not regex.match(expediente):
+                    if on_discard:
+                        try:
+                            on_discard(
+                                {
+                                    "site_id": self.site_id,
+                                    "idRecurso": recurso.get("idRecurso"),
+                                    "Expedient": expediente,
+                                    "tipo_incidencia": "REGEX_DISCARDED",
+                                    "motivo": f"Expediente no valido para madrid: {expediente}",
+                                }
+                            )
+                        except Exception:
+                            pass
+                    continue
+                recurso["Expedient"] = expediente
+
+                fase_norm = self._normalize_text(recurso.get("FaseProcedimiento"))
+                if any(x in fase_norm for x in ["reclamacion", "embargo", "apremio"]):
+                    if on_discard:
+                        try:
+                            on_discard(
+                                {
+                                    "site_id": "madrid",
+                                    "idRecurso": recurso.get("idRecurso"),
+                                    "Expedient": recurso.get("Expedient"),
+                                    "tipo_incidencia": "SITE_RULE_DISCARDED",
+                                    "motivo": (
+                                        "Madrid: trámite no reclamable por regla de sede (fase negra: "
+                                        f"{self._clean_str(recurso.get('FaseProcedimiento'))}). "
+                                        "Revisar si el trámite está mal formado o si debe tratarse manualmente."
+                                    ),
+                                }
+                            )
+                        except Exception:
+                            pass
+                    continue
+
+                estado = int(recurso.get("Estado") or 0)
+                usuario = self._clean_str(recurso.get("UsuarioAsignado"))
+                if estado == 1 and authenticated_user and usuario != authenticated_user:
+                    continue
+                if estado == 1 and not authenticated_user:
+                    continue
+
+                out.append(recurso)
+            return out
 
         texp_values = [2, 3]
         texp_placeholders = ",".join(["?"] * len(texp_values))
@@ -539,13 +615,12 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 }
             )
 
-        batch_mapping: dict[str, dict] = {}
-        if os.getenv("GROQ_API_KEY"):
-            try:
-                batch_mapping = await classify_addresses_batch_with_ai(items)
-            except Exception as e:
-                logger.warning("[MADRID][IA] Fallo batch LLM, usando fallback local: %s", e)
-                batch_mapping = {}
+        context_by_id: dict[str, ResourceContext] = {}
+        for r in candidates:
+            rid = str(r.get("idRecurso") or "").strip()
+            if rid:
+                context_by_id[rid] = ResourceContext(site_id=self.site_id, protocol="")
+        batch_mapping = await self._groq_guardian.classify_batch(items=items, context_by_id=context_by_id)
 
         payloads: list[dict] = []
         for r in candidates:

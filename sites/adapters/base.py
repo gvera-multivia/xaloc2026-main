@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
 from datetime import datetime
 from decimal import Decimal
@@ -12,6 +11,7 @@ import pyodbc
 
 from .site_adapter import SiteAdapter
 from core.address_classifier import classify_address_fallback
+from core.guardians import GroqTokenGuardian, ResourceContext
 from core.sqlserver_utils import build_sqlserver_connection_string
 
 logger = logging.getLogger("brain")
@@ -116,6 +116,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         super().__init__(site_id="base_online", priority=1)
         self._regex_expediente_cache: dict[str, re.Pattern[str]] = {}
         self._regex_expediente_fallback = re.compile(self.DEFAULT_REGEX_EXPEDIENTE)
+        self._groq_guardian = GroqTokenGuardian(logger=logger)
 
     @staticmethod
     def _clean_str(v: Any) -> str:
@@ -290,6 +291,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         authenticated_user: Optional[str],
         limit: int,
         on_discard: Optional[SiteAdapter.DiscardCallback] = None,
+        resource_repo: Any | None = None,
     ) -> list[dict]:
         regex_pattern = self._clean_str(config.get("regex_expediente")) or self.DEFAULT_REGEX_EXPEDIENTE
         regex = self._regex_expediente_cache.get(regex_pattern)
@@ -300,6 +302,48 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 logger.warning(f"[base_online] Regex invalido en config.regex_expediente: {regex_pattern!r}. Usando fallback.")
                 regex = self._regex_expediente_fallback
             self._regex_expediente_cache[regex_pattern] = regex
+
+        if resource_repo is not None:
+            recursos_map: dict[int, dict] = {}
+            resources = resource_repo.get_pending_resources(site_id=self.site_id, config=config, limit=limit)
+            for resource in resources:
+                record = dict(resource.metadata or {})
+                rid = record.get("idRecurso")
+                if not rid:
+                    continue
+                rid_int = int(rid)
+                recursos_map[rid_int] = record
+
+            out: list[dict] = []
+            for _, recurso in recursos_map.items():
+                if limit and len(out) >= limit:
+                    break
+
+                expediente = self._clean_str(recurso.get("Expedient")).upper()
+                expediente = re.sub(r"\s+", "", expediente)
+                if not expediente or not regex.match(expediente):
+                    if on_discard:
+                        on_discard(
+                            {
+                                "site_id": self.site_id,
+                                "idRecurso": recurso.get("idRecurso"),
+                                "Expedient": expediente,
+                                "tipo_incidencia": "REGEX_DISCARDED",
+                                "motivo": f"Expediente no valido para BASE: {expediente}",
+                            }
+                        )
+                    continue
+                recurso["Expedient"] = expediente
+
+                estado = int(recurso.get("Estado") or 0)
+                usuario = self._clean_str(recurso.get("UsuarioAsignado"))
+                if estado == 1 and authenticated_user and usuario != authenticated_user:
+                    continue
+                if estado == 1 and not authenticated_user:
+                    continue
+
+                out.append(recurso)
+            return out
 
         filtro_texp = self._clean_str(config.get("filtro_texp"))
         try:
@@ -387,10 +431,14 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         if not candidates:
             return []
 
-        from core.address_classifier import classify_addresses_batch_with_ai
-
         items_for_ia: list[dict] = []
+        context_by_id: dict[str, ResourceContext] = {}
         for r in candidates:
+            fase_raw = self._clean_str(r.get("FaseProcedimiento"))
+            protocolo = self._determina_protocolo(fase_raw)
+            rid_txt = str(r.get("idRecurso") or "").strip()
+            if rid_txt:
+                context_by_id[rid_txt] = ResourceContext(site_id=self.site_id, protocol=protocolo)
             items_for_ia.append(
                 {
                     "idRecurso": r.get("idRecurso"),
@@ -402,12 +450,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 }
             )
 
-        batch_mapping: dict[str, dict] = {}
-        if os.getenv("GROQ_API_KEY"):
-            try:
-                batch_mapping = await classify_addresses_batch_with_ai(items_for_ia)
-            except Exception as e:
-                logger.warning("[base_online][IA] Fallo batch LLM, usando fallback: %s", e)
+        batch_mapping = await self._groq_guardian.classify_batch(items=items_for_ia, context_by_id=context_by_id)
 
         payloads: list[dict] = []
         for r in candidates:

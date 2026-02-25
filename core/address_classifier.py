@@ -6,6 +6,7 @@ Adaptado para cumplir con el catálogo oficial de tipos de vía del formulario.
 import os
 import json
 import re
+import unicodedata
 from typing import Optional
 from groq import Groq
 
@@ -30,6 +31,41 @@ VIAS_VALIDAS = [
     "SALON", "SECTOR", "SENDA", "SOLAR", "SUBIDA", "TERRENOS", "TORRENTE", "TRANSVERSAL", 
     "TRASERA", "TRAVESIA", "URBANIZACION", "VALLE", "VEREDA", "VIA", "VIADUCTO", "VIAL"
 ]
+
+_WORD_RE = re.compile(r"[0-9A-ZÁÉÍÓÚÜÑ]+", flags=re.IGNORECASE)
+
+
+def _token_key(token: str) -> str:
+    txt = (token or "").strip().upper()
+    if not txt:
+        return ""
+    txt = unicodedata.normalize("NFD", txt)
+    txt = "".join(ch for ch in txt if unicodedata.category(ch) != "Mn")
+    return txt
+
+
+def _restore_street_spelling(calle_candidate: str, direccion_raw: str) -> str:
+    """
+    Restaura grafia original desde direccion_raw (incluyendo Ñ/acentos) cuando
+    la IA devuelve formas simplificadas como NUNEZ.
+    """
+    calle_up = (calle_candidate or "").strip().upper()
+    raw_up = (direccion_raw or "").strip().upper()
+    if not calle_up or not raw_up:
+        return calle_up
+
+    raw_map: dict[str, str] = {}
+    for m in _WORD_RE.finditer(raw_up):
+        tok = m.group(0).upper()
+        key = _token_key(tok)
+        if key and key not in raw_map:
+            raw_map[key] = tok
+
+    def _replace(match: re.Match[str]) -> str:
+        tok = match.group(0).upper()
+        return raw_map.get(_token_key(tok), tok)
+
+    return _WORD_RE.sub(_replace, calle_up)
 
 def _get_groq_client(api_key: Optional[str] = None) -> Groq:
     key = api_key or os.getenv("GROQ_API_KEY")
@@ -99,7 +135,7 @@ async def classify_address_with_ai(
 
         return {
             "tipo_via": via_ia,
-            "calle": (respuesta.get("calle") or "").strip().upper(),
+            "calle": _restore_street_spelling((respuesta.get("calle") or "").strip(), direccion_raw),
             "numero": (respuesta.get("numero") or "").strip().upper(),
             "escalera": (respuesta.get("escalera") or "").strip().upper(),
             "planta": (respuesta.get("planta") or "").strip().upper(),
@@ -173,6 +209,7 @@ async def classify_addresses_batch_with_ai(
     if not isinstance(respuesta, dict):
         raise ValueError("Respuesta batch no es un objeto JSON.")
 
+    raw_by_id = {str(it.get("idRecurso")): (it.get("direccion_raw") or "") for it in compact_items}
     out: dict[str, dict] = {}
     for rid, val in respuesta.items():
         if not isinstance(val, dict):
@@ -182,9 +219,11 @@ async def classify_addresses_batch_with_ai(
         if via_ia not in VIAS_VALIDAS:
             via_ia = "CALLE"
 
+        src_direccion_raw = raw_by_id.get(str(rid), "")
+
         out[str(rid)] = {
             "tipo_via": via_ia,
-            "calle": (val.get("calle") or "").strip().upper(),
+            "calle": _restore_street_spelling((val.get("calle") or "").strip(), src_direccion_raw),
             "numero": (val.get("numero") or "").strip().upper(),
             "escalera": (val.get("escalera") or "").strip().upper(),
             "planta": (val.get("planta") or "").strip().upper(),

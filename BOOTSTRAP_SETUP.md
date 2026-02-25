@@ -399,6 +399,12 @@ Dentro de contenedores, usa nombres de servicio Docker:
 
 No uses `localhost` en DSN/URL de servicios que corren dentro de Docker.
 
+## 10. Runbook Brain 2.0
+
+Para la operativa completa de Brain 2.0 (arranque, migracion de incidencias v2, validacion de Redis Streams y troubleshooting en `cmd.exe`), consulta:
+
+- `BRAIN2_0_OPERATIONS_RUNBOOK.md`
+
 
 
 powershell -ExecutionPolicy Bypass -File scripts/validate_migration.ps1 -SkipBuild    
