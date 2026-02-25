@@ -13,9 +13,22 @@ from core.base_config import BaseConfig
 class AyuntaPalmaSelectors:
     login_frame: str = "#ventanaModal"
     login_option_rows: str = "#optSsl tr"
-    btn_nueva_instancia: str = "button.redirect-url.stop-click-propagation:has-text(\"Nueva instancia en blanco\")"
+    login_option_cert_titulo: str = "#optSsl tr:first-child .titulo-opcion"
+    btn_nueva_instancia: str = "button.redirect-url.stop-click-propagation.btn-icono"
+    btn_nueva_instancia_visible: str = (
+        "div.btn-bar-horizontal-centrada-inner:has(input#ctl00_ctl00_cphM_cph_btnUltimoBorradorCancelar) "
+        "button.btn-icono"
+    )
     input_nueva_instancia: str = "#ctl00_ctl00_cphM_cph_btnUltimoBorradorCancelar"
-    btn_nuevo_interesado: str = ".btn-bar-horizontal-centrada-inner button:has-text(\"Nuevo/a interesado/a\")"
+    btn_nuevo_interesado: str = (
+        "#ctl00_ctl00_cphM_cph_pnlListaInteresadosOpciones "
+        "div.btn-bar-horizontal-centrada-inner:has(input#ctl00_ctl00_cphM_cph_btnListaInteresadosOpcionesNuevo) "
+        "button.btn-icono"
+    )
+    btn_nuevo_interesado_visible: str = (
+        "div.btn-bar-horizontal-centrada-inner:has(input#ctl00_ctl00_cphM_cph_btnListaInteresadosOpcionesNuevo) "
+        "button:has-text(\"Nuevo/a interesado/a\")"
+    )
     input_nuevo_interesado: str = "#ctl00_ctl00_cphM_cph_btnListaInteresadosOpcionesNuevo"
     persona_tipo_usuario: str = "#ctl00_ctl00_cphM_cph_ddlPersonaTipoUsuario"
     persona_tipo_personalidad: str = "#ctl00_ctl00_cphM_cph_ddlPersonaTipoPersonalidad"
@@ -35,12 +48,28 @@ class AyuntaPalmaSelectors:
     btn_aceptar_modal_visible: str = ".ui-dialog:visible .btn-bar-horizontal-centrada-inner button.btn-bl1"
     input_aceptar_modal_persona: str = "#ctl00_ctl00_cphM_cph_btnAceptarPersona"
     btn_indicar_representante: str = "button:has-text(\"Indicar representante\")"
-    btn_siguiente: str = ".btn-bar-horizontal-centrada-inner button:has-text(\"Siguiente\")"
+    input_indicar_representante: str = "#ctl00_ctl00_cphM_cph_repListaInteresados_ctl00_btnListaInteresadosItemNuevoRepresentante"
+    btn_indicar_representante_visible: str = (
+        "div.btn-bar-horizontal-centrada-inner:has(input#ctl00_ctl00_cphM_cph_repListaInteresados_ctl00_btnListaInteresadosItemNuevoRepresentante) "
+        "button.btn-icono"
+    )
+    btn_siguiente: str = (
+        ".btn-bar-horizontal-centrada-inner button:has-text(\"Siguiente\"), "
+        ".btn-bar-horizontal-centrada-inner button:has-text(\"Següent\"), "
+        ".btn-bar-horizontal-centrada-inner button:has-text(\"Seguent\")"
+    )
+    btn_siguiente_visible: str = (
+        "div.btn-bar-horizontal-centrada-inner:has(input#ctl00_ctl00_cphM_cph_btnSiguiente) button.btn-icono:has-text(\"Siguiente\"), "
+        "div.btn-bar-horizontal-centrada-inner:has(input#ctl00_ctl00_cphM_cph_btnSiguiente) button.btn-icono:has-text(\"Següent\"), "
+        "div.btn-bar-horizontal-centrada-inner:has(input#ctl00_ctl00_cphM_cph_btnSiguiente) button.btn-icono:has-text(\"Seguent\")"
+    )
     input_siguiente: str = "#ctl00_ctl00_cphM_cph_btnSiguiente"
     chk_proteccion_datos: str = "#ctl00_ctl00_cphM_cph_chkProteccionDatos"
     btn_modal_aceptar: str = ".ui-dialog:visible button[data-icono='aceptar.svg']"
     btn_confirmar: str = "button:has-text(\"Confirmar\")"
-    btn_firmar: str = "button:has-text(\"Firmar\")"
+    btn_confirmar_visible: str = "div.btn-bar-horizontal-centrada-inner:has(input[id$='_btnConfirmar']) button.btn-icono"
+    input_confirmar: str = "input[id$='_btnConfirmar']"
+    btn_firmar: str = "button:has-text(\"Firmar\"), button:has-text(\"Signar\")"
     input_firmar: str = "#ctl00_ctl00_cphM_cph_btnFirmar"
     btn_signar_tots_documents: str = "button:has-text(\"Signar tots els documents\")"
     btn_anadir_documento: str = ".btn-bar-horizontal-centrada-inner button:has-text(\"Añadir\")"
@@ -50,7 +79,7 @@ class AyuntaPalmaSelectors:
     alegaciones_input: str = "input[type='text'].form-control"
     alegaciones_textarea: str = "textarea.form-control"
     alegaciones_confirm: str = "button:has-text(\"Confirmar\")"
-    archivo_input: str = "#ctl00_ctl00_cphM_cph_pnlNuevoFichero input[type='file']"
+    archivo_input: str = "#ctl00_ctl00_cphM_cph_mfuNuevoFichero_pnl input[type='file']"
 
 
 @dataclass

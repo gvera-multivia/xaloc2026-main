@@ -59,3 +59,15 @@ class AyuntaPalmaAutomation(BaseAutomation):
         except Exception:
             await self.capture_error_screenshot("ayunta_palma_error.png")
             raise
+        finally:
+            # Palma queda inestable si se reutiliza la misma pestaña tras un tramite.
+            # Cerramos siempre la pestaña de trabajo (exito o error).
+            if self.page:
+                try:
+                    if not self.page.is_closed():
+                        await self.page.close()
+                        self.logger.info("Pestaña de trabajo cerrada al finalizar trámite de ayunta_palma.")
+                except Exception as e:
+                    self.logger.warning("No se pudo cerrar la pestaña de ayunta_palma al finalizar: %s", e)
+                finally:
+                    self.page = None
