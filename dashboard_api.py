@@ -37,7 +37,12 @@ cors_origins_raw = (os.getenv("DASHBOARD_CORS_ORIGINS") or "").strip()
 if cors_origins_raw:
     cors_origins = [o.strip() for o in cors_origins_raw.split(",") if o.strip()]
 else:
-    cors_origins = ["http://127.0.0.1:3000", "http://localhost:3000"]
+    cors_origins = [
+        "http://127.0.0.1:3000",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
 
 app.add_middleware(
     CORSMiddleware,

@@ -20,6 +20,7 @@ export function LoginPage() {
     setLoading(true)
 
     try {
+      console.log('Login attempt with baseURL:', apiClient.defaults.baseURL)
       const loginRes = await apiClient.post(AUTH.LOGIN, { username: usernameOrEmail, password })
       // El server devuelve el usuario en la respuesta del login — no hace falta un GET /auth/me adicional
       const userData = loginRes.data?.user
@@ -36,7 +37,7 @@ export function LoginPage() {
       if (status === 401) {
         setError('Credenciales incorrectas.')
       } else if (!status) {
-        setError(`Error interno local: ${err.message}`)
+        setError(`Error interno local: ${err.message} (URL: ${apiClient.defaults.baseURL})`)
       } else {
         setError(`Error del servidor (${status}).`)
       }
