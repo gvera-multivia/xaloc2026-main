@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from core.client_documentation import check_requires_gesdoc
 from core.pg_control_plane_store import PgControlPlaneStore
 from core.pg_pending_authorization_store import PgPendingAuthorizationStore
+from core.realtime_store import build_realtime_store
 from core.redis_client import get_redis_client
 from shared.queue import RedisStreamsClient
 
@@ -28,6 +29,7 @@ class PayloadValidatorService:
         self.streams = RedisStreamsClient(redis, logger=logger)
         self.store = PgControlPlaneStore.from_env(logger=logger)
         self.pending_auth_store = PgPendingAuthorizationStore.from_env(logger=logger)
+        self.realtime_store = build_realtime_store(logger=logger)
 
         self.candidates_stream = (os.getenv("CANDIDATES_STREAM_KEY") or "candidates").strip() or "candidates"
         self.validated_stream = (os.getenv("VALIDATED_STREAM_KEY") or "validated").strip() or "validated"
@@ -79,6 +81,21 @@ class PayloadValidatorService:
         if "denuncia" in fase or "aleg" in fase:
             return "P2"
         return "GENERIC"
+
+    @staticmethod
+    def _incident_type_for_gesdoc_reason(reason: str | None) -> str:
+        text = str(reason or "").strip().lower()
+        if not text:
+            return "REQUIRES_GESDOC"
+        if "carpeta de documentaci" in text and "no existe" in text:
+            return "CLIENT_FOLDER_NOT_FOUND"
+        if "no se encontr" in text and "autorizaci" in text:
+            return "CLIENT_AUTHORIZATION_MISSING"
+        if "compartido de clientes inaccesible" in text or "compartido de clientes vac" in text:
+            return "CLIENT_DOCS_SHARE_UNAVAILABLE"
+        if "no se pudo inferir identidad del cliente" in text:
+            return "CLIENT_IDENTITY_UNRESOLVED"
+        return "REQUIRES_GESDOC"
 
     async def run_once(self) -> bool:
         await self.streams.ensure_group(stream=self.candidates_stream, group=self.group)
@@ -154,11 +171,36 @@ class PayloadValidatorService:
             if not disable_gesdoc:
                 requires_gesdoc, gesdoc_reason = check_requires_gesdoc(normalized_payload)
                 if requires_gesdoc:
+                    reason_text = (gesdoc_reason or "").strip() or "Requiere autorizacion GESDOC"
                     self.pending_auth_store.insert_pending_authorization(
                         site_id=organism_id,
                         payload=normalized_payload,
                         authorization_type="gesdoc",
-                        reason=(gesdoc_reason or "").strip() or "Requiere autorizacion GESDOC",
+                        reason=reason_text,
+                    )
+                    expediente = str(
+                        normalized_payload.get("expediente")
+                        or normalized_payload.get("expediente_num")
+                        or normalized_payload.get("nExp")
+                        or ""
+                    ).strip()
+                    resource_id_for_incident = None
+                    try:
+                        resource_id_for_incident = (
+                            int(rid_for_auth) if rid_for_auth is not None else None
+                        )
+                    except Exception:
+                        resource_id_for_incident = None
+                    incident_type = self._incident_type_for_gesdoc_reason(reason_text)
+                    self.realtime_store.record_incident_once(
+                        site_id=organism_id,
+                        incident_type=incident_type,
+                        reason=reason_text,
+                        resource_id=resource_id_for_incident,
+                        expediente=expediente or None,
+                        payload=normalized_payload,
+                        error_code=incident_type,
+                        status="NEW",
                     )
                     await self.streams.ack(stream=self.candidates_stream, group=self.group, message_id=msg.message_id)
                     return True

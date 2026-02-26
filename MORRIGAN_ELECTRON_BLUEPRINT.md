@@ -1,15 +1,15 @@
-# Morrigan Electron Blueprint
+﻿# Morrigan Electron Blueprint
 
 Documento de referencia para construir la app de escritorio **Morrigan** sobre el stack actual de Xaloc.
 
 ## 1. Objetivo
 
-Crear una aplicación Electron para operación interna que:
+Crear una aplicaciÃ³n Electron para operaciÃ³n interna que:
 
 - consuma el backend existente via `api-gateway` (`http://localhost:8080`)
-- gestione cola, incidencias, control de procesos, logs y configuración
+- gestione cola, incidencias, control de procesos, logs y configuraciÃ³n
 - soporte realtime por WebSocket
-- sea segura por defecto (`contextIsolation`, `preload`, IPC mínimo)
+- sea segura por defecto (`contextIsolation`, `preload`, IPC mÃ­nimo)
 
 ## 2. Stack recomendado
 
@@ -19,7 +19,7 @@ Crear una aplicación Electron para operación interna que:
 - Estado remoto: TanStack Query
 - Estado local/UI: Zustand
 - HTTP: Axios
-- Validación runtime: Zod
+- ValidaciÃ³n runtime: Zod
 - Routing: React Router
 - Build/packaging: electron-builder
 - Lint/format: ESLint + Prettier
@@ -31,13 +31,13 @@ Separar en 3 capas:
 
 1. `main` (Node/Electron)
 - ciclo de vida de ventanas
-- actualización de app
+- actualizaciÃ³n de app
 - filesystem/shell (controlado)
 - bridge IPC seguro
 
 2. `preload`
 - expone API estricta al renderer (`window.morrigan`)
-- sin exponer módulos Node completos
+- sin exponer mÃ³dulos Node completos
 
 3. `renderer` (React SPA)
 - vistas y flujos de negocio
@@ -128,38 +128,40 @@ morrigan-electron/
 Crear `.env.example`:
 
 ```env
-MORRIGAN_API_BASE_URL=http://localhost:8080
-MORRIGAN_WS_URL=ws://localhost:8080/ws/dashboard
+MORRIGAN_API_BASE_URL=http://192.168.184.72:8080
+MORRIGAN_WS_URL=ws://192.168.184.72:8080/ws/dashboard
+MORRIGAN_BOOTSTRAP_URL=http://192.168.184.72:8080/morrigan-config.json
+MORRIGAN_CONFIG_REFRESH_SEC=120
 MORRIGAN_APP_NAME=Morrigan
 MORRIGAN_LOG_LEVEL=info
 ```
 
-Resolución:
+ResoluciÃ³n:
 
 - `renderer`: usar `import.meta.env`
 - `main`: usar `process.env`
-- en producción, permitir override via archivo local (`config.json`) leído por `main`
+- en producciÃ³n, permitir override via archivo local (`config.json`) leÃ­do por `main`
 
 ## 6. Seguridad Electron (obligatorio)
 
-En creación de BrowserWindow:
+En creaciÃ³n de BrowserWindow:
 
 - `contextIsolation: true`
 - `nodeIntegration: false`
 - `sandbox: true`
 - `webSecurity: true`
 - `preload: <path seguro>`
-- bloquear navegación externa no permitida
+- bloquear navegaciÃ³n externa no permitida
 - abrir links externos con `shell.openExternal` controlado
 
 En preload:
 
-- exponer solo métodos necesarios:
+- exponer solo mÃ©todos necesarios:
   - `app.getVersion()`
   - `shell.openPath(path)`
   - `diag.getRuntimeInfo()`
 
-## 7. Conexión API (contrato actual)
+## 7. ConexiÃ³n API (contrato actual)
 
 Base URL: `http://localhost:8080`
 
@@ -196,25 +198,25 @@ Base URL: `http://localhost:8080`
 ### Realtime
 - `WS /ws/dashboard`
 
-## 8. Cliente HTTP (patrón)
+## 8. Cliente HTTP (patrÃ³n)
 
 `src/renderer/core/api/client.ts`:
 
-- instancia Axios única
+- instancia Axios Ãºnica
 - `withCredentials: true`
 - timeout global (ej. 20s)
 - interceptor de errores:
-  - `401` => limpiar sesión y redirigir login
+  - `401` => limpiar sesiÃ³n y redirigir login
   - `409` => mostrar conflicto funcional
   - `5xx` => toast + retry selectivo
 
-## 9. WebSocket (patrón)
+## 9. WebSocket (patrÃ³n)
 
 `src/renderer/core/api/ws.ts`:
 
-- conexión única a `/ws/dashboard`
-- reconexión exponencial (`1s`, `2s`, `5s`, `10s`, max `30s`)
-- heartbeat de aplicación (si procede)
+- conexiÃ³n Ãºnica a `/ws/dashboard`
+- reconexiÃ³n exponencial (`1s`, `2s`, `5s`, `10s`, max `30s`)
+- heartbeat de aplicaciÃ³n (si procede)
 - publish interno hacia Zustand/event bus
 
 ## 10. Modelo de datos frontend
@@ -246,11 +248,11 @@ type IncidentItem = {
 }
 ```
 
-## 11. Módulos funcionales (MVP)
+## 11. MÃ³dulos funcionales (MVP)
 
-1. Login/Sesión
+1. Login/SesiÃ³n
 - formulario login
-- persistencia de sesión por cookie
+- persistencia de sesiÃ³n por cookie
 - perfil y logout
 
 2. Queue
@@ -272,7 +274,7 @@ type IncidentItem = {
 
 6. Config
 - tabla de `organismo_config`
-- edición `query_organisme`, `filtro_texp`, `regex_expediente`, `active`
+- ediciÃ³n `query_organisme`, `filtro_texp`, `regex_expediente`, `active`
 
 ## 12. Permisos por rol
 
@@ -282,31 +284,31 @@ type IncidentItem = {
 Implementar guardas en frontend:
 
 - rutas protegidas por `role`
-- ocultación de acciones no autorizadas
+- ocultaciÃ³n de acciones no autorizadas
 
-## 13. Plan de implementación por fases
+## 13. Plan de implementaciÃ³n por fases
 
-### Fase 0: Bootstrap técnico
+### Fase 0: Bootstrap tÃ©cnico
 - crear proyecto electron + react + typescript
 - wiring `main/preload/renderer`
 - lint + test base + scripts build
 
 ### Fase 1: Auth + layout
 - login/me/logout
-- shell base con navegación lateral
-- guardas de sesión/rol
+- shell base con navegaciÃ³n lateral
+- guardas de sesiÃ³n/rol
 
 ### Fase 2: Queue + Incidents
 - pages y APIs de cola/incidencias
-- acciones críticas con modal de confirmación
+- acciones crÃ­ticas con modal de confirmaciÃ³n
 
 ### Fase 3: Control + Logs + Config
 - control procesos
 - logs viewer
-- edición config organismos
+- ediciÃ³n config organismos
 
 ### Fase 4: Realtime y UX operativa
-- socket + invalidación de queries
+- socket + invalidaciÃ³n de queries
 - badges de eventos
 - notificaciones de error/retry
 
@@ -333,37 +335,47 @@ Implementar guardas en frontend:
 }
 ```
 
-## 15. Checklist de aceptación
+## 15. Checklist de aceptaciÃ³n
 
 - login/logout funcional contra `api-gateway`
-- módulos MVP operativos
+- mÃ³dulos MVP operativos
 - WebSocket conectado y reconectando
-- sin warnings de seguridad críticos en Electron
+- sin warnings de seguridad crÃ­ticos en Electron
 - instalador generado y ejecutable
 - runbook operativo para soporte interno
 
 ## 16. Riesgos y mitigaciones
 
 1. CORS/cookies
-- usar `withCredentials` y validar dominio/puerto únicos por entorno
+- usar `withCredentials` y validar dominio/puerto Ãºnicos por entorno
 
-2. Desalineación contratos API
+2. DesalineaciÃ³n contratos API
 - centralizar schemas Zod y fallback seguro
 
-3. UX en caídas de backend
+3. UX en caÃ­das de backend
 - estados offline, retry y mensajes claros
 
 4. Seguridad desktop
 - no exponer APIs Node al renderer
 - auditar IPC y permisos
 
-## 17. Próximo paso sugerido
+## 17. PrÃ³ximo paso sugerido
 
 Crear un esqueleto inicial del proyecto con:
 
 - `main/index.ts`
 - `preload/index.ts`
 - `renderer/main.tsx`
-- cliente API base + módulo Auth listo
+- cliente API base + mÃ³dulo Auth listo
 
-Con eso se puede empezar a iterar funcionalidad en 1-2 días.
+Con eso se puede empezar a iterar funcionalidad en 1-2 dÃ­as.
+
+
+## 18. Operacion LAN Windows (obligatorio)
+
+- usar URL/IP de servidor en LAN (ejemplo actual: `192.168.184.72`) y actualizar por `morrigan-config.json`
+- publicar `morrigan-config.json` centralizado para cambiar host/puerto sin reinstalar
+- crear acceso directo de escritorio desde NSIS (`createDesktopShortcut: always`)
+- activar autoarranque con Windows (`app.setLoginItemSettings({ openAtLogin: true })`)
+- validar sesion al arranque con `GET /api/auth/me` para mantener sesion cuando la cookie siga viva
+

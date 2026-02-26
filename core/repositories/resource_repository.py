@@ -193,21 +193,40 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
     def _clean_str(value: Any) -> str:
         return str(value).strip() if value is not None else ""
 
+    @classmethod
+    def _normalize_like_pattern(cls, raw: Any) -> str:
+        token = cls._clean_str(raw)
+        if not token:
+            return ""
+        if token == "%":
+            return token
+
+        has_wildcard = ("%" in token) or ("_" in token)
+        if not has_wildcard:
+            return f"%{token}%"
+
+        if not token.startswith("%"):
+            token = f"%{token}"
+        if not token.endswith("%"):
+            token = f"{token}%"
+        return token
+
     def _parse_organisme_patterns(self, raw: Any) -> tuple[list[str], str]:
         text = self._clean_str(raw)
         if not text:
             return ["%"], "or"
 
         if "|" in text:
-            parts = [self._clean_str(chunk) for chunk in text.split("|")]
+            parts = [self._normalize_like_pattern(chunk) for chunk in text.split("|")]
             patterns = [chunk for chunk in parts if chunk]
             return patterns or ["%"], "or"
 
         # Backward-compat: legacy split by spaces and AND semantics.
-        patterns = [self._clean_str(chunk) for chunk in text.split(" ")]
+        patterns = [self._normalize_like_pattern(chunk) for chunk in text.split(" ")]
         patterns = [chunk for chunk in patterns if chunk]
         self.logger.warning(
-            "query_organisme en formato legacy (sin '|'). Compatibilidad activa con split por espacios + AND; "
+            "query_organisme en formato legacy (sin '|'). Compatibilidad activa con split por espacios + AND "
+            "(normalizando wildcards LIKE); "
             "actualiza a formato OR por '|'. Valor=%r",
             text,
         )

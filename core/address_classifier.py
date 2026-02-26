@@ -39,14 +39,17 @@ def _token_key(token: str) -> str:
     txt = (token or "").strip().upper()
     if not txt:
         return ""
+    # Normalizamos a NFD para separar los acentos de las letras.
+    # Pero queremos mantener la Ñ/ñ si es posible, aunque NFD la separa en N + tilde combinada.
     txt = unicodedata.normalize("NFD", txt)
+    # Eliminamos marcadores de acentuación (Mn = Mark, Nonspacing)
     txt = "".join(ch for ch in txt if unicodedata.category(ch) != "Mn")
     return txt
 
 
 def _restore_street_spelling(calle_candidate: str, direccion_raw: str) -> str:
     """
-    Restaura grafia original desde direccion_raw (incluyendo Ñ/acentos) cuando
+    Restaura grafía original desde direccion_raw (incluyendo Ñ/acentos) cuando
     la IA devuelve formas simplificadas como NUNEZ.
     """
     calle_up = (calle_candidate or "").strip().upper()
@@ -54,6 +57,7 @@ def _restore_street_spelling(calle_candidate: str, direccion_raw: str) -> str:
     if not calle_up or not raw_up:
         return calle_up
 
+    # Mapear tokens normalizados a su versión original con Ñ/acentos
     raw_map: dict[str, str] = {}
     for m in _WORD_RE.finditer(raw_up):
         tok = m.group(0).upper()
@@ -63,7 +67,9 @@ def _restore_street_spelling(calle_candidate: str, direccion_raw: str) -> str:
 
     def _replace(match: re.Match[str]) -> str:
         tok = match.group(0).upper()
-        return raw_map.get(_token_key(tok), tok)
+        key = _token_key(tok)
+        # Si el token normalizado existe en el original, restauramos la grafía (Ñ, tildes)
+        return raw_map.get(key, tok)
 
     return _WORD_RE.sub(_replace, calle_up)
 
@@ -84,7 +90,7 @@ def _build_prompt_sistema() -> str:
 
     Devuelve exclusivamente un objeto JSON con los siguientes campos:
     - via: (DEBE ser uno de los valores de la lista anterior. Si no encaja, usa 'CALLE')
-    - calle: (Nombre limpio de la vía. Corrige truncamientos)
+    - calle: (Nombre limpio de la vía. Corrige truncamientos. PRESERVA las Ñ y tildes si las detectas)
     - numero: (Solo el número o S/N)
     - escalera: (Solo el identificador)
     - planta: (Piso. Normaliza: 'P'->'PRINCIPAL', 'BJ'->'BAJO', '3º'->'3')
@@ -93,7 +99,8 @@ def _build_prompt_sistema() -> str:
     REGLAS:
     1. Si recibes 'CL' o 'C/', mapealo a 'CALLE'. Si recibes 'AV' a 'AVENIDA', etc.
     2. En 'puerta', si el valor es 'NAVE 8', pon solo '8'.
-    3. JSON puro, sin comentarios.
+    3. NO elimines la letra Ñ de los nombres de calle (ej. NUÑEZ no debe ser NUNEZ).
+    4. JSON puro, sin comentarios.
     """
 
 async def classify_address_with_ai(

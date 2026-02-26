@@ -88,6 +88,9 @@ services:
     command: /opt/venv/bin/uvicorn services.dashboard_backend.app:app --host 0.0.0.0 --port 8788
     environment:
       DASHBOARD_ENABLE_FRONTEND_PROXY: "0"
+      DASHBOARD_ENABLE_WS: "1"
+      DASHBOARD_CORS_ORIGINS: "*"
+      REDIS_URL: redis://redis:6379/0
       AUTH_RBAC_SERVICE_URL: http://auth-rbac-service:8101
       USE_PG_SOURCE_OF_TRUTH: "1"
       QUEUE_MODE: redis_streams
@@ -129,12 +132,18 @@ services:
       DASHBOARD_FRONTEND_HOST: 0.0.0.0
       DASHBOARD_FRONTEND_PORT: "3000"
       DASHBOARD_FRONTEND_DEV: ${DASHBOARD_FRONTEND_DEV:-0}
+      MORRIGAN_RELEASE_DIR: /app/morrigan-electron/release
+      MORRIGAN_INSTALLER_PATTERN: Morrigan*.exe
+      MORRIGAN_MSI_PATTERN: Morrigan*.msi
+      MORRIGAN_API_BASE_URL: ${MORRIGAN_API_BASE_URL:-}
+      MORRIGAN_WS_URL: ${MORRIGAN_WS_URL:-}
+      MORRIGAN_BOOTSTRAP_URL: ${MORRIGAN_BOOTSTRAP_URL:-}
+      MORRIGAN_CONFIG_REFRESH_SEC: ${MORRIGAN_CONFIG_REFRESH_SEC:-120}
+      ELECTRON_AUTH_DEBUG: ${ELECTRON_AUTH_DEBUG:-1}
     volumes:
       - ../../:/app
       - dashboard_frontend_node_modules:/app/dashboard-frontend/node_modules
       - dashboard_frontend_next:/app/dashboard-frontend/.next
-    ports:
-      - "8080:8080"
     depends_on:
       dashboard-backend-service:
         condition: service_started
@@ -326,6 +335,20 @@ services:
       - ../../certificates:/data/certificates:ro
     ports:
       - "8112:8112"
+
+  xaloc-proxy:
+    image: caddy:alpine
+    container_name: xaloc-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      api-gateway:
+        condition: service_started
+      playwright-runner-service:
+        condition: service_started
 
 volumes:
   postgres_data:

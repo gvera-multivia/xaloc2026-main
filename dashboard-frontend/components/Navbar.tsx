@@ -12,6 +12,7 @@ import {
   Terminal,
   LayoutDashboard,
   Users,
+  Download,
 } from "lucide-react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
@@ -49,6 +50,7 @@ export default function Navbar() {
     { href: "/users", label: "Usuarios", icon: Users, adminOnly: true },
     { href: "/control", label: "Control", icon: Terminal, adminOnly: true },
     { href: "/blacklist", label: "Bloqueos", icon: ShieldAlert, adminOnly: false },
+    { href: "/descargas", label: "Electron", icon: Download, adminOnly: false },
   ]
     .filter((link) => !link.adminOnly || isAdmin)
     .filter((link) => !(isClientView && link.href === "/control"));

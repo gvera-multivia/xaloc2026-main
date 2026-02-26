@@ -349,6 +349,11 @@ async def api_auth_login(request: Request, payload: dict[str, Any] = Body(...)) 
     return await _proxy_auth_service(method="POST", path="/auth/login", request=request, payload=payload)
 
 
+@app.post("/api/auth/register")
+async def api_auth_register(request: Request, payload: dict[str, Any] = Body(...)) -> Response:
+    return await _proxy_auth_service(method="POST", path="/auth/register", request=request, payload=payload)
+
+
 @app.get("/api/auth/me")
 async def api_auth_me(request: Request, _user: dict[str, Any] = Depends(require_user)) -> Response:
     return await _proxy_auth_service(method="GET", path="/auth/me", request=request)
@@ -394,6 +399,7 @@ async def api_auth_delete_user(
 
 @app.websocket("/ws/dashboard")
 async def websocket_dashboard(websocket: WebSocket):
+    logger.error(">>> WEBSOCKET HANDSHAKE REACHED ROUTE")
     if not ENABLE_WS_REALTIME:
         await websocket.close(code=1008, reason="Realtime disabled")
         return
@@ -1088,6 +1094,56 @@ _HOP_BY_HOP_HEADERS = {
     "transfer-encoding",
     "upgrade",
 }
+
+
+@app.post("/api/admin/notifications/broadcast")
+async def api_admin_broadcast_notification(
+    payload: dict = Body(...),
+    admin: dict = Depends(require_admin),
+) -> dict:
+    """
+    Broadcast admin notification to all WebSocket listeners (Electron included).
+    Publishes an 'admin.alert' event to Redis channel:ui_updates.
+    """
+    import json as _json
+    from datetime import datetime, timezone
+
+    title = str(payload.get("title") or "").strip()
+    body_text = str(payload.get("body") or "").strip()
+    level = str(payload.get("level") or "info").strip().lower()
+    template_id = str(payload.get("template_id") or "").strip()
+    internal_note = str(payload.get("internal_note") or "").strip()
+
+    if not title:
+        raise HTTPException(status_code=400, detail="Campo 'title' obligatorio.")
+    if not body_text:
+        raise HTTPException(status_code=400, detail="Campo 'body' obligatorio.")
+    if level not in {"info", "warning", "critical"}:
+        raise HTTPException(status_code=400, detail="Campo 'level' invalido (info|warning|critical).")
+
+    redis = get_redis_client()
+    if not redis:
+        raise HTTPException(status_code=503, detail="Redis no disponible para broadcast.")
+
+    event = {
+        "type": "admin.alert",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "data": {
+            "title": title,
+            "body": body_text,
+            "level": level,
+            "template_id": template_id or None,
+            "internal_note": internal_note or None,
+            "sent_by": str(admin.get("username") or admin.get("sub") or "admin"),
+        },
+    }
+
+    try:
+        subscribers = await redis.publish("channel:ui_updates", _json.dumps(event, ensure_ascii=False))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"No se pudo publicar la notificacion: {exc}") from exc
+
+    return {"ok": True, "published_to_subscribers": int(subscribers), "event": event}
 
 
 @app.api_route(

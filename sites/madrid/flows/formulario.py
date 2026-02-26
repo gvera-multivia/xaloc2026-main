@@ -127,10 +127,31 @@ def _normalizar_texto_autocomplete(texto: str) -> str:
     if texto is None:
         return ""
 
-    texto = unicodedata.normalize("NFKD", texto)
-    texto = "".join(ch for ch in texto if not unicodedata.combining(ch))
+    # Normalizamos a NFD para separar los acentos de las letras.
+    # Pero queremos mantener la Ñ/ñ. En NFD, la Ñ se convierte en N + ~ (combinada).
+    texto = unicodedata.normalize("NFD", texto)
+    
+    # Eliminamos marcadores de acentuación EXCEPTO para la Ñ si es posible,
+    # o más fácil: reconstruimos el texto saltando solo Mn que no sigan a N/n 
+    # (aunque técnicamente queremos todas las tildes fuera excepto la de la Ñ).
+    # Una forma más sencilla y segura para este caso:
+    resultado = []
+    for i, ch in enumerate(texto):
+        if unicodedata.category(ch) != "Mn":
+            resultado.append(ch)
+        else:
+            # Si es una tilde combinada (U+0303), y el carácter anterior era N o n, lo mantenemos
+            # para que al normalizar de vuelta a NFC se convierta en Ñ/ñ.
+            if ch == "\u0303" and i > 0 and texto[i-1].upper() == "N":
+                resultado.append(ch)
+    
+    texto = "".join(resultado)
+    # Volvemos a NFC para recomponer la Ñ
+    texto = unicodedata.normalize("NFC", texto)
+    
     texto = texto.upper()
-    texto = re.sub(r"[^A-Z0-9 ]+", " ", texto)
+    # Permitimos la Ñ en el regex
+    texto = re.sub(r"[^A-Z0-9Ñ ]+", " ", texto)
     texto = re.sub(r"\s+", " ", texto).strip()
     return texto
 
