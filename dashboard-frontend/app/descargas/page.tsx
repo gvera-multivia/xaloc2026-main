@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Download, Package, FileJson, Loader2, Plus, Save, Trash2, RefreshCw } from 'lucide-react';
+import { Download, Loader2, Plus, Save, Trash2, RefreshCw, Megaphone } from 'lucide-react';
 import { electronApi } from '@/lib/api';
 import { sileo } from 'sileo';
 import { useAuth } from '@/lib/AuthContext';
@@ -80,6 +80,11 @@ export default function DescargasPage() {
   const [editingTemplateId, setEditingTemplateId] = useState('');
   const [templateForm, setTemplateForm] = useState<TemplateForm>(EMPTY_TEMPLATE_FORM);
   const [templateSaving, setTemplateSaving] = useState(false);
+  const [releaseModalOpen, setReleaseModalOpen] = useState(false);
+  const [releaseVersion, setReleaseVersion] = useState('');
+  const [releaseFixSummary, setReleaseFixSummary] = useState('');
+  const [releaseAction, setReleaseAction] = useState('Descarga e instala la nueva version desde Descargas.');
+  const [releasePublishing, setReleasePublishing] = useState(false);
 
   const hasTemplateSelection = templateId.trim().length > 0;
 
@@ -242,6 +247,49 @@ export default function DescargasPage() {
     }
   };
 
+  const publishReleaseAnnouncement = async () => {
+    const version = releaseVersion.trim().replace(/^v/i, '');
+    const fixSummary = releaseFixSummary.trim();
+    const actionText = releaseAction.trim();
+
+    if (!version || !fixSummary) {
+      sileo.error({
+        title: 'Campos obligatorios',
+        description: 'Debes indicar version y resumen del fix.',
+      });
+      return;
+    }
+
+    const bodyText = [
+      `Nueva version disponible: v${version}.`,
+      `Fix principal: ${fixSummary}.`,
+      actionText ? `Accion recomendada: ${actionText}` : '',
+    ].filter(Boolean).join('\n');
+
+    try {
+      setReleasePublishing(true);
+      const res = await electronApi.broadcastAlert({
+        title: `Actualizacion Morrigan v${version}`,
+        body: bodyText,
+        level: 'warning',
+        internal_note: `release_announce_v${version}`,
+      });
+      sileo.success({
+        title: 'Version publicada',
+        description: `Broadcast enviado. Subscriptores activos: ${res.published_to_subscribers}`,
+      });
+      setReleaseModalOpen(false);
+      setReleaseFixSummary('');
+    } catch (err: any) {
+      sileo.error({
+        title: 'No se pudo publicar',
+        description: String(err?.message || 'Error desconocido'),
+      });
+    } finally {
+      setReleasePublishing(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-[40vh] flex items-center justify-center text-sm text-muted-foreground">
@@ -309,13 +357,29 @@ export default function DescargasPage() {
                 Envia mensajes broadcast a todos los Electron conectados por WebSocket.
               </div>
             </div>
-            <button
-              className="inline-flex items-center gap-2 rounded-md px-3 py-2 text-xs font-bold border border-border/70 hover:border-foreground/40 transition"
-              onClick={() => setTemplatesOpen((prev) => !prev)}
-              type="button"
-            >
-              {templatesOpen ? 'Cerrar gestor' : 'Gestionar plantillas'}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                className="inline-flex items-center gap-2 rounded-md px-3 py-2 text-xs font-bold border border-amber-400/60 bg-amber-400/10 hover:bg-amber-400/20 transition"
+                onClick={() => {
+                  if (!releaseVersion) {
+                    const inferred = String(info?.installerName || '').match(/(\d+\.\d+\.\d+)/)?.[1] || '';
+                    setReleaseVersion(inferred);
+                  }
+                  setReleaseModalOpen(true);
+                }}
+                type="button"
+              >
+                <Megaphone size={14} />
+                Publicar nueva version
+              </button>
+              <button
+                className="inline-flex items-center gap-2 rounded-md px-3 py-2 text-xs font-bold border border-border/70 hover:border-foreground/40 transition"
+                onClick={() => setTemplatesOpen((prev) => !prev)}
+                type="button"
+              >
+                {templatesOpen ? 'Cerrar gestor' : 'Gestionar plantillas'}
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -592,6 +656,74 @@ export default function DescargasPage() {
               Plantilla activa: <span className="font-semibold text-foreground">{selectedTemplate.label}</span> ({selectedTemplate.id})
             </div>
           )}
+        </div>
+      )}
+
+      {isAdmin && releaseModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-xl rounded-xl border border-border/70 bg-[rgba(17,19,26,0.95)] p-5 space-y-4 shadow-2xl">
+            <div>
+              <div className="text-sm font-black uppercase tracking-wider">Publicar nueva version</div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Este aviso se enviara como notificacion global a clientes Electron conectados.
+              </p>
+            </div>
+
+            <label className="text-xs block">
+              <div className="mb-1 text-muted-foreground uppercase tracking-wider">Version</div>
+              <input
+                className="w-full rounded-md border border-border/70 bg-background/40 p-2 font-mono"
+                value={releaseVersion}
+                onChange={(e) => setReleaseVersion(e.target.value)}
+                placeholder="0.1.7"
+              />
+            </label>
+
+            <label className="text-xs block">
+              <div className="mb-1 text-muted-foreground uppercase tracking-wider">Resumen del fix</div>
+              <textarea
+                className="w-full rounded-md border border-border/70 bg-background/40 p-2 min-h-[80px]"
+                value={releaseFixSummary}
+                onChange={(e) => setReleaseFixSummary(e.target.value)}
+                placeholder="Fix de notificaciones WS + mejora instalacion updater"
+              />
+            </label>
+
+            <label className="text-xs block">
+              <div className="mb-1 text-muted-foreground uppercase tracking-wider">Accion recomendada</div>
+              <textarea
+                className="w-full rounded-md border border-border/70 bg-background/40 p-2 min-h-[70px]"
+                value={releaseAction}
+                onChange={(e) => setReleaseAction(e.target.value)}
+                placeholder="Descarga e instala la nueva version."
+              />
+            </label>
+
+            <div className="rounded-md border border-border/60 bg-black/25 p-3 text-xs">
+              <div className="font-semibold mb-1">Previsualizacion del mensaje</div>
+              <pre className="whitespace-pre-wrap text-[11px] text-muted-foreground">{`Actualizacion Morrigan v${releaseVersion || 'X.Y.Z'}\nNueva version disponible: v${releaseVersion || 'X.Y.Z'}.\nFix principal: ${releaseFixSummary || '...'}.\nAccion recomendada: ${releaseAction || '...'}`}</pre>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                className="inline-flex items-center gap-2 rounded-md px-3 py-2 text-xs font-bold border border-border/70 hover:border-foreground/40 transition"
+                onClick={() => setReleaseModalOpen(false)}
+                disabled={releasePublishing}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="inline-flex items-center gap-2 rounded-md px-4 py-2 text-xs font-black uppercase border border-amber-400/60 bg-amber-400/15 hover:bg-amber-400/25 transition disabled:opacity-60"
+                onClick={() => void publishReleaseAnnouncement()}
+                disabled={releasePublishing}
+              >
+                {releasePublishing ? <Loader2 size={14} className="animate-spin" /> : <Megaphone size={14} />}
+                {releasePublishing ? 'Publicando...' : 'Publicar aviso'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

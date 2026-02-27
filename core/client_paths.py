@@ -194,3 +194,53 @@ def get_ruta_cliente_documentacion(client: ClientIdentity, base_path: str | Path
             return matches[0]
 
     return candidate
+
+
+def _normalize_phase_text(value: str) -> str:
+    text = strip_accents(str(value or "").strip().lower())
+    return re.sub(r"\s+", " ", text)
+
+
+def get_phase_folder_name(fase_procedimiento: str | None) -> str | None:
+    """
+    Mapea una fase de procedimiento al nombre de subcarpeta de justificantes.
+    """
+    fase_norm = _normalize_phase_text(fase_procedimiento or "")
+    if not fase_norm:
+        return None
+
+    motivo_to_folder = {
+        "identificacion": "IDENTIFICACIONES",
+        "denuncia": "ALEGACIONES",
+        "propuesta de resolucion": "ALEGACIONES",
+        "extraordinario de revision": "EXTRAORDINARIOS DE REVISION",
+        "subsanacion": "SUBSANACIONES",
+        "reclamaciones": "RECLAMACIONES",
+        "requerimiento embargo": "EMBARGOS",
+        "sancion": "SANCIONES",
+        "apremio": "APREMIOS",
+        "embargo": "EMBARGOS",
+    }
+
+    for key, folder_name in motivo_to_folder.items():
+        if key in fase_norm:
+            return folder_name
+    return None
+
+
+def get_ruta_recursos_telematicos(
+    *,
+    client: ClientIdentity,
+    base_path: str | Path,
+    fase_procedimiento: str | None = None,
+) -> Path:
+    """
+    Devuelve la ruta final de justificantes:
+    <cliente>/RECURSOS TELEMATICOS[/<subcarpeta por fase>]
+    """
+    ruta_cliente = get_ruta_cliente_documentacion(client, base_path=base_path)
+    ruta_recursos = find_or_create_normalized_subfolder(ruta_cliente, "RECURSOS TELEMATICOS")
+    phase_folder = get_phase_folder_name(fase_procedimiento)
+    if not phase_folder:
+        return ruta_recursos
+    return find_or_create_normalized_subfolder(ruta_recursos, phase_folder)

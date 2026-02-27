@@ -137,7 +137,11 @@ async def download_document_and_attachments(
         if k in seen_keys:
             continue
         if not p.exists():
-            logger.warning("Archivo del payload no encontrado, se omite: %s", p)
+            p_norm = _key(p)
+            if "tmp" in p_norm and "ayunta_palma" in p_norm:
+                logger.info("Archivo temporal antiguo de payload, se omite: %s", p)
+            else:
+                logger.warning("Archivo del payload no encontrado, se omite: %s", p)
             continue
         seen_keys.add(k)
         merged.append(p)

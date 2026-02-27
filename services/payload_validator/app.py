@@ -6,6 +6,7 @@ import logging
 import os
 import signal
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from dotenv import load_dotenv
@@ -26,6 +27,7 @@ class PayloadValidatorService:
         redis = get_redis_client()
         if redis is None:
             raise RuntimeError("Redis requerido para payload-validator-service.")
+        self.redis = redis
         self.streams = RedisStreamsClient(redis, logger=logger)
         self.store = PgControlPlaneStore.from_env(logger=logger)
         self.pending_auth_store = PgPendingAuthorizationStore.from_env(logger=logger)
@@ -192,7 +194,7 @@ class PayloadValidatorService:
                     except Exception:
                         resource_id_for_incident = None
                     incident_type = self._incident_type_for_gesdoc_reason(reason_text)
-                    self.realtime_store.record_incident_once(
+                    created = self.realtime_store.record_incident_once(
                         site_id=organism_id,
                         incident_type=incident_type,
                         reason=reason_text,
@@ -202,6 +204,32 @@ class PayloadValidatorService:
                         error_code=incident_type,
                         status="NEW",
                     )
+                    if created:
+                        # Best-effort realtime event so Electron can notify immediately.
+                        try:
+                            await self.redis.publish(
+                                "channel:ui_updates",
+                                json.dumps(
+                                    {
+                                        "type": "incident.new",
+                                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                                        "data": {
+                                            "site_id": organism_id,
+                                            "incident_type": incident_type,
+                                            "error_code": incident_type,
+                                            "reason": reason_text,
+                                            "resource_id": resource_id_for_incident,
+                                            "expediente": expediente or None,
+                                        },
+                                    },
+                                    ensure_ascii=False,
+                                ),
+                            )
+                        except Exception as exc:
+                            logger.debug(
+                                "[payload-validator] No se pudo publicar evento realtime de incidencia: %s",
+                                exc,
+                            )
                     await self.streams.ack(stream=self.candidates_stream, group=self.group, message_id=msg.message_id)
                     return True
 

@@ -798,6 +798,41 @@ async def _click_signar_tots_programatic(page: Page) -> bool:
         "1", "true", "yes", "on"
     }
 
+    # Fast-path quirurgico con reintentos: click directo en
+    # ventanaModal -> button.btn.btnFirmar antes de usar heuristicas.
+    for _ in range(40):
+        try:
+            direct_modal_click = await page.evaluate(
+                """() => {
+                    const iframe =
+                        document.querySelector("div.ui-dialog iframe#ventanaModal")
+                        || document.querySelector("iframe#ventanaModal")
+                        || document.querySelector("iframe[src*='/firma/firmar.aspx']");
+                    if (!iframe) return false;
+                    const w = iframe.contentWindow;
+                    const d = iframe.contentDocument || (w && w.document);
+                    if (!d) return false;
+                    const btn =
+                        d.querySelector("button.btn.btnFirmar")
+                        || d.querySelector("button.btnFirmar")
+                        || Array.from(d.querySelectorAll("button")).find((b) => {
+                            const t = (b.textContent || "").toLowerCase().replace(/\\s+/g, " ").trim();
+                            return t.includes("signar tots els documents")
+                                || t.includes("firmar todos los documentos")
+                                || t.includes("firmar tots els documents");
+                        });
+                    if (!btn) return false;
+                    btn.click();
+                    return true;
+                }"""
+            )
+            if direct_modal_click:
+                logger.info("[AP-FIRMA] Click directo en ventanaModal sobre 'Signar tots els documents'.")
+                return True
+        except Exception:
+            pass
+        await asyncio.sleep(0.25)
+
     async def _try_locator_click(scope, label: str) -> bool:
         # 1) Click real de Playwright (trusted) sobre boton visible.
         for sel in strict_button_selectors:

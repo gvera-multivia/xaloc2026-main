@@ -8,6 +8,7 @@ import logging
 import re
 import shutil
 import unicodedata
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -319,16 +320,21 @@ def _renombrar_y_mover_justificante(
     Returns:
         Ruta final del justificante guardado
     """
-    # Construir nombre final
-    nombre_final = f"JUSTIFICANTE {num_expediente}.pdf"
-    ruta_final = destino_dir / nombre_final
-    
-    logger.info(f"Copiando justificante a: {nombre_final}")
-    
-    # Eliminar archivo existente si existe
+    # Construir nombre final base
+    nombre_base = f"JUSTIFICANTE {num_expediente}"
+    ruta_final = destino_dir / f"{nombre_base}.pdf"
+
+    # Nunca sobrescribir justificantes previos del mismo expediente:
+    # si existe, generar nombre con fecha/hora para mantener histórico.
     if ruta_final.exists():
-        logger.warning(f"El archivo {ruta_final} ya existe, sera sobrescrito")
-        ruta_final.unlink()
+        timestamp = datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
+        ruta_final = destino_dir / f"{nombre_base} ({timestamp}).pdf"
+        intento = 1
+        while ruta_final.exists():
+            intento += 1
+            ruta_final = destino_dir / f"{nombre_base} ({timestamp})_{intento}.pdf"
+
+    logger.info(f"Copiando justificante a: {ruta_final.name}")
     
     # Usar shutil.copy2 para copiar entre unidades diferentes
     # En Windows, rename() falla con WinError 17 al intentar mover entre unidades
@@ -401,7 +407,8 @@ async def descargar_y_guardar_justificante(page: Page, payload: dict) -> str:
         ruta_recursos = _construir_ruta_recursos_telematicos(payload, fase_procedimiento)
         
         # 4. Descargar a archivo temporal (nombre limpio para evitar problemas)
-        temporal = Path("tmp") / f"temp_justif_{num_expediente}.pdf"
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        temporal = Path("tmp") / f"temp_justif_{num_expediente}_{ts}.pdf"
         temporal.parent.mkdir(parents=True, exist_ok=True)
         
         await _descargar_pdf_desde_url(page, url_justificante, temporal)

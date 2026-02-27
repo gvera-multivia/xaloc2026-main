@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import traceback
 from pathlib import Path
 from typing import Optional
@@ -18,6 +19,7 @@ from .models import ProcessOutcome
 from .runner_client import execute_via_runner_service, use_remote_playwright_runner
 
 logger = logging.getLogger("worker.task_orchestrator")
+TMP_ROOT = Path("tmp")
 
 
 async def _append_required_client_docs(
@@ -88,6 +90,32 @@ async def process_task(
         or "NO_ID"
     )
     logger.info("Procesando tarea ID=%s site=%s protocol=%s", task_label, site_id, protocol)
+
+    def _cleanup_tmp_workspace() -> None:
+        """
+        Limpia tmp tras cada recurso para evitar basura local/contenedor.
+        """
+        try:
+            root = TMP_ROOT.resolve()
+        except Exception:
+            root = TMP_ROOT
+        if not root.exists():
+            return
+
+        # Safety belt: nunca borrar fuera de .../tmp
+        if root.name.lower() != "tmp":
+            logger.warning("Se omite limpieza tmp por ruta insegura: %s", root)
+            return
+
+        for child in list(root.iterdir()):
+            try:
+                if child.is_dir():
+                    shutil.rmtree(child, ignore_errors=True)
+                else:
+                    child.unlink(missing_ok=True)
+            except Exception as exc:
+                logger.debug("No se pudo limpiar temporal %s: %s", child, exc)
+
     try:
         if auth_session is None:
             raise ValueError("auth_session es requerido para descargar documentos.")
@@ -155,4 +183,5 @@ async def process_task(
         logger.error(traceback.format_exc())
         return ProcessOutcome(success=False, error=f"{type(e).__name__}: {e}")
     finally:
+        _cleanup_tmp_workspace()
         logger.info("Finalizando procesamiento de tarea %s", task_label)

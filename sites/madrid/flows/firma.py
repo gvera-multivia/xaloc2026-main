@@ -4,6 +4,7 @@ import logging
 import re
 import shutil
 import unicodedata
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -122,9 +123,25 @@ def _justificante_filename(num_expediente: str) -> str:
     return f"JUSTIFICANTE - {clean_exp}.pdf"
 
 
+def _build_unique_path(destino_dir: Path, filename: str) -> Path:
+    base = Path(filename).stem
+    ext = Path(filename).suffix or ".pdf"
+    candidate = destino_dir / f"{base}{ext}"
+    if not candidate.exists():
+        return candidate
+
+    ts = datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
+    candidate = destino_dir / f"{base} ({ts}){ext}"
+    seq = 1
+    while candidate.exists():
+        seq += 1
+        candidate = destino_dir / f"{base} ({ts})_{seq}{ext}"
+    return candidate
+
+
 async def _guardar_justificante_temporal(download: Any, *, num_expediente: str, tmp_dir: Path) -> Path:
     tmp_dir.mkdir(parents=True, exist_ok=True)
-    tmp_path = tmp_dir / _justificante_filename(num_expediente)
+    tmp_path = _build_unique_path(tmp_dir, _justificante_filename(num_expediente))
     await download.save_as(tmp_path)
     logger.info("Justificante guardado temporalmente en: %s", tmp_path)
     return tmp_path
@@ -132,9 +149,7 @@ async def _guardar_justificante_temporal(download: Any, *, num_expediente: str, 
 
 def _mover_justificante_a_destino(tmp_path: Path, *, destino_dir: Path) -> Path:
     destino_dir.mkdir(parents=True, exist_ok=True)
-    destino_path = destino_dir / tmp_path.name
-    if destino_path.exists():
-        destino_path.unlink()
+    destino_path = _build_unique_path(destino_dir, tmp_path.name)
     shutil.move(str(tmp_path), str(destino_path))
     logger.info("Justificante movido a: %s", destino_path)
     return destino_path

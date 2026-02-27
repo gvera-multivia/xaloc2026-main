@@ -185,7 +185,9 @@ function installNow(): { ok: boolean; reason?: string } {
     }
 
     logger.info('[Updater] Instalacion inmediata solicitada por el renderer')
-    autoUpdater.quitAndInstall(true, false)
+    // Silent install avoids leaving a hidden installer wizard and force-run
+    // guarantees reopening Morrigan after update is applied.
+    autoUpdater.quitAndInstall(true, true)
     return { ok: true }
 }
 

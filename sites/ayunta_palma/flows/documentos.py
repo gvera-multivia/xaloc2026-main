@@ -11,6 +11,7 @@ import re
 import shutil
 import sys
 import unicodedata
+from datetime import datetime
 from pathlib import Path
 
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
@@ -454,6 +455,22 @@ def _normalize_text(text: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFD", text) if unicodedata.category(c) != "Mn")
 
 
+def _build_unique_path(destino_dir: Path, filename: str) -> Path:
+    base = Path(filename).stem
+    ext = Path(filename).suffix or ".pdf"
+    candidate = destino_dir / f"{base}{ext}"
+    if not candidate.exists():
+        return candidate
+
+    ts = datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
+    candidate = destino_dir / f"{base} ({ts}){ext}"
+    seq = 1
+    while candidate.exists():
+        seq += 1
+        candidate = destino_dir / f"{base} ({ts})_{seq}{ext}"
+    return candidate
+
+
 def _folder_matches(folder_name: str, target_name: str) -> bool:
     folder_norm = _normalize_text(folder_name)
     target_norm = _normalize_text(target_name)
@@ -767,14 +784,12 @@ async def _descargar_justificante_instancia(page: Page, payload: dict | None) ->
     filename = f"JUSTIFICANTE - {expediente}.pdf"
     tmp_dir = Path("tmp") / "ayunta_palma" / "justificantes" / str(payload.get("idRecurso") or "unknown")
     tmp_dir.mkdir(parents=True, exist_ok=True)
-    tmp_path = tmp_dir / filename
+    tmp_path = _build_unique_path(tmp_dir, filename)
     tmp_path.write_bytes(pdf_bytes)
 
     destino_dir = _construir_ruta_recursos_telematicos(payload)
     destino_dir.mkdir(parents=True, exist_ok=True)
-    final_path = destino_dir / filename
-    if final_path.exists():
-        final_path.unlink()
+    final_path = _build_unique_path(destino_dir, filename)
     shutil.copy2(tmp_path, final_path)
     tmp_path.unlink(missing_ok=True)
     logger.info("[AP-DIAG] Justificante guardado en carpeta cliente: %s", final_path)
@@ -985,98 +1000,59 @@ async def _click_firmar_con_reintentos(page: Page, config: AyuntaPalmaConfig, ma
 
 
 async def _click_signar_tots_documents(page: Page, config: AyuntaPalmaConfig) -> None:
-    async def _get_ventana_modal_frame():
-        try:
-            iframe = page.locator("#ventanaModal").first
-            if await iframe.count() == 0:
-                return None
-            handle = await iframe.element_handle()
-            if handle is None:
-                return None
-            return await handle.content_frame()
-        except Exception:
-            return None
-
-    async def _try_click_in_frame(frame) -> bool:
-        candidates = [
-            frame.locator("button.btnFirmar").first,
-            frame.locator("button", has_text="Signar tots els documents").first,
-            frame.locator("button", has_text="Firmar todos los documentos").first,
-            frame.locator(config.selectors.btn_signar_tots_documents).first,
-        ]
-        for locator in candidates:
-            try:
-                if await locator.count() > 0 and await locator.is_visible():
-                    await locator.scroll_into_view_if_needed()
-                    await locator.click(timeout=4000)
-                    return True
-            except Exception:
-                try:
-                    await locator.click(force=True, timeout=4000)
-                    return True
-                except Exception:
-                    continue
-        try:
-            return bool(
-                await frame.evaluate(
-                    """() => {
-                        const byClass = document.querySelector('button.btnFirmar');
-                        if (byClass) { byClass.click(); return true; }
-                        const buttons = Array.from(document.querySelectorAll('button'));
-                        const target = buttons.find((b) => {
-                            const t = (b.textContent || '').toLowerCase();
-                            return t.includes('signar tots els documents') || t.includes('firmar todos los documentos');
-                        });
-                        if (target) { target.click(); return true; }
-                        return false;
-                    }"""
-                )
-            )
-        except Exception:
-            return False
-        return False
-
     deadline_ms = config.timeouts.general
     waited = 0
-    step = 1000
+    step = 500
     while waited < deadline_ms:
-        modal_frame = await _get_ventana_modal_frame()
-        if modal_frame is not None and await _try_click_in_frame(modal_frame):
+        # Camino principal: click directo dentro del iframe de Portafirmas.
+        clicked_modal = await page.evaluate(
+            """() => {
+                const iframe =
+                    document.querySelector("div.ui-dialog iframe#ventanaModal")
+                    || document.querySelector("iframe#ventanaModal")
+                    || document.querySelector("iframe[src*='/firma/firmar.aspx']");
+                if (!iframe) return false;
+                const w = iframe.contentWindow;
+                const d = iframe.contentDocument || (w && w.document);
+                if (!d) return false;
+
+                const btn =
+                    d.querySelector("button.btn.btnFirmar")
+                    || d.querySelector("button.btnFirmar")
+                    || Array.from(d.querySelectorAll("button")).find((b) => {
+                        const t = (b.textContent || "").toLowerCase().replace(/\\s+/g, " ").trim();
+                        return t.includes("signar tots els documents")
+                            || t.includes("firmar todos los documentos")
+                            || t.includes("firmar tots els documents");
+                    });
+                if (!btn) return false;
+                btn.click();
+                return true;
+            }"""
+        )
+        if clicked_modal:
+            logger.info("[AP-DIAG] Click directo en boton 'Signar tots els documents' dentro de ventanaModal.")
             await page.wait_for_timeout(config.delay_ms)
             await _esperar_velo_oculto(page, config)
             return
-        if await _try_click_in_frame(page):
-            await page.wait_for_timeout(config.delay_ms)
-            await _esperar_velo_oculto(page, config)
-            return
+
+        # Fallback: localizar en frames detectados por Playwright.
         for fr in page.frames:
-            if fr is page.main_frame:
+            try:
+                locator = fr.locator("button.btn.btnFirmar, button.btnFirmar").first
+                if await locator.count() > 0 and await locator.is_visible():
+                    await locator.click(force=True, timeout=2000)
+                    logger.info("[AP-DIAG] Click fallback Playwright en boton btnFirmar (frame=%s).", fr.url)
+                    await page.wait_for_timeout(config.delay_ms)
+                    await _esperar_velo_oculto(page, config)
+                    return
+            except Exception:
                 continue
-            if await _try_click_in_frame(fr):
-                await page.wait_for_timeout(config.delay_ms)
-                await _esperar_velo_oculto(page, config)
-                return
+
         await page.wait_for_timeout(step)
         waited += step
 
-    # Fallback final por JS en main frame.
-    clicked = await page.evaluate(
-        """() => {
-            const byClass = document.querySelector('button.btnFirmar');
-            if (byClass) { byClass.click(); return true; }
-            const buttons = Array.from(document.querySelectorAll('button'));
-            const target = buttons.find(b => {
-                const t = (b.textContent || '').toLowerCase();
-                return t.includes('signar tots els documents') || t.includes('firmar todos los documentos');
-            });
-            if (target) { target.click(); return true; }
-            return false;
-        }"""
-    )
-    if not clicked:
-        raise PlaywrightTimeoutError("No se localizÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³ el botÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³n 'Signar tots els documents' en la pÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡gina/frames.")
-    await page.wait_for_timeout(config.delay_ms)
-    await _esperar_velo_oculto(page, config)
+    raise PlaywrightTimeoutError("No se pudo clickar 'Signar tots els documents' en ventanaModal.")
 
 
 async def _verificar_firma_realizada(page: Page, config: AyuntaPalmaConfig) -> None:

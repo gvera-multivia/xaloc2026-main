@@ -139,20 +139,32 @@ class PostgresHistoryRepository:
                     (day, page_size, offset),
                 )
                 rows = cur.fetchall()
-                items = [
-                    {
-                        "site_id": row[0],
-                        "resource_id": row[1],
-                        "job_id": row[2],
-                        "protocol": row[3],
-                        "day": row[4],
-                        "started_at": row[5].isoformat() if row[5] else None,
-                        "ended_at": row[6].isoformat() if row[6] else None,
-                        "payload": row[7],
-                        "result": row[8],
-                    }
-                    for row in rows
-                ]
+                items = []
+                for row in rows:
+                    payload = row[7] if isinstance(row[7], dict) else {}
+                    expediente = (
+                        payload.get("expediente")
+                        or payload.get("expediente_num")
+                        or payload.get("denuncia_num")
+                        or payload.get("nExp")
+                        or payload.get("Expedient")
+                    )
+                    fase = payload.get("fase_procedimiento") or payload.get("FaseProcedimiento")
+                    items.append(
+                        {
+                            "site_id": row[0],
+                            "resource_id": row[1],
+                            "job_id": row[2],
+                            "protocol": row[3],
+                            "day": row[4],
+                            "started_at": row[5].isoformat() if row[5] else None,
+                            "ended_at": row[6].isoformat() if row[6] else None,
+                            "payload": row[7],
+                            "result": row[8],
+                            "expediente": str(expediente).strip() if expediente is not None else None,
+                            "fase_procedimiento": str(fase).strip() if fase is not None else None,
+                        }
+                    )
                 return {"items": items, "page": page, "page_size": page_size, "total": total}
         except Exception as exc:
             self.logger.warning("Error listando exitos en PG: %s", exc)
@@ -287,6 +299,8 @@ class SQLServerHistoryRepository:
                     "protocol": "P2" if row[4] == 2 else ("P3" if row[4] == 3 else f"T-{row[4]}"),
                     "day": row[7],
                     "started_at": row[8].isoformat() if row[8] else None,
+                    "expediente": row[2],
+                    "fase_procedimiento": (row[12] or "").strip() if row[12] else None,
                     "payload": {
                         "expediente": row[2],
                         "usuario": row[5],

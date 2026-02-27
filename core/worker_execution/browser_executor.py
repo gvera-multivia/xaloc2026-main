@@ -40,7 +40,6 @@ async def execute_browser_flow(
         headless = 1 if os.getenv("XALOC_HEADLESS") == "1" else 0
         config = call_with_supported_kwargs(controller.create_config, headless=headless, protocol=protocol)
         config.navegador.perfil_path = Path("profiles/worker").absolute()
-
         mapped_data = controller.map_data(payload)
         mapped_data.update({"protocol": protocol, "headless": headless})
 
@@ -63,9 +62,14 @@ async def execute_browser_flow(
             "yes",
             "on",
         }
-        if (not keep_browser_open_disabled) and site_id in ["madrid", "base_online", "ayunta_palma"]:
+        if site_id == "ayunta_palma":
+            # Palma puede quedar en estado intermedio si se reutiliza ventana/contexto.
+            # Forzamos cierre completo al terminar cada recurso.
+            os.environ["XALOC_KEEP_BROWSER_OPEN"] = "0"
+            os.environ["XALOC_KEEP_TAB_OPEN"] = "0"
+        elif (not keep_browser_open_disabled) and site_id in ["madrid", "base_online"]:
             os.environ["XALOC_KEEP_BROWSER_OPEN"] = "1"
-            os.environ["XALOC_KEEP_TAB_OPEN"] = "0" if site_id == "ayunta_palma" else "1"
+            os.environ["XALOC_KEEP_TAB_OPEN"] = "1"
 
         async with AutomationCls(config) as bot:
             if screencast_enabled:

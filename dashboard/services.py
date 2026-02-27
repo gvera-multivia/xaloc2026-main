@@ -734,27 +734,48 @@ class DashboardService:
 
     def resolve_client_folder(self, *, payload: dict[str, Any]) -> dict[str, Any]:
         """Calcula la ruta a la carpeta de justificantes del cliente (RECURSOS TELEMATICOS + subfase)."""
-        from sites.xaloc_girona.flows.descarga_justificante import (
-            _construir_ruta_recursos_telematicos,
+        from core.client_documentation import client_identity_from_payload
+        from core.client_paths import (
+            get_phase_folder_name,
+            get_ruta_cliente_documentacion,
+            get_ruta_recursos_telematicos,
+            resolve_client_docs_base_path,
         )
 
         fase_procedimiento = payload.get("fase_procedimiento")
         try:
-            ruta = _construir_ruta_recursos_telematicos(payload, fase_procedimiento)
+            base_path = resolve_client_docs_base_path()
+            client = client_identity_from_payload(payload)
+            ruta_cliente = get_ruta_cliente_documentacion(client, base_path=base_path)
+            ruta = get_ruta_recursos_telematicos(
+                client=client,
+                base_path=base_path,
+                fase_procedimiento=str(fase_procedimiento or ""),
+            )
+            phase_folder = get_phase_folder_name(str(fase_procedimiento or ""))
         except Exception as exc:
             self.logger.warning("Error construyendo ruta recursos telematicos: %s", exc)
             # Fallback: usar solo RECURSOS TELEMATICOS sin subfase
             from core.client_documentation import (
                 client_identity_from_payload,
             )
-            from core.client_paths import get_ruta_cliente_documentacion, resolve_client_docs_base_path
+            from core.client_paths import (
+                find_or_create_normalized_subfolder,
+                get_ruta_cliente_documentacion,
+                resolve_client_docs_base_path,
+            )
 
             base_path = resolve_client_docs_base_path()
             client = client_identity_from_payload(payload)
             ruta_base = get_ruta_cliente_documentacion(client, base_path=base_path)
-            ruta = ruta_base / "RECURSOS TELEMATICOS"
+            ruta = find_or_create_normalized_subfolder(ruta_base, "RECURSOS TELEMATICOS")
+            ruta_cliente = ruta_base
+            phase_folder = None
 
         return {
             "path": str(ruta),
             "exists": ruta.exists(),
+            "fase_procedimiento": (str(fase_procedimiento or "").strip() or None),
+            "fase_folder": phase_folder,
+            "ruta_cliente": str(ruta_cliente),
         }
