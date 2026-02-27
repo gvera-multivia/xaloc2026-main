@@ -188,7 +188,56 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         authenticated_user: Optional[str],
         limit: int,
         on_discard: Optional[SiteAdapter.DiscardCallback] = None,
+        resource_repo: Any | None = None,
     ) -> list[dict]:
+        if resource_repo is not None:
+            regex_pattern = self._clean_str(config.get("regex_expediente")) or self.DEFAULT_REGEX_EXPEDIENTE
+            regex = self._regex_cache.get(regex_pattern)
+            if regex is None:
+                try:
+                    regex = re.compile(regex_pattern)
+                except re.error:
+                    logger.warning("[ayunta_palma] Regex invalido: %r. Usando fallback.", regex_pattern)
+                    regex = self._regex_fallback
+                self._regex_cache[regex_pattern] = regex
+
+            out: list[dict] = []
+            resources = resource_repo.get_pending_resources(site_id=self.site_id, config=config, limit=limit)
+            for resource in resources:
+                if limit and len(out) >= limit:
+                    break
+                recurso = dict(resource.metadata or {})
+                expediente = self._clean_str(recurso.get("Expedient")).upper()
+                if not expediente or not regex.match(expediente):
+                    if on_discard:
+                        on_discard(
+                            {
+                                "site_id": self.site_id,
+                                "idRecurso": recurso.get("idRecurso"),
+                                "Expedient": expediente,
+                                "tipo_incidencia": "REGEX_DISCARDED",
+                                "motivo": f"Expediente no valido para ayunta_palma: {expediente}",
+                            }
+                        )
+                    continue
+                recurso["Expedient"] = expediente
+
+                adjuntos = list(recurso.get("adjuntos") or [])
+                for adj in adjuntos:
+                    if "url" not in adj and adj.get("id") is not None:
+                        adj["url"] = self.ADJUNTO_URL_TEMPLATE.format(id=int(adj["id"]))
+                recurso["adjuntos"] = adjuntos
+
+                estado = int(recurso.get("Estado") or 0)
+                usuario = self._clean_str(recurso.get("UsuarioAsignado"))
+                if estado == 1 and authenticated_user and usuario != authenticated_user:
+                    continue
+                if estado == 1 and not authenticated_user:
+                    continue
+
+                out.append(recurso)
+            return out
+
         regex_pattern = self._clean_str(config.get("regex_expediente")) or self.DEFAULT_REGEX_EXPEDIENTE
         regex = self._regex_cache.get(regex_pattern)
         if regex is None:

@@ -13,22 +13,25 @@ export default function NotificationManager() {
     const lastAuthId = useRef<number>(0);
     const lastBlacklistId = useRef<number>(0);
 
+    const canUseBrowserNotifications = () =>
+        typeof window !== 'undefined' && window.isSecureContext && 'Notification' in window;
+
     // Initialize permission state
     useEffect(() => {
-        if (typeof window !== 'undefined' && 'Notification' in window) {
-            setPermission(Notification.permission);
+        if (!canUseBrowserNotifications()) return;
 
-            // Load last seen IDs from localStorage
-            const savedAuthId = localStorage.getItem('lastSeenAuthId');
-            if (savedAuthId) lastAuthId.current = parseInt(savedAuthId);
+        setPermission(window.Notification.permission);
 
-            const savedBlacklistId = localStorage.getItem('lastSeenBlacklistId');
-            if (savedBlacklistId) lastBlacklistId.current = parseInt(savedBlacklistId);
-        }
+        // Load last seen IDs from localStorage
+        const savedAuthId = localStorage.getItem('lastSeenAuthId');
+        if (savedAuthId) lastAuthId.current = parseInt(savedAuthId, 10);
+
+        const savedBlacklistId = localStorage.getItem('lastSeenBlacklistId');
+        if (savedBlacklistId) lastBlacklistId.current = parseInt(savedBlacklistId, 10);
     }, []);
 
     const checkNewItems = async () => {
-        if (!isAuthenticated || loading || Notification.permission !== 'granted') return;
+        if (!isAuthenticated || loading || !canUseBrowserNotifications() || window.Notification.permission !== 'granted') return;
 
         try {
             // 1. Check Pending Authorizations
@@ -42,9 +45,9 @@ export default function NotificationManager() {
                 } else if (maxId > lastAuthId.current) {
                     const newItems = authRes.items.filter((it: any) => it.id > lastAuthId.current);
                     newItems.forEach((item: any) => {
-                        new Notification('Autorización Requerida', {
-                            body: `${item.site_id}: #${item.resource_id} requiere validación.`,
-                            icon: '/favicon.ico', // Adjust if needed
+                        new window.Notification('Autorizacion requerida', {
+                            body: `${item.site_id}: #${item.resource_id} requiere validacion.`,
+                            icon: '/favicon.ico',
                         });
                     });
                     lastAuthId.current = maxId;
@@ -55,7 +58,6 @@ export default function NotificationManager() {
             // 2. Check Blacklist
             const blacklistRes = await blacklistApi.list();
             if (blacklistRes.items && blacklistRes.items.length > 0) {
-                // Items in blacklist usually have an 'id' based on the schema I found
                 const maxId = Math.max(...blacklistRes.items.map((it: any) => it.id || 0));
                 if (lastBlacklistId.current === 0 && maxId > 0) {
                     lastBlacklistId.current = maxId;
@@ -63,7 +65,7 @@ export default function NotificationManager() {
                 } else if (maxId > lastBlacklistId.current) {
                     const newItems = blacklistRes.items.filter((it: any) => (it.id || 0) > lastBlacklistId.current);
                     newItems.forEach((item: any) => {
-                        new Notification('Nuevo Recurso Bloqueado', {
+                        new window.Notification('Nuevo recurso bloqueado', {
                             body: `${item.site_id}: #${item.resource_id} ha sido bloqueado.`,
                             icon: '/favicon.ico',
                         });
@@ -81,32 +83,36 @@ export default function NotificationManager() {
         if (!isAuthenticated || loading) return;
 
         const intervalId = setInterval(checkNewItems, POLLING_INTERVAL);
-        // Initial check
         checkNewItems();
 
         return () => clearInterval(intervalId);
-    }, [isAuthenticated, loading]);
+    }, [isAuthenticated, loading, permission]);
 
     // Public method to request permission (can be called from settings/admin)
-    // We'll expose this via a custom event or just trust the admin setting
     useEffect(() => {
         const handleRequestPermission = () => {
-            if ('Notification' in window) {
-                Notification.requestPermission().then((res) => {
-                    setPermission(res);
-                    if (res === 'granted') {
-                        sileo.success({ title: 'Notificaciones habilitadas', description: 'Recibirás alertas del sistema.' });
-                        checkNewItems();
-                    } else {
-                        sileo.warning({ title: 'Notificaciones denegadas', description: 'No recibirás alertas en el escritorio.' });
-                    }
+            if (!canUseBrowserNotifications()) {
+                sileo.warning({
+                    title: 'Notificaciones no disponibles',
+                    description: 'Se requiere HTTPS o localhost para usar notificaciones del navegador.',
                 });
+                return;
             }
+
+            window.Notification.requestPermission().then((res) => {
+                setPermission(res);
+                if (res === 'granted') {
+                    sileo.success({ title: 'Notificaciones habilitadas', description: 'Recibiras alertas del sistema.' });
+                    checkNewItems();
+                } else {
+                    sileo.warning({ title: 'Notificaciones denegadas', description: 'No recibiras alertas en el escritorio.' });
+                }
+            });
         };
 
         window.addEventListener('request-browser-notifications', handleRequestPermission);
         return () => window.removeEventListener('request-browser-notifications', handleRequestPermission);
-    }, [isAuthenticated, loading]);
+    }, [isAuthenticated, loading, permission]);
 
     return null; // This is a logic-only component
 }

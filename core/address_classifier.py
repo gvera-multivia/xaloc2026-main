@@ -6,6 +6,7 @@ Adaptado para cumplir con el catálogo oficial de tipos de vía del formulario.
 import os
 import json
 import re
+import unicodedata
 from typing import Optional
 from groq import Groq
 
@@ -31,6 +32,47 @@ VIAS_VALIDAS = [
     "TRASERA", "TRAVESIA", "URBANIZACION", "VALLE", "VEREDA", "VIA", "VIADUCTO", "VIAL"
 ]
 
+_WORD_RE = re.compile(r"[0-9A-ZÁÉÍÓÚÜÑ]+", flags=re.IGNORECASE)
+
+
+def _token_key(token: str) -> str:
+    txt = (token or "").strip().upper()
+    if not txt:
+        return ""
+    # Normalizamos a NFD para separar los acentos de las letras.
+    # Pero queremos mantener la Ñ/ñ si es posible, aunque NFD la separa en N + tilde combinada.
+    txt = unicodedata.normalize("NFD", txt)
+    # Eliminamos marcadores de acentuación (Mn = Mark, Nonspacing)
+    txt = "".join(ch for ch in txt if unicodedata.category(ch) != "Mn")
+    return txt
+
+
+def _restore_street_spelling(calle_candidate: str, direccion_raw: str) -> str:
+    """
+    Restaura grafía original desde direccion_raw (incluyendo Ñ/acentos) cuando
+    la IA devuelve formas simplificadas como NUNEZ.
+    """
+    calle_up = (calle_candidate or "").strip().upper()
+    raw_up = (direccion_raw or "").strip().upper()
+    if not calle_up or not raw_up:
+        return calle_up
+
+    # Mapear tokens normalizados a su versión original con Ñ/acentos
+    raw_map: dict[str, str] = {}
+    for m in _WORD_RE.finditer(raw_up):
+        tok = m.group(0).upper()
+        key = _token_key(tok)
+        if key and key not in raw_map:
+            raw_map[key] = tok
+
+    def _replace(match: re.Match[str]) -> str:
+        tok = match.group(0).upper()
+        key = _token_key(tok)
+        # Si el token normalizado existe en el original, restauramos la grafía (Ñ, tildes)
+        return raw_map.get(key, tok)
+
+    return _WORD_RE.sub(_replace, calle_up)
+
 def _get_groq_client(api_key: Optional[str] = None) -> Groq:
     key = api_key or os.getenv("GROQ_API_KEY")
     if not key:
@@ -48,7 +90,7 @@ def _build_prompt_sistema() -> str:
 
     Devuelve exclusivamente un objeto JSON con los siguientes campos:
     - via: (DEBE ser uno de los valores de la lista anterior. Si no encaja, usa 'CALLE')
-    - calle: (Nombre limpio de la vía. Corrige truncamientos)
+    - calle: (Nombre limpio de la vía. Corrige truncamientos. PRESERVA las Ñ y tildes si las detectas)
     - numero: (Solo el número o S/N)
     - escalera: (Solo el identificador)
     - planta: (Piso. Normaliza: 'P'->'PRINCIPAL', 'BJ'->'BAJO', '3º'->'3')
@@ -57,7 +99,8 @@ def _build_prompt_sistema() -> str:
     REGLAS:
     1. Si recibes 'CL' o 'C/', mapealo a 'CALLE'. Si recibes 'AV' a 'AVENIDA', etc.
     2. En 'puerta', si el valor es 'NAVE 8', pon solo '8'.
-    3. JSON puro, sin comentarios.
+    3. NO elimines la letra Ñ de los nombres de calle (ej. NUÑEZ no debe ser NUNEZ).
+    4. JSON puro, sin comentarios.
     """
 
 async def classify_address_with_ai(
@@ -99,7 +142,7 @@ async def classify_address_with_ai(
 
         return {
             "tipo_via": via_ia,
-            "calle": (respuesta.get("calle") or "").strip().upper(),
+            "calle": _restore_street_spelling((respuesta.get("calle") or "").strip(), direccion_raw),
             "numero": (respuesta.get("numero") or "").strip().upper(),
             "escalera": (respuesta.get("escalera") or "").strip().upper(),
             "planta": (respuesta.get("planta") or "").strip().upper(),
@@ -173,6 +216,7 @@ async def classify_addresses_batch_with_ai(
     if not isinstance(respuesta, dict):
         raise ValueError("Respuesta batch no es un objeto JSON.")
 
+    raw_by_id = {str(it.get("idRecurso")): (it.get("direccion_raw") or "") for it in compact_items}
     out: dict[str, dict] = {}
     for rid, val in respuesta.items():
         if not isinstance(val, dict):
@@ -182,9 +226,11 @@ async def classify_addresses_batch_with_ai(
         if via_ia not in VIAS_VALIDAS:
             via_ia = "CALLE"
 
+        src_direccion_raw = raw_by_id.get(str(rid), "")
+
         out[str(rid)] = {
             "tipo_via": via_ia,
-            "calle": (val.get("calle") or "").strip().upper(),
+            "calle": _restore_street_spelling((val.get("calle") or "").strip(), src_direccion_raw),
             "numero": (val.get("numero") or "").strip().upper(),
             "escalera": (val.get("escalera") or "").strip().upper(),
             "planta": (val.get("planta") or "").strip().upper(),

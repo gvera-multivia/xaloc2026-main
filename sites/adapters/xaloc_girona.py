@@ -202,7 +202,9 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         authenticated_user: Optional[str],
         limit: int,
         on_discard: Optional[SiteAdapter.DiscardCallback] = None,
+        resource_repo: Any | None = None,
     ) -> list[dict]:
+        use_resource_repo = resource_repo is not None
         texp_values = [2, 3] # Hardcoded logic from xaloc_task.py
         texp_placeholders = ",".join(["?"] * len(texp_values))
         
@@ -223,28 +225,42 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         conn = pyodbc.connect(conn_str)
         try:
             cursor = conn.cursor()
-            cursor.execute(query, patterns + texp_values)
-            columns = [column[0] for column in cursor.description]
-
             recursos_map: dict[int, dict] = {}
-            for row in cursor.fetchall():
-                record = dict(zip(columns, row))
-                rid = record.get("idRecurso")
-                if not rid: continue
-                rid_int = int(rid)
+            if use_resource_repo:
+                resources = resource_repo.get_pending_resources(site_id=self.site_id, config=config, limit=limit)
+                for resource in resources:
+                    record = dict(resource.metadata or {})
+                    rid = record.get("idRecurso")
+                    if not rid:
+                        continue
+                    rid_int = int(rid)
+                    adjuntos = list(record.get("adjuntos") or [])
+                    for adj in adjuntos:
+                        if "url" not in adj and adj.get("id") is not None:
+                            adj["url"] = self.ADJUNTO_URL_TEMPLATE.format(id=int(adj["id"]))
+                    record["adjuntos"] = adjuntos
+                    recursos_map[rid_int] = record
+            else:
+                cursor.execute(query, patterns + texp_values)
+                columns = [column[0] for column in cursor.description]
+                for row in cursor.fetchall():
+                    record = dict(zip(columns, row))
+                    rid = record.get("idRecurso")
+                    if not rid: continue
+                    rid_int = int(rid)
 
-                if rid_int not in recursos_map:
-                    recursos_map[rid_int] = {**record, "adjuntos": []}
+                    if rid_int not in recursos_map:
+                        recursos_map[rid_int] = {**record, "adjuntos": []}
 
-                adj_id = record.get("adjunto_id")
-                if adj_id:
-                    filename = self._clean_str(record.get("adjunto_filename"))
-                    if filename:
-                        recursos_map[rid_int]["adjuntos"].append({
-                            "id": int(adj_id),
-                            "filename": filename,
-                            "url": self.ADJUNTO_URL_TEMPLATE.format(id=int(adj_id)),
-                        })
+                    adj_id = record.get("adjunto_id")
+                    if adj_id:
+                        filename = self._clean_str(record.get("adjunto_filename"))
+                        if filename:
+                            recursos_map[rid_int]["adjuntos"].append({
+                                "id": int(adj_id),
+                                "filename": filename,
+                                "url": self.ADJUNTO_URL_TEMPLATE.format(id=int(adj_id)),
+                            })
 
             out: list[dict] = []
             for _, recurso in recursos_map.items():

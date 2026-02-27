@@ -21,6 +21,7 @@ class SiteAdapter:
         authenticated_user: Optional[str],
         limit: int,
         on_discard: Optional[DiscardCallback] = None,
+        resource_repo: Any | None = None,
     ) -> list[dict]:
         raise NotImplementedError
 

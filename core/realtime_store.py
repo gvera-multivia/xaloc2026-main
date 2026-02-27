@@ -70,6 +70,9 @@ class NullRealtimeStore:
         payload: Optional[dict[str, Any]],
         started_at: Optional[datetime] = None,
         ended_at: Optional[datetime] = None,
+        error_code: Optional[str] = None,
+        status: Optional[str] = None,
+        screenshot_path: Optional[str] = None,
     ) -> None:
         return
 
@@ -142,7 +145,12 @@ class PostgresRealtimeStore:
                         resource_id BIGINT,
                         expediente TEXT,
                         incident_type TEXT NOT NULL,
+                        error_code TEXT,
                         reason TEXT,
+                        status TEXT NOT NULL DEFAULT 'NEW' CHECK (status IN ('NEW', 'REVIEWED', 'RESOLVED')),
+                        screenshot_path TEXT,
+                        resolved_at TIMESTAMPTZ,
+                        resolved_by TEXT,
                         day DATE NOT NULL,
                         started_at TIMESTAMPTZ NOT NULL,
                         ended_at TIMESTAMPTZ NOT NULL,
@@ -156,6 +164,31 @@ class PostgresRealtimeStore:
                     """
                     CREATE INDEX IF NOT EXISTS ix_realtime_incidents_day_site
                     ON realtime_incidents(day, site_id, incident_type)
+                    """
+                )
+                cur.execute("ALTER TABLE realtime_incidents ADD COLUMN IF NOT EXISTS error_code TEXT")
+                cur.execute("ALTER TABLE realtime_incidents ADD COLUMN IF NOT EXISTS status TEXT")
+                cur.execute("ALTER TABLE realtime_incidents ADD COLUMN IF NOT EXISTS screenshot_path TEXT")
+                cur.execute("ALTER TABLE realtime_incidents ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ")
+                cur.execute("ALTER TABLE realtime_incidents ADD COLUMN IF NOT EXISTS resolved_by TEXT")
+                cur.execute("UPDATE realtime_incidents SET error_code = incident_type WHERE error_code IS NULL")
+                cur.execute("UPDATE realtime_incidents SET status = 'NEW' WHERE status IS NULL OR status = ''")
+                cur.execute("ALTER TABLE realtime_incidents ALTER COLUMN status SET DEFAULT 'NEW'")
+                cur.execute("ALTER TABLE realtime_incidents ALTER COLUMN status SET NOT NULL")
+                cur.execute(
+                    """
+                    DO $$
+                    BEGIN
+                        IF NOT EXISTS (
+                            SELECT 1
+                            FROM pg_constraint
+                            WHERE conname = 'realtime_incidents_status_check'
+                        ) THEN
+                            ALTER TABLE realtime_incidents
+                            ADD CONSTRAINT realtime_incidents_status_check
+                            CHECK (status IN ('NEW', 'REVIEWED', 'RESOLVED'));
+                        END IF;
+                    END$$
                     """
                 )
             conn.commit()
@@ -302,12 +335,22 @@ class PostgresRealtimeStore:
         payload: Optional[dict[str, Any]],
         started_at: Optional[datetime] = None,
         ended_at: Optional[datetime] = None,
+        error_code: Optional[str] = None,
+        status: Optional[str] = None,
+        screenshot_path: Optional[str] = None,
     ) -> None:
         ts_start = started_at or _utc_now()
         ts_end = ended_at or ts_start
+        incident_type_value = str(incident_type or error_code or "UNKNOWN_INCIDENT").strip() or "UNKNOWN_INCIDENT"
+        reason_value = str(reason or "").strip()
+        error_code_value = str(error_code or incident_type_value).strip() or incident_type_value
+        status_value = str(status or "NEW").strip().upper() or "NEW"
+        if status_value not in {"NEW", "REVIEWED", "RESOLVED"}:
+            status_value = "NEW"
+        screenshot_value = str(screenshot_path or "").strip() or None
         dedupe_key = self._incident_dedupe_key(
             site_id=site_id,
-            incident_type=incident_type,
+            incident_type=incident_type_value,
             resource_id=resource_id,
             expediente=expediente,
         )
@@ -316,14 +359,18 @@ class PostgresRealtimeStore:
                 cur.execute(
                     """
                     INSERT INTO realtime_incidents (
-                        dedupe_key, site_id, resource_id, expediente, incident_type, reason,
-                        day, started_at, ended_at, payload, updated_at
+                        dedupe_key, site_id, resource_id, expediente, incident_type, error_code, reason, status,
+                        screenshot_path, day, started_at, ended_at, payload, updated_at
                     ) VALUES (
-                        %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s::jsonb, NOW()
+                        %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s::jsonb, NOW()
                     )
                     ON CONFLICT (dedupe_key) DO UPDATE SET
+                        incident_type = EXCLUDED.incident_type,
+                        error_code = EXCLUDED.error_code,
                         reason = EXCLUDED.reason,
+                        status = EXCLUDED.status,
+                        screenshot_path = EXCLUDED.screenshot_path,
                         day = EXCLUDED.day,
                         started_at = EXCLUDED.started_at,
                         ended_at = EXCLUDED.ended_at,
@@ -335,8 +382,11 @@ class PostgresRealtimeStore:
                         site_id,
                         resource_id,
                         expediente,
-                        incident_type,
-                        reason,
+                        incident_type_value,
+                        error_code_value,
+                        reason_value,
+                        status_value,
+                        screenshot_value,
                         ts_start.date(),
                         ts_start,
                         ts_end,
@@ -418,7 +468,12 @@ class SqliteRealtimeStore:
                     resource_id INTEGER,
                     expediente TEXT,
                     incident_type TEXT NOT NULL,
+                    error_code TEXT,
                     reason TEXT,
+                    status TEXT NOT NULL DEFAULT 'NEW' CHECK (status IN ('NEW', 'REVIEWED', 'RESOLVED')),
+                    screenshot_path TEXT,
+                    resolved_at TEXT,
+                    resolved_by TEXT,
                     day TEXT NOT NULL,
                     started_at TEXT NOT NULL,
                     ended_at TEXT NOT NULL,
@@ -434,6 +489,20 @@ class SqliteRealtimeStore:
                 ON realtime_incidents(day, site_id, incident_type)
                 """
             )
+            for ddl in (
+                "ALTER TABLE realtime_incidents ADD COLUMN error_code TEXT",
+                "ALTER TABLE realtime_incidents ADD COLUMN status TEXT",
+                "ALTER TABLE realtime_incidents ADD COLUMN screenshot_path TEXT",
+                "ALTER TABLE realtime_incidents ADD COLUMN resolved_at TEXT",
+                "ALTER TABLE realtime_incidents ADD COLUMN resolved_by TEXT",
+            ):
+                try:
+                    conn.execute(ddl)
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        raise
+            conn.execute("UPDATE realtime_incidents SET error_code = incident_type WHERE error_code IS NULL")
+            conn.execute("UPDATE realtime_incidents SET status = 'NEW' WHERE status IS NULL OR status = ''")
             conn.commit()
 
     def _task_dedupe_key(self, *, site_id: str, status: str, resource_id: Optional[int], job_id: Optional[str]) -> str:
@@ -576,12 +645,22 @@ class SqliteRealtimeStore:
         payload: Optional[dict[str, Any]],
         started_at: Optional[datetime] = None,
         ended_at: Optional[datetime] = None,
+        error_code: Optional[str] = None,
+        status: Optional[str] = None,
+        screenshot_path: Optional[str] = None,
     ) -> None:
         ts_start = started_at or _utc_now()
         ts_end = ended_at or ts_start
+        incident_type_value = str(incident_type or error_code or "UNKNOWN_INCIDENT").strip() or "UNKNOWN_INCIDENT"
+        reason_value = str(reason or "").strip()
+        error_code_value = str(error_code or incident_type_value).strip() or incident_type_value
+        status_value = str(status or "NEW").strip().upper() or "NEW"
+        if status_value not in {"NEW", "REVIEWED", "RESOLVED"}:
+            status_value = "NEW"
+        screenshot_value = str(screenshot_path or "").strip() or None
         dedupe_key = self._incident_dedupe_key(
             site_id=site_id,
-            incident_type=incident_type,
+            incident_type=incident_type_value,
             resource_id=resource_id,
             expediente=expediente,
         )
@@ -589,14 +668,18 @@ class SqliteRealtimeStore:
             conn.execute(
                 """
                 INSERT INTO realtime_incidents (
-                    dedupe_key, site_id, resource_id, expediente, incident_type, reason,
-                    day, started_at, ended_at, payload, updated_at
+                    dedupe_key, site_id, resource_id, expediente, incident_type, error_code, reason, status,
+                    screenshot_path, day, started_at, ended_at, payload, updated_at
                 ) VALUES (
-                    ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, CURRENT_TIMESTAMP
+                    ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
                 )
                 ON CONFLICT(dedupe_key) DO UPDATE SET
+                    incident_type = excluded.incident_type,
+                    error_code = excluded.error_code,
                     reason = excluded.reason,
+                    status = excluded.status,
+                    screenshot_path = excluded.screenshot_path,
                     day = excluded.day,
                     started_at = excluded.started_at,
                     ended_at = excluded.ended_at,
@@ -608,8 +691,11 @@ class SqliteRealtimeStore:
                     site_id,
                     resource_id,
                     expediente,
-                    incident_type,
-                    reason,
+                    incident_type_value,
+                    error_code_value,
+                    reason_value,
+                    status_value,
+                    screenshot_value,
                     ts_start.date().isoformat(),
                     ts_start.isoformat(),
                     ts_end.isoformat(),

@@ -1,0 +1,11 @@
+:80 {
+    reverse_proxy api-gateway:8080
+
+    handle_path /vnc* {
+        reverse_proxy playwright-runner-service:6080
+    }
+
+    handle /websockify* {
+        reverse_proxy playwright-runner-service:6080
+    }
+}

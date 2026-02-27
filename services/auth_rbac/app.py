@@ -5,11 +5,13 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Optional
 
+import aiohttp
 import jwt
 import psycopg
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request, status
@@ -17,6 +19,7 @@ from fastapi.responses import Response
 from psycopg.rows import dict_row
 
 from core.runtime_flags import get_report_pg_dsn
+from core.xvia_auth import create_authenticated_session_in_place
 
 AUTH_COOKIE_NAME = "dashboard_access_token"
 AUTH_ROLE_COOKIE_NAME = "dashboard_role"
@@ -92,9 +95,18 @@ class AuthUser:
     username: str
     role: str
     active: bool
+    xvia_email: Optional[str] = None
+    xvia_username: Optional[str] = None
 
     def to_claims(self, scopes: list[dict[str, Optional[str]]]) -> dict[str, Any]:
-        return {"sub": str(self.id), "username": self.username, "role": self.role, "scopes": scopes}
+        return {
+            "sub": str(self.id),
+            "username": self.username,
+            "role": self.role,
+            "scopes": scopes,
+            "xvia_email": self.xvia_email,
+            "xvia_username": self.xvia_username,
+        }
 
 
 class AuthRbacStore:
@@ -116,11 +128,16 @@ class AuthRbacStore:
                         password_hash TEXT NOT NULL,
                         role TEXT NOT NULL,
                         active BOOLEAN NOT NULL DEFAULT TRUE,
+                        xvia_email TEXT NULL UNIQUE,
+                        xvia_username TEXT NULL,
                         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                     )
                     """
                 )
+                cur.execute("ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS xvia_email TEXT NULL")
+                cur.execute("ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS xvia_username TEXT NULL")
+                cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_auth_users_xvia_email ON auth_users (xvia_email)")
                 cur.execute(
                     """
                     CREATE TABLE IF NOT EXISTS auth_user_scopes (
@@ -152,7 +169,7 @@ class AuthRbacStore:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT id, username, password_hash, role, active, created_at, updated_at
+                    SELECT id, username, password_hash, role, active, xvia_email, xvia_username, created_at, updated_at
                     FROM auth_users WHERE username = %s LIMIT 1
                     """,
                     (username_norm,),
@@ -160,10 +177,32 @@ class AuthRbacStore:
                 row = cur.fetchone()
         return dict(row) if row else None
 
+    def get_user_by_login_identifier(self, login_id: str) -> Optional[dict[str, Any]]:
+        login_norm = _normalize_username(login_id)
+        if not login_norm:
+            return None
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, username, password_hash, role, active, xvia_email, xvia_username, created_at, updated_at
+                    FROM auth_users
+                    WHERE username = %s OR xvia_email = %s
+                    ORDER BY id ASC
+                    LIMIT 1
+                    """,
+                    (login_norm, login_norm),
+                )
+                row = cur.fetchone()
+        return dict(row) if row else None
+
     def get_user_by_id(self, user_id: int) -> Optional[AuthUser]:
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT id, username, role, active FROM auth_users WHERE id = %s LIMIT 1", (int(user_id),))
+                cur.execute(
+                    "SELECT id, username, role, active, xvia_email, xvia_username FROM auth_users WHERE id = %s LIMIT 1",
+                    (int(user_id),),
+                )
                 row = cur.fetchone()
         if not row:
             return None
@@ -172,6 +211,8 @@ class AuthRbacStore:
             username=str(row["username"]),
             role=str(row["role"]),
             active=bool(row["active"]),
+            xvia_email=(str(row["xvia_email"]) if row.get("xvia_email") else None),
+            xvia_username=(str(row["xvia_username"]) if row.get("xvia_username") else None),
         )
 
     def list_user_scopes(self, user_id: int) -> list[dict[str, Optional[str]]]:
@@ -212,7 +253,7 @@ class AuthRbacStore:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT id, username, role, active, created_at, updated_at
+                    SELECT id, username, role, active, xvia_email, xvia_username, created_at, updated_at
                     FROM auth_users ORDER BY username ASC
                     """
                 )
@@ -225,10 +266,21 @@ class AuthRbacStore:
             )
         return items
 
-    def create_user(self, *, username: str, password: str, role: str = ROLE_USER, active: bool = True) -> AuthUser:
+    def create_user(
+        self,
+        *,
+        username: str,
+        password: str,
+        role: str = ROLE_USER,
+        active: bool = True,
+        xvia_email: Optional[str] = None,
+        xvia_username: Optional[str] = None,
+    ) -> AuthUser:
         username_norm = _normalize_username(username)
         if not username_norm:
             raise ValueError("username es obligatorio.")
+        xvia_email_norm = _normalize_username(xvia_email) if xvia_email else None
+        xvia_username_norm = str(xvia_username or "").strip() or None
         role_norm = str(role or "").strip().lower()
         if role_norm not in VALID_ROLES:
             raise ValueError("role invalido.")
@@ -239,17 +291,35 @@ class AuthRbacStore:
                 try:
                     cur.execute(
                         """
-                        INSERT INTO auth_users (username, password_hash, role, active, created_at, updated_at)
-                        VALUES (%s, %s, %s, %s, %s::timestamptz, %s::timestamptz)
+                        INSERT INTO auth_users (username, password_hash, role, active, xvia_email, xvia_username, created_at, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s::timestamptz, %s::timestamptz)
                         RETURNING id
                         """,
-                        (username_norm, password_hash, role_norm, bool(active), now_iso, now_iso),
+                        (
+                            username_norm,
+                            password_hash,
+                            role_norm,
+                            bool(active),
+                            xvia_email_norm,
+                            xvia_username_norm,
+                            now_iso,
+                            now_iso,
+                        ),
                     )
                 except Exception as exc:
-                    raise ValueError(f"Ya existe un usuario con username '{username_norm}'.") from exc
+                    raise ValueError(
+                        f"Ya existe un usuario con username '{username_norm}' o email XVIA '{xvia_email_norm or '-'}'."
+                    ) from exc
                 user_id = int(cur.fetchone()["id"])
             conn.commit()
-        return AuthUser(id=user_id, username=username_norm, role=role_norm, active=bool(active))
+        return AuthUser(
+            id=user_id,
+            username=username_norm,
+            role=role_norm,
+            active=bool(active),
+            xvia_email=xvia_email_norm,
+            xvia_username=xvia_username_norm,
+        )
 
     def update_user(
         self,
@@ -372,14 +442,21 @@ class AuthRbacStore:
         return self.create_user(username=username, password=password, role=ROLE_ADMIN, active=True)
 
     def authenticate(self, username: str, password: str) -> Optional[AuthUser]:
-        row = self.get_user_by_username(username)
+        row = self.get_user_by_login_identifier(username)
         if not row:
             return None
         if not bool(row["active"]):
             return None
         if not verify_password(str(password or ""), str(row["password_hash"] or "")):
             return None
-        return AuthUser(id=int(row["id"]), username=str(row["username"]), role=str(row["role"]), active=True)
+        return AuthUser(
+            id=int(row["id"]),
+            username=str(row["username"]),
+            role=str(row["role"]),
+            active=True,
+            xvia_email=(str(row["xvia_email"]) if row.get("xvia_email") else None),
+            xvia_username=(str(row["xvia_username"]) if row.get("xvia_username") else None),
+        )
 
 
 class JwtManager:
@@ -442,6 +519,53 @@ def _build_claims_for_user(user: AuthUser) -> dict[str, Any]:
     return user.to_claims(scopes=scopes)
 
 
+def _extract_xvia_username(text: str) -> Optional[str]:
+    if not text:
+        return None
+    patterns = [
+        r'<a[^>]+class="dropdown-toggle[^>]+><i[^>]+></i>\s*([^<]+)\s*</a>', # Nuevo: Menú superior
+        r"Bienvenido(?:,|:)?\s*([^<\n\r]+)",
+        r"Usuario(?:\s*actual)?:\s*([^<\n\r]+)",
+        r"Nombre(?:\s*de\s*usuario)?:\s*([^<\n\r]+)",
+        r"profile-user[^>]*>\s*([^<]+)\s*<",
+        r"user-name[^>]*>\s*([^<]+)\s*<",
+    ]
+    blacklist = {"todos", "inicio", "salir", "desconexión", "usuario", "bienvenido"}
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            candidate = str(match.group(1) or "").strip()
+            # Limpieza de HTML si quedara algo
+            candidate = re.sub(r'<[^>]+>', '', candidate).strip()
+            
+            if candidate and len(candidate) <= 120 and candidate.lower() not in blacklist:
+                return candidate
+    return None
+
+
+async def _validate_xvia_credentials_and_resolve_username(email: str, password: str) -> str:
+    cookie_jar = aiohttp.CookieJar(unsafe=True)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept-Language": "es-ES,es;q=0.9",
+        "Referer": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login",
+        "Origin": "http://www.xvia-grupoeuropa.net",
+        "Connection": "keep-alive",
+    }
+    async with aiohttp.ClientSession(headers=headers, cookie_jar=cookie_jar) as session:
+        await create_authenticated_session_in_place(session, email.strip(), password.strip())
+        async with session.get(
+            "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos"
+        ) as response:
+            html = await response.text()
+            if response.status >= 400:
+                raise HTTPException(status_code=502, detail="No se pudo leer la vista de usuario de XVIA.")
+    xvia_username = _extract_xvia_username(html) or email.strip()
+    if not xvia_username:
+        raise HTTPException(status_code=422, detail="No se pudo determinar el usuario de XVIA.")
+    return xvia_username
+
+
 @app.on_event("startup")
 def _startup() -> None:
     bootstrap_admin_user = (os.getenv("DASHBOARD_ADMIN_USERNAME") or "").strip().lower()
@@ -466,7 +590,48 @@ async def auth_login(payload: dict[str, Any] = Body(...)) -> Response:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenciales invalidas.")
     claims = _build_claims_for_user(user)
     token = jwt_manager.create_access_token(user, claims.get("scopes") or [])
-    response = Response(content=json.dumps({"ok": True, "user": claims}), media_type="application/json")
+    response = Response(content=json.dumps({"ok": True, "user": claims, "token": token}), media_type="application/json")
+    response.set_cookie(key=AUTH_COOKIE_NAME, value=token, httponly=True, secure=AUTH_COOKIE_SECURE, samesite="lax", max_age=jwt_manager.access_token_minutes * 60, path="/")
+    response.set_cookie(key=AUTH_ROLE_COOKIE_NAME, value=user.role, httponly=False, secure=AUTH_COOKIE_SECURE, samesite="lax", max_age=jwt_manager.access_token_minutes * 60, path="/")
+    return response
+
+
+@app.post("/auth/register")
+async def auth_register(payload: dict[str, Any] = Body(...)) -> Response:
+    email = str(payload.get("email") or "").strip().lower()
+    password = str(payload.get("password") or "")
+    if "role" in payload:
+        raise HTTPException(status_code=400, detail="El campo 'role' no esta permitido en registro.")
+    if not email or not password:
+        raise HTTPException(status_code=400, detail="email y password son obligatorios.")
+    if "@" not in email:
+        raise HTTPException(status_code=400, detail="email invalido.")
+
+    try:
+        xvia_username = await _validate_xvia_credentials_and_resolve_username(email, password)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="El correo y la contraseña no coinciden con XVIA.",
+        )
+
+    try:
+        user = store.create_user(
+            username=xvia_username,
+            password=password,
+            role=ROLE_USER,
+            active=True,
+            xvia_email=email,
+            xvia_username=xvia_username,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    claims = _build_claims_for_user(user)
+    token = jwt_manager.create_access_token(user, claims.get("scopes") or [])
+    response = Response(content=json.dumps({"ok": True, "created": True, "user": claims}), media_type="application/json")
     response.set_cookie(key=AUTH_COOKIE_NAME, value=token, httponly=True, secure=AUTH_COOKIE_SECURE, samesite="lax", max_age=jwt_manager.access_token_minutes * 60, path="/")
     response.set_cookie(key=AUTH_ROLE_COOKIE_NAME, value=user.role, httponly=False, secure=AUTH_COOKIE_SECURE, samesite="lax", max_age=jwt_manager.access_token_minutes * 60, path="/")
     return response

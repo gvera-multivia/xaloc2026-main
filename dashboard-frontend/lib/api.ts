@@ -144,3 +144,75 @@ export const blacklistApi = {
     unblock: (siteId: string, resourceId: number | string) =>
         api.delete<any>(`/blacklist/${encodeURIComponent(siteId)}/${resourceId}`),
 };
+
+export const electronApi = {
+    getDownloadInfo: () =>
+        api.get<{
+            installerName: string;
+            installerSizeBytes: number;
+            msiName?: string | null;
+            msiSizeBytes?: number | null;
+            config: {
+                apiBaseUrl: string;
+                wsUrl: string;
+                bootstrapUrl: string;
+                refreshIntervalSec: number;
+            };
+            downloadUrls: {
+                bundleZip: string;
+                installer: string;
+                installerMsi?: string | null;
+                configJson: string;
+            };
+            user: { username?: string; role?: string };
+        }>('/electron/download/info'),
+    broadcastAlert: (payload: {
+        title: string;
+        body: string;
+        level: 'info' | 'warning' | 'critical';
+        internal_note?: string;
+        template_id?: string;
+        design_code?: string;
+    }) =>
+        api.post<{
+            ok: boolean;
+            published_to_subscribers: number;
+            event: any;
+        }>('/admin/notifications/broadcast', payload),
+    listAlertTemplates: () =>
+        api.get<{
+            items: Array<{
+                id: string;
+                label: string;
+                title: string;
+                body: string;
+                level: 'info' | 'warning' | 'critical';
+                design_code?: string | null;
+                created_at?: string;
+                updated_at?: string;
+            }>;
+            total: number;
+        }>('/admin/notifications/templates'),
+    createAlertTemplate: (payload: {
+        id: string;
+        label: string;
+        title: string;
+        body: string;
+        level: 'info' | 'warning' | 'critical';
+        design_code?: string;
+    }) =>
+        api.post<{ ok: boolean; item: any }>('/admin/notifications/templates', payload),
+    updateAlertTemplate: (
+        templateId: string,
+        payload: Partial<{
+            label: string;
+            title: string;
+            body: string;
+            level: 'info' | 'warning' | 'critical';
+            design_code?: string | null;
+        }>,
+    ) =>
+        api.put<{ ok: boolean; item: any }>(`/admin/notifications/templates/${encodeURIComponent(templateId)}`, payload),
+    deleteAlertTemplate: (templateId: string) =>
+        api.delete<{ ok: boolean; deleted: boolean; id: string }>(`/admin/notifications/templates/${encodeURIComponent(templateId)}`),
+};

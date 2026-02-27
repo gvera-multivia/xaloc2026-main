@@ -13,7 +13,7 @@ env/
 ENV/
 .venv
 .env
-
+morrigan-electron/.env.example
 # Playwright
 .pytest_cache/
 

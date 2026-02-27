@@ -1,0 +1,90 @@
+﻿appId: com.xaloc.morrigan
+productName: Morrigan
+executableName: Morrigan
+copyright: Copyright (c) 2026 Xaloc
+asar: true
+disableDefaultIgnoredFiles: true
+compression: maximum
+
+# ── Localización ──────────────────────────────────────────────────────────────
+# Limitar a es y en-US elimina ~20 MB de archivos .pak de locales de Chromium.
+electronLanguages:
+  - en-US
+  - es
+
+directories:
+  buildResources: build
+  output: release
+
+files:
+  - from: .
+    filter:
+      - package.json
+  - from: dist/main
+    to: dist/main
+    filter:
+      - "**/*"
+  - from: dist/preload
+    to: dist/preload
+    filter:
+      - "**/*"
+  - from: dist/renderer
+    to: dist/renderer
+    filter:
+      - "**/*"
+  # ── esbuild bundlea todas las dependencias en dist/main/index.js ──────────────
+  # Solo se incluyen los módulos que esbuild marca como 'external' porque
+  # necesitan el runtime de Electron o usan APIs nativas (.node files):
+  - from: node_modules/electron-log
+    to: node_modules/electron-log
+    filter: ["**/*", "!**/test/**", "!**/*.md", "!**/*.d.ts"]
+  - from: node_modules/electron-updater
+    to: node_modules/electron-updater
+    filter: ["**/*", "!**/test/**", "!**/*.md", "!**/*.d.ts"]
+  - from: node_modules/builder-util-runtime
+    to: node_modules/builder-util-runtime
+    filter: ["**/*", "!**/*.d.ts"]
+  - from: node_modules/semver
+    to: node_modules/semver
+    filter: ["**/*", "!**/*.d.ts"]
+  - from: node_modules/js-yaml
+    to: node_modules/js-yaml
+    filter: ["**/*", "!**/*.d.ts"]
+  - from: node_modules/lazy-val
+    to: node_modules/lazy-val
+    filter: ["**/*", "!**/*.d.ts"]
+  # Excluir source maps y tests del bundle de producción
+  - "!**/*.map"
+  - "!**/test/**"
+  - "!**/tests/**"
+  - "!**/*.spec.*"
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: msi
+      arch:
+        - x64
+  icon: build/icon.png
+  signAndEditExecutable: false
+
+nsis:
+  oneClick: true
+  perMachine: false
+  allowToChangeInstallationDirectory: false
+  runAfterFinish: false
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: Morrigan
+  differentialPackage: true
+
+# ── Hook post-empaquetado ──────────────────────────────────────────────────────
+# Elimina binarios Chromium innecesarios (SwiftShader, GL fallbacks) y
+# locales que no estén en electronLanguages como doble barrera de limpieza.
+afterPack: "./build/hooks/afterPack.js"
+
+publish:
+  provider: generic
+  url: "http://${API_GATEWAY_HOST:-localhost}:8080/updates"

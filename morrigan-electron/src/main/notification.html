@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Morrigan Alert</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            width: 380px;
+            height: auto;
+            background: transparent;
+            overflow: hidden;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(110%);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+
+            to {
+                transform: translateX(110%);
+                opacity: 0;
+            }
+        }
+
+        @keyframes pulse-border {
+
+            0%,
+            100% {
+                box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.6);
+            }
+
+            50% {
+                box-shadow: 0 0 0 6px rgba(220, 38, 38, 0);
+            }
+        }
+
+        .toast {
+            width: 380px;
+            background: linear-gradient(135deg, #181820 0%, #1f1f2e 100%);
+            border: 1px solid #dc2626;
+            border-radius: 8px;
+            padding: 16px 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            animation: slideIn 0.35s cubic-bezier(.22, .68, 0, 1.2) forwards;
+            animation-play-state: paused;
+            /* se activa desde JS */
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(220, 38, 38, 0.3);
+        }
+
+        .toast.in {
+            animation-play-state: running;
+        }
+
+        .toast.out {
+            animation: slideOut 0.3s ease-in forwards;
+        }
+
+        .toast-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .alert-icon {
+            width: 28px;
+            height: 28px;
+            background: #dc2626;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            flex-shrink: 0;
+            animation: pulse-border 1.5s ease-in-out infinite;
+        }
+
+        .toast-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: #f87171;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            flex: 1;
+        }
+
+        .toast-close {
+            background: none;
+            border: none;
+            color: #6b7280;
+            font-size: 16px;
+            cursor: pointer;
+            padding: 2px 6px;
+            border-radius: 4px;
+            line-height: 1;
+            transition: color 0.15s, background 0.15s;
+            -webkit-app-region: no-drag;
+        }
+
+        .toast-close:hover {
+            color: #f87171;
+            background: rgba(220, 38, 38, 0.1);
+        }
+
+        .toast-body {
+            font-size: 12.5px;
+            color: #c0c0cc;
+            line-height: 1.5;
+            padding-left: 38px;
+        }
+
+        .toast-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-left: 38px;
+            margin-top: 2px;
+        }
+
+        .toast-time {
+            font-size: 11px;
+            color: #52525e;
+        }
+
+        .progress-bar-wrap {
+            flex: 1;
+            height: 2px;
+            background: rgba(220, 38, 38, 0.15);
+            border-radius: 2px;
+            overflow: hidden;
+            margin-left: 12px;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: #dc2626;
+            width: 100%;
+            transform-origin: left;
+            transition: width linear;
+        }
+
+        /* VARIANTES POR TIPO */
+        /* Verde (Recurso no se puede hacer) */
+        .toast.type-green {
+            border-color: #10b981;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(16, 185, 129, 0.3);
+        }
+
+        .toast.type-green .alert-icon {
+            background: #10b981;
+            animation: pulse-border-green 1.5s ease-in-out infinite;
+        }
+
+        .toast.type-green .toast-title {
+            color: #34d399;
+        }
+
+        .toast.type-green .progress-bar-wrap {
+            background: rgba(16, 185, 129, 0.15);
+        }
+
+        .toast.type-green .progress-bar {
+            background: #10b981;
+        }
+
+        @keyframes pulse-border-green {
+
+            0%,
+            100% {
+                box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.6);
+            }
+
+            50% {
+                box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
+            }
+        }
+
+        /* Morado (Bloqueos) */
+        .toast.type-purple {
+            border-color: #8b5cf6;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(139, 92, 246, 0.3);
+        }
+
+        .toast.type-purple .alert-icon {
+            background: #8b5cf6;
+            animation: pulse-border-purple 1.5s ease-in-out infinite;
+        }
+
+        .toast.type-purple .toast-title {
+            color: #a78bfa;
+        }
+
+        .toast.type-purple .progress-bar-wrap {
+            background: rgba(139, 92, 246, 0.15);
+        }
+
+        .toast.type-purple .progress-bar {
+            background: #8b5cf6;
+        }
+
+        @keyframes pulse-border-purple {
+
+            0%,
+            100% {
+                box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.6);
+            }
+
+            50% {
+                box-shadow: 0 0 0 6px rgba(139, 92, 246, 0);
+            }
+        }
+
+        /* Rojo Grande (Falta AUT / Carpeta) */
+        .toast.type-red-large {
+            padding: 24px 22px;
+            gap: 12px;
+        }
+
+        .toast.type-red-large .alert-icon {
+            width: 36px;
+            height: 36px;
+            font-size: 20px;
+        }
+
+        .toast.type-red-large .toast-title {
+            font-size: 16px;
+        }
+
+        .toast.type-red-large .toast-body {
+            font-size: 14px;
+            padding-left: 46px;
+        }
+
+        .toast.type-red-large .toast-footer {
+            padding-left: 46px;
+            margin-top: 6px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="toast" id="toast">
+        <div class="toast-header">
+            <div class="alert-icon">⚠</div>
+            <div class="toast-title" id="title">INCIDENCIA DETECTADA</div>
+            <button class="toast-close" id="closeBtn" onclick="closeNow()">✕</button>
+        </div>
+        <div class="toast-body" id="body">
+            Se ha detectado una incidencia en el sistema.
+        </div>
+        <div class="toast-footer">
+            <div class="toast-time" id="timeStr">ahora</div>
+            <div class="progress-bar-wrap">
+                <div class="progress-bar" id="progress"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let closeTimer;
+        let startTime;
+        let duration = 6000; // default, se soBreescribe desde el main
+
+        function init(data) {
+            if (data.title) document.getElementById('title').textContent = data.title;
+            if (data.body) document.getElementById('body').textContent = data.body;
+            if (data.duration) duration = data.duration;
+
+            document.getElementById('timeStr').textContent = new Date().toLocaleTimeString();
+
+            // Arrancar animación de entrada
+            const toast = document.getElementById('toast');
+            if (data.type) {
+                toast.classList.add(`type-${data.type}`);
+            }
+
+            if (data.design_code) {
+                const style = document.createElement('style');
+                style.id = 'dynamic-design';
+                style.textContent = data.design_code;
+                document.head.appendChild(style);
+            }
+
+            toast.classList.add('in');
+
+            // Barra de progreso
+            const bar = document.getElementById('progress');
+            bar.style.transition = `width ${duration}ms linear`;
+            // necesitamos un tick para que el browser pinte el 100% primero
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+                bar.style.width = '0%';
+            }));
+
+            startTime = Date.now();
+            closeTimer = setTimeout(closeNow, duration);
+        }
+
+        function closeNow() {
+            clearTimeout(closeTimer);
+            const toast = document.getElementById('toast');
+            toast.classList.remove('in');
+            toast.classList.add('out');
+            setTimeout(() => {
+                if (window.electronAPI) {
+                    window.electronAPI.close();
+                }
+            }, 320);
+        }
+
+        // Recibir datos desde el process main via IPC
+        if (window.electronNotify) {
+            window.electronNotify.onData((data) => init(data));
+        } else {
+            // fallback para preview / dev directo en browser
+            init({ title: 'TEST INCIDENCIA', body: 'Ejemplo de notificación de prueba', duration: 5000 });
+        }
+    </script>
+</body>
+
+</html>

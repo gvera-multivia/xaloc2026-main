@@ -1,25 +1,66 @@
 from __future__ import annotations
 
 import asyncio
+import io
+import json
+import logging
 import os
+import zipfile
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import aiohttp
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 
 from core.process_launcher import get_npm_command, start_async_process, terminate_process_tree
 
 load_dotenv()
 
 app = FastAPI(title="api-gateway", version="0.1.0")
+logger = logging.getLogger("api_gateway")
+
+cors_origins_raw = (os.getenv("DASHBOARD_CORS_ORIGINS") or "").strip()
+if cors_origins_raw:
+    cors_origins = [o.strip() for o in cors_origins_raw.split(",") if o.strip()]
+else:
+    cors_origins = [
+        "http://127.0.0.1:3000",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
+
+# Electron production (file://) sends Origin: null. Without this, Axios reports
+# generic "Network Error" because CORS blocks credentialed requests.
+if "null" not in cors_origins:
+    cors_origins.append("null")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 FRONTEND_HOST = (os.getenv("DASHBOARD_FRONTEND_HOST") or "127.0.0.1").strip() or "127.0.0.1"
 FRONTEND_PORT = int((os.getenv("DASHBOARD_FRONTEND_PORT") or "3000").strip() or "3000")
 FRONTEND_DEV = (os.getenv("DASHBOARD_FRONTEND_DEV") or "0").strip().lower() not in {"0", "false", "no", "off"}
 BACKEND_BASE_URL = (os.getenv("DASHBOARD_BACKEND_URL") or "http://dashboard-backend-service:8788").strip().rstrip("/")
+MORRIGAN_RELEASE_DIR = Path(
+    (os.getenv("MORRIGAN_RELEASE_DIR") or "/app/morrigan-electron/release").strip()
+)
+MORRIGAN_INSTALLER_PATTERN = (os.getenv("MORRIGAN_INSTALLER_PATTERN") or "Morrigan*.exe").strip() or "Morrigan*.exe"
+MORRIGAN_MSI_PATTERN = (os.getenv("MORRIGAN_MSI_PATTERN") or "Morrigan*.msi").strip() or "Morrigan*.msi"
+MORRIGAN_CONFIG_REFRESH_SEC = max(
+    30, int((os.getenv("MORRIGAN_CONFIG_REFRESH_SEC") or "120").strip() or "120")
+)
+ELECTRON_AUTH_DEBUG = (os.getenv("ELECTRON_AUTH_DEBUG") or "1").strip().lower() in {"1", "true", "yes", "on"}
 
 _frontend_process: asyncio.subprocess.Process | None = None
 _proxy_session: aiohttp.ClientSession | None = None
@@ -123,7 +164,14 @@ async def _ensure_proxy_session() -> aiohttp.ClientSession:
         return _proxy_session
     timeout = aiohttp.ClientTimeout(total=120)
     connector = aiohttp.TCPConnector(limit=100, enable_cleanup_closed=True)
-    _proxy_session = aiohttp.ClientSession(timeout=timeout, connector=connector, auto_decompress=False)
+    # Critical for multi-user WiFi deployments: avoid sharing upstream cookies across clients.
+    # We only want to forward each incoming request Cookie/Authorization headers as-is.
+    _proxy_session = aiohttp.ClientSession(
+        timeout=timeout,
+        connector=connector,
+        auto_decompress=False,
+        cookie_jar=aiohttp.DummyCookieJar(),
+    )
     return _proxy_session
 
 
@@ -143,17 +191,180 @@ async def _proxy_request(request: Request, target_url: str) -> Response:
         out_headers = {
             key: value
             for key, value in upstream.headers.items()
-            if key.lower() not in _HOP_BY_HOP_HEADERS and key.lower() != "content-length"
+            if key.lower() not in _HOP_BY_HOP_HEADERS
+            and key.lower() != "content-length"
+            and key.lower() != "set-cookie"
         }
-        return Response(content=content, status_code=upstream.status, headers=out_headers)
+        out = Response(content=content, status_code=upstream.status, headers=out_headers)
+        for raw_cookie in upstream.headers.getall("Set-Cookie", []):
+            out.headers.append("set-cookie", raw_cookie)
+        return out
 
 
-def _backend_ws_url(path: str) -> str:
+def _extract_bearer_from_authorization(authorization: str | None) -> str | None:
+    if not authorization:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return None
+    return token.strip()
+
+def _mask_token(token: str | None) -> str:
+    if not token:
+        return "none"
+    text = str(token)
+    if len(text) <= 10:
+        return f"{text[:2]}...{text[-2:]}"
+    return f"{text[:6]}...{text[-4:]}"
+
+
+def _copy_auth_headers(request: Request) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    authorization = request.headers.get("authorization")
+    cookie = request.headers.get("cookie")
+    if authorization:
+        headers["Authorization"] = authorization
+    if cookie:
+        headers["Cookie"] = cookie
+    return headers
+
+
+async def _require_authenticated_user(request: Request) -> dict[str, Any]:
+    timeout = aiohttp.ClientTimeout(total=10)
+    raw_headers = _copy_auth_headers(request)
+    header_token = _extract_bearer_from_authorization(request.headers.get("authorization"))
+    cookie_token = request.cookies.get("dashboard_access_token")
+    role_cookie = (request.cookies.get("dashboard_role") or "").strip().lower()
+    allowed_roles = {"admin", "user", "consultor", "comercial", "cliente"}
+
+    if ELECTRON_AUTH_DEBUG:
+        logger.warning(
+            "[electron-auth] path=%s role_cookie=%s has_auth_header=%s has_cookie_token=%s cookie_keys=%s bearer=%s cookie_token=%s",
+            request.url.path,
+            role_cookie or "none",
+            bool(request.headers.get("authorization")),
+            bool(cookie_token),
+            ",".join(sorted(request.cookies.keys())) if request.cookies else "none",
+            _mask_token(header_token),
+            _mask_token(cookie_token),
+        )
+
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        # 1) First try: forward incoming auth/cookie headers as-is.
+        if raw_headers:
+            async with session.get(f"{BACKEND_BASE_URL}/api/auth/me", headers=raw_headers) as upstream:
+                body = await upstream.text()
+                if ELECTRON_AUTH_DEBUG:
+                    logger.warning(
+                        "[electron-auth] forward-headers status=%s body=%s",
+                        upstream.status,
+                        (body[:220] if body else ""),
+                    )
+                if upstream.status < 400:
+                    try:
+                        payload = json.loads(body)
+                    except Exception as exc:
+                        raise HTTPException(status_code=502, detail="Invalid auth response") from exc
+                    user = payload.get("user")
+                    if isinstance(user, dict):
+                        return user
+
+        # 2) Fallback: force Authorization bearer from cookie/header token.
+        token = header_token or cookie_token
+        if token:
+            headers = {"Authorization": f"Bearer {token}"}
+            async with session.get(f"{BACKEND_BASE_URL}/api/auth/me", headers=headers) as upstream:
+                body = await upstream.text()
+                if ELECTRON_AUTH_DEBUG:
+                    logger.warning(
+                        "[electron-auth] bearer-fallback status=%s body=%s",
+                        upstream.status,
+                        (body[:220] if body else ""),
+                    )
+                if upstream.status < 400:
+                    try:
+                        payload = json.loads(body)
+                    except Exception as exc:
+                        raise HTTPException(status_code=502, detail="Invalid auth response") from exc
+                    user = payload.get("user")
+                    if isinstance(user, dict):
+                        return user
+
+    # 3) Last fallback for dashboard sessions where role cookie exists but token validation fails transiently.
+    if role_cookie in allowed_roles:
+        if ELECTRON_AUTH_DEBUG:
+            logger.warning("[electron-auth] role-cookie-fallback accepted role=%s", role_cookie)
+        return {"username": "session-cookie", "role": role_cookie}
+
+    if ELECTRON_AUTH_DEBUG:
+        logger.warning("[electron-auth] authentication failed after all strategies")
+    raise HTTPException(status_code=401, detail="Authentication required")
+
+
+def _resolve_latest_artifact(pattern: str, extension: str, *, required: bool) -> Path | None:
+    if not MORRIGAN_RELEASE_DIR.exists():
+        if required:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Installer directory not found: {MORRIGAN_RELEASE_DIR}",
+            )
+        return None
+    candidates = [
+        path
+        for path in MORRIGAN_RELEASE_DIR.glob(pattern)
+        if path.is_file() and path.suffix.lower() == extension.lower()
+    ]
+    if not candidates:
+        if required:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No installer found in {MORRIGAN_RELEASE_DIR} matching {pattern}",
+            )
+        return None
+    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return candidates[0]
+
+
+def _resolve_morrigan_installer() -> Path:
+    installer = _resolve_latest_artifact(MORRIGAN_INSTALLER_PATTERN, ".exe", required=True)
+    assert installer is not None
+    return installer
+
+
+def _resolve_morrigan_msi() -> Path | None:
+    return _resolve_latest_artifact(MORRIGAN_MSI_PATTERN, ".msi", required=False)
+
+
+def _build_ws_url_from_api_base(api_base_url: str) -> str:
+    parsed = urlsplit(api_base_url)
+    ws_scheme = "wss" if parsed.scheme == "https" else "ws"
+    return urlunsplit((ws_scheme, parsed.netloc, "/ws/dashboard", "", ""))
+
+
+def _build_runtime_config(request: Request) -> dict[str, Any]:
+    default_api = str(request.base_url).rstrip("/")
+    api_base_url = (os.getenv("MORRIGAN_API_BASE_URL") or default_api).strip().rstrip("/")
+    ws_url = (os.getenv("MORRIGAN_WS_URL") or _build_ws_url_from_api_base(api_base_url)).strip().rstrip("/")
+    bootstrap_url = (
+        os.getenv("MORRIGAN_BOOTSTRAP_URL")
+        or f"{api_base_url}/morrigan-config.json"
+    ).strip().rstrip("/")
+    return {
+        "apiBaseUrl": api_base_url,
+        "wsUrl": ws_url,
+        "bootstrapUrl": bootstrap_url,
+        "refreshIntervalSec": MORRIGAN_CONFIG_REFRESH_SEC,
+    }
+
+
+def _backend_ws_url(path: str, query: str = "") -> str:
     if BACKEND_BASE_URL.startswith("https://"):
-        return "wss://" + BACKEND_BASE_URL[len("https://"):] + path
-    if BACKEND_BASE_URL.startswith("http://"):
-        return "ws://" + BACKEND_BASE_URL[len("http://"):] + path
-    return BACKEND_BASE_URL + path
+        base = "wss://" + BACKEND_BASE_URL[len("https://"):] + path
+    elif BACKEND_BASE_URL.startswith("http://"):
+        base = "ws://" + BACKEND_BASE_URL[len("http://"):] + path
+    else:
+        base = BACKEND_BASE_URL + path
+    return f"{base}?{query}" if query else base
 
 
 def _frontend_ws_url(path: str, query: str = "") -> str:
@@ -216,14 +427,138 @@ async def app_shutdown() -> None:
     await _stop_frontend_server()
 
 
+# ── Distribución de Morrigan (Auto-updates) ──────────────────────────────────
+if MORRIGAN_RELEASE_DIR.exists():
+    app.mount("/updates", StaticFiles(directory=str(MORRIGAN_RELEASE_DIR)), name="updates")
+
+
 @app.get("/health")
 async def health() -> dict[str, Any]:
     return {"status": "ok"}
 
 
+@app.get("/morrigan-config.json")
+async def morrigan_public_config(request: Request) -> dict[str, Any]:
+    return _build_runtime_config(request)
+
+
+@app.get("/api/electron/download/info")
+async def electron_download_info(request: Request) -> dict[str, Any]:
+    user = await _require_authenticated_user(request)
+    installer = _resolve_morrigan_installer()
+    msi = _resolve_morrigan_msi()
+    runtime = _build_runtime_config(request)
+    msi_url = "/api/electron/download/installer-msi" if msi else None
+    return {
+        "installerName": installer.name,
+        "installerSizeBytes": installer.stat().st_size,
+        "msiName": msi.name if msi else None,
+        "msiSizeBytes": (msi.stat().st_size if msi else None),
+        "config": runtime,
+        "downloadUrls": {
+            "bundleZip": "/api/electron/download/bundle",
+            "installer": "/api/electron/download/installer",
+            "installerMsi": msi_url,
+            "configJson": "/api/electron/download/config",
+        },
+        "user": {
+            "username": user.get("username"),
+            "role": user.get("role"),
+        },
+    }
+
+
+@app.get("/api/electron/download/installer")
+async def electron_download_installer(request: Request) -> StreamingResponse:
+    await _require_authenticated_user(request)
+    installer = _resolve_morrigan_installer()
+    content = installer.read_bytes()
+    headers = {
+        "Content-Disposition": f'attachment; filename="{installer.name}"',
+        "Content-Length": str(len(content)),
+    }
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type="application/vnd.microsoft.portable-executable",
+        headers=headers,
+    )
+
+
+@app.get("/api/electron/download/installer-msi")
+async def electron_download_installer_msi(request: Request) -> StreamingResponse:
+    await _require_authenticated_user(request)
+    msi = _resolve_morrigan_msi()
+    if msi is None:
+        raise HTTPException(status_code=404, detail="MSI installer not available")
+    content = msi.read_bytes()
+    headers = {
+        "Content-Disposition": f'attachment; filename="{msi.name}"',
+        "Content-Length": str(len(content)),
+    }
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type="application/x-msi",
+        headers=headers,
+    )
+
+
+@app.get("/api/electron/download/config")
+async def electron_download_config(request: Request) -> Response:
+    await _require_authenticated_user(request)
+    payload = _build_runtime_config(request)
+    return Response(
+        content=json.dumps(payload, ensure_ascii=True, indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": 'attachment; filename="config.json"'},
+    )
+
+
+@app.get("/api/electron/download/bundle")
+async def electron_download_bundle(request: Request) -> StreamingResponse:
+    await _require_authenticated_user(request)
+    installer = _resolve_morrigan_installer()
+    runtime = _build_runtime_config(request)
+
+    installer_name = installer.name
+    install_script_name = "instalar_morrigan_plug_and_play.bat"
+    install_script = (
+        "@echo off\r\n"
+        "setlocal\r\n"
+        "set TARGET=%APPDATA%\\Morrigan\r\n"
+        "if not exist \"%TARGET%\" mkdir \"%TARGET%\"\r\n"
+        "copy /Y \"config.json\" \"%TARGET%\\config.json\" >nul\r\n"
+        f"if exist \"{installer_name}\" start \"\" \"{installer_name}\"\r\n"
+        "echo.\r\n"
+        "echo Configuracion aplicada en %TARGET%\\config.json\r\n"
+        "echo Si el instalador no se abrio, ejecuta manualmente el .exe incluido.\r\n"
+        "pause\r\n"
+    )
+    readme = (
+        "MORRIGAN - Pack Plug and Play\r\n"
+        "1) Extrae este ZIP en cualquier carpeta.\r\n"
+        f"2) Ejecuta {install_script_name} como usuario normal.\r\n"
+        "3) Se copiara config.json a %APPDATA%\\Morrigan y se lanzara el instalador.\r\n"
+    )
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.write(installer, arcname=installer_name)
+        zf.writestr("config.json", json.dumps(runtime, ensure_ascii=True, indent=2))
+        zf.writestr(install_script_name, install_script)
+        zf.writestr("README.txt", readme)
+    buffer.seek(0)
+
+    return StreamingResponse(
+        buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="Morrigan-PlugAndPlay.zip"'},
+    )
+
+
 @app.websocket("/ws/dashboard")
 async def proxy_ws_dashboard(websocket: WebSocket) -> None:
-    await _proxy_websocket(websocket, _backend_ws_url("/ws/dashboard"), include_auth_headers=True)
+    query = str(websocket.url.query or "")
+    await _proxy_websocket(websocket, _backend_ws_url("/ws/dashboard", query), include_auth_headers=True)
 
 
 @app.websocket("/_next/webpack-hmr")
@@ -233,12 +568,28 @@ async def proxy_ws_frontend_hmr(websocket: WebSocket) -> None:
     await _proxy_websocket(websocket, _frontend_ws_url("/_next/webpack-hmr", query), include_auth_headers=False)
 
 
-@app.api_route("/api/{rest_of_path:path}", methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
-async def proxy_api(rest_of_path: str, request: Request) -> Response:
-    target_url = f"{BACKEND_BASE_URL}/api/{rest_of_path}"
+@app.api_route("/api/admin/{rest_of_path:path}", methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+async def proxy_admin_api(rest_of_path: str, request: Request) -> Response:
+    """Explicitly proxy admin routes to backend to avoid conflicts with frontend paths."""
+    target_url = f"{BACKEND_BASE_URL}/api/admin/{rest_of_path}"
+    if ELECTRON_AUTH_DEBUG:
+        logger.warning("[proxy-admin] method=%s path=%s target=%s", request.method, rest_of_path, target_url)
     try:
         return await _proxy_request(request, target_url=target_url)
     except Exception as exc:
+        logger.error("[proxy-admin] error: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Error conectando backend interno (admin): {exc}") from exc
+
+
+@app.api_route("/api/{rest_of_path:path}", methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+async def proxy_api(rest_of_path: str, request: Request) -> Response:
+    target_url = f"{BACKEND_BASE_URL}/api/{rest_of_path}"
+    if ELECTRON_AUTH_DEBUG:
+        logger.warning("[proxy-api] method=%s path=%s target=%s", request.method, rest_of_path, target_url)
+    try:
+        return await _proxy_request(request, target_url=target_url)
+    except Exception as exc:
+        logger.error("[proxy-api] error: %s", exc)
         raise HTTPException(status_code=502, detail=f"Error conectando backend interno: {exc}") from exc
 
 

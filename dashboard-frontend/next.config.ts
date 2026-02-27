@@ -12,6 +12,7 @@ const backendBase = (
 ).replace(/\/+$/, "");
 
 const nextConfig: NextConfig = {
+  devIndicators: false,
   turbopack: {
     root: process.cwd(),
   },
