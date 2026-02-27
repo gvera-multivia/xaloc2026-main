@@ -56,9 +56,12 @@ class MorriganWebSocket {
                 }
             }
 
-            this.ws.onclose = () => {
+            this.ws.onclose = (event) => {
                 this.connected = false
                 this.ws = null
+                if (event.code === 4401) {
+                    console.warn('[WS] Conexion rechazada por autenticacion invalida (4401)')
+                }
                 if (!this.destroyed) {
                     this.scheduleReconnect()
                 }

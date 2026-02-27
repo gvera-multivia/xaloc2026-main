@@ -4,6 +4,7 @@ import asyncio
 import os
 import json
 import logging
+import sqlite3
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from typing import Any, Optional
 from pathlib import Path
@@ -37,7 +38,17 @@ cors_origins_raw = (os.getenv("DASHBOARD_CORS_ORIGINS") or "").strip()
 if cors_origins_raw:
     cors_origins = [o.strip() for o in cors_origins_raw.split(",") if o.strip()]
 else:
-    cors_origins = ["http://127.0.0.1:3000", "http://localhost:3000"]
+    cors_origins = [
+        "http://127.0.0.1:3000",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
+
+# Electron production (file://) sends Origin: null. Without this, Axios reports
+# generic "Network Error" because CORS blocks credentialed requests.
+if "null" not in cors_origins:
+    cors_origins.append("null")
 
 app.add_middleware(
     CORSMiddleware,
@@ -60,6 +71,13 @@ _frontend_process: asyncio.subprocess.Process | None = None
 _proxy_session: aiohttp.ClientSession | None = None
 _prev_loop_exception_handler = None
 _FRONTEND_LOG_PATH = Path("logs") / "frontend_out.log"
+_WS_ACTIVE_CONNECTIONS = 0
+_WS_DEBUG_STATS: dict[str, int] = {
+    "accepted": 0,
+    "rejected_missing_token": 0,
+    "rejected_invalid_token": 0,
+    "rejected_redis_unavailable": 0,
+}
 
 
 def _is_windows_connection_reset(context: dict[str, Any]) -> bool:
@@ -399,6 +417,7 @@ async def api_auth_delete_user(
 
 @app.websocket("/ws/dashboard")
 async def websocket_dashboard(websocket: WebSocket):
+    global _WS_ACTIVE_CONNECTIONS
     logger.error(">>> WEBSOCKET HANDSHAKE REACHED ROUTE")
     if not ENABLE_WS_REALTIME:
         await websocket.close(code=1008, reason="Realtime disabled")
@@ -406,16 +425,19 @@ async def websocket_dashboard(websocket: WebSocket):
 
     token = _extract_token_from_websocket(websocket)
     if not token:
+        _WS_DEBUG_STATS["rejected_missing_token"] += 1
         await websocket.close(code=4401, reason="Missing auth token")
         return
     try:
         await _auth_introspect(token)
     except HTTPException:
+        _WS_DEBUG_STATS["rejected_invalid_token"] += 1
         await websocket.close(code=4401, reason="Invalid auth token")
         return
 
     redis = get_redis_client()
     if not redis:
+        _WS_DEBUG_STATS["rejected_redis_unavailable"] += 1
         await websocket.close(code=1013, reason="Realtime backend unavailable")
         return
 
@@ -434,16 +456,48 @@ async def websocket_dashboard(websocket: WebSocket):
         return
 
     await websocket.accept()
+    _WS_ACTIVE_CONNECTIONS += 1
+    _WS_DEBUG_STATS["accepted"] += 1
+
+    async def _forward_pubsub_to_ws() -> None:
+        async for message in pubsub.listen():
+            if message["type"] != "message":
+                continue
+            raw_data = message.get("data")
+            if isinstance(raw_data, bytes):
+                text_data = raw_data.decode("utf-8", errors="replace")
+            elif isinstance(raw_data, str):
+                text_data = raw_data
+            else:
+                text_data = json.dumps(raw_data, ensure_ascii=False)
+            await websocket.send_text(text_data)
+
+    async def _watch_client_disconnect() -> None:
+        while True:
+            msg = await websocket.receive()
+            if msg.get("type") == "websocket.disconnect":
+                break
+
+    sender_task = asyncio.create_task(_forward_pubsub_to_ws())
+    watcher_task = asyncio.create_task(_watch_client_disconnect())
 
     try:
-        async for message in pubsub.listen():
-            if message["type"] == "message":
-                await websocket.send_text(message["data"])
+        done, pending = await asyncio.wait(
+            {sender_task, watcher_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in pending:
+            task.cancel()
+        for task in done:
+            exc = task.exception()
+            if exc and not isinstance(exc, WebSocketDisconnect):
+                logger.error(f"WebSocket task error: {exc}")
     except WebSocketDisconnect:
         pass
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
     finally:
+        _WS_ACTIVE_CONNECTIONS = max(0, _WS_ACTIVE_CONNECTIONS - 1)
         if pubsub is not None:
             try:
                 await pubsub.unsubscribe("channel:ui_updates")
@@ -1095,6 +1149,318 @@ _HOP_BY_HOP_HEADERS = {
     "upgrade",
 }
 
+_ALERT_TEMPLATE_LEVELS = {"info", "warning", "critical"}
+_TEMPLATES_DB_PATH = Path(
+    (os.getenv("DASHBOARD_TEMPLATES_DB") or "db/notification_templates.db").strip()
+    or "db/notification_templates.db"
+)
+_DEFAULT_ALERT_TEMPLATES = [
+    {
+        "id": "maintenance",
+        "label": "Mantenimiento programado",
+        "level": "warning",
+        "title": "Mantenimiento programado",
+        "body": "Habra mantenimiento en breve. Guarda trabajo y valida estado de tramites.",
+    },
+    {
+        "id": "incident",
+        "label": "Incidencia operativa",
+        "level": "critical",
+        "title": "Incidencia operativa",
+        "body": "Se ha detectado una incidencia. Sigue las instrucciones del equipo tecnico.",
+    },
+    {
+        "id": "info",
+        "label": "Comunicado interno",
+        "level": "info",
+        "title": "Comunicado interno",
+        "body": "Nuevo aviso operativo para los equipos conectados.",
+    },
+]
+
+
+def _ensure_alert_templates_table() -> None:
+    _TEMPLATES_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(_TEMPLATES_DB_PATH) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS notification_templates (
+                id TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                title TEXT NOT NULL,
+                body TEXT NOT NULL,
+                level TEXT NOT NULL CHECK(level IN ('info','warning','critical')),
+                design_code TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_notification_templates_level ON notification_templates(level)"
+        )
+        conn.commit()
+
+
+def _seed_alert_templates_if_empty() -> None:
+    _ensure_alert_templates_table()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with sqlite3.connect(_TEMPLATES_DB_PATH) as conn:
+        cur = conn.execute("SELECT COUNT(*) FROM notification_templates")
+        if int(cur.fetchone()[0] or 0) > 0:
+            return
+        for tpl in _DEFAULT_ALERT_TEMPLATES:
+            conn.execute(
+                """
+                INSERT INTO notification_templates (id, label, title, body, level, design_code, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    tpl["id"],
+                    tpl["label"],
+                    tpl["title"],
+                    tpl["body"],
+                    tpl["level"],
+                    tpl.get("design_code"),
+                    now_iso,
+                    now_iso,
+                ),
+            )
+        conn.commit()
+
+
+def _validate_alert_template_payload(payload: dict[str, Any], *, partial: bool = False) -> dict[str, str]:
+    data: dict[str, Any] = {}
+    required = ["label", "title", "body", "level"] if not partial else []
+    for key in required:
+        value = str(payload.get(key) or "").strip()
+        if not value:
+            raise HTTPException(status_code=400, detail=f"Campo '{key}' obligatorio.")
+
+    for key in ["label", "title", "body", "level", "design_code"]:
+        value = payload.get(key)
+        if value is not None:
+             data[key] = str(value).strip() if isinstance(value, str) else value
+
+    if "level" in data and data["level"] not in _ALERT_TEMPLATE_LEVELS:
+        raise HTTPException(status_code=400, detail="Campo 'level' invalido (info|warning|critical).")
+
+    return data
+
+
+def _template_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": str(row["id"]),
+        "label": str(row["label"]),
+        "title": str(row["title"]),
+        "body": str(row["body"]),
+        "level": str(row["level"]),
+        "design_code": row["design_code"],
+        "created_at": str(row["created_at"]),
+        "updated_at": str(row["updated_at"]),
+    }
+
+
+@app.on_event("startup")
+async def _startup_alert_templates() -> None:
+    _seed_alert_templates_if_empty()
+
+
+@app.get("/api/admin/notifications/templates")
+async def api_admin_list_notification_templates(
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    _ensure_alert_templates_table()
+    with sqlite3.connect(_TEMPLATES_DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT id, label, title, body, level, design_code, created_at, updated_at
+            FROM notification_templates
+            ORDER BY label COLLATE NOCASE ASC, id ASC
+            """
+        ).fetchall()
+    items = [_template_row_to_dict(row) for row in rows]
+    return {"items": items, "total": len(items)}
+
+
+@app.post("/api/admin/notifications/templates")
+async def api_admin_create_notification_template(
+    payload: dict[str, Any] = Body(...),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    template_id = str(payload.get("id") or "").strip()
+    if not template_id:
+        raise HTTPException(status_code=400, detail="Campo 'id' obligatorio.")
+    data = _validate_alert_template_payload(payload, partial=False)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    _ensure_alert_templates_table()
+    try:
+        with sqlite3.connect(_TEMPLATES_DB_PATH) as conn:
+            conn.execute(
+                """
+                INSERT INTO notification_templates (id, label, title, body, level, design_code, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    template_id,
+                    data["label"],
+                    data["title"],
+                    data["body"],
+                    data["level"],
+                    data.get("design_code"),
+                    now_iso,
+                    now_iso,
+                ),
+            )
+            conn.commit()
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(status_code=409, detail=f"La plantilla '{template_id}' ya existe.") from exc
+    return {
+        "ok": True,
+        "item": {
+            "id": template_id,
+            **data,
+            "created_at": now_iso,
+            "updated_at": now_iso,
+        },
+    }
+
+
+@app.put("/api/admin/notifications/templates/{template_id}")
+async def api_admin_update_notification_template(
+    template_id: str,
+    payload: dict[str, Any] = Body(...),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    template_id = str(template_id or "").strip()
+    if not template_id:
+        raise HTTPException(status_code=400, detail="template_id invalido.")
+    data = _validate_alert_template_payload(payload, partial=True)
+    if not data:
+        raise HTTPException(status_code=400, detail="No hay campos para actualizar.")
+    now_iso = datetime.now(timezone.utc).isoformat()
+    set_fields = [f"{key} = ?" for key in data.keys()]
+    set_fields.append("updated_at = ?")
+    values = [*data.values(), now_iso, template_id]
+
+    _ensure_alert_templates_table()
+    with sqlite3.connect(_TEMPLATES_DB_PATH) as conn:
+        cur = conn.execute(
+            f"UPDATE notification_templates SET {', '.join(set_fields)} WHERE id = ?",
+            values,
+        )
+        if int(cur.rowcount or 0) == 0:
+            raise HTTPException(status_code=404, detail=f"Plantilla '{template_id}' no encontrada.")
+        conn.commit()
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT id, label, title, body, level, design_code, created_at, updated_at
+            FROM notification_templates
+            WHERE id = ?
+            """,
+            (template_id,),
+        ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Plantilla '{template_id}' no encontrada.")
+    return {"ok": True, "item": _template_row_to_dict(row)}
+
+
+@app.delete("/api/admin/notifications/templates/{template_id}")
+async def api_admin_delete_notification_template(
+    template_id: str,
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    template_id = str(template_id or "").strip()
+    if not template_id:
+        raise HTTPException(status_code=400, detail="template_id invalido.")
+    _ensure_alert_templates_table()
+    with sqlite3.connect(_TEMPLATES_DB_PATH) as conn:
+        cur = conn.execute("DELETE FROM notification_templates WHERE id = ?", (template_id,))
+        if int(cur.rowcount or 0) == 0:
+            raise HTTPException(status_code=404, detail=f"Plantilla '{template_id}' no encontrada.")
+        conn.commit()
+    return {"ok": True, "deleted": True, "id": template_id}
+
+
+@app.get("/api/admin/notifications/debug")
+async def api_admin_notifications_debug(
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    redis = get_redis_client()
+    debug_info: dict[str, Any] = {
+        "ws_realtime_enabled": bool(ENABLE_WS_REALTIME),
+        "redis_enabled_env": (os.getenv("REDIS_ENABLED") or "0").strip(),
+        "redis_url_configured": bool((os.getenv("REDIS_URL") or "").strip()),
+        "channel": "channel:ui_updates",
+        "ws_active_connections": _WS_ACTIVE_CONNECTIONS,
+        "ws_debug_stats": dict(_WS_DEBUG_STATS),
+    }
+    if not redis:
+        debug_info["redis_available"] = False
+        return debug_info
+
+    debug_info["redis_available"] = True
+    try:
+        debug_info["redis_ping"] = bool(await redis.ping())
+    except Exception as exc:
+        debug_info["redis_ping"] = False
+        debug_info["redis_ping_error"] = str(exc)
+
+    try:
+        raw = await redis.execute_command("PUBSUB", "NUMSUB", "channel:ui_updates")
+        # Redis devuelve [channel, count] para un único canal.
+        if isinstance(raw, (list, tuple)) and len(raw) >= 2:
+            debug_info["numsub_raw"] = raw
+            try:
+                debug_info["numsub"] = int(raw[1])
+            except Exception:
+                debug_info["numsub"] = 0
+        else:
+            debug_info["numsub_raw"] = raw
+            debug_info["numsub"] = 0
+    except Exception as exc:
+        debug_info["numsub_error"] = str(exc)
+        debug_info["numsub"] = 0
+
+    return debug_info
+
+
+@app.post("/api/admin/notifications/debug/publish")
+async def api_admin_notifications_debug_publish(
+    payload: dict[str, Any] = Body(default={}),
+    admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    redis = get_redis_client()
+    if not redis:
+        raise HTTPException(status_code=503, detail="Redis no disponible.")
+
+    title = str(payload.get("title") or "DEBUG ALERT").strip()
+    body_text = str(payload.get("body") or "Ping de diagnostico de notificaciones.").strip()
+    level = str(payload.get("level") or "info").strip().lower()
+    if level not in _ALERT_TEMPLATE_LEVELS:
+        raise HTTPException(status_code=400, detail="Campo 'level' invalido (info|warning|critical).")
+
+    event = {
+        "type": "admin.alert",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "data": {
+            "title": title,
+            "body": body_text,
+            "level": level,
+            "template_id": None,
+            "internal_note": "debug_publish_endpoint",
+            "sent_by": str(admin.get("username") or admin.get("sub") or "admin"),
+        },
+    }
+    subscribers = await redis.publish("channel:ui_updates", json.dumps(event, ensure_ascii=False))
+    return {
+        "ok": True,
+        "published_to_subscribers": int(subscribers),
+        "event": event,
+    }
+
 
 @app.post("/api/admin/notifications/broadcast")
 async def api_admin_broadcast_notification(
@@ -1113,12 +1479,13 @@ async def api_admin_broadcast_notification(
     level = str(payload.get("level") or "info").strip().lower()
     template_id = str(payload.get("template_id") or "").strip()
     internal_note = str(payload.get("internal_note") or "").strip()
+    design_code = payload.get("design_code")
 
     if not title:
         raise HTTPException(status_code=400, detail="Campo 'title' obligatorio.")
     if not body_text:
         raise HTTPException(status_code=400, detail="Campo 'body' obligatorio.")
-    if level not in {"info", "warning", "critical"}:
+    if level not in _ALERT_TEMPLATE_LEVELS:
         raise HTTPException(status_code=400, detail="Campo 'level' invalido (info|warning|critical).")
 
     redis = get_redis_client()
@@ -1134,6 +1501,7 @@ async def api_admin_broadcast_notification(
             "level": level,
             "template_id": template_id or None,
             "internal_note": internal_note or None,
+            "design_code": design_code or None,
             "sent_by": str(admin.get("username") or admin.get("sub") or "admin"),
         },
     }

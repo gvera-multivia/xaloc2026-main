@@ -2,6 +2,9 @@ import { app } from 'electron'
 import { readFile } from 'fs/promises'
 import path from 'path'
 import logger from './logger'
+import { loadMainEnv } from './env-loader'
+
+loadMainEnv()
 
 export interface RuntimeConfig {
     apiBaseUrl: string

@@ -298,6 +298,14 @@
             if (data.type) {
                 toast.classList.add(`type-${data.type}`);
             }
+
+            if (data.design_code) {
+                const style = document.createElement('style');
+                style.id = 'dynamic-design';
+                style.textContent = data.design_code;
+                document.head.appendChild(style);
+            }
+
             toast.classList.add('in');
 
             // Barra de progreso

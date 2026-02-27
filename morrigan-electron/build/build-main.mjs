@@ -21,6 +21,7 @@
 import * as esbuild from 'esbuild'
 import { fileURLToPath } from 'url'
 import { dirname, resolve } from 'path'
+import { copyFile, mkdir } from 'fs/promises'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const root = resolve(__dirname, '..')
@@ -63,6 +64,14 @@ async function build() {
         outfile: resolve(root, 'dist/main/notification-preload.js'),
     })
     console.log('  ✓ dist/main/notification-preload.js')
+
+    // Static asset required by overlay notifications in packaged builds.
+    await mkdir(resolve(root, 'dist/main'), { recursive: true })
+    await copyFile(
+        resolve(root, 'src/main/notification.html'),
+        resolve(root, 'dist/main/notification.html')
+    )
+    console.log('  ✓ dist/main/notification.html')
 
     console.log('► Bundling preload...')
     await esbuild.build({

@@ -1,5 +1,6 @@
 import { BrowserWindow, screen, ipcMain, app } from 'electron'
 import * as path from 'path'
+import logger from './services/logger'
 
 const TOAST_WIDTH = 400
 const TOAST_HEIGHT = 110
@@ -18,9 +19,15 @@ export function showOverlayNotification(opts: {
     title: string
     body: string
     duration?: number  // ms, default 6000
-    type?: string
+    type?: string | { type?: string; design_code?: string }
 }) {
-    const { title, body, duration = 6000, type } = opts
+    let { title, body, duration = 6000, type } = opts
+    let design_code: string | undefined
+
+    if (type && typeof type === 'object') {
+        design_code = type.design_code
+        type = type.type || 'default'
+    }
 
     // Si ya hay una activa, cerrarla antes de mostrar la nueva
     if (activeToast && !activeToast.isDestroyed()) {
@@ -71,11 +78,14 @@ export function showOverlayNotification(opts: {
 
     const htmlPath = path.join(assetsDir, 'notification.html')
     toast.loadFile(htmlPath)
+    toast.webContents.on('did-fail-load', (_event, code, description) => {
+        logger.error(`[Notification] did-fail-load code=${code} reason=${description} file=${htmlPath}`)
+    })
 
     // Cuando el HTML esté listo, enviarle los datos
     toast.webContents.on('did-finish-load', () => {
         if (toast.isDestroyed()) return
-        toast.webContents.send('notification:data', { title, body, duration, type })
+        toast.webContents.send('notification:data', { title, body, duration, type, design_code })
 
         // Auto-destruir después de la duración + animación de salida (350ms)
         setTimeout(() => {

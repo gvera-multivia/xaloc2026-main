@@ -32,6 +32,7 @@ type AlertTemplate = {
   level: 'info' | 'warning' | 'critical';
   title: string;
   body: string;
+  design_code?: string | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -139,12 +140,15 @@ export default function DescargasPage() {
     }
   }, [isAdmin]);
 
+  const [designCode, setDesignCode] = useState('');
+
   const resetTemplateForm = () => {
     setEditingTemplateId('');
     setTemplateForm(EMPTY_TEMPLATE_FORM);
+    setDesignCode('');
   };
 
-  const beginEditTemplate = (tpl: AlertTemplate) => {
+  const beginEditTemplate = (tpl: AlertTemplate & { design_code?: string | null }) => {
     setEditingTemplateId(tpl.id);
     setTemplateForm({
       id: tpl.id,
@@ -153,6 +157,7 @@ export default function DescargasPage() {
       title: tpl.title,
       body: tpl.body,
     });
+    setDesignCode(tpl.design_code || '');
   };
 
   const saveTemplate = async () => {
@@ -162,6 +167,7 @@ export default function DescargasPage() {
       title: templateForm.title.trim(),
       body: templateForm.body.trim(),
       level: templateForm.level,
+      design_code: designCode.trim() || undefined,
     };
 
     if (!payload.id || !payload.label || !payload.title || !payload.body) {
@@ -177,6 +183,7 @@ export default function DescargasPage() {
           title: payload.title,
           body: payload.body,
           level: payload.level,
+          design_code: payload.design_code ?? null,
         });
         sileo.success({ title: 'Plantilla actualizada', description: payload.label });
       } else {
@@ -219,6 +226,7 @@ export default function DescargasPage() {
         level,
         internal_note: internalNote.trim() || undefined,
         template_id: templateId || undefined,
+        design_code: selectedTemplate?.design_code || undefined,
       });
       sileo.success({
         title: 'Alerta enviada',
@@ -268,88 +276,28 @@ export default function DescargasPage() {
           <div>
             <div className="text-sm font-black">Instalador recomendado</div>
             <div className="text-xs text-muted-foreground">
-              Descarga directa del instalador (.exe), para doble clic y ejecutar.
+              Descarga directa del instalador (.exe), ya configurado y listo para usar.
             </div>
           </div>
           <a
             href={info.downloadUrls.installer}
-            className="inline-flex items-center gap-2 rounded-md px-4 py-2 text-xs font-black uppercase tracking-[0.15em] border border-[rgba(108,77,255,0.35)] bg-[rgba(108,77,255,0.12)] hover:bg-[rgba(108,77,255,0.18)] transition"
+            className="inline-flex items-center gap-2 rounded-md px-6 py-3 text-sm font-black uppercase tracking-[0.15em] border border-[rgba(108,77,255,0.45)] bg-[rgba(108,77,255,0.15)] hover:bg-[rgba(108,77,255,0.22)] shadow-[0_0_20px_rgba(108,77,255,0.1)] transition-all transform hover:scale-[1.02]"
           >
-            <Download size={14} />
-            Descargar instalador .exe
+            <Download size={18} />
+            Descargar Morrigan (.exe)
           </a>
         </div>
 
-        {info.downloadUrls.installerMsi && (
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="text-sm font-black">Alternativa MSI</div>
-              <div className="text-xs text-muted-foreground">
-                Instalador .msi para despliegues corporativos o GPO.
-              </div>
-            </div>
-            <a
-              href={info.downloadUrls.installerMsi}
-              className="inline-flex items-center gap-2 rounded-md px-4 py-2 text-xs font-black uppercase tracking-[0.15em] border border-border/70 hover:border-foreground/40 transition"
-            >
-              <Download size={14} />
-              Descargar instalador .msi
-            </a>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs pt-2">
           <div className="rounded-md border border-border/60 bg-background/20 p-3">
-            <div className="text-muted-foreground uppercase tracking-wider">Installer</div>
+            <div className="text-muted-foreground uppercase tracking-wider">Archivo</div>
             <div className="font-semibold mt-1">{info.installerName}</div>
-            <div className="text-muted-foreground">{formatSize(info.installerSizeBytes)}</div>
           </div>
-          {info.msiName && info.msiSizeBytes ? (
-            <div className="rounded-md border border-border/60 bg-background/20 p-3">
-              <div className="text-muted-foreground uppercase tracking-wider">Installer MSI</div>
-              <div className="font-semibold mt-1">{info.msiName}</div>
-              <div className="text-muted-foreground">{formatSize(info.msiSizeBytes)}</div>
-            </div>
-          ) : (
-            <div className="rounded-md border border-border/60 bg-background/20 p-3">
-              <div className="text-muted-foreground uppercase tracking-wider">Installer MSI</div>
-              <div className="font-semibold mt-1">No disponible</div>
-              <div className="text-muted-foreground">Generalo con `npm run dist:msi`.</div>
-            </div>
-          )}
           <div className="rounded-md border border-border/60 bg-background/20 p-3">
-            <div className="text-muted-foreground uppercase tracking-wider">Usuario</div>
-            <div className="font-semibold mt-1">{info.user?.username || '-'}</div>
-            <div className="text-muted-foreground">rol: {info.user?.role || '-'}</div>
+            <div className="text-muted-foreground uppercase tracking-wider">Tamaño</div>
+            <div className="font-semibold mt-1">{formatSize(info.installerSizeBytes)}</div>
           </div>
         </div>
-      </div>
-
-      <div className="rounded-xl border border-border/70 bg-[rgba(17,19,26,0.55)] p-5 space-y-3">
-        <div className="text-sm font-black">Descargas avanzadas</div>
-        <div className="flex flex-wrap gap-2">
-          <a
-            href={info.downloadUrls.bundleZip}
-            className="inline-flex items-center gap-2 rounded-md px-3 py-2 text-xs font-bold border border-border/70 hover:border-foreground/40 transition"
-          >
-            <Package size={14} />
-            ZIP plug-and-play
-          </a>
-          <a
-            href={info.downloadUrls.configJson}
-            className="inline-flex items-center gap-2 rounded-md px-3 py-2 text-xs font-bold border border-border/70 hover:border-foreground/40 transition"
-          >
-            <FileJson size={14} />
-            Solo config.json
-          </a>
-        </div>
-      </div>
-
-      <div className="rounded-xl border border-border/70 bg-[rgba(17,19,26,0.55)] p-5">
-        <div className="text-sm font-black mb-2">Configuracion inyectada</div>
-        <pre className="text-xs overflow-auto rounded-md bg-black/30 p-3 border border-border/60">
-{JSON.stringify(info.config, null, 2)}
-        </pre>
       </div>
 
       {isAdmin && (
@@ -430,7 +378,10 @@ export default function DescargasPage() {
             />
           </label>
 
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-3 items-center">
+            {selectedTemplate?.design_code && (
+              <div className="text-[10px] text-purple-400 font-mono italic">Incluye custom CSS</div>
+            )}
             <button
               className="inline-flex items-center gap-2 rounded-md px-4 py-2 text-xs font-black uppercase tracking-[0.12em] border border-[rgba(108,77,255,0.35)] bg-[rgba(108,77,255,0.12)] hover:bg-[rgba(108,77,255,0.18)] transition disabled:opacity-60"
               onClick={sendAlert}
@@ -456,9 +407,9 @@ export default function DescargasPage() {
                 </button>
               </div>
 
-              <div className="overflow-auto border border-border/60 rounded-md">
+              <div className="overflow-auto border border-border/60 rounded-md max-h-[300px]">
                 <table className="w-full text-xs">
-                  <thead className="bg-black/20">
+                  <thead className="bg-black/20 sticky top-0">
                     <tr>
                       <th className="text-left p-2">ID</th>
                       <th className="text-left p-2">Etiqueta</th>
@@ -468,14 +419,21 @@ export default function DescargasPage() {
                   </thead>
                   <tbody>
                     {templates.map((tpl) => (
-                      <tr key={tpl.id} className="border-t border-border/40">
-                        <td className="p-2 font-mono">{tpl.id}</td>
-                        <td className="p-2">{tpl.label}</td>
-                        <td className="p-2">{tpl.level}</td>
+                      <tr key={tpl.id} className="border-t border-border/40 hover:bg-white/5 transition">
+                        <td className="p-2 font-mono text-muted-foreground">{tpl.id}</td>
+                        <td className="p-2 font-semibold">{tpl.label}</td>
+                        <td className="p-2">
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${tpl.level === 'critical' ? 'bg-red-500/20 text-red-400' :
+                            tpl.level === 'warning' ? 'bg-yellow-500/20 text-yellow-400' :
+                              'bg-blue-500/20 text-blue-400'
+                            }`}>
+                            {tpl.level}
+                          </span>
+                        </td>
                         <td className="p-2 text-right space-x-2">
                           <button
                             type="button"
-                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 border border-border/70 hover:border-foreground/40"
+                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 border border-border/70 hover:border-foreground/40 transition"
                             onClick={() => beginEditTemplate(tpl)}
                           >
                             <Save size={12} />
@@ -483,7 +441,7 @@ export default function DescargasPage() {
                           </button>
                           <button
                             type="button"
-                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 border border-red-500/50 text-red-300 hover:bg-red-500/10"
+                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 border border-red-500/50 text-red-300 hover:bg-red-500/10 transition"
                             onClick={() => void deleteTemplate(tpl.id)}
                           >
                             <Trash2 size={12} />
@@ -496,59 +454,118 @@ export default function DescargasPage() {
                 </table>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <label className="text-xs block">
-                  <div className="mb-1 text-muted-foreground uppercase tracking-wider">ID</div>
-                  <input
-                    className="w-full rounded-md border border-border/70 bg-background/40 p-2 font-mono"
-                    value={templateForm.id}
-                    onChange={(e) => setTemplateForm((prev) => ({ ...prev, id: e.target.value }))}
-                    placeholder="maintenance"
-                    disabled={Boolean(editingTemplateId)}
-                  />
-                </label>
-                <label className="text-xs block">
-                  <div className="mb-1 text-muted-foreground uppercase tracking-wider">Etiqueta</div>
-                  <input
-                    className="w-full rounded-md border border-border/70 bg-background/40 p-2"
-                    value={templateForm.label}
-                    onChange={(e) => setTemplateForm((prev) => ({ ...prev, label: e.target.value }))}
-                    placeholder="Mantenimiento programado"
-                  />
-                </label>
-                <label className="text-xs block">
-                  <div className="mb-1 text-muted-foreground uppercase tracking-wider">Nivel</div>
-                  <select
-                    className="w-full rounded-md border border-border/70 bg-background/40 p-2"
-                    value={templateForm.level}
-                    onChange={(e) => setTemplateForm((prev) => ({ ...prev, level: e.target.value as 'info' | 'warning' | 'critical' }))}
-                  >
-                    <option value="info">info</option>
-                    <option value="warning">warning</option>
-                    <option value="critical">critical</option>
-                  </select>
-                </label>
-                <label className="text-xs block md:col-span-2">
-                  <div className="mb-1 text-muted-foreground uppercase tracking-wider">Titulo</div>
-                  <input
-                    className="w-full rounded-md border border-border/70 bg-background/40 p-2"
-                    value={templateForm.title}
-                    onChange={(e) => setTemplateForm((prev) => ({ ...prev, title: e.target.value }))}
-                    placeholder="Titulo por defecto"
-                  />
-                </label>
-                <label className="text-xs block md:col-span-2">
-                  <div className="mb-1 text-muted-foreground uppercase tracking-wider">Cuerpo</div>
-                  <textarea
-                    className="w-full rounded-md border border-border/70 bg-background/40 p-2 min-h-[84px]"
-                    value={templateForm.body}
-                    onChange={(e) => setTemplateForm((prev) => ({ ...prev, body: e.target.value }))}
-                    placeholder="Mensaje por defecto"
-                  />
-                </label>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <label className="text-xs block">
+                      <div className="mb-1 text-muted-foreground uppercase tracking-wider">ID</div>
+                      <input
+                        className="w-full rounded-md border border-border/70 bg-background/40 p-2 font-mono"
+                        value={templateForm.id}
+                        onChange={(e) => setTemplateForm((prev) => ({ ...prev, id: e.target.value }))}
+                        placeholder="maintenance"
+                        disabled={Boolean(editingTemplateId)}
+                      />
+                    </label>
+                    <label className="text-xs block">
+                      <div className="mb-1 text-muted-foreground uppercase tracking-wider">Etiqueta</div>
+                      <input
+                        className="w-full rounded-md border border-border/70 bg-background/40 p-2"
+                        value={templateForm.label}
+                        onChange={(e) => setTemplateForm((prev) => ({ ...prev, label: e.target.value }))}
+                        placeholder="Mantenimiento programado"
+                      />
+                    </label>
+                    <label className="text-xs block">
+                      <div className="mb-1 text-muted-foreground uppercase tracking-wider">Nivel</div>
+                      <select
+                        className="w-full rounded-md border border-border/70 bg-background/40 p-2"
+                        value={templateForm.level}
+                        onChange={(e) => setTemplateForm((prev) => ({ ...prev, level: e.target.value as 'info' | 'warning' | 'critical' }))}
+                      >
+                        <option value="info">info</option>
+                        <option value="warning">warning</option>
+                        <option value="critical">critical</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <label className="text-xs block">
+                    <div className="mb-1 text-muted-foreground uppercase tracking-wider">Titulo Defecto</div>
+                    <input
+                      className="w-full rounded-md border border-border/70 bg-background/40 p-2"
+                      value={templateForm.title}
+                      onChange={(e) => setTemplateForm((prev) => ({ ...prev, title: e.target.value }))}
+                      placeholder="Titulo por defecto"
+                    />
+                  </label>
+
+                  <label className="text-xs block">
+                    <div className="mb-1 text-muted-foreground uppercase tracking-wider">Cuerpo Defecto</div>
+                    <textarea
+                      className="w-full rounded-md border border-border/70 bg-background/40 p-2 min-h-[84px]"
+                      value={templateForm.body}
+                      onChange={(e) => setTemplateForm((prev) => ({ ...prev, body: e.target.value }))}
+                      placeholder="Mensaje por defecto"
+                    />
+                  </label>
+
+                  <label className="text-xs block">
+                    <div className="mb-1 text-purple-400 font-bold uppercase tracking-wider flex items-center gap-2">
+                      <span>Código de diseño (CSS)</span>
+                      <div className="h-px bg-purple-500/30 flex-1"></div>
+                    </div>
+                    <textarea
+                      className="w-full rounded-md border border-purple-500/30 bg-purple-500/5 p-2 min-h-[140px] font-mono whitespace-pre text-[11px]"
+                      value={designCode}
+                      onChange={(e) => setDesignCode(e.target.value)}
+                      placeholder={".toast {\n  background: linear-gradient(to right, #1a1a2e, #16213e) !important;\n  border-color: #4ecca3 !important;\n}\n.toast-title { color: #4ecca3 !important; }"}
+                    />
+                  </label>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Previsualización</div>
+                  <div className="rounded-xl border border-border/60 bg-black/40 p-8 flex items-center justify-center min-h-[300px] overflow-hidden relative">
+                    {/* Inject custom CSS for preview */}
+                    <style dangerouslySetInnerHTML={{ __html: designCode }} />
+
+                    <div className={`toast p-4 border rounded-lg shadow-2xl flex flex-col gap-2 max-w-[340px] w-full transition-all ${templateForm.level === 'critical' ? 'border-red-500/50 bg-[#181820]' :
+                      templateForm.level === 'warning' ? 'border-yellow-500/50 bg-[#181820]' :
+                        'border-blue-500/50 bg-[#181820]'
+                      }`}>
+                      <div className="toast-header flex items-center gap-3">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-white shadow-lg ${templateForm.level === 'critical' ? 'bg-red-500 shadow-red-500/20' :
+                          templateForm.level === 'warning' ? 'bg-yellow-500 shadow-yellow-500/20' :
+                            'bg-blue-500 shadow-blue-500/20'
+                          }`}>!</div>
+                        <div className={`toast-title flex-1 text-sm font-bold uppercase tracking-tight ${templateForm.level === 'critical' ? 'text-red-400' :
+                          templateForm.level === 'warning' ? 'text-yellow-400' :
+                            'text-blue-400'
+                          }`}>{templateForm.title || 'Título de ejemplo'}</div>
+                        <div className="text-muted-foreground text-xs opacity-40">✕</div>
+                      </div>
+                      <div className="toast-body text-[12.5px] leading-relaxed text-slate-300 ml-11">
+                        {templateForm.body || 'Este es el cuerpo de la notificación que se mostrará en las terminales de los usuarios.'}
+                      </div>
+                      <div className="toast-footer ml-11 flex items-center gap-3 mt-1">
+                        <div className="text-[10px] text-slate-500 font-mono">11:11:11</div>
+                        <div className="h-0.5 bg-foreground/10 flex-1 rounded-full overflow-hidden">
+                          <div className={`h-full w-[40%] ${templateForm.level === 'critical' ? 'bg-red-500' :
+                            templateForm.level === 'warning' ? 'bg-yellow-500' :
+                              'bg-blue-500'
+                            }`}></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground text-center italic">
+                    Nota: El CSS inyectado puede afectar a otros elementos si no se usa especificidad (.toast).
+                  </p>
+                </div>
               </div>
 
-              <div className="flex justify-end gap-2">
+              <div className="flex justify-end gap-2 p-2 bg-black/20 rounded-lg">
                 <button
                   type="button"
                   className="inline-flex items-center gap-2 rounded-md px-3 py-2 text-xs font-bold border border-border/70 hover:border-foreground/40 transition"
@@ -559,7 +576,7 @@ export default function DescargasPage() {
                 </button>
                 <button
                   type="button"
-                  className="inline-flex items-center gap-2 rounded-md px-3 py-2 text-xs font-bold border border-[rgba(108,77,255,0.35)] bg-[rgba(108,77,255,0.12)] hover:bg-[rgba(108,77,255,0.18)] transition disabled:opacity-60"
+                  className="inline-flex items-center gap-2 rounded-md px-4 py-2 text-xs font-black uppercase border border-[rgba(108,77,255,0.45)] bg-[rgba(108,77,255,0.15)] hover:bg-[rgba(108,77,255,0.25)] transition-all disabled:opacity-60"
                   onClick={() => void saveTemplate()}
                   disabled={templateSaving}
                 >
@@ -572,7 +589,7 @@ export default function DescargasPage() {
 
           {selectedTemplate && (
             <div className="text-[11px] text-muted-foreground">
-              Plantilla activa: <span className="font-semibold">{selectedTemplate.label}</span> ({selectedTemplate.id})
+              Plantilla activa: <span className="font-semibold text-foreground">{selectedTemplate.label}</span> ({selectedTemplate.id})
             </div>
           )}
         </div>

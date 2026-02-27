@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 
 from core.process_launcher import get_npm_command, start_async_process, terminate_process_tree
 
@@ -22,6 +23,30 @@ load_dotenv()
 
 app = FastAPI(title="api-gateway", version="0.1.0")
 logger = logging.getLogger("api_gateway")
+
+cors_origins_raw = (os.getenv("DASHBOARD_CORS_ORIGINS") or "").strip()
+if cors_origins_raw:
+    cors_origins = [o.strip() for o in cors_origins_raw.split(",") if o.strip()]
+else:
+    cors_origins = [
+        "http://127.0.0.1:3000",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
+
+# Electron production (file://) sends Origin: null. Without this, Axios reports
+# generic "Network Error" because CORS blocks credentialed requests.
+if "null" not in cors_origins:
+    cors_origins.append("null")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 FRONTEND_HOST = (os.getenv("DASHBOARD_FRONTEND_HOST") or "127.0.0.1").strip() or "127.0.0.1"
 FRONTEND_PORT = int((os.getenv("DASHBOARD_FRONTEND_PORT") or "3000").strip() or "3000")
