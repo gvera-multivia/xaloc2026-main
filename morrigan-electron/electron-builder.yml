@@ -71,10 +71,10 @@ win:
   signAndEditExecutable: false
 
 nsis:
-  oneClick: false
-  perMachine: true
-  allowToChangeInstallationDirectory: true
-  runAfterFinish: true
+  oneClick: true
+  perMachine: false
+  allowToChangeInstallationDirectory: false
+  runAfterFinish: false
   createDesktopShortcut: always
   createStartMenuShortcut: true
   shortcutName: Morrigan

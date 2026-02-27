@@ -66,10 +66,13 @@ app.on('ready', async () => {
 
     logger.info('[Main] App ready, creating window (hidden)')
 
-    app.setLoginItemSettings({
-        openAtLogin: true,
-        openAsHidden: true,
-    })
+    // Avoid auto-start side effects while developing/testing updater flows.
+    if (app.isPackaged) {
+        app.setLoginItemSettings({
+            openAtLogin: true,
+            openAsHidden: true,
+        })
+    }
 
     mainWindow = createMainWindow(isDev, getCspConnectSources)
 

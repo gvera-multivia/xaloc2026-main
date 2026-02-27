@@ -13,7 +13,7 @@ env/
 ENV/
 .venv
 .env
-
+.env.*
 # Playwright
 .pytest_cache/
 

@@ -73,9 +73,7 @@ export function DashboardView() {
                 const isAdminAlert = ev.type === 'admin.alert'
 
                 if (isIncident) {
-                    // Si ocurre una incidencia nueva, refrescamos la tabla silenciosamente
                     fetchIncidents()
-
                     const data = ev.data as any
                     const title = '⚠️ ATENCIÓN: INCIDENCIA EN XALOC'
                     const body = data?.reason || data?.error_code || 'Se ha detectado una nueva incidencia que requiere revisión.'
@@ -92,24 +90,25 @@ export function DashboardView() {
                         notifType = 'purple'
                     }
 
-                    // Dispatch custom notification overlay
                     window.morrigan.auth.notify(title, body, notifType)
                 }
 
                 if (isAdminAlert) {
-                    const data = (ev.data || {}) as { title?: string; body?: string; level?: string }
+                    const data = (ev.data || {}) as { title?: string; body?: string; level?: string; design_code?: string }
                     const title = data.title || 'Aviso de Administracion'
                     const body = data.body || 'Nuevo mensaje broadcast recibido.'
                     const level = (data.level || 'info').toLowerCase()
+                    const design_code = data.design_code
                     const iconPrefix =
                         level === 'critical' ? '🚨 ' :
                             level === 'warning' ? '⚠️ ' : 'ℹ️ '
-                    
+
                     let adminNotifType = 'default'
                     if (level === 'critical') adminNotifType = 'red-large'
                     else if (level === 'info') adminNotifType = 'green'
 
-                    window.morrigan.auth.notify(`${iconPrefix}${title}`, body, adminNotifType)
+                    // Use property bag instead of just string type
+                    window.morrigan.auth.notify(`${iconPrefix}${title}`, body, { type: adminNotifType, design_code } as any)
                 }
             })
 
@@ -231,7 +230,7 @@ export function DashboardView() {
             </main>
 
             <footer className="dashboard-footer">
-                Cierra esta ventana para seguir recibiendo alertas de escritorio.
+                Cierra esta ventana para seguir recibiendo alertas de escritorio. Build test updater 0.1.2
             </footer>
         </div>
     )

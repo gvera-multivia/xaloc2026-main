@@ -172,6 +172,7 @@ export const electronApi = {
         level: 'info' | 'warning' | 'critical';
         internal_note?: string;
         template_id?: string;
+        design_code?: string;
     }) =>
         api.post<{
             ok: boolean;
@@ -186,6 +187,7 @@ export const electronApi = {
                 title: string;
                 body: string;
                 level: 'info' | 'warning' | 'critical';
+                design_code?: string | null;
                 created_at?: string;
                 updated_at?: string;
             }>;
@@ -197,6 +199,7 @@ export const electronApi = {
         title: string;
         body: string;
         level: 'info' | 'warning' | 'critical';
+        design_code?: string;
     }) =>
         api.post<{ ok: boolean; item: any }>('/admin/notifications/templates', payload),
     updateAlertTemplate: (
@@ -206,6 +209,7 @@ export const electronApi = {
             title: string;
             body: string;
             level: 'info' | 'warning' | 'critical';
+            design_code?: string | null;
         }>,
     ) =>
         api.put<{ ok: boolean; item: any }>(`/admin/notifications/templates/${encodeURIComponent(templateId)}`, payload),

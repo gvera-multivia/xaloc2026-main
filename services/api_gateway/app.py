@@ -35,6 +35,11 @@ else:
         "http://127.0.0.1:5173",
     ]
 
+# Electron production (file://) sends Origin: null. Without this, Axios reports
+# generic "Network Error" because CORS blocks credentialed requests.
+if "null" not in cors_origins:
+    cors_origins.append("null")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,

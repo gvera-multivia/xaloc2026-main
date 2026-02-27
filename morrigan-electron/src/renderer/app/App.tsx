@@ -28,10 +28,10 @@ export function App() {
                 setSession(session, persistedToken ?? undefined)
                 morriganWs.connectWithToken(persistedToken)
             } catch (err) {
-                // En DEV, si falla AUTH.ME (por cookies), pero tenemos sesión persistida, 
-                // confiamos en el estado de Zustand para no bloquear al usuario.
+                // In production, stale persisted sessions produce invalid WS tokens (403 loop).
+                // Keep the relaxed behavior only in DEV.
                 const currentSession = useAuthStore.getState().user
-                if (!currentSession) {
+                if (!currentSession || !import.meta.env.DEV) {
                     clearSession()
                 }
             } finally {
@@ -52,6 +52,10 @@ export function App() {
         if (!bootReady) return
 
         window.morrigan.auth.notifyLoginStatus(isAuthenticated)
+        if (isAuthenticated) {
+            const token = useAuthStore.getState().token
+            morriganWs.connectWithToken(token ?? null)
+        }
 
         const unsubscribe = window.morrigan.auth.onForceLogout(() => {
             clearSession()

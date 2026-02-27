@@ -49,7 +49,7 @@ contextBridge.exposeInMainWorld('morrigan', {
         notifyLoginStatus: (isLoggedIn: boolean) => ipcRenderer.send('renderer:login-status', isLoggedIn),
         notifyLoginSuccess: () => ipcRenderer.send('renderer:login-success'),
         notifyLogout: () => ipcRenderer.send('renderer:logout'),
-        notify: (title: string, body: string, type?: string) => ipcRenderer.send('renderer:notify', { title, body, type }),
+        notify: (title: string, body: string, type?: string | { type?: string; design_code?: string }) => ipcRenderer.send('renderer:notify', { title, body, type }),
         onForceLogout: (callback: () => void): (() => void) => {
             const listener = () => callback()
             ipcRenderer.on('morrigan:force-logout', listener)

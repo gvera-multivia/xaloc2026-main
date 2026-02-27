@@ -1,6 +1,11 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { autoUpdater, type UpdateInfo } from 'electron-updater'
 import logger from './logger'
+import { loadMainEnv } from './env-loader'
+import { getRuntimeConfig } from './runtime-config'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 
 type UpdaterStage =
     | 'disabled'
@@ -28,6 +33,7 @@ interface UpdaterState {
 
 let isInitialized = false
 let checkInFlight = false
+let isDevTestMode = false
 
 const state: UpdaterState = {
     enabled: false,
@@ -55,6 +61,69 @@ function setDisabled(message: string): void {
 function parseBoolEnv(value: string | undefined): boolean {
     const normalized = String(value || '').trim().toLowerCase()
     return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on'
+}
+
+function sanitizeHttpUrl(value: string | undefined): string | null {
+    const raw = String(value || '').trim()
+    if (!raw) return null
+    try {
+        const parsed = new URL(raw)
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+            return null
+        }
+        return parsed.toString().replace(/\/$/, '')
+    } catch {
+        return null
+    }
+}
+
+function resolveUpdateUrl(): string | null {
+    const explicitUrl = sanitizeHttpUrl(process.env.MORRIGAN_UPDATE_URL)
+    if (explicitUrl) {
+        return explicitUrl
+    }
+
+    const envApiBase = sanitizeHttpUrl(process.env.MORRIGAN_API_BASE_URL)
+    if (envApiBase) {
+        return `${envApiBase}/updates`
+    }
+
+    const runtimeApiBase = sanitizeHttpUrl(getRuntimeConfig().apiBaseUrl)
+    if (runtimeApiBase) {
+        return `${runtimeApiBase}/updates`
+    }
+
+    return null
+}
+
+function findLatestPendingInstaller(cacheDirName: string): string | null {
+    const localAppData =
+        process.env.LOCALAPPDATA?.trim() ||
+        path.join(os.homedir(), 'AppData', 'Local')
+    const pendingDir = path.join(localAppData, cacheDirName, 'pending')
+    if (!fs.existsSync(pendingDir)) {
+        return null
+    }
+    const candidates = fs
+        .readdirSync(pendingDir)
+        .filter((name) => name.toLowerCase().endsWith('.exe'))
+        .map((name) => path.join(pendingDir, name))
+        .filter((fullPath) => {
+            try {
+                return fs.statSync(fullPath).isFile()
+            } catch {
+                return false
+            }
+        })
+    if (candidates.length === 0) {
+        return null
+    }
+    candidates.sort((a, b) => {
+        const aTime = fs.statSync(a).mtimeMs
+        const bTime = fs.statSync(b).mtimeMs
+        return bTime - aTime
+    })
+    return candidates[0]
 }
 
 async function checkForUpdatesNow(): Promise<{ ok: boolean; reason?: string }> {
@@ -98,8 +167,25 @@ function installNow(): { ok: boolean; reason?: string } {
         return { ok: false, reason: 'update_not_downloaded' }
     }
 
+    if (isDevTestMode && !app.isPackaged) {
+        const installerPath = findLatestPendingInstaller('morrigan-updater-dev')
+        if (!installerPath) {
+            return { ok: false, reason: 'pending_installer_not_found' }
+        }
+        logger.info(`[Updater] Dev test mode install requested. Launching installer: ${installerPath}`)
+        // shell.openPath triggers normal shell execution; empty string means success.
+        void shell.openPath(installerPath).then((errorMessage) => {
+            if (errorMessage) {
+                logger.error(`[Updater] No se pudo abrir instalador en dev test mode: ${errorMessage}`)
+                return
+            }
+            setTimeout(() => app.quit(), 300)
+        })
+        return { ok: true }
+    }
+
     logger.info('[Updater] Instalacion inmediata solicitada por el renderer')
-    autoUpdater.quitAndInstall(true, true)
+    autoUpdater.quitAndInstall(true, false)
     return { ok: true }
 }
 
@@ -117,6 +203,8 @@ function registerIpcHandlers(): void {
  * Inicializa el auto-updater para builds empaquetadas.
  */
 export function initUpdater(): void {
+    loadMainEnv()
+
     if (isInitialized) {
         return
     }
@@ -125,6 +213,7 @@ export function initUpdater(): void {
 
     state.currentVersion = app.getVersion()
     const testMode = parseBoolEnv(process.env.MORRIGAN_UPDATER_TEST_MODE)
+    isDevTestMode = testMode
     const allowUpdater = app.isPackaged || testMode
 
     if (!allowUpdater) {
@@ -133,16 +222,17 @@ export function initUpdater(): void {
         return
     }
 
-    const updateUrl = process.env.MORRIGAN_UPDATE_URL?.trim()
+    const updateUrl = resolveUpdateUrl()
     if (!updateUrl) {
-        logger.warn('[Updater] MORRIGAN_UPDATE_URL no configurada - updater desactivado')
-        setDisabled('MORRIGAN_UPDATE_URL no configurada')
+        logger.warn('[Updater] URL de actualizacion no configurada (MORRIGAN_UPDATE_URL / MORRIGAN_API_BASE_URL)')
+        setDisabled('URL de actualizacion no configurada')
         return
     }
 
     autoUpdater.logger = logger
     autoUpdater.autoDownload = true
     autoUpdater.autoInstallOnAppQuit = true
+    autoUpdater.disableWebInstaller = true
     // Permite probar updater en dev con dev-app-update.yml.
     autoUpdater.forceDevUpdateConfig = !app.isPackaged && testMode
     autoUpdater.setFeedURL({
