@@ -113,7 +113,20 @@ export default function MonitorPage() {
     };
   }, [today]);
 
-  const liveItem = useMemo(() => queue.find(x => (x.state || '').toLowerCase() === 'processing') || null, [queue]);
+  const [selectedWorkerId, setSelectedWorkerId] = useState<string | null>(null);
+
+  const liveItem = useMemo(() => {
+    if (selectedWorkerId) {
+      // Intentar buscar el item que está procesando el worker seleccionado
+      // (Asumiendo que el worker_id se guarda en el item o que podemos deducirlo)
+      // Por ahora, si hay varios en processing, mostramos el primero o el que coincida si tuviéramos esa info.
+      // Optimización: si no hay un item específico ligado al worker en el payload de la cola,
+      // mostramos cualquier item en 'processing' que coincida con el site del worker si lo supiéramos.
+      return queue.find(x => (x.state || '').toLowerCase() === 'processing') || null;
+    }
+    return queue.find(x => (x.state || '').toLowerCase() === 'processing') || null;
+  }, [queue, selectedWorkerId]);
+
   useEffect(() => {
     if (liveItem) {
       setLastLiveSeenTs(Date.now());
@@ -185,7 +198,10 @@ export default function MonitorPage() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         {/* Left */}
         <div className="lg:col-span-8 space-y-8">
-          <LiveScreencast live={liveStreamEnabled} />
+          <LiveScreencast
+            live={liveStreamEnabled}
+            onWorkerSelect={(id) => setSelectedWorkerId(id)}
+          />
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             <SlaRing

@@ -106,9 +106,16 @@ class RedisStreamsQueueGateway(QueueGateway):
         )
         return True, job_id
 
-    async def reserve(self, *, timeout_seconds: int = 10, worker_id: Optional[str] = None) -> Optional[QueueJob]:
+    async def reserve(
+        self,
+        *,
+        timeout_seconds: int = 10,
+        worker_id: Optional[str] = None,
+        site_id: Optional[str] = None,
+    ) -> Optional[QueueJob]:
         await self._ensure_group()
         consumer = (worker_id or f"worker-{uuid.uuid4().hex[:12]}").strip()
+        worker_site_filter = (site_id or "").strip() or None
         deadline = time.time() + max(1, int(timeout_seconds))
 
         async def _requeue_message() -> None:
@@ -156,7 +163,7 @@ class RedisStreamsQueueGateway(QueueGateway):
 
             fields = message.fields
             job_id = str(fields.get("job_id") or "").strip()
-            site_id = str(fields.get("site_id") or "").strip()
+            job_site_id = str(fields.get("site_id") or "").strip()
             protocol = str(fields.get("protocol") or "").strip() or None
 
             payload_raw = fields.get("payload") or "{}"
@@ -183,19 +190,26 @@ class RedisStreamsQueueGateway(QueueGateway):
                         await self.streams.delete(stream=self.stream_key, message_id=message.message_id)
                     continue
 
+            # FILTRO POR SITIO ASIGNADO AL WORKER
+            if worker_site_filter and job_site_id and job_site_id != worker_site_filter:
+                # Este worker solo procesa un sitio específico, y este job es de otro.
+                # Lo devolvemos a la cola para que otros workers lo tomen.
+                await _requeue_message()
+                continue
+
             site_active_check = getattr(self.db, "is_site_active", None)
             is_site_active = True
-            if callable(site_active_check) and site_id:
-                is_site_active = bool(site_active_check(site_id=site_id))
-            if site_id and not is_site_active:
+            if callable(site_active_check) and job_site_id:
+                is_site_active = bool(site_active_check(site_id=job_site_id))
+            if job_site_id and not is_site_active:
                 await _requeue_message()
                 continue
 
-            if site_id and self.db.is_site_processing_paused(site_id=site_id):
+            if job_site_id and self.db.is_site_processing_paused(site_id=job_site_id):
                 await _requeue_message()
                 continue
 
-            if site_id and resource_id is not None and self.db.is_resource_processing_paused(site_id=site_id, resource_id=resource_id):
+            if job_site_id and resource_id is not None and self.db.is_resource_processing_paused(site_id=job_site_id, resource_id=resource_id):
                 await _requeue_message()
                 continue
 
@@ -210,7 +224,7 @@ class RedisStreamsQueueGateway(QueueGateway):
             payload["_stream_message_id"] = message.message_id
             return QueueJob(
                 job_id=job_id,
-                site_id=site_id,
+                site_id=job_site_id,
                 protocol=protocol,
                 payload=payload,
                 resource_id=resource_id,

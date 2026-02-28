@@ -57,7 +57,15 @@ async def run_worker_loop():
     logger.info(f"Backend de cola activo: {queue_backend}")
     worker_instance_id = f"worker-{uuid.uuid4().hex}"
     worker_pid = os.getpid()
+    worker_site_id = (os.getenv("WORKER_SITE_ID") or "").strip() or None
+    worker_novnc_url = (os.getenv("WORKER_NOVNC_EXTERNAL_URL") or "").strip() or None
+
     logger.info("Worker UUID runtime: %s (pid=%s)", worker_instance_id, worker_pid)
+    if worker_site_id:
+        logger.info("Filtro de sitio activo: %s", worker_site_id)
+    if worker_novnc_url:
+        logger.info("URL noVNC externa registrada: %s", worker_novnc_url)
+
     enforce_singleton = (os.getenv("WORKER_ENFORCE_SINGLETON") or "1").strip().lower() in {"1", "true", "yes", "on"}
 
     heartbeat_seconds = int_env("WORKER_HEARTBEAT_SECONDS", 5, minimum=1)
@@ -77,6 +85,7 @@ async def run_worker_loop():
                 pid=worker_pid,
                 status=runtime_status["value"],
                 current_job_id=runtime_state.get("current_job_id"),
+                novnc_url=worker_novnc_url,
             )
         except Exception as exc:
             logger.debug("No se pudo sincronizar runtime inmediato: %s", exc)
@@ -203,7 +212,11 @@ async def run_worker_loop():
                 # Reservamos con algo de espera, pero checkeando shutdown
                 try:
                     job = await asyncio.wait_for(
-                        queue_gateway.reserve(timeout_seconds=10, worker_id=worker_instance_id),
+                        queue_gateway.reserve(
+                            timeout_seconds=10,
+                            worker_id=worker_instance_id,
+                            site_id=worker_site_id,
+                        ),
                         timeout=11
                     )
                 except asyncio.TimeoutError:
