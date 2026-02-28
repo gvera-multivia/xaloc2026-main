@@ -1,60 +1,75 @@
-# Investigación: Simultaneidad de Trámites en Xaloc 2026
+# Investigación: Simultaneidad de Trámites y Arquitectura por Organismo (noVNC)
 
-## 1. Estado Actual: ¿Es factible hoy?
-**No de forma inmediata**, pero sí con cambios técnicos menores y una reconfiguración de la arquitectura.
+## 1. Estado Actual y Tecnología de Visualización
+**Nota importante:** El sistema de "Screencast" (frames JPEG) ha sido deprecado en favor de **noVNC**, que proporciona una transmisión de video en tiempo real del navegador mucho más fluida y eficiente.
 
-El sistema actual tiene varios "cuellos de botella" que fuerzan la ejecución secuencial (un trámite después de otro):
-1.  **Bloqueo Global en Runner:** El microservicio `playwright-runner-service` tiene un `asyncio.Lock()` global que impide que dos trámites se ejecuten a la vez en el mismo contenedor.
-2.  **Cámara (Screencast) Única:** El archivo que genera la vista en vivo es fijo (`live_frame.jpg`). Si dos navegadores escribieran ahí a la vez, la imagen se corrompería o parpadearía.
-3.  **Perfiles de Navegador:** Se usa una ruta fija (`profiles/worker`). Chromium bloquea el perfil si otra instancia intenta usarlo.
-4.  **Certificados:** La importación de certificados en la base de datos NSS de Linux durante el arranque puede causar conflictos de acceso si varios procesos lo hacen simultáneamente sobre el mismo volumen.
+Para lograr la simultaneidad, el sistema debe permitir múltiples sesiones de noVNC activas, una por cada navegador en ejecución.
 
 ---
 
-## 2. ¿Varios Dockers o un Docker con varios Navegadores?
+## 2. Estrategia: Un Organismo por Docker
+La arquitectura recomendada para escalar el sistema es dedicar un par de contenedores (Worker + Playwright Runner) a cada organismo o sitio específico.
 
-### Opción Recomendada: Varios Dockers (Escalabilidad Horizontal)
-Es la opción más robusta y fácil de implementar. Cada "unidad de trabajo" (Worker + Playwright Runner) vive en su propio contenedor.
-
-*   **Ventajas:**
-    *   **Aislamiento Total:** Si un navegador falla o se cuelga, no afecta a los demás.
-    *   **Gestión de Certificados:** Cada contenedor tiene su propio almacén NSS.
-    *   **Recursos:** Puedes limitar CPU/RAM por contenedor.
-    *   **Cámara:** Cada contenedor sirve su propio flujo de vídeo/imagen.
-*   **Implementación:** Simplemente hay que instanciar más servicios en el `docker-compose.yml` o usar un orquestador (Docker Swarm/Kubernetes) para hacer `replica: 3`.
-
-### Opción Descartada: Un Docker con varios Navegadores
-Sería mucho más complejo de gestionar internamente.
-*   **Desventajas:** Habría que gestionar múltiples puertos de VNC/noVNC (5900, 5901...), múltiples carpetas de perfiles dinámicamente y eliminar los bloqueos (`Locks`) del código Python.
+### Beneficios de esta aproximación:
+*   **Aislamiento de Recursos:** Un trámite pesado en "Madrid" no ralentiza a "Palma".
+*   **Configuración Específica:** Cada contenedor puede tener sus propias variables de entorno, certificados y políticas de autoselección.
+*   **Simplicidad en el Filtrado:** El Worker solo solicita tareas de su organismo asignado, simplificando la lógica de la cola.
 
 ---
 
-## 3. Solución para la "Cámara" (Screencast)
-Para poder ver uno u otro trámite en el Dashboard, se requiere:
+## 3. Implementación de la Visualización Multi-puesto (noVNC)
+Al tener varios contenedores `playwright-runner`, cada uno tendrá su propia instancia de noVNC. Para que el Dashboard muestre la "cámara" correcta, se propone:
 
-### A. Identificación de Stream
-Actualmente, el Dashboard pide `/api/queue/live-screenshot` y el backend lee siempre el mismo archivo.
-**Cambio propuesto:**
-1.  Cada Worker debe generar su frame con un ID: `live_frame_{worker_id}.jpg`.
-2.  El Dashboard API debe aceptar el ID: `/api/queue/live-screenshot?worker_id=worker-1`.
-
-### B. Selector en el Dashboard
-La interfaz de usuario necesita un componente de "Selector de Cámara":
-1.  Consultar la tabla `worker_runtime` para ver qué workers están "online".
-2.  Mostrar un desplegable o miniaturas de los trámites activos.
-3.  Al seleccionar uno, el componente `LiveScreencast` cambiará la URL del stream para apuntar al archivo del worker seleccionado.
+1.  **Registro Dinámico de URLs:**
+    *   Cada contenedor `playwright-runner` expone noVNC en un puerto distinto o bajo una ruta única.
+    *   Al arrancar, el Worker obtiene su URL de noVNC (ej: `http://runner-madrid:6080/vnc.html`) y la registra en la tabla `worker_runtime` de PostgreSQL.
+2.  **Consumo en el Dashboard:**
+    *   El Dashboard ya no usará una variable de entorno estática para la URL de noVNC.
+    *   Consultará la API `/api/control/status` o una nueva ruta `/api/workers/active` para obtener la lista de workers y sus respectivas URLs de noVNC.
+    *   El usuario podrá seleccionar qué worker visualizar, y el frontend cargará el `iframe` con la URL registrada para ese worker.
 
 ---
 
-## 4. Plan de Acción para habilitar la Simultaneidad
+## 4. Cambios Técnicos Necesarios
 
-1.  **Eliminar el `_EXECUTE_LOCK`** en `services/playwright_runner/app.py` para permitir peticiones concurrentes (si se opta por un solo runner potente) o, mejor aún, desplegar múltiples runners.
-2.  **Parametrizar el nombre del frame:** Modificar `BaseAutomation` para que acepte un sufijo o ID de worker al guardar el JPEG.
-3.  **Configurar Rutas Dinámicas de Perfil:** Asegurar que cada instancia de Playwright use un subdirectorio único en `profiles/` (ej: `profiles/worker_1`, `profiles/worker_2`).
-4.  **Actualizar el Dashboard:**
-    *   Backend: Servir imágenes basadas en el ID del worker.
-    *   Frontend: Añadir el selector de "Cámaras Activas".
-5.  **Ajustar `docker-compose`:** Escalar el servicio `worker-orchestrator` y `playwright-runner-service`.
+### A. Worker (Consumer)
+*   **Filtrado por Site:** Añadir soporte para una variable `WORKER_SITE_ID` que, si está presente, haga que el worker ignore tareas de otros sitios en el método `reserve`.
+*   **Heartbeat con URL:** Incluir la `NOVNC_URL` en el latido (heartbeat) que el worker envía a la base de datos.
+
+### B. Playwright Runner
+*   Asegurar que cada instancia use un puerto de noVNC único si están en la misma red, o usar nombres de servicio de Docker (ej: `playwright-runner-madrid`) para que el proxy los identifique.
+
+### C. Dashboard API
+*   Modificar `/api/queue/live-viewer` para que acepte un `worker_id` y devuelva la URL específica almacenada en la base de datos.
+
+### D. Docker Compose
+Ejemplo de configuración para dos organismos:
+```yaml
+services:
+  worker-madrid:
+    image: xaloc-worker
+    environment:
+      - WORKER_SITE_ID=madrid
+      - PLAYWRIGHT_RUNNER_URL=http://runner-madrid:8111
+      - NOVNC_INTERNAL_URL=http://runner-madrid:6080
+
+  runner-madrid:
+    image: xaloc-playwright-runner
+    ports: ["6081:6080"]
+
+  worker-palma:
+    image: xaloc-worker
+    environment:
+      - WORKER_SITE_ID=ayunta_palma
+      - PLAYWRIGHT_RUNNER_URL=http://runner-palma:8111
+      - NOVNC_INTERNAL_URL=http://runner-palma:6080
+
+  runner-palma:
+    image: xaloc-playwright-runner
+    ports: ["6082:6080"]
+```
+
+---
 
 ## 5. Conclusión
-**Es perfectamente factible.** La arquitectura ya está orientada a microservicios, lo que facilita enormemente el escalado mediante **múltiples contenedores Docker**. El reto principal no es la ejecución en sí, sino la **coordinación de las evidencias visuales (cámara)** y los **bloqueos de perfil de navegador**, problemas que se resuelven asignando identidades únicas a cada instancia.
+La transición a un modelo de **"Un Organismo por Docker"** con **noVNC** es el camino más natural para el proyecto. Aprovecha la infraestructura de microservicios actual y resuelve los conflictos de concurrencia (perfiles, certificados, bloqueos) al proporcionar aislamiento total por proceso.
