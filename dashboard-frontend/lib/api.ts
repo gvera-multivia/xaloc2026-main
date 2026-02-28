@@ -38,7 +38,8 @@ export const api = {
 export const queueApi = {
     getCurrent: (page = 1, pageSize = 200) =>
         api.get<{ items: any[], total: number }>(`/queue/current?page=${page}&page_size=${pageSize}`),
-    getLiveViewer: () => api.get<{ enabled: boolean; novnc_url: string | null }>('/queue/live-viewer'),
+    getLiveViewer: (workerId?: string) =>
+        api.get<{ enabled: boolean; novnc_url: string | null }>(`/queue/live-viewer${workerId ? `?worker_id=${encodeURIComponent(workerId)}` : ''}`),
     getCompletionMarker: (day: string) => api.get<{ marker: string }>(`/queue/completion-marker?day=${day}`),
     deleteItem: (siteId: string, resourceId: number | string) =>
         api.delete<any>(`/queue/items/${encodeURIComponent(siteId)}/${resourceId}`),
@@ -99,6 +100,7 @@ export const historyApi = {
 
 export const controlApi = {
     getStatus: () => api.get<any>('/control/status'),
+    getActiveWorkers: () => api.get<{ items: any[]; total: number }>('/workers/active'),
     getLogs: (processName: string, lines = 100) => api.get<any>(`/logs/${processName}?lines=${lines}`),
     start: (processName: string) => api.post<any>(`/control/${processName}/start`),
     stop: (processName: string) => api.post<any>(`/control/${processName}/stop`),

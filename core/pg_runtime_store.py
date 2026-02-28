@@ -48,6 +48,7 @@ class PgRuntimeStore:
                         pid INTEGER,
                         status TEXT NOT NULL DEFAULT 'online',
                         current_job_id TEXT,
+                        novnc_url TEXT,
                         last_heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -244,23 +245,25 @@ class PgRuntimeStore:
         pid: int,
         status: str,
         current_job_id: Optional[str],
+        novnc_url: Optional[str] = None,
     ) -> None:
         with self._conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
                     INSERT INTO worker_runtime (
-                        worker_id, run_id, pid, status, current_job_id, last_heartbeat_at, updated_at
-                    ) VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
+                        worker_id, run_id, pid, status, current_job_id, novnc_url, last_heartbeat_at, updated_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
                     ON CONFLICT (worker_id) DO UPDATE SET
                         run_id = EXCLUDED.run_id,
                         pid = EXCLUDED.pid,
                         status = EXCLUDED.status,
                         current_job_id = EXCLUDED.current_job_id,
+                        novnc_url = COALESCE(EXCLUDED.novnc_url, worker_runtime.novnc_url),
                         last_heartbeat_at = NOW(),
                         updated_at = NOW()
                     """,
-                    (worker_id, run_id, int(pid), status, current_job_id),
+                    (worker_id, run_id, int(pid), status, current_job_id, novnc_url),
                 )
             conn.commit()
 
@@ -549,6 +552,33 @@ class PgRuntimeStore:
     def is_process_enabled(self, *, process_name: str) -> bool:
         state = self.get_process_desired_state(process_name=process_name)
         return str(state.get("desired_state") or "running").strip().lower() != "stopped"
+
+    def list_active_workers(self, *, heartbeat_timeout_seconds: int = 90) -> list[dict[str, Any]]:
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT worker_id, run_id, pid, status, current_job_id, novnc_url, last_heartbeat_at
+                    FROM worker_runtime
+                    WHERE status = 'online'
+                      AND last_heartbeat_at >= NOW() - (%s * INTERVAL '1 second')
+                    ORDER BY updated_at DESC
+                    """,
+                    (int(heartbeat_timeout_seconds),),
+                )
+                rows = cur.fetchall()
+        return [
+            {
+                "worker_id": row[0],
+                "run_id": row[1],
+                "pid": row[2],
+                "status": row[3],
+                "current_job_id": row[4],
+                "novnc_url": row[5],
+                "last_heartbeat_at": row[6].isoformat() if row[6] else None,
+            }
+            for row in rows
+        ]
 
     def list_process_desired_states(self) -> dict[str, dict[str, Any]]:
         base = {

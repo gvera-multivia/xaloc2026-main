@@ -685,16 +685,38 @@ def _novnc_force_local_scale(url: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, parts.fragment))
 
 
+@app.get("/api/workers/active")
+async def api_workers_active(
+    heartbeat_timeout_seconds: int = Query(90, ge=5),
+    _user: dict = Depends(require_user),
+) -> dict:
+    items = service.runtime_store.list_active_workers(heartbeat_timeout_seconds=heartbeat_timeout_seconds)
+    return {"items": items, "total": len(items)}
+
+
 @app.get("/api/queue/live-viewer")
-async def api_queue_live_viewer(request: Request, _user: dict = Depends(require_user)) -> dict:
+async def api_queue_live_viewer(
+    request: Request,
+    worker_id: str | None = Query(None),
+    _user: dict = Depends(require_user),
+) -> dict:
     visual_enabled = (os.getenv("XALOC_VISUAL_DEBUG") or "1").strip().lower() in {"1", "true", "yes", "on"}
     if not visual_enabled:
         return {"enabled": False, "novnc_url": None}
 
+    # PRIORIDAD 1: URL específica registrada por el worker en DB
+    if worker_id:
+        workers = service.runtime_store.list_active_workers()
+        target = next((w for w in workers if w["worker_id"] == worker_id), None)
+        if target and target.get("novnc_url"):
+            return {"enabled": True, "novnc_url": _novnc_force_local_scale(target["novnc_url"]), "worker_id": worker_id}
+
+    # PRIORIDAD 2: URL explícita por variable de entorno (legado/global)
     explicit_url = (os.getenv("XALOC_NOVNC_PUBLIC_URL") or "").strip()
     if explicit_url:
         return {"enabled": True, "novnc_url": _novnc_force_local_scale(explicit_url)}
 
+    # PRIORIDAD 3: URL autogenerada basada en puerto por defecto
     scheme = request.url.scheme or "http"
     host = request.url.hostname or "localhost"
     port = int((os.getenv("XALOC_NOVNC_PUBLIC_PORT") or "6080").strip() or "6080")
