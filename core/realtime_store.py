@@ -1,11 +1,12 @@
 import json
 import logging
-import os
 import sqlite3
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+from core.redis_client import get_redis_client
 from core.runtime_flags import get_report_pg_dsn, is_pg_source_of_truth_enabled
 
 try:
@@ -22,6 +23,78 @@ def _to_jsonb(value: Optional[dict[str, Any]]) -> Optional[str]:
     if value is None:
         return None
     return json.dumps(value, ensure_ascii=False)
+
+
+def _derive_incident_alert_level(*, incident_type: str, reason: str) -> str:
+    text = f"{incident_type} {reason}".lower()
+    if any(k in text for k in ("blocked", "bloque", "retry_exhausted", "failed", "critical", "fatal")):
+        return "critical"
+    if any(k in text for k in ("requires_gesdoc", "authorization", "autorizaci", "regex_discarded", "discarded")):
+        return "warning"
+    return "critical"
+
+
+def _build_incident_alert_title(*, site_id: str, resource_id: Optional[int]) -> str:
+    site_label = str(site_id or "sistema").replace("_", " ").strip().upper() or "SISTEMA"
+    rid = f" (recurso {int(resource_id)})" if resource_id is not None else ""
+    return f"INCIDENCIA EN {site_label}{rid}"
+
+
+def _publish_incident_events_best_effort(
+    *,
+    logger: logging.Logger,
+    site_id: str,
+    incident_type: str,
+    reason: str,
+    error_code: str,
+    resource_id: Optional[int],
+    expediente: Optional[str],
+) -> None:
+    redis = get_redis_client()
+    if redis is None:
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    timestamp = datetime.now(timezone.utc).isoformat()
+    incident_event = {
+        "type": "incident.new",
+        "timestamp": timestamp,
+        "data": {
+            "site_id": site_id,
+            "incident_type": incident_type,
+            "error_code": error_code,
+            "reason": reason,
+            "resource_id": resource_id,
+            "expediente": expediente or None,
+        },
+    }
+    alert_level = _derive_incident_alert_level(incident_type=incident_type, reason=reason)
+    alert_event = {
+        "type": "admin.alert",
+        "timestamp": timestamp,
+        "data": {
+            "title": _build_incident_alert_title(site_id=site_id, resource_id=resource_id),
+            "body": reason or incident_type,
+            "level": alert_level,
+            "template_id": "incident",
+            "internal_note": "incident_auto",
+            "design_code": None,
+            "sent_by": "system",
+            "site_id": site_id,
+            "incident_type": incident_type,
+            "error_code": error_code,
+            "resource_id": resource_id,
+            "expediente": expediente or None,
+        },
+    }
+    try:
+        loop.create_task(redis.publish("channel:ui_updates", json.dumps(incident_event, ensure_ascii=False)))
+        loop.create_task(redis.publish("channel:ui_updates", json.dumps(alert_event, ensure_ascii=False)))
+    except Exception as exc:
+        logger.debug("No se pudo publicar notificacion realtime de incidencia: %s", exc)
 
 
 class NullRealtimeStore:
@@ -416,6 +489,16 @@ class PostgresRealtimeStore:
                         ),
                     )
             conn.commit()
+            if created:
+                _publish_incident_events_best_effort(
+                    logger=self.logger,
+                    site_id=site_id,
+                    incident_type=incident_type_value,
+                    reason=reason_value,
+                    error_code=error_code_value,
+                    resource_id=resource_id,
+                    expediente=expediente,
+                )
             return created
 
     def purge_invalid_incidents(self) -> int:
@@ -746,6 +829,16 @@ class SqliteRealtimeStore:
                     ),
                 )
             conn.commit()
+            if created:
+                _publish_incident_events_best_effort(
+                    logger=self.logger,
+                    site_id=site_id,
+                    incident_type=incident_type_value,
+                    reason=reason_value,
+                    error_code=error_code_value,
+                    resource_id=resource_id,
+                    expediente=expediente,
+                )
             return created
 
     def purge_invalid_incidents(self) -> int:

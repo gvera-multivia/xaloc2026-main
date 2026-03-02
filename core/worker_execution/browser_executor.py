@@ -67,7 +67,7 @@ async def execute_browser_flow(
             # Forzamos cierre completo al terminar cada recurso.
             os.environ["XALOC_KEEP_BROWSER_OPEN"] = "0"
             os.environ["XALOC_KEEP_TAB_OPEN"] = "0"
-        elif (not keep_browser_open_disabled) and site_id in ["madrid", "base_online"]:
+        elif (not keep_browser_open_disabled) and site_id in ["madrid", "base_online", "redsara"]:
             os.environ["XALOC_KEEP_BROWSER_OPEN"] = "1"
             os.environ["XALOC_KEEP_TAB_OPEN"] = "1"
 

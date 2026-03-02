@@ -51,6 +51,7 @@ class BaseAutomation:
         "https://cert.valid.aoc.cat:443/*",
         "https://palma.sedipualba.es/*",
         "https://identificacionssl.sedipualba.es/*",
+        "https://reg.redsara.es/*",
     )
     _DEFAULT_CLIENT_CERT_ORIGINS: tuple[str, ...] = (
         "https://sede.madrid.es",
@@ -66,6 +67,7 @@ class BaseAutomation:
         "https://pasarela.clave.gob.es",
         "https://palma.sedipualba.es",
         "https://identificacionssl.sedipualba.es",
+        "https://reg.redsara.es",
     )
 
     def __init__(self, config: BaseConfig):

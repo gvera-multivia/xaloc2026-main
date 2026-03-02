@@ -8,7 +8,6 @@ import re
 import signal
 import uuid
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -332,32 +331,6 @@ class BrainClaimService:
 
         if not created:
             return
-
-        # Best-effort realtime event so Electron can notify immediately.
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(
-                self.redis.publish(
-                    "channel:ui_updates",
-                    json.dumps(
-                        {
-                            "type": "incident.new",
-                            "timestamp": datetime.now(timezone.utc).isoformat(),
-                            "data": {
-                                "site_id": site_id,
-                                "incident_type": error_code,
-                                "error_code": error_code,
-                                "reason": description,
-                                "resource_id": resource_id,
-                                "expediente": expediente or None,
-                            },
-                        },
-                        ensure_ascii=False,
-                    ),
-                )
-            )
-        except Exception as exc:
-            logger.debug("[%s] No se pudo publicar evento realtime de incidencia: %s", site_id, exc)
 
     async def run_tick(self) -> dict[str, Any]:
         stats = {"claimed": 0, "published_candidates": 0, "incidents_logged": 0, "errors": 0}
