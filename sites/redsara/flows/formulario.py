@@ -98,8 +98,26 @@ def _build_texts_for_phase(fase: str, expediente: str) -> tuple[str, str, str]:
 
 
 async def _fill_input(page: Page, selector: str, value: str) -> None:
-    await page.locator(selector).first.click()
-    await page.locator(selector).first.fill(value)
+    loc = page.locator(selector).first
+    await loc.wait_for(state="visible")
+    await loc.scroll_into_view_if_needed()
+    await loc.click()
+    await loc.fill(value)
+
+
+async def _fill_first_visible(locator, value: str) -> bool:
+    count = await locator.count()
+    for i in range(count):
+        candidate = locator.nth(i)
+        try:
+            if not await candidate.is_visible():
+                continue
+            await candidate.scroll_into_view_if_needed()
+            await candidate.fill(value)
+            return True
+        except Exception:
+            continue
+    return False
 
 
 async def _fill_dnt_input(page: Page, formcontrolname: str, value: str, group: str | None = None) -> None:
@@ -107,12 +125,37 @@ async def _fill_dnt_input(page: Page, formcontrolname: str, value: str, group: s
         return
     prefix = f'div[formgroupname="{group}"] ' if group else ""
     locator = page.locator(f'{prefix}dnt-input[formcontrolname="{formcontrolname}"] input:not([type="hidden"])')
-    if await locator.count() > 0:
-        await locator.first.fill(value)
+    if await locator.count() > 0 and await _fill_first_visible(locator, value):
         return
     fallback = page.locator(f'{prefix}input[formcontrolname="{formcontrolname}"]')
-    if await fallback.count() > 0:
-        await fallback.first.fill(value)
+    if await fallback.count() > 0 and await _fill_first_visible(fallback, value):
+        return
+    raise RuntimeError(f"redsara: no se pudo rellenar campo '{formcontrolname}' (group={group}).")
+
+
+async def _select_representante(page: Page) -> None:
+    # 1) Intento por texto visible
+    try:
+        text_target = page.get_by_text("Representante", exact=False).first
+        if await text_target.is_visible():
+            await text_target.click(force=True)
+            return
+    except Exception:
+        pass
+
+    # 2) Fallback por radios custom (segunda opcion)
+    radios = page.locator(".dnt-radio__inner")
+    if await radios.count() >= 2:
+        await radios.nth(1).click(force=True)
+        return
+
+    # 3) Ultimo intento por label
+    radio = page.get_by_label("Representante", exact=False)
+    if await radio.count() > 0:
+        await radio.first.click(force=True)
+        return
+
+    raise RuntimeError("redsara: no se pudo seleccionar el tipo 'Representante'.")
 
 
 async def _select_option_after_fill(page: Page, selector: str, value: str) -> None:
@@ -125,9 +168,9 @@ async def rellenar_formulario_redsara(page: Page, config: RedSaraConfig, datos: 
     await page.get_by_text("Datos del interesado").wait_for(timeout=config.flow_timeouts.medium_wait)
 
     if datos.representante.es_representante:
-        radio = page.get_by_label("Representante", exact=False)
-        if await radio.count() > 0:
-            await radio.first.click(force=True)
+        await _select_representante(page)
+        represented_group = page.locator('div[formgroupname="represented"]')
+        await represented_group.first.wait_for(state="visible", timeout=config.flow_timeouts.medium_wait)
 
     await _fill_dnt_input(page, "email", datos.representante.email, group="represented")
     await _fill_dnt_input(page, "phone", datos.representante.telefono, group="represented")
