@@ -54,6 +54,8 @@ async def execute_browser_flow(
             mapped_data[key] = archivos_para_subir
         elif site_id == "ayunta_palma":
             mapped_data["archivos"] = archivos_para_subir
+        elif site_id == "redsara":
+            mapped_data["archivos_adjuntos"] = archivos_para_subir
 
         datos = call_with_supported_kwargs(controller.create_target, **mapped_data)
         keep_browser_open_disabled = (os.getenv("XALOC_DISABLE_KEEP_BROWSER_OPEN") or "0").strip().lower() in {
