@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from typing import Optional
+from urllib.parse import urlsplit, urlunsplit
 
 
 VALID_QUEUE_MODES = {"redis_list", "redis_streams"}
@@ -44,6 +45,28 @@ def is_redis_streams_pilot_enabled() -> bool:
     return _is_true(os.getenv("REDIS_STREAMS_PILOT_ENABLED", "0"))
 
 
+def _prefer_localhost_for_docker_hostnames(url: str) -> str:
+    raw = str(url or "").strip()
+    if not raw or os.name != "nt":
+        return raw
+
+    parsed = urlsplit(raw)
+    hostname = (parsed.hostname or "").strip().lower()
+    if hostname not in {"postgres", "redis", "auth-rbac-service", "dashboard-backend-service"}:
+        return raw
+
+    port = f":{parsed.port}" if parsed.port else ""
+    userinfo = ""
+    if parsed.username:
+        userinfo = parsed.username
+        if parsed.password is not None:
+            userinfo += f":{parsed.password}"
+        userinfo += "@"
+
+    netloc = f"{userinfo}localhost{port}"
+    return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
+
+
 def get_report_pg_dsn(explicit: Optional[str] = None) -> Optional[str]:
     dsn = (explicit or "").strip()
     if not dsn:
@@ -57,5 +80,5 @@ def get_report_pg_dsn(explicit: Optional[str] = None) -> Optional[str]:
     if lowered in {"0", "1", "true", "false", "yes", "no", "on", "off", "enabled", "disabled"}:
         return None
     if "://" in dsn or "=" in dsn:
-        return dsn
+        return _prefer_localhost_for_docker_hostnames(dsn)
     return None

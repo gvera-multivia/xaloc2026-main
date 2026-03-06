@@ -1,6 +1,7 @@
 import os
 import logging
 from typing import Optional
+from urllib.parse import urlsplit, urlunsplit
 
 try:
     import redis.asyncio as redis
@@ -11,6 +12,27 @@ logger = logging.getLogger("redis_client")
 
 _redis_client: Optional["redis.Redis"] = None
 _redis_pool: Optional["redis.ConnectionPool"] = None
+
+
+def _normalize_redis_url(redis_url: str) -> str:
+    raw = str(redis_url or "").strip()
+    if not raw or os.name != "nt":
+        return raw
+
+    parsed = urlsplit(raw)
+    if (parsed.hostname or "").strip().lower() != "redis":
+        return raw
+
+    port = f":{parsed.port}" if parsed.port else ""
+    userinfo = ""
+    if parsed.username:
+        userinfo = parsed.username
+        if parsed.password is not None:
+            userinfo += f":{parsed.password}"
+        userinfo += "@"
+
+    netloc = f"{userinfo}localhost{port}"
+    return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
 
 def get_redis_client() -> Optional["redis.Redis"]:
     """
@@ -30,7 +52,7 @@ def get_redis_client() -> Optional["redis.Redis"]:
     if _redis_client is not None:
         return _redis_client
 
-    redis_url = (os.getenv("REDIS_URL") or "").strip()
+    redis_url = _normalize_redis_url((os.getenv("REDIS_URL") or "").strip())
     if not redis_url:
         logger.warning("REDIS_ENABLED=1 pero REDIS_URL vacío. Redis desactivado.")
         return None
