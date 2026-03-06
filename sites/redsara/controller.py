@@ -308,28 +308,21 @@ class RedsaraController:
             interested_surname1 = ""
             interested_surname2 = ""
         else:
-            parsed_name, parsed_surname1, parsed_surname2 = _split_full_name(
-                data.get("name") or data.get("sujeto_recurso")
-            )
-            # Para persona fisica: solo nombre de pila.
+            # Para persona fisica: usar campos estructurados de cliente.
             interested_name = (
                 data.get("interested_name")
                 or data.get("nombre")
                 or data.get("cliente_nombre")
-                or parsed_name
             )
-            # Si "name" venia como nombre completo, solo usamos su troceado seguro.
             interested_surname1 = (
                 data.get("interested_surname1")
                 or data.get("surname1")
                 or data.get("cliente_apellido1")
-                or parsed_surname1
             )
             interested_surname2 = (
                 data.get("interested_surname2")
                 or data.get("surname2")
                 or data.get("cliente_apellido2")
-                or parsed_surname2
                 or ""
             )
         return {
@@ -454,15 +447,6 @@ class RedsaraController:
             candidate_surname2 = _normalize_person_name_for_redsara(
                 (interested_surname2 or "").strip() or (os.getenv("REDSARA_INT_SURNAME2") or "").strip()
             )
-
-            # Defensa en profundidad: si llega nombre completo por entrada directa, separarlo.
-            parsed_name, parsed_surname1, parsed_surname2 = _split_full_name(candidate_name)
-            if " " in candidate_name:
-                candidate_name = parsed_name or candidate_name
-            if not candidate_surname1:
-                candidate_surname1 = parsed_surname1
-            if not candidate_surname2:
-                candidate_surname2 = parsed_surname2
 
             if not candidate_name:
                 raise ValueError("redsara: falta 'interested_name'.")
