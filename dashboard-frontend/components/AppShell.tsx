@@ -15,11 +15,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const { loading, isAuthenticated, isAdmin } = useAuth();
 
   const isLoginPage = pathname === '/login';
+  const isDocumentosPage = pathname?.startsWith('/documentos');
   const requiresAdmin = ADMIN_ROUTES.some((prefix: string) => pathname?.startsWith(prefix));
 
   useEffect(() => {
     if (loading) return;
-    if (!isAuthenticated && !isLoginPage) {
+    if (!isAuthenticated && !isLoginPage && !isDocumentosPage) {
       router.replace('/login');
       return;
     }
@@ -30,9 +31,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     if (isAuthenticated && requiresAdmin && !isAdmin) {
       router.replace('/');
     }
-  }, [loading, isAuthenticated, isLoginPage, requiresAdmin, isAdmin, router]);
+  }, [loading, isAuthenticated, isLoginPage, isDocumentosPage, requiresAdmin, isAdmin, router]);
 
-  if (loading && !isLoginPage) {
+  if (loading && !isLoginPage && !isDocumentosPage) {
     return (
       <main className="min-h-screen flex items-center justify-center">
         <div className="text-sm text-muted-foreground">Cargando sesión...</div>
@@ -40,7 +41,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!isLoginPage && !isAuthenticated) {
+  if (!isLoginPage && !isDocumentosPage && !isAuthenticated) {
     return null;
   }
 
