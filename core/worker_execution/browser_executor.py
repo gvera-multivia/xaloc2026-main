@@ -54,6 +54,8 @@ async def execute_browser_flow(
             mapped_data[key] = archivos_para_subir
         elif site_id == "ayunta_palma":
             mapped_data["archivos"] = archivos_para_subir
+        elif site_id == "redsara":
+            mapped_data["archivos"] = archivos_para_subir
 
         datos = call_with_supported_kwargs(controller.create_target, **mapped_data)
         keep_browser_open_disabled = (os.getenv("XALOC_DISABLE_KEEP_BROWSER_OPEN") or "0").strip().lower() in {
@@ -140,6 +142,9 @@ async def execute_browser_flow(
                 )
             else:
                 payload_updates = payload if payload != original_payload else {}
+                flow_metadata = getattr(bot, "last_flow_metadata", None)
+                if isinstance(flow_metadata, dict) and flow_metadata:
+                    payload_updates = {**payload_updates, **flow_metadata}
                 return ProcessOutcome(
                     success=True,
                     screenshot=str(screenshot_path) if screenshot_path else None,

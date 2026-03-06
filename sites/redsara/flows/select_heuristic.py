@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import unicodedata
 
 HEURISTIC_MIN_SCORE = 60
@@ -14,6 +15,17 @@ PROVINCE_ALIASES = {
     "baleares": "illes balears",
 }
 
+CITY_ALIASES = {
+    # Errores frecuentes en origen de datos
+    "fornells de la seva": "fornells de la selva",
+}
+
+# Patrones para variaciones frecuentes no cubiertas por alias exacto.
+# Se evalúan sobre texto ya normalizado (sin tildes, en minúsculas).
+CITY_ALIAS_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"^fornells de la se[vb]a$"), "fornells de la selva"),
+]
+
 
 def _normalize_py(raw: str | None) -> str:
     text = unicodedata.normalize("NFD", (raw or ""))
@@ -24,6 +36,42 @@ def _normalize_py(raw: str | None) -> str:
 def normalize_province_alias(raw: str | None) -> str:
     n = _normalize_py(raw)
     return PROVINCE_ALIASES.get(n, raw or "")
+
+
+def normalize_city_alias(raw: str | None) -> str:
+    raw_text = str(raw or "").strip()
+    n = _normalize_py(raw_text)
+    if not n:
+        return raw_text
+
+    # 1) Si viene formato "NUCLEO - MUNICIPIO", nos quedamos con el municipio.
+    # Ej.: "BELLAVISTA - LES FRANQUESES DEL VALLES"
+    split_parts = re.split(r"\s+-\s+", raw_text, maxsplit=1)
+    candidate = split_parts[1].strip() if len(split_parts) == 2 and split_parts[1].strip() else raw_text
+
+    # 2) Pasar articulo inicial al final: "Les X" -> "X, Les"
+    # Sirve para combos oficiales de tipo "Franqueses del Valles, Les".
+    m = re.match(r"^\s*(?P<article>les|la|el|los|las)\s+(?P<body>.+?)\s*$", candidate, flags=re.IGNORECASE)
+    if m:
+        article = m.group("article").strip().capitalize()
+        body = m.group("body").strip()
+        candidate = f"{body}, {article}"
+        if _normalize_py(body) == "franqueses del valles" and article.lower() == "les":
+            candidate = "Franqueses del Vallès, Les"
+
+    candidate_norm = _normalize_py(candidate)
+
+    # Prioridad 1: alias exacto (candidate y raw para compatibilidad).
+    exact = CITY_ALIASES.get(candidate_norm) or CITY_ALIASES.get(n)
+    if exact:
+        return exact
+
+    # Prioridad 2: alias por patrón.
+    for pattern, replacement in CITY_ALIAS_PATTERNS:
+        if pattern.match(candidate_norm):
+            return replacement
+
+    return candidate
 
 
 def _js_heuristic_core() -> str:

@@ -97,7 +97,14 @@ function Get-Buttons($win) {{
 
 function Kind-Window([string]$title, $texts) {{
   $all = ((Norm $title) + " " + (Norm (($texts -join " "))))
-  if ($all.Contains("intentant obrir autofirma") -or $all.Contains("intentando abrir autofirma") -or $all.Contains("trying to open autofirma")) {{ return "edge_open" }}
+  if (
+    $all.Contains("intentant obrir autofirma")
+    -or $all.Contains("intentando abrir autofirma")
+    -or $all.Contains("trying to open autofirma")
+    -or $all.Contains("xaloc afirma handler")
+    -or $all.Contains("wants to open this application")
+    -or $all.Contains("open this application")
+  ) {{ return "edge_open" }}
   if ($all.Contains("dialogo de seguridad del almacen windows") -or $all.Contains("diálogo de seguridad del almacén windows") -or $all.Contains("security dialog") -or $all.Contains("certificat") -or $all.Contains("certific")) {{ return "windows_cert" }}
   if ($all.Contains("autofirma") -or $all.Contains("portafirm")) {{ return "autofirma" }}
   return ""
@@ -145,9 +152,19 @@ function Set-EdgeCheckbox($win) {{
     $checks = $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condCheck)
     foreach ($chk in $checks) {{
       $chkName = Norm ([string]$chk.Current.Name)
-      if ($chkName.Contains("permet sempre") -or $chkName.Contains("permitir siempre") -or $chkName.Contains("always allow")) {{
-        Try-Click-Pattern $chk | Out-Null
-        Write-Output "edge_open checkbox=attempted"
+      if (
+        $chkName.Contains("permet sempre")
+        -or $chkName.Contains("permitir siempre")
+        -or $chkName.Contains("always allow")
+        -or $chkName.Contains("always open")
+      ) {{
+        try {{
+          $toggle = $chk.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+          if ($chk.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::Off) {{
+            $toggle.Toggle()
+            Write-Output ("edge_open checkbox=checked name=" + [string]$chk.Current.Name)
+          }}
+        }} catch {{}}
       }}
     }}
   }} catch {{}}
@@ -179,7 +196,8 @@ for ($i=0; $i -lt {loops}; $i++) {{
 
       if ($kind -eq "edge_open") {{
         if ($clickedByKey.ContainsKey($key)) {{ continue }}
-        $clicked = Click-ButtonByHints $w @("obre","abrir","open") "edge_open"
+        Set-EdgeCheckbox $w
+        $clicked = Click-ButtonByHints $w @("obre","abrir","open","xaloc afirma handler","open xaloc afirma handler") "edge_open"
         if (-not $clicked) {{
           try {{
             $wshell.SendKeys("%o")

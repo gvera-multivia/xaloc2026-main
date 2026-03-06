@@ -296,13 +296,24 @@ services:
       XALOC_CERT_AUTOSELECT_CLI_FALLBACK: "1"
       XALOC_CERT_FILTER_BY_CN: "0"
       PLAYWRIGHT_USE_CLIENT_CERTIFICATES: ${PLAYWRIGHT_USE_CLIENT_CERTIFICATES:-1}
-      PLAYWRIGHT_CLIENT_CERT_ORIGINS: ${PLAYWRIGHT_CLIENT_CERT_ORIGINS:-https://sede.madrid.es,https://servcla.madrid.es,https://servpub.madrid.es,https://www.xalocgirona.cat,https://seu.xalocgirona.cat,https://www.base.cat,https://www.baseonline.cat,https://valid.aoc.cat,https://cert.valid.aoc.cat,https://cas.madrid.es,https://pasarela.clave.gob.es,https://palma.sedipualba.es,https://identificacionssl.sedipualba.es}
+      PLAYWRIGHT_CLIENT_CERT_ORIGINS: ${PLAYWRIGHT_CLIENT_CERT_ORIGINS:-https://sede.madrid.es,https://servcla.madrid.es,https://servpub.madrid.es,https://www.xalocgirona.cat,https://seu.xalocgirona.cat,https://www.base.cat,https://www.baseonline.cat,https://valid.aoc.cat,https://cert.valid.aoc.cat,https://cas.madrid.es,https://pasarela.clave.gob.es,https://palma.sedipualba.es,https://identificacionssl.sedipualba.es,https://reg.redsara.es}
       PLAYWRIGHT_CERT_PATH: /data/certificates/certificate.pfx
       PLAYWRIGHT_PROFILE_DIR: /app/profiles/worker
       PLAYWRIGHT_NSS_DB_DIR: ${PLAYWRIGHT_NSS_DB_DIR:-/root/.pki/nssdb}
       PLAYWRIGHT_GLOBAL_NSS_DB_DIR: /root/.pki/nssdb
       PLAYWRIGHT_CERT_REQUIRED: ${PLAYWRIGHT_CERT_REQUIRED:-1}
       PLAYWRIGHT_CERT_PASSWORD: ${PLAYWRIGHT_CERT_PASSWORD:-}
+      XALOC_AUTOFIRMA_ORIGIN: ${XALOC_AUTOFIRMA_ORIGIN:-https://palma.sedipualba.es}
+      XALOC_AUTOFIRMA_ALLOWED_ORIGINS: ${XALOC_AUTOFIRMA_ALLOWED_ORIGINS:-https://palma.sedipualba.es,https://identificacionssl.sedipualba.es,https://reg.redsara.es,https://sede.redsara.es}
+      XALOC_AUTOFIRMA_PROTOCOLS: ${XALOC_AUTOFIRMA_PROTOCOLS:-afirma,xalocafirma}
+      # El volumen ../../:/app monta el repo en /app, el script está en infra/docker/
+      XALOC_AFIRMA_PROXY_SCRIPT: /app/infra/docker/autofirma_proxy.py
+      XALOC_AFIRMA_TEXT_SIGN_RESPONSE_MODE: ${XALOC_AFIRMA_TEXT_SIGN_RESPONSE_MODE:-pair}
+      XALOC_PYTHON_BIN: /opt/venv/bin/python3
+      XALOC_REDSARA_SIGN_RETRIES: ${XALOC_REDSARA_SIGN_RETRIES:-3}
+      XALOC_REDSARA_SIGN_TIMEOUT_MS: ${XALOC_REDSARA_SIGN_TIMEOUT_MS:-120000}
+      XALOC_REDSARA_AUTOSCRIPT_LAUNCH_MS: ${XALOC_REDSARA_AUTOSCRIPT_LAUNCH_MS:-8000}
+      XALOC_REDSARA_AUTOSCRIPT_RETRIES: ${XALOC_REDSARA_AUTOSCRIPT_RETRIES:-30}
       SIGNING_PFX_PATH: /data/certificates/certificate.pfx
       SIGNING_PFX_PASSWORD: ${PLAYWRIGHT_CERT_PASSWORD:-}
       SIGNING_PFX_ALIAS: ${SIGNING_PFX_ALIAS:-35059210b_maria_teresa_morente__r__b62798210_}
@@ -357,8 +368,8 @@ volumes:
   dashboard_frontend_node_modules:
   dashboard_frontend_next:
   clientes_smb:
-    driver: local
-    driver_opts:
-      type: cifs
-      o: username=${SMB_USER:-},password=${SMB_PASS:-},vers=${SMB_VERS:-3.0},rw,iocharset=utf8
-      device: "//${SMB_SERVER:-SERVER-DOC}/${SMB_SHARE:-clientes}"
+      driver: local
+      driver_opts:
+        type: cifs
+        o: "username=Guillem Vera,password=1234,vers=3.0,rw,iocharset=utf8"
+        device: "//192.168.184.150/clientes"

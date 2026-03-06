@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import os
+import re
+import unicodedata
 
 from sites.redsara.config import RedsaraConfig
 from sites.redsara.data_models import RedsaraTarget
 
-REP_STREET_TYPE_FIXED = "RONDA"
-REP_ADDRESS_FIXED = "GENERAL MITRE"
+REP_STREET_TYPE_FIXED = "Ronda"
+REP_ADDRESS_FIXED = "GENERAL MITRE 169"
 REP_COUNTRY_FIXED = "ESPANA"
 REP_PROVINCE_FIXED = "BARCELONA"
 REP_CITY_FIXED = "BARCELONA"
@@ -14,6 +16,244 @@ REP_ZIP_FIXED = "08022"
 
 PHONE_FIXED = "722761154"
 EMAIL_FIXED = "info@xvia-serviciosjuridicos.com"
+
+_RE_NIF = re.compile(r"^\d{8}[A-Z]$", re.IGNORECASE)
+_RE_NIE = re.compile(r"^[XYZ]\d{7}[A-Z]$", re.IGNORECASE)
+_RE_CIF = re.compile(r"^[ABCDEFGHJKLMNPQRSUVW]\d{7}[0-9A-J]$", re.IGNORECASE)
+_RE_PASS = re.compile(r"^[A-Z0-9]{3,20}$", re.IGNORECASE)
+
+_DOC_TYPE_ALIASES = {
+    "NIF": "NIF",
+    "DNI": "NIF",
+    "NIE": "NIE",
+    "CIF": "CIF",
+    "NIF/NIE": "NIE",
+    "NIF NIE": "NIE",
+    "PASAPORTE": "PASAPORTE",
+    "PASS": "PASAPORTE",
+    "PASSPORT": "PASAPORTE",
+    "DOCUMENTO EXTRANJERO": "PASAPORTE",
+}
+
+
+def _normalize_person_name_for_redsara(raw: str | None) -> str:
+    """
+    Sanea caracteres conflictivos en nombres/apellidos para el formulario REDSARA.
+    Convierte ordinales (p.ej. Mª) en separador de espacio sin truncar texto.
+    """
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    # U+00AA (ª), U+00BA (º) y variantes mojibake comunes ("Âª", "Âº").
+    # Importante: primero secuencias dobles para no dejar "\u00C2" colgando.
+    text = text.replace("\u00C2\u00AA", " ").replace("\u00C2\u00BA", " ")
+    text = text.replace("\u00AA", " ").replace("\u00BA", " ")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _normalize_doc_number(raw: str | None) -> str:
+    value = str(raw or "").strip().upper()
+    return re.sub(r"[\s\-_/]", "", value)
+
+
+def _infer_doc_type(doc_number: str | None) -> str | None:
+    doc = _normalize_doc_number(doc_number)
+    if not doc:
+        return None
+    if _RE_NIF.match(doc):
+        return "NIF"
+    if _RE_NIE.match(doc):
+        return "NIE"
+    if _RE_CIF.match(doc):
+        return "CIF"
+    # Si no encaja con NIF/NIE/CIF, tratar como pasaporte/documento extranjero.
+    if _RE_PASS.match(doc):
+        return "PASAPORTE"
+    return None
+
+
+def _normalize_doc_type(raw: str | None) -> str | None:
+    value = str(raw or "").strip().upper()
+    if not value:
+        return None
+    return _DOC_TYPE_ALIASES.get(value, value)
+
+
+def _is_doc_type_compatible(doc_type: str | None, doc_number: str | None) -> bool:
+    t = _normalize_doc_type(doc_type)
+    doc = _normalize_doc_number(doc_number)
+    if not t or not doc:
+        return False
+    if t == "NIF":
+        return bool(_RE_NIF.match(doc))
+    if t == "NIE":
+        return bool(_RE_NIE.match(doc))
+    if t == "CIF":
+        return bool(_RE_CIF.match(doc))
+    if t == "PASAPORTE":
+        return not (_RE_NIF.match(doc) or _RE_NIE.match(doc) or _RE_CIF.match(doc))
+    return False
+
+
+def _resolve_doc_type(doc_number: str | None, explicit_doc_type: str | None) -> str | None:
+    """
+    Prioriza inferencia por nÃƒÂºmero para evitar tipos incoherentes (ej. NIF con NIE).
+    """
+    inferred = _infer_doc_type(doc_number)
+    explicit = _normalize_doc_type(explicit_doc_type)
+    if inferred:
+        return inferred
+    if explicit and _is_doc_type_compatible(explicit, doc_number):
+        return explicit
+    return explicit
+
+
+def _is_company_by_cliente_tipo(value: object) -> bool:
+    try:
+        return int(str(value).strip()) == 2
+    except Exception:
+        return False
+
+
+_REDSARA_STREET_TYPES = [
+    "Alameda",
+    "Avenida",
+    "Avinguda",
+    "Barrio",
+    "Bulevar",
+    "Calle",
+    "Calleja",
+    "CamÃƒÂ­",
+    "Camino",
+    "Campo",
+    "Carrer",
+    "Carrera",
+    "Carretera",
+    "Cuesta",
+    "Edificio",
+    "Enparantza",
+    "Estrada",
+    "Glorieta",
+    "Jardines",
+    "Jardins",
+    "Kalea",
+    "Otros",
+    "Parque",
+    "Pasaje",
+    "Paseo",
+    "Passatge",
+    "Passeig",
+    "PlaÃƒÂ§a",
+    "Placeta",
+    "Plaza",
+    "Plazuela",
+    "Poblado",
+    "PolÃƒÂ­gono",
+    "Praza",
+    "Rambla",
+    "Ronda",
+    "RÃƒÂºa",
+    "Sector",
+    "TravesÃƒÂ­a",
+    "Travessera",
+    "UrbanizaciÃƒÂ³n",
+    "Via",
+]
+
+
+def _normalize_street_type_key(raw: str | None) -> str:
+    text = str(raw or "").strip().lower()
+    text = unicodedata.normalize("NFD", text)
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+    text = re.sub(r"[\s\.,;:/_\\-]+", " ", text).strip()
+    return text
+
+
+_STREET_TYPE_MAP: dict[str, str] = {
+    _normalize_street_type_key(v): v for v in _REDSARA_STREET_TYPES
+}
+_STREET_TYPE_MAP.update(
+    {
+        "cl": "Calle",
+        "c": "Calle",
+        "c/": "Calle",
+        "av": "Avenida",
+        "avda": "Avenida",
+        "rda": "Ronda",
+        "ctra": "Carretera",
+        "pl": "Plaza",
+        "pg": "Paseo",
+        "ps": "Paseo",
+        "cami": "CamÃƒÂ­",
+        "trav": "TravesÃƒÂ­a",
+        "trv": "TravesÃƒÂ­a",
+        "urb": "UrbanizaciÃƒÂ³n",
+        "pol": "PolÃƒÂ­gono",
+    }
+)
+
+
+def _infer_street_type(street_type: str | None, sigla: str | None, street_name: str | None) -> str | None:
+    direct = _normalize_street_type_key(street_type)
+    if direct:
+        return _STREET_TYPE_MAP.get(direct)
+
+    sig = _normalize_street_type_key(sigla)
+    if sig:
+        mapped = _STREET_TYPE_MAP.get(sig)
+        if mapped:
+            return mapped
+
+    # Inferencia por prefijo del nombre de la direccion.
+    name = str(street_name or "").strip()
+    if not name:
+        return None
+    first = _normalize_street_type_key(re.split(r"[\\s,.-]+", name, maxsplit=1)[0])
+    return _STREET_TYPE_MAP.get(first)
+
+
+def _normalize_city_for_redsara(raw: str | None) -> str:
+    value = str(raw or "").strip()
+    if not value:
+        return ""
+    value_norm = unicodedata.normalize("NFD", value.lower())
+    value_norm = "".join(ch for ch in value_norm if unicodedata.category(ch) != "Mn")
+    value_norm = " ".join(value_norm.split())
+    if value_norm == "fornells de la seva":
+        return "FORNELLS DE LA SELVA"
+
+    # 1) Formato "NUCLEO - MUNICIPIO" -> usar municipio.
+    split_parts = re.split(r"\s+-\s+", value, maxsplit=1)
+    candidate = split_parts[1].strip() if len(split_parts) == 2 and split_parts[1].strip() else value
+
+    # 2) Reordenar articulo inicial al final: "Les X" -> "X, LES".
+    m = re.match(r"^\s*(?P<article>les|la|el|los|las)\s+(?P<body>.+?)\s*$", candidate, flags=re.IGNORECASE)
+    if m:
+        article = m.group("article").strip().upper()
+        body = m.group("body").strip().upper()
+        candidate = f"{body}, {article}"
+        body_norm = unicodedata.normalize("NFD", body.lower())
+        body_norm = "".join(ch for ch in body_norm if unicodedata.category(ch) != "Mn")
+        body_norm = " ".join(body_norm.split())
+        if body_norm == "franqueses del valles" and article == "LES":
+            candidate = "FRANQUESES DEL VALLÃƒË†S, LES"
+
+    return candidate
+
+
+def _split_full_name(full_name: str | None) -> tuple[str, str, str]:
+    """
+    Split a full name into (given_name, surname1, surname2).
+    Never returns fabricated values.
+    """
+    tokens = [t for t in re.split(r"\s+", str(full_name or "").strip()) if t]
+    if not tokens:
+        return "", "", ""
+    if len(tokens) == 1:
+        return tokens[0], "", ""
+    if len(tokens) == 2:
+        return tokens[0], tokens[1], ""
+    return tokens[0], tokens[1], " ".join(tokens[2:])
 
 
 class RedsaraController:
@@ -26,6 +266,72 @@ class RedsaraController:
         return config
 
     def map_data(self, data: dict) -> dict:
+        base_doc_number = data.get("interested_doc_number") or data.get("nif") or data.get("interested_nif")
+        doc_type = _resolve_doc_type(
+            base_doc_number,
+            data.get("interested_doc_type") or data.get("tipo_doc_interesado"),
+        )
+        is_empresa = _is_company_by_cliente_tipo(data.get("cliente_tipo")) or bool(data.get("interested_is_company")) or (
+            (doc_type or "").strip().upper() == "CIF"
+        )
+        if is_empresa:
+            doc_number = (
+                data.get("interested_doc_number")
+                or data.get("cif")
+                or data.get("cliente_nif_empresa")
+            )
+            doc_type = "CIF"
+        else:
+            doc_number = base_doc_number
+        street_name = (
+            data.get("interested_address")
+            or data.get("address_street")
+            or data.get("cliente_domicilio")
+            or data.get("domicilio")
+        )
+        street_name = str(street_name or "").strip()
+        street_type = _infer_street_type(
+            data.get("interested_street_type"),
+            data.get("address_sigla"),
+            street_name,
+        )
+        if not street_type:
+            street_type = "Otros"
+        if is_empresa:
+            # Para empresa: el campo "name" del formulario equivale a businessName (razon social).
+            interested_name = (
+                data.get("interested_razon_social")
+                or data.get("razon_social")
+                or data.get("empresa")
+                or data.get("cliente_razon_social")
+            )
+            interested_surname1 = ""
+            interested_surname2 = ""
+        else:
+            parsed_name, parsed_surname1, parsed_surname2 = _split_full_name(
+                data.get("name") or data.get("sujeto_recurso")
+            )
+            # Para persona fisica: solo nombre de pila.
+            interested_name = (
+                data.get("interested_name")
+                or data.get("nombre")
+                or data.get("cliente_nombre")
+                or parsed_name
+            )
+            # Si "name" venia como nombre completo, solo usamos su troceado seguro.
+            interested_surname1 = (
+                data.get("interested_surname1")
+                or data.get("surname1")
+                or data.get("cliente_apellido1")
+                or parsed_surname1
+            )
+            interested_surname2 = (
+                data.get("interested_surname2")
+                or data.get("surname2")
+                or data.get("cliente_apellido2")
+                or parsed_surname2
+                or ""
+            )
         return {
             "payload": data,
             # Representante fijo (datos corporativos)
@@ -36,29 +342,33 @@ class RedsaraController:
             "represented_zip": REP_ZIP_FIXED,
             "represented_phone": PHONE_FIXED,
             "represented_email": EMAIL_FIXED,
-            "interested_doc_type": data.get("interested_doc_type") or data.get("tipo_doc_interesado"),
-            "interested_doc_number": data.get("interested_doc_number") or data.get("nif") or data.get("interested_nif"),
-            "interested_name": data.get("interested_name") or data.get("name"),
-            "interested_surname1": data.get("interested_surname1") or data.get("surname1"),
-            "interested_surname2": data.get("interested_surname2") or data.get("surname2"),
-            "interested_street_type": data.get("interested_street_type") or data.get("address_sigla"),
-            "interested_address": data.get("interested_address") or data.get("address_street"),
+            "interested_doc_type": doc_type,
+            "interested_doc_number": doc_number,
+            "interested_name": _normalize_person_name_for_redsara(interested_name),
+            "interested_surname1": _normalize_person_name_for_redsara(interested_surname1),
+            # Nunca inventar apellido2: si no existe, se deja vacio.
+            "interested_surname2": _normalize_person_name_for_redsara(interested_surname2),
+            "interested_street_type": street_type,
+            "interested_address": street_name,
             "interested_province": data.get("interested_province") or data.get("address_province"),
-            "interested_city": data.get("interested_city") or data.get("address_city"),
+            "interested_city": _normalize_city_for_redsara(data.get("interested_city") or data.get("address_city")),
             "interested_zip": data.get("interested_zip") or data.get("address_zip"),
             # Contacto interesado fijo (datos corporativos)
             "interested_phone": PHONE_FIXED,
             "interested_email": EMAIL_FIXED,
+            "interested_is_company": is_empresa,
             "email_alert": data.get("email_alert"),
             "destination_organism_code": data.get("destination_organism_code") or data.get("organism_code"),
             "subject": data.get("subject") or data.get("asunto"),
             "exposes": data.get("exposes") or data.get("expone"),
             "solicit": data.get("solicit") or data.get("solicita"),
+            "archivos": data.get("archivos") or [],
         }
 
     def create_target(
         self,
         *,
+        payload: dict | None = None,
         represented_street_type: str | None = None,
         represented_address: str | None = None,
         represented_province: str | None = None,
@@ -78,11 +388,13 @@ class RedsaraController:
         interested_zip: str | None = None,
         interested_phone: str | None = None,
         interested_email: str | None = None,
+        interested_is_company: bool | None = None,
         email_alert: bool | None = None,
         destination_organism_code: str | None = None,
         subject: str | None = None,
         exposes: str | None = None,
         solicit: str | None = None,
+        archivos: list | None = None,
         **_kwargs,
     ) -> RedsaraTarget:
         def _pick(value: str | None, env_key: str, fallback: str) -> str:
@@ -94,7 +406,75 @@ class RedsaraController:
                 return env_text
             return fallback
 
+        def _pick_required(value: str | None, env_key: str, field_name: str) -> str:
+            text = (value or "").strip()
+            if text:
+                return text
+            env_text = (os.getenv(env_key) or "").strip()
+            if env_text:
+                return env_text
+            raise ValueError(f"redsara: falta '{field_name}'.")
+
+        resolved_doc_number = _pick_required(interested_doc_number, "REDSARA_INT_DOC_NUMBER", "interested_doc_number")
+        resolved_doc_type = _resolve_doc_type(
+            resolved_doc_number,
+            (interested_doc_type or "").strip() or (os.getenv("REDSARA_INT_DOC_TYPE") or "").strip(),
+        ) or ""
+        if not resolved_doc_type:
+            raise ValueError("redsara: no se pudo inferir 'interested_doc_type' a partir del documento.")
+        payload_cliente_tipo = (payload or {}).get("cliente_tipo") if isinstance(payload, dict) else None
+        is_empresa = (
+            True if interested_is_company is True else False
+        ) or _is_company_by_cliente_tipo(payload_cliente_tipo) or (resolved_doc_type.upper() == "CIF")
+        if is_empresa:
+            resolved_doc_type = "CIF"
+        resolved_street_type = _infer_street_type(
+            interested_street_type,
+            None,
+            interested_address,
+        ) or _infer_street_type(
+            (os.getenv("REDSARA_INT_STREET_TYPE") or "").strip(),
+            None,
+            interested_address,
+        ) or "Otros"
+        if is_empresa:
+            # Para empresa: interested_name es razon social y apellidos vacios.
+            resolved_name = _normalize_person_name_for_redsara(
+                _pick_required(interested_name, "REDSARA_INT_NAME", "interested_name (razon social)")
+            )
+            resolved_surname1 = ""
+            resolved_surname2 = ""
+        else:
+            candidate_name = _normalize_person_name_for_redsara(
+                (interested_name or "").strip() or (os.getenv("REDSARA_INT_NAME") or "").strip()
+            )
+            candidate_surname1 = _normalize_person_name_for_redsara(
+                (interested_surname1 or "").strip() or (os.getenv("REDSARA_INT_SURNAME1") or "").strip()
+            )
+            candidate_surname2 = _normalize_person_name_for_redsara(
+                (interested_surname2 or "").strip() or (os.getenv("REDSARA_INT_SURNAME2") or "").strip()
+            )
+
+            # Defensa en profundidad: si llega nombre completo por entrada directa, separarlo.
+            parsed_name, parsed_surname1, parsed_surname2 = _split_full_name(candidate_name)
+            if " " in candidate_name:
+                candidate_name = parsed_name or candidate_name
+            if not candidate_surname1:
+                candidate_surname1 = parsed_surname1
+            if not candidate_surname2:
+                candidate_surname2 = parsed_surname2
+
+            if not candidate_name:
+                raise ValueError("redsara: falta 'interested_name'.")
+            if not candidate_surname1:
+                raise ValueError("redsara: falta 'interested_surname1'.")
+
+            resolved_name = _normalize_person_name_for_redsara(candidate_name)
+            resolved_surname1 = _normalize_person_name_for_redsara(candidate_surname1)
+            resolved_surname2 = _normalize_person_name_for_redsara(candidate_surname2 or "")
+
         return RedsaraTarget(
+            payload=dict(payload or {}),
             represented_street_type=_pick(represented_street_type, "REDSARA_REP_STREET_TYPE", REP_STREET_TYPE_FIXED),
             represented_address=_pick(represented_address, "REDSARA_REP_ADDRESS", REP_ADDRESS_FIXED),
             represented_province=_pick(represented_province, "REDSARA_REP_PROVINCE", REP_PROVINCE_FIXED),
@@ -102,23 +482,25 @@ class RedsaraController:
             represented_zip=_pick(represented_zip, "REDSARA_REP_ZIP", REP_ZIP_FIXED),
             represented_phone=_pick(represented_phone, "REDSARA_REP_PHONE", PHONE_FIXED),
             represented_email=_pick(represented_email, "REDSARA_REP_EMAIL", EMAIL_FIXED),
-            interested_doc_type=_pick(interested_doc_type, "REDSARA_INT_DOC_TYPE", "NIF"),
-            interested_doc_number=_pick(interested_doc_number, "REDSARA_INT_DOC_NUMBER", "12345678Z"),
-            interested_name=_pick(interested_name, "REDSARA_INT_NAME", "NOMBRE"),
-            interested_surname1=_pick(interested_surname1, "REDSARA_INT_SURNAME1", "APELLIDO1"),
-            interested_surname2=_pick(interested_surname2, "REDSARA_INT_SURNAME2", "APELLIDO2"),
-            interested_street_type=_pick(interested_street_type, "REDSARA_INT_STREET_TYPE", "CALLE"),
-            interested_address=_pick(interested_address, "REDSARA_INT_ADDRESS", "CALLE INTERESADO 2"),
-            interested_province=_pick(interested_province, "REDSARA_INT_PROVINCE", "MADRID"),
-            interested_city=_pick(interested_city, "REDSARA_INT_CITY", "MADRID"),
-            interested_zip=_pick(interested_zip, "REDSARA_INT_ZIP", "28002"),
+            interested_doc_type=resolved_doc_type,
+            interested_doc_number=resolved_doc_number,
+            interested_name=resolved_name,
+            interested_surname1=resolved_surname1,
+            interested_surname2=resolved_surname2,
+            interested_street_type=resolved_street_type,
+            interested_address=_pick_required(interested_address, "REDSARA_INT_ADDRESS", "interested_address"),
+            interested_province=_pick_required(interested_province, "REDSARA_INT_PROVINCE", "interested_province"),
+            interested_city=_normalize_city_for_redsara(_pick_required(interested_city, "REDSARA_INT_CITY", "interested_city")),
+            interested_zip=_pick_required(interested_zip, "REDSARA_INT_ZIP", "interested_zip"),
             interested_phone=_pick(interested_phone, "REDSARA_INT_PHONE", PHONE_FIXED),
             interested_email=_pick(interested_email, "REDSARA_INT_EMAIL", EMAIL_FIXED),
+            interested_is_company=is_empresa,
             email_alert=True if email_alert is None else bool(email_alert),
-            destination_organism_code=_pick(destination_organism_code, "REDSARA_DEST_ORGANISM_CODE", "LA0007892"),
-            subject=_pick(subject, "REDSARA_SUBJECT", "PRUEBA REDSARA"),
-            exposes=_pick(exposes, "REDSARA_EXPOSES", "Texto de prueba para el campo expone."),
-            solicit=_pick(solicit, "REDSARA_SOLICIT", "Texto de prueba para el campo solicita."),
+            destination_organism_code=_pick_required(destination_organism_code, "REDSARA_DEST_ORGANISM_CODE", "destination_organism_code"),
+            subject=_pick_required(subject, "REDSARA_SUBJECT", "subject"),
+            exposes=_pick_required(exposes, "REDSARA_EXPOSES", "exposes"),
+            solicit=_pick_required(solicit, "REDSARA_SOLICIT", "solicit"),
+            archivos=list(archivos or []),
         )
 
 

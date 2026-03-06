@@ -59,6 +59,7 @@ export interface ItemPauseInfo extends PauseInfo {
 export interface OrganismoConfig {
     site_id: SiteID;
     active: number | boolean;
+    claim_limit_per_tick?: number | null;
     query_organisme?: string;
     filtro_texp?: string;
     regex_expediente?: string;

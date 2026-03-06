@@ -285,39 +285,48 @@ class BaseAutomation:
 
             protocol_handler = prefs.setdefault("protocol_handler", {})
             excluded = protocol_handler.setdefault("excluded_schemes", {})
-            excluded[self.config.autofirma_protocol] = False
+            protocols_raw = (os.getenv("XALOC_AUTOFIRMA_PROTOCOLS") or "").strip()
+            protocols = [p.strip() for p in protocols_raw.split(",") if p.strip()]
+            if not protocols:
+                protocols = [str(self.config.autofirma_protocol or "").strip() or "afirma"]
+            for proto in protocols:
+                excluded[proto] = False
 
             pairs = protocol_handler.get("allowed_origin_protocol_pairs")
-            wanted_protocol = str(self.config.autofirma_protocol)
-            wanted_origin = str(self.config.autofirma_origin)
+            origins_raw = (os.getenv("XALOC_AUTOFIRMA_ALLOWED_ORIGINS") or "").strip()
+            origins = [o.strip() for o in origins_raw.split(",") if o.strip()]
+            if not origins:
+                origins = [str(self.config.autofirma_origin)]
+            wanted_pairs = [{"protocol": proto, "origin": origin} for proto in protocols for origin in origins]
 
             # Chromium puede guardar esta clave como lista de objetos
-            # o como diccionario {origin: [protocols]} según versión/perfil.
+            # o como diccionario {origin: [protocols]} segun version/perfil.
             if isinstance(pairs, list):
-                wanted = {"protocol": wanted_protocol, "origin": wanted_origin}
-                if not any(
-                    isinstance(p, dict)
-                    and str(p.get("protocol")) == wanted_protocol
-                    and str(p.get("origin")) == wanted_origin
-                    for p in pairs
-                ):
-                    pairs.append(wanted)
+                for wanted in wanted_pairs:
+                    if not any(
+                        isinstance(p, dict)
+                        and str(p.get("protocol")) == str(wanted["protocol"])
+                        and str(p.get("origin")) == str(wanted["origin"])
+                        for p in pairs
+                    ):
+                        pairs.append(wanted)
             elif isinstance(pairs, dict):
-                current = pairs.get(wanted_origin)
-                if isinstance(current, list):
-                    if wanted_protocol not in current:
-                        current.append(wanted_protocol)
-                elif isinstance(current, str):
-                    if current != wanted_protocol:
-                        pairs[wanted_origin] = [current, wanted_protocol]
-                elif current is None:
-                    pairs[wanted_origin] = [wanted_protocol]
-                else:
-                    pairs[wanted_origin] = [wanted_protocol]
+                for origin in origins:
+                    current = pairs.get(origin)
+                    if isinstance(current, list):
+                        for proto in protocols:
+                            if proto not in current:
+                                current.append(proto)
+                    elif isinstance(current, str):
+                        merged = [current]
+                        for proto in protocols:
+                            if proto not in merged:
+                                merged.append(proto)
+                        pairs[origin] = merged
+                    else:
+                        pairs[origin] = list(protocols)
             else:
-                protocol_handler["allowed_origin_protocol_pairs"] = [
-                    {"protocol": wanted_protocol, "origin": wanted_origin}
-                ]
+                protocol_handler["allowed_origin_protocol_pairs"] = wanted_pairs
 
             pref_path.write_text(
                 json.dumps(prefs, ensure_ascii=False, separators=(",", ":")),

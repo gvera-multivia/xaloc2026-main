@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 import re
@@ -39,11 +39,11 @@ SELECT
     e.matricula,
     e.Idpublic AS exp_idpublic,
 
-    pe.publicación AS pub_publicacion,
+    pe.publicaciÃ³n AS pub_publicacion,
 
     rs.cif,
 
-    -- Datos detallados del cliente para NOTIFICACIÓN
+    -- Datos detallados del cliente para NOTIFICACIÃ“N
     c.nif AS cliente_nif,
     c.nifempresa AS cliente_nif_empresa,
     c.tipodecliente AS cliente_tipo,
@@ -95,6 +95,28 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
     def _clean_str(v: Any) -> str:
         return str(v).strip() if v is not None else ""
 
+    @classmethod
+    def _sanitize_query_organisme(cls, configured: Any) -> str:
+        """
+        Evita patrones excesivamente amplios (p.ej. %MADRID%) que capturan
+        recursos de otras sedes y generan descartes/ruido cruzado.
+        """
+        raw = cls._clean_str(configured)
+        if not raw:
+            return "%SUBDIRECCION GNAL GESTION MULTAS DE MADRID%"
+
+        tokens = [t.strip() for t in raw.split("|") if cls._clean_str(t)]
+        filtered: list[str] = []
+        for token in tokens:
+            norm = token.strip().upper()
+            if norm == "%MADRID%":
+                continue
+            filtered.append(token)
+
+        if not filtered:
+            return "%SUBDIRECCION GNAL GESTION MULTAS DE MADRID%"
+        return "|".join(filtered)
+
     @staticmethod
     def _normalize_document_id(doc: Any) -> str:
         """
@@ -139,6 +161,9 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 logger.warning(f"[madrid] Regex invalido en config.regex_expediente: {regex_pattern!r}. Usando fallback.")
                 regex = self._regex_expediente_fallback
             self._regex_expediente_cache[regex_pattern] = regex
+
+        config = dict(config or {})
+        config["query_organisme"] = self._sanitize_query_organisme(config.get("query_organisme"))
 
         if resource_repo is not None:
             recursos_map: dict[int, dict] = {}
@@ -194,9 +219,9 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                                     "Expedient": recurso.get("Expedient"),
                                     "tipo_incidencia": "SITE_RULE_DISCARDED",
                                     "motivo": (
-                                        "Madrid: trámite no reclamable por regla de sede (fase negra: "
+                                        "Madrid: trÃ¡mite no reclamable por regla de sede (fase negra: "
                                         f"{self._clean_str(recurso.get('FaseProcedimiento'))}). "
-                                        "Revisar si el trámite está mal formado o si debe tratarse manualmente."
+                                        "Revisar si el trÃ¡mite estÃ¡ mal formado o si debe tratarse manualmente."
                                     ),
                                 }
                             )
@@ -217,15 +242,15 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         texp_values = [2, 3]
         texp_placeholders = ",".join(["?"] * len(texp_values))
 
-        # Manejar múltiples patrones LIKE (separados por espacios)
+        # Manejar mÃºltiples patrones LIKE (separados por espacios)
         query_organisme_raw = config.get("query_organisme", "%")
-        patterns = [p.strip() for p in query_organisme_raw.split(" ") if p.strip()]
+        patterns = [p.strip() for p in str(query_organisme_raw).split("|") if p.strip()]
 
         if not patterns:
             patterns = ["%"]
 
         like_clauses = ["rs.Organisme LIKE ?"] * len(patterns)
-        organisme_like_clause = " AND ".join(like_clauses)
+        organisme_like_clause = " OR ".join(like_clauses)
 
         query = self.SQL_FETCH_RECURSOS_MADRID.format(organisme_like_clause=organisme_like_clause, texp_list=texp_placeholders)
 
@@ -293,9 +318,9 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                                     "Expedient": recurso.get("Expedient"),
                                     "tipo_incidencia": "SITE_RULE_DISCARDED",
                                     "motivo": (
-                                        "Madrid: trámite no reclamable por regla de sede (fase negra: "
+                                        "Madrid: trÃ¡mite no reclamable por regla de sede (fase negra: "
                                         f"{self._clean_str(recurso.get('FaseProcedimiento'))}). "
-                                        "Revisar si el trámite está mal formado o si debe tratarse manualmente."
+                                        "Revisar si el trÃ¡mite estÃ¡ mal formado o si debe tratarse manualmente."
                                     ),
                                 }
                             )
@@ -424,9 +449,9 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         )
 
         # Naturaleza del escrito:
-        # - "A": Alegación
-        # - "R": Recurso (incluye Resolución sancionadora, Apremio, Embargo, etc.)
-        # - "I": Identificación del conductor
+        # - "A": AlegaciÃ³n
+        # - "R": Recurso (incluye ResoluciÃ³n sancionadora, Apremio, Embargo, etc.)
+        # - "I": IdentificaciÃ³n del conductor
         #
         # Regla: si hay match en config_motivos, preferimos mapping por key para evitar falsos positivos
         # (p.ej. "propuesta de resolucion" puede contener la palabra "recurso" en el texto).
@@ -478,7 +503,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         if plate_exp:
             return re.sub(r"\s+", "", plate_exp).upper(), "expedientes.matricula"
 
-        # 3. Regex en texto (Publicación o Notas)
+        # 3. Regex en texto (PublicaciÃ³n o Notas)
         # Regex mejorada que permite espacios y guiones opcionales pero respeta word boundaries
         regex = r"\b([0-9]{4}[\s-]*[A-Z]{3}|[A-Z]{1,2}[\s-]*[0-9]{4}[\s-]*[A-Z]{1,2})\b"
 
@@ -487,13 +512,13 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 return None
             m = re.search(regex, text.upper())
             if m:
-                # Limpiar la matrícula encontrada de espacios y guiones
+                # Limpiar la matrÃ­cula encontrada de espacios y guiones
                 clean_plate = m.group(1).replace(" ", "").replace("-", "")
                 return clean_plate, source_name
             return None
 
-        # 3.a Publicación
-        res_pub = _try_extract(MadridAdapter._clean_str(recurso.get("pub_publicacion")), "pubExp.publicación")
+        # 3.a PublicaciÃ³n
+        res_pub = _try_extract(MadridAdapter._clean_str(recurso.get("pub_publicacion")), "pubExp.publicaciÃ³n")
         if res_pub:
             return res_pub
 
@@ -517,11 +542,11 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         if MadridAdapter.RE_NIE.match(d) or re.match(r"^[XYZ]\d{7,8}$", d):
             return "NIE"
 
-        # DNI/NIF persona física o CIF persona jurídica (Madrid usa "NIF" para ambos)
+        # DNI/NIF persona fÃ­sica o CIF persona jurÃ­dica (Madrid usa "NIF" para ambos)
         if MadridAdapter.RE_DNI.match(d) or MadridAdapter.RE_CIF.match(d) or re.match(r"^[KLM]\d{7}[A-Z0-9]$", d):
             return "NIF"
 
-        # Pasaportes: muy variables, pero suele ser alfanumérico.
+        # Pasaportes: muy variables, pero suele ser alfanumÃ©rico.
         if MadridAdapter.RE_PASAPORTE_SIMPLE.match(d) or (re.search(r"[A-Z]", d) and re.search(r"\d", d) and 6 <= len(d) <= 15):
             return "PASAPORTE"
 
@@ -538,7 +563,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
     @staticmethod
     def _extract_street_name_from_raw(raw_address: str) -> str:
         """
-        Intenta recuperar un nombre de vía desde una dirección libre cuando la IA/fallback no lo devuelve.
+        Intenta recuperar un nombre de vÃ­a desde una direcciÃ³n libre cuando la IA/fallback no lo devuelve.
         """
         raw = MadridAdapter._clean_str(raw_address).upper()
         if not raw:
@@ -553,10 +578,10 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         tokens = text.split(" ")
         filtered: list[str] = []
         for tok in tokens:
-            # Omitimos tokens típicos de numeración o puerta.
+            # Omitimos tokens tÃ­picos de numeraciÃ³n o puerta.
             if re.fullmatch(r"\d+[A-Z]?", tok):
                 continue
-            if tok in {"S/N", "SN", "N", "NUM", "NUMERO", "Nº", "PISO", "PTA", "PUERTA", "ESC", "ESCALERA"}:
+            if tok in {"S/N", "SN", "N", "NUM", "NUMERO", "NÂº", "PISO", "PTA", "PUERTA", "ESC", "ESCALERA"}:
                 continue
             filtered.append(tok)
 
@@ -592,7 +617,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         if payload.get("notif_tipo_numeracion") == "NUM" and not str(payload.get("notif_numero") or "").strip():
             missing.append("notif_numero")
         if missing:
-            raise ValueError(f"Payload Madrid inválido, faltan campos: {', '.join(sorted(set(missing)))}")
+            raise ValueError(f"Payload Madrid invÃ¡lido, faltan campos: {', '.join(sorted(set(missing)))}")
 
     async def build_payloads(
         self,
@@ -630,7 +655,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
             nif_empresa = self._clean_str(r.get("cliente_nif_empresa"))
             tipo_cliente = int(r.get("cliente_tipo") or 0)
 
-            # Lógica de selección de NIF
+            # LÃ³gica de selecciÃ³n de NIF
             if tipo_cliente == 2:
                 # Es empresa: Prioridad 1: nifempresa, Prioridad 2: rs.cif
                 nif = nif_empresa or cif_recurso
@@ -642,7 +667,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                     )
                     continue
             else:
-                # Es física: Usar cliente_nif
+                # Es fÃ­sica: Usar cliente_nif
                 nif = nif_individual
 
             if not nif:
@@ -680,7 +705,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
             if not notif_nombre_via:
                 notif_nombre_via = self._extract_street_name_from_raw(domicilio_raw)
             if not notif_nombre_via and poblacion:
-                # Último fallback para pasar validación mínima.
+                # Ãšltimo fallback para pasar validaciÃ³n mÃ­nima.
                 notif_nombre_via = poblacion.upper()
             notif_numero = (clasif.get("numero") or numero_db).upper()
             notif_escalera = ((clasif.get("escalera") or escalera_db) or "").upper()
@@ -695,18 +720,18 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 "rep_tipo_numeracion": "NUM",
                 "representative_city": "BARCELONA",
                 "representative_province": "BARCELONA",
-                "representative_country": "ESPAÑA",
-                "representative_street": "GENERAL MITRE, DEL",
+                "representative_country": "ESPAÃ‘A",
+                "representative_street": "GENERAL MITRE",
                 "representative_number": "169",
                 "representative_zip": "08022",
                 "representative_email": "info@xvia-serviciosjuridicos.com",
                 "representative_phone": "932531411",
-                "rep_nombre_via": "GENERAL MITRE, DEL",
+                "rep_nombre_via": "GENERAL MITRE",
                 "rep_numero": "169",
                 "rep_cp": "08022",
                 "rep_municipio": "BARCELONA",
                 "rep_provincia": "BARCELONA",
-                "rep_pais": "ESPAÑA",
+                "rep_pais": "ESPAÃ‘A",
                 "rep_email": "info@xvia-serviciosjuridicos.com",
                 "rep_movil": "932531411",
                 "rep_telefono": "932531411",
@@ -732,7 +757,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 "notif_surname1": self._clean_str(r.get("cliente_apellido1")).upper(),
                 "notif_surname2": self._clean_str(r.get("cliente_apellido2")).upper(),
                 "notif_razon_social": self._clean_str(r.get("cliente_razon_social")).upper(),
-                "notif_pais": "ESPAÑA",
+                "notif_pais": "ESPAÃ‘A",
                 "notif_provincia": provincia_notif,
                 "notif_municipio": poblacion.upper(),
                 "notif_tipo_via": notif_tipo_via,
@@ -768,7 +793,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 self._prevalidate_required_fields(payload)
             except ValueError as e:
                 logger.warning(
-                    "[MADRID] Recurso %s descartado por payload inválido: %s",
+                    "[MADRID] Recurso %s descartado por payload invÃ¡lido: %s",
                     r.get("idRecurso"),
                     e,
                 )

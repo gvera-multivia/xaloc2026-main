@@ -7,11 +7,17 @@ from core.base_config import BaseConfig
 
 @dataclass
 class RedsaraSelectors:
-    nuevo_registro_link: str = "dnt-link:has-text('Nuevo registro')"
-    afima_login_button: str = "button.idp-button[onclick*=\"selectedIdP('AFIRMA')\"]"
-    step1_heading: str = "h1:has-text('Datos del solicitante')"
+    nuevo_registro_link: str = "dnt-horizontal-menu-item[idoption='2']"
+    # Cl@ve IdP gateway: robust AFIRMA match across onclick variants.
+    afirma_login_button: str = (
+        "button.idp-button[onclick*='selectedIdP'][onclick*='AFIRMA'], "
+        "button.idp-button[data-idp='AFIRMA']"
+    )
+    # Backward compatibility for previous misspelled attribute name.
+    afima_login_button: str = afirma_login_button
+    step1_heading: str = "app-create-registry-step1"
     step1_next_button: str = "app-create-registry-step1 dnt-button:has-text('Siguiente')"
-    step2_heading: str = "h1:has-text('Datos de solicitud')"
+    step2_heading: str = "app-create-registry-step2"
 
     # Representative section
     represented_street_type_id: str = "represented.streetType"

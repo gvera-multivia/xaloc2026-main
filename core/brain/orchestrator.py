@@ -22,7 +22,7 @@ from core.xvia_auth import create_authenticated_session_in_place
 from core.nt_expediente_fixer import is_nt_pattern, fix_nt_expediente
 from core.client_documentation import check_requires_gesdoc
 from core.address_classifier import classify_addresses_batch_with_ai, classify_address_fallback
-from sites.adapters import MadridAdapter, XalocAdapter, BaseOnlineAdapter, AyuntaPalmaAdapter
+from sites.adapters import MadridAdapter, XalocAdapter, BaseOnlineAdapter, AyuntaPalmaAdapter, RedsaraAdapter
 from sites.adapters.site_adapter import SiteAdapter
 
 load_dotenv()
@@ -84,9 +84,15 @@ FROM Recursos.RecursosExp
 WHERE idRecurso = ?
 """
 
-# Limites por sitio para recursos reclamados/encolados por tick.
-# Vacio => sin limites especificos por sitio.
-SITE_CLAIM_LIMIT_PER_TICK: dict[str, int] = {}
+def _site_claim_limit_from_config(config: dict[str, Any]) -> int | None:
+    raw = (config or {}).get("claim_limit_per_tick")
+    if raw in (None, "", "null"):
+        return None
+    try:
+        value = int(raw)
+    except Exception:
+        return None
+    return value if value > 0 else None
 
 def _parse_enabled_sites(csv_value: str) -> Optional[set[str]]:
     value = (csv_value or "").strip()
@@ -122,6 +128,7 @@ class BrainOrchestrator:
             "xaloc_girona": XalocAdapter(),
             "base_online": BaseOnlineAdapter(),
             "ayunta_palma": AyuntaPalmaAdapter(),
+            "redsara": RedsaraAdapter(),
         }
 
     def _record_incident_once(
@@ -669,7 +676,7 @@ class BrainOrchestrator:
                 self.logger.warning(f"[{site_id}] Sin config activa; saltando.")
                 continue
 
-            site_claim_limit = SITE_CLAIM_LIMIT_PER_TICK.get(site_id)
+            site_claim_limit = _site_claim_limit_from_config(config)
             site_claims_done = 0
 
             fetch_limit = min(remaining_claim_budget, 9999)

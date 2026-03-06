@@ -35,8 +35,13 @@ async def download_document_and_attachments(
                     payload_files_raw.append(Path(item))
 
     id_recurso = payload.get("idRecurso")
+    if id_recurso in (None, ""):
+        id_recurso = payload.get("external_resource_id")
+    if id_recurso in (None, ""):
+        id_recurso = payload.get("resource_id")
     if not id_recurso:
         raise ValueError("Falta 'idRecurso' en el payload para descargar el documento.")
+    payload["idRecurso"] = id_recurso
 
     target_url = DOCUMENT_URL_TEMPLATE.format(idRecurso=id_recurso)
     logger.info("Iniciando descarga autenticada desde: %s", target_url)

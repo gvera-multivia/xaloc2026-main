@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass
@@ -27,6 +28,7 @@ class RedsaraTarget:
 
     interested_phone: str
     interested_email: str
+    interested_is_company: bool = False
     email_alert: bool = True
 
     # Step 2 - Datos de solicitud
@@ -34,3 +36,5 @@ class RedsaraTarget:
     subject: str = "PRUEBA REDSARA"
     exposes: str = "Texto de prueba para el campo expone."
     solicit: str = "Texto de prueba para el campo solicita."
+    archivos: list[str | Path] | None = None
+    payload: dict | None = None

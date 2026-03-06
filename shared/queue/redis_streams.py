@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -19,8 +20,12 @@ class RedisStreamsClient:
         self.logger = logger or logging.getLogger("redis_streams")
 
     async def ensure_group(self, *, stream: str, group: str) -> None:
+        # IMPORTANT:
+        # Default to "0-0" so a newly created consumer-group can consume
+        # already enqueued entries (prevents silent skips when service restarts).
+        start_id = (os.getenv("QUEUE_STREAM_GROUP_START_ID") or "0-0").strip() or "0-0"
         try:
-            await self.redis.xgroup_create(name=stream, groupname=group, id="$", mkstream=True)
+            await self.redis.xgroup_create(name=stream, groupname=group, id=start_id, mkstream=True)
         except Exception as exc:
             text = str(exc).upper()
             if "BUSYGROUP" in text:

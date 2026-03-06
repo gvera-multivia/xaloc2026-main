@@ -167,6 +167,12 @@ class RedisStreamsQueueGateway(QueueGateway):
             payload["job_id"] = job_id
 
             resource_id = _to_int_like(fields.get("resource_id"))
+            if resource_id is None:
+                resource_id = _to_int_like(payload.get("idRecurso"))
+            if resource_id is None:
+                resource_id = _to_int_like(payload.get("external_resource_id"))
+            if resource_id is not None and payload.get("idRecurso") in (None, ""):
+                payload["idRecurso"] = resource_id
 
             attempt = int(str(fields.get("attempt") or "0").strip() or "0")
             max_attempts = int(str(fields.get("max_attempts") or self.max_attempts_default).strip() or str(self.max_attempts_default))

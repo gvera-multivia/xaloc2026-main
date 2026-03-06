@@ -131,6 +131,8 @@ export const usersApi = {
 
 export const configApi = {
     list: () => api.get<{ items: any[], total: number }>('/config'),
+    update: (siteId: string, updates: Record<string, any>) =>
+        api.put<any>(`/config/${encodeURIComponent(siteId)}`, updates),
     setSiteActive: (siteId: string, active: boolean) =>
         api.post<any>(`/config/${encodeURIComponent(siteId)}/active`, { active }),
 };

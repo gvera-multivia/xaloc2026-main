@@ -19,6 +19,7 @@ from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 from core.client_documentation import client_identity_from_payload, get_ruta_cliente_documentacion
 from core.client_paths import resolve_client_docs_base_path
 from sites.ayunta_palma.config import AyuntaPalmaConfig
+from sites.ayunta_palma.flows.autofirma_monitor import monitor_autofirma_windows
 from sites.ayunta_palma.flows.firma_programatica import firmar_programaticamente
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,84 @@ async def _run_ps_diagnostic(step_name: str, ps_script: str, timeout_s: int = 45
             logger.warning("[AP-DIAG][%s] PowerShell returncode=%s sin stderr.", step_name, proc.returncode)
     except Exception as e:
         logger.warning("[AP-DIAG][%s] Error ejecutando PowerShell: %s", step_name, e)
+
+
+async def _dump_autofirma_windows_runtime_diag() -> None:
+    """
+    Vuelca estado de procesos/ventanas para diagnosticar bloqueos de AutoFirma en Windows.
+    """
+    if not sys.platform.startswith("win"):
+        return
+
+    ps_script = r"""
+$ErrorActionPreference = "SilentlyContinue"
+Write-Output "diag=autofirma_runtime begin=1"
+$targets = Get-Process | Where-Object {
+  $_.ProcessName -match 'AutoFirma|java|javaw'
+}
+if (-not $targets) {
+  Write-Output "diag=autofirma_runtime procs=none"
+} else {
+  foreach ($p in $targets) {
+    $title = [string]$p.MainWindowTitle
+    if ($null -eq $title) { $title = "" }
+    Write-Output ("proc name=" + $p.ProcessName + " pid=" + $p.Id + " title=" + ($title -replace "`r|`n", " ").Trim())
+  }
+}
+try {
+  $wins = Get-Process | Where-Object { $_.MainWindowTitle -match 'AutoFirma|Portafirm|Firma|Certificat|Certificado' }
+  foreach ($w in $wins) {
+    Write-Output ("window pid=" + $w.Id + " name=" + $w.ProcessName + " title=" + ([string]$w.MainWindowTitle -replace "`r|`n", " ").Trim())
+  }
+} catch {}
+Write-Output "diag=autofirma_runtime end=1"
+"""
+    await _run_ps_diagnostic("autofirma_runtime", ps_script, timeout_s=20)
+
+
+async def _dump_browser_signature_diag(page: Page, label: str) -> None:
+    """
+    Snapshot corto del estado del navegador cuando la firma parece bloqueada.
+    """
+    try:
+        diag = await page.evaluate(
+            """() => {
+                const isVisible = (el) => {
+                    if (!el) return false;
+                    const cs = window.getComputedStyle(el);
+                    const r = el.getBoundingClientRect();
+                    return cs.display !== 'none' && cs.visibility !== 'hidden' && r.width > 0 && r.height > 0;
+                };
+                const overlays = {
+                    progress: isVisible(document.querySelector('#divProgressBar')),
+                    modalwait: isVisible(document.querySelector('.modalwait')),
+                    widget_overlay: isVisible(document.querySelector('.ui-widget-overlay')),
+                };
+                const estadoEl =
+                    document.getElementById('ctl00_ctl00_cphM_cph_txtDescripcionEstado')
+                    || document.querySelector("span[id*='txtDescripcionEstado']");
+                const estadoFechaEl =
+                    document.getElementById('ctl00_ctl00_cphM_cph_txtDescripcionEstadoFecha')
+                    || document.querySelector("span[id*='txtDescripcionEstadoFecha']");
+                const body = (document.body?.innerText || '').replace(/\\s+/g, ' ').trim();
+                const iframeUrls = Array.from(document.querySelectorAll('iframe'))
+                    .map((f) => f.getAttribute('src') || '')
+                    .filter(Boolean)
+                    .slice(0, 8);
+                return {
+                    url: location.href,
+                    ready_state: document.readyState || '',
+                    estado: (estadoEl?.textContent || '').trim(),
+                    estado_fecha: (estadoFechaEl?.textContent || '').trim(),
+                    overlays,
+                    iframe_urls: iframeUrls,
+                    text_sample: body.slice(0, 260),
+                };
+            }"""
+        )
+        logger.warning("[AP-DIAG][%s] Browser snapshot: %s", label, diag)
+    except Exception as e:
+        logger.warning("[AP-DIAG][%s] No se pudo tomar browser snapshot: %s", label, e)
 
 
 async def _aceptar_dialogo_xdg_open_linux(timeout_s: int = 95) -> None:
@@ -351,10 +430,15 @@ function Is-EdgePromptText([string]$txt) {
   if ([string]::IsNullOrWhiteSpace($txt)) { return $false }
   $t = $txt.ToLowerInvariant()
   if ($t.Contains("autofirma")) { return $true }
+  if ($t.Contains("xaloc afirma handler")) { return $true }
+  if ($t.Contains("open xaloc afirma")) { return $true }
+  if ($t.Contains("abre xaloc afirma")) { return $true }
+  if ($t.Contains("obre xaloc afirma")) { return $true }
   if ($t.Contains("intentant obrir")) { return $true }
   if ($t.Contains("intentando abrir")) { return $true }
   if ($t.Contains("trying to open")) { return $true }
   if ($t.Contains("wants to open")) { return $true }
+  if ($t.Contains("open this application")) { return $true }
   return $false
 }
 
@@ -406,7 +490,12 @@ for ($i=0; $i -lt 360; $i++) {
     $checks = $targetWindow.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condCheck)
     foreach ($chk in $checks) {
       $chkName = [string]$chk.Current.Name
-      if ($chkName -like "*Permet sempre*" -or $chkName -like "*Permitir siempre*" -or $chkName -like "*Always allow*") {
+      if (
+        $chkName -like "*Permet sempre*"
+        -or $chkName -like "*Permitir siempre*"
+        -or $chkName -like "*Always allow*"
+        -or $chkName -like "*Always open*"
+      ) {
         try {
           $toggle = $chk.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
           if ($chk.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::Off) {
@@ -424,7 +513,15 @@ for ($i=0; $i -lt 360; $i++) {
     $buttons = $targetWindow.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condBtn)
     foreach ($btn in $buttons) {
       $btnName = [string]$btn.Current.Name
-      if ($btnName -eq "Obre" -or $btnName -eq "Abrir" -or $btnName -eq "Open" -or $btnName -like "*Obre*" -or $btnName -like "*Abrir*" -or $btnName -like "*Open*") {
+      if (
+        $btnName -eq "Obre"
+        -or $btnName -eq "Abrir"
+        -or $btnName -eq "Open"
+        -or $btnName -like "*Obre*"
+        -or $btnName -like "*Abrir*"
+        -or $btnName -like "*Open*"
+        -or $btnName -like "*Xaloc Afirma Handler*"
+      ) {
         try {
           $invoke = $btn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
           $invoke.Invoke()
@@ -685,10 +782,25 @@ async def _esperar_exito_firma_o_refrescar(page: Page, config: AyuntaPalmaConfig
             || estado.includes("completat")
             || estado.includes("registrada")
             || estado.includes("registrat");
+        const hasInstanciaRow = !!Array.from(document.querySelectorAll("input.descripcion.documento-pdf"))
+            .find((el) => String(el?.value || "").toLowerCase().includes("instancia"));
+        const isVisible = (el) => {
+            if (!el) return false;
+            const cs = window.getComputedStyle(el);
+            const rect = el.getBoundingClientRect();
+            return cs.display !== "none" && cs.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+        };
+        const loadingOverlay =
+            isVisible(document.querySelector("#divProgressBar"))
+            || isVisible(document.querySelector(".modalwait"))
+            || isVisible(document.querySelector(".ui-widget-overlay"))
+            || t.includes("cargando");
         return {
-            ok: okByBanner || okByEstado,
+            ok: okByBanner || okByEstado || hasInstanciaRow,
             by_banner: okByBanner,
             by_estado: okByEstado,
+            by_instancia_row: hasInstanciaRow,
+            loading: loadingOverlay,
             estado,
             text_sample: t.slice(0, 220),
         };
@@ -698,41 +810,58 @@ async def _esperar_exito_firma_o_refrescar(page: Page, config: AyuntaPalmaConfig
         loop = asyncio.get_event_loop()
         deadline = loop.time() + (timeout_ms / 1000)
         last_diag: dict | None = None
+        loading_seconds = 0
         while loop.time() < deadline:
+            diag: dict | None = None
             try:
                 diag = await page.evaluate(success_diag_js)
                 if isinstance(diag, dict):
                     last_diag = diag
                     if bool(diag.get("ok")):
                         logger.info(
-                            "[AP-DIAG] Exito de firma detectado (%s): by_banner=%s by_estado=%s estado=%s",
+                            "[AP-DIAG] Exito de firma detectado (%s): by_banner=%s by_estado=%s by_instancia=%s estado=%s",
                             attempt_label,
                             bool(diag.get("by_banner")),
                             bool(diag.get("by_estado")),
+                            bool(diag.get("by_instancia_row")),
                             diag.get("estado", ""),
                         )
                         return
-            except Exception:
-                pass
+                    if bool(diag.get("loading")):
+                        loading_seconds += 1
+                    else:
+                        loading_seconds = 0
+                    if loading_seconds >= 40:
+                        await _dump_browser_signature_diag(page, f"{attempt_label}-loading>=40s")
+                        await _dump_autofirma_windows_runtime_diag()
+                        raise PlaywrightTimeoutError(
+                            f"[AP-DIAG] Loading bloqueado ({attempt_label}) >=40s. last_diag={last_diag}"
+                        )
+            except PlaywrightTimeoutError:
+                raise
+            except Exception as e:
+                logger.info("[AP-DIAG] Poll firma (%s) error no bloqueante: %s", attempt_label, e)
             await page.wait_for_timeout(1000)
         raise PlaywrightTimeoutError(f"[AP-DIAG] Timeout exito firma ({attempt_label}). last_diag={last_diag}")
 
     try:
-        logger.info("[AP-DIAG] Esperando evidencia de exito de firma (intento 1, 120s)...")
-        await _wait_success_with_diag(timeout_ms=120000, attempt_label="intento-1")
+        logger.info("[AP-DIAG] Esperando evidencia de exito de firma (intento 1, 90s)...")
+        await _wait_success_with_diag(timeout_ms=90000, attempt_label="intento-1")
         return
     except Exception as e:
-        logger.warning("[AP-DIAG] No se detecto exito en 120s. Probable pantalla gris; refrescando. detalle=%s", e)
+        await _dump_browser_signature_diag(page, "intento-1-timeout-or-stuck")
+        await _dump_autofirma_windows_runtime_diag()
+        logger.warning("[AP-DIAG] No se detecto exito en 90s. Probable pantalla gris; refrescando. detalle=%s", e)
 
     try:
         await page.reload(wait_until="domcontentloaded", timeout=60000)
         await page.wait_for_timeout(config.delay_ms)
         await _esperar_velo_oculto(page, config)
-        logger.info("[AP-DIAG] Reload completado. Reintentando espera de exito (intento 2, 120s)...")
+        logger.info("[AP-DIAG] Reload completado. Reintentando espera de exito (intento 2, 90s)...")
     except Exception:
         logger.warning("[AP-DIAG] Error durante reload previo a reintento de exito.")
 
-    await _wait_success_with_diag(timeout_ms=120000, attempt_label="intento-2")
+    await _wait_success_with_diag(timeout_ms=90000, attempt_label="intento-2")
 
 
 async def _descargar_justificante_instancia(page: Page, payload: dict | None) -> Path:
@@ -1015,18 +1144,21 @@ async def _click_signar_tots_documents(page: Page, config: AyuntaPalmaConfig) ->
                 const w = iframe.contentWindow;
                 const d = iframe.contentDocument || (w && w.document);
                 if (!d) return false;
-
-                const btn =
-                    d.querySelector("button.btn.btnFirmar")
-                    || d.querySelector("button.btnFirmar")
-                    || Array.from(d.querySelectorAll("button")).find((b) => {
-                        const t = (b.textContent || "").toLowerCase().replace(/\\s+/g, " ").trim();
-                        return t.includes("signar tots els documents")
-                            || t.includes("firmar todos los documentos")
-                            || t.includes("firmar tots els documents");
-                    });
+                const norm = (s) => String(s || "").toLowerCase().replace(/\\s+/g, " ").trim();
+                const all = Array.from(d.querySelectorAll("button, input[type='submit'], input[type='button']"));
+                const btn = all.find((el) => {
+                    const txt = norm(el.textContent || el.value || el.getAttribute("title") || "");
+                    const idn = norm(el.id || "");
+                    const cls = norm(el.className || "");
+                    if (txt.includes("signar tots els documents")) return true;
+                    if (txt.includes("firmar todos los documentos")) return true;
+                    if (txt.includes("firmar tots els documents")) return true;
+                    if (idn.includes("btnfirmar")) return true;
+                    if (cls.includes("btnfirmar")) return true;
+                    return false;
+                });
                 if (!btn) return false;
-                btn.click();
+                try { btn.click(); } catch (e) {}
                 return true;
             }"""
         )
@@ -1039,7 +1171,9 @@ async def _click_signar_tots_documents(page: Page, config: AyuntaPalmaConfig) ->
         # Fallback: localizar en frames detectados por Playwright.
         for fr in page.frames:
             try:
-                locator = fr.locator("button.btn.btnFirmar, button.btnFirmar").first
+                locator = fr.locator(
+                    "button.btn.btnFirmar, button.btnFirmar, input[type='submit'][id*='btnFirmar'], input[type='submit'][name*='btnFirmar'], input[type='submit'][value*='Signar'], input[type='submit'][value*='Firmar']"
+                ).first
                 if await locator.count() > 0 and await locator.is_visible():
                     await locator.click(force=True, timeout=2000)
                     logger.info("[AP-DIAG] Click fallback Playwright en boton btnFirmar (frame=%s).", fr.url)
@@ -1196,6 +1330,7 @@ async def subir_documentos(
         logger.info("[AP-DIAG] Plataforma Windows: usando watchers UIAutomation.")
         logger.info("[AP-DIAG] Lanzando watcher edge_open_dialog en background.")
         edge_task = asyncio.create_task(_aceptar_dialogo_edge_abrir_autofirma())
+        auto_monitor_task = asyncio.create_task(monitor_autofirma_windows(timeout_s=120))
         await _launch_autofirma_cert_acceptor()
         logger.info("[AP-DIAG] Arrancando watcher de certificado Windows en paralelo.")
         cert_task = asyncio.create_task(_aceptar_certificado_windows())
@@ -1209,6 +1344,18 @@ async def subir_documentos(
             await cert_task
         except Exception as e:
             logger.warning("[AP-DIAG] Watcher certificado devolvio error: %s", e)
+        try:
+            monitor_res = await auto_monitor_task
+            logger.info(
+                "[AP-DIAG] AutoFirma monitor: edge_clicked=%s cert_clicked=%s autofirma_seen=%s autofirma_clicks=%s timed_out=%s",
+                monitor_res.edge_clicked,
+                monitor_res.cert_clicked,
+                monitor_res.autofirma_windows_seen,
+                monitor_res.autofirma_clicks,
+                monitor_res.timed_out,
+            )
+        except Exception as e:
+            logger.warning("[AP-DIAG] AutoFirma monitor devolvio error: %s", e)
         if not edge_task.done():
             logger.info("[AP-DIAG] edge_open_dialog no ha terminado; esperamos 3s finales.")
             try:

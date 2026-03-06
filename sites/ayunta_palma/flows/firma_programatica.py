@@ -18,9 +18,12 @@ import re
 import subprocess
 import tempfile
 import urllib.parse
+from functools import partial
 from pathlib import Path
 
 from playwright.async_api import BrowserContext, Frame, Page
+from core.autofirma_signing_bridge import parse_afirma_url, sign_with_pfx
+from core.autofirma_shared import prepare_autofirma_context
 
 # Usar el logger del sitio para garantizar salida en logs del runner.
 logger = logging.getLogger("xaloc_automation.ayunta_palma")
@@ -30,6 +33,7 @@ logger = logging.getLogger("xaloc_automation.ayunta_palma")
 # ─────────────────────────────────────────────────────────────────────────────
 
 _SIGNING_SUPPORTED = True  # will be False if autofirma binary not found
+_AFIRMA_URI_RE = re.compile(r"((?:afirma|xalocafirma)://[^'\"\\s]+)", re.IGNORECASE)
 
 try:
     # autofirma v1.9 does not have a 'version' subcommand; checking binary exists via -help
@@ -57,7 +61,7 @@ _INTERCEPT_SCRIPT = """() => {
 
     const captureAfirma = (url, source) => {
         if (typeof url !== 'string') return false;
-        if (!url.startsWith('afirma://')) return false;
+        if (!/^(afirma|xalocafirma):\\/\\//i.test(url)) return false;
         window.__afirma_url = url;
         window.__afirma_source = source || 'unknown';
         console.debug('[xaloc] afirma:// capturado via', window.__afirma_source, url.substring(0, 120));
@@ -137,8 +141,8 @@ _INTERCEPT_SCRIPT = """() => {
     try {
         const _origSetTimeout = window.setTimeout.bind(window);
         window.setTimeout = function(fn, delay, ...rest) {
-            if (typeof fn === 'string' && fn.includes('afirma://')) {
-                const m = fn.match(/afirma:\\/\\/[^'\"\\s)]+/);
+            if (typeof fn === 'string' && /(afirma|xalocafirma):\\/\\//i.test(fn)) {
+                const m = fn.match(/(?:afirma|xalocafirma):\\/\\/[^'\"\\s)]+/i);
                 if (m && m[0]) {
                     captureAfirma(m[0], 'setTimeout-string');
                     return 0;
@@ -160,64 +164,8 @@ async def preparar_captura_afirma_context(context: BrowserContext) -> None:
     - instala init_script global para todos los documentos/frames futuros
     - registra listener de consola para detectar "Launched external handler for 'afirma://...'"
     """
-    try:
-        if getattr(context, "_xaloc_afirma_capture_prepared", False):
-            return
-    except Exception:
-        pass
-
-    try:
-        await context.add_init_script(_INTERCEPT_SCRIPT)
-        logger.info("[AP-FIRMA] init_script global preparado al inicio del contexto.")
-    except Exception as e:
-        logger.warning("[AP-FIRMA] No se pudo preparar init_script global al inicio: %s", e)
-
-    def _extract_afirma_url(text: str) -> str | None:
-        if not text:
-            return None
-        m = re.search(r"(afirma://[^'\"\\s]+)", text)
-        if m:
-            return m.group(1)
-        return None
-
-    def _attach_listener(p: Page) -> None:
-        try:
-            if getattr(p, "_xaloc_afirma_console_bootstrap", False):
-                return
-            setattr(p, "_xaloc_afirma_console_bootstrap", True)
-        except Exception:
-            pass
-
-        def _on_console(msg) -> None:
-            try:
-                txt = getattr(msg, "text", "")
-                if callable(txt):
-                    txt = txt()
-                txt = str(txt or "")
-                if _extract_afirma_url(txt):
-                    logger.info(
-                        "[AP-FIRMA][DIAG] Consola detecta afirma:// durante bootstrap (page=%s)",
-                        (p.url or "")[:120],
-                    )
-            except Exception:
-                pass
-
-        try:
-            p.on("console", _on_console)
-        except Exception:
-            pass
-
-    try:
-        for p in context.pages:
-            _attach_listener(p)
-        context.on("page", _attach_listener)
-    except Exception as e:
-        logger.warning("[AP-FIRMA] No se pudo preparar listeners bootstrap de consola: %s", e)
-
-    try:
-        setattr(context, "_xaloc_afirma_capture_prepared", True)
-    except Exception:
-        pass
+    # Wrapper de compatibilidad: la preparación común vive en core/autofirma_shared.py.
+    await prepare_autofirma_context(context, logger=logger)
 
 
 async def interceptar_y_capturar_url_afirma(
@@ -1111,7 +1059,7 @@ async def firmar_programaticamente(
     def _extract_afirma_url(text: str) -> str | None:
         if not text:
             return None
-        m = re.search(r"(afirma://[^'\"\\s]+)", text)
+        m = _AFIRMA_URI_RE.search(text)
         if m:
             return m.group(1)
         return None
@@ -1368,7 +1316,7 @@ async def firmar_programaticamente(
             try:
                 if handler_latest_file.exists():
                     handler_uri = handler_latest_file.read_text(encoding="utf-8", errors="ignore").strip()
-                    if handler_uri.startswith("afirma://"):
+                    if _AFIRMA_URI_RE.match(handler_uri):
                         url_afirma = handler_uri
                         source_afirma = "xdg-handler-file"
                         logger.info(
@@ -1390,14 +1338,16 @@ async def firmar_programaticamente(
                             return {
                                 afirma_url: window.__afirma_url,
                                 afirma_source: window.__afirma_source || null,
-                                has_anchor: !!document.querySelector('a[href^="afirma://"]'),
+                                has_anchor: !!Array.from(document.querySelectorAll('a[href]'))
+                                    .find(x => /^(afirma|xalocafirma):\\/\\//i.test(String(x.getAttribute('href') || x.href || ''))),
                                 has_hidden: !!Array.from(document.querySelectorAll('input[type="hidden"]'))
-                                    .find(x => typeof x.value === 'string' && x.value.startsWith('afirma://')),
+                                    .find(x => typeof x.value === 'string' && /^(afirma|xalocafirma):\\/\\//i.test(x.value)),
                             };
                         }
-                        const a = document.querySelector('a[href^="afirma://"]');
-                        if (a && a.href) {
-                            window.__afirma_url = a.href;
+                        const a = Array.from(document.querySelectorAll('a[href]'))
+                            .find(x => /^(afirma|xalocafirma):\\/\\//i.test(String(x.getAttribute('href') || x.href || '')));
+                        if (a) {
+                            window.__afirma_url = String(a.getAttribute('href') || a.href || '');
                             window.__afirma_source = 'dom-anchor-scan';
                             return {
                                 afirma_url: window.__afirma_url,
@@ -1408,7 +1358,7 @@ async def firmar_programaticamente(
                         }
                         const hidden = Array.from(document.querySelectorAll('input[type="hidden"]'))
                             .map(x => x.value)
-                            .find(v => typeof v === 'string' && v.startsWith('afirma://'));
+                            .find(v => typeof v === 'string' && /^(afirma|xalocafirma):\\/\\//i.test(v));
                         if (hidden) {
                             window.__afirma_url = hidden;
                             window.__afirma_source = 'dom-hidden-scan';
@@ -1461,9 +1411,10 @@ async def firmar_programaticamente(
                         """() => ({
                             afirma_source: window.__afirma_source || null,
                             afirma_url_prefix: (window.__afirma_url && String(window.__afirma_url).slice(0, 80)) || null,
-                            has_anchor: !!document.querySelector('a[href^="afirma://"]'),
+                            has_anchor: !!Array.from(document.querySelectorAll('a[href]'))
+                                .find(x => /^(afirma|xalocafirma):\\/\\//i.test(String(x.getAttribute('href') || x.href || ''))),
                             has_hidden: !!Array.from(document.querySelectorAll('input[type="hidden"]'))
-                                .find(x => typeof x.value === 'string' && x.value.startsWith('afirma://')),
+                                .find(x => typeof x.value === 'string' && /^(afirma|xalocafirma):\\/\\//i.test(x.value)),
                             ready: document.readyState || null,
                         })"""
                     )
@@ -1492,16 +1443,14 @@ async def firmar_programaticamente(
         )
 
     # Step 4: Parse
-    params = _parsear_afirma_url(url_afirma)
+    params = parse_afirma_url(url_afirma)
 
     # Step 5: Sign in a thread pool to avoid blocking the event loop
     loop = asyncio.get_event_loop()
+    signer_call = partial(sign_with_pfx, params, pfx_path, pfx_password, logger=logger)
     firma_b64 = await loop.run_in_executor(
         None,
-        firmar_con_pfx,
-        params,
-        pfx_path,
-        pfx_password,
+        signer_call,
     )
 
     # Step 6: Inject result on the real signing frame (avoid main-frame false positives).

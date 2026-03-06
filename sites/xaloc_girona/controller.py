@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from sites.xaloc_girona.config import XalocConfig
-from sites.xaloc_girona.data_models import DatosMulta, DatosMandatario
+from sites.xaloc_girona.data_models import DatosMandatario, DatosMulta
 
 
 class XalocGironaController:
@@ -17,19 +17,30 @@ class XalocGironaController:
 
     def map_data(self, data: dict) -> dict:
         """
-        Mapea claves genéricas de DB a argumentos de create_target.
+        Mapea claves genericas de DB a argumentos de create_target.
         """
+
+        def _pick(*keys: str):
+            for key in keys:
+                value = data.get(key)
+                if value is not None and str(value).strip():
+                    return value
+            return None
+
         return {
-            "email": data.get("email") or data.get("user_email"),
-            "num_denuncia": data.get("num_denuncia") or data.get("denuncia_num"),
-            "matricula": data.get("matricula") or data.get("plate_number"),
-            "num_expediente": data.get("num_expediente") or data.get("expediente_num"),
-            "motivos": data.get("motivos"),
-            # En un caso real, los archivos podrían venir de otra forma o descargarse
+            "email": _pick("email", "user_email", "cliente_email"),
+            "num_denuncia": _pick("num_denuncia", "denuncia_num", "numero_denuncia", "nExp"),
+            "matricula": _pick("matricula", "plate_number", "rs_matricula"),
+            "num_expediente": _pick(
+                "num_expediente",
+                "expediente_num",
+                "expediente",
+                "Expedient",
+                "numero_expediente",
+            ),
+            "motivos": _pick("motivos", "body", "texto_recurso"),
             "archivos_adjuntos": data.get("archivos_adjuntos") or data.get("archivos"),
-            # NUEVO: Datos del mandatario
             "mandatario": data.get("mandatario"),
-            # NUEVO: Fase del procedimiento (para organizar justificantes)
             "fase_procedimiento": data.get("fase_procedimiento"),
         }
 
@@ -59,7 +70,6 @@ class XalocGironaController:
         if not paths:
             raise ValueError("xaloc_girona: falta 'archivos_adjuntos' (al menos 1 archivo).")
 
-        # Crear objeto DatosMandatario si existe
         datos_mandatario = None
         if mandatario:
             datos_mandatario = DatosMandatario(**mandatario)
@@ -81,4 +91,3 @@ def get_controller() -> XalocGironaController:
 
 
 __all__ = ["XalocGironaController", "get_controller"]
-
