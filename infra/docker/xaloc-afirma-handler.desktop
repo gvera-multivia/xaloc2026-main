@@ -3,5 +3,5 @@ Type=Application
 Name=Xaloc Afirma Handler
 Exec=/usr/local/bin/afirma-handler.sh %u
 Terminal=false
-MimeType=x-scheme-handler/afirma;
+MimeType=x-scheme-handler/afirma;x-scheme-handler/xalocafirma;
 NoDisplay=true

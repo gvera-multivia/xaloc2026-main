@@ -35,8 +35,13 @@ async def download_document_and_attachments(
                     payload_files_raw.append(Path(item))
 
     id_recurso = payload.get("idRecurso")
+    if id_recurso in (None, ""):
+        id_recurso = payload.get("external_resource_id")
+    if id_recurso in (None, ""):
+        id_recurso = payload.get("resource_id")
     if not id_recurso:
         raise ValueError("Falta 'idRecurso' en el payload para descargar el documento.")
+    payload["idRecurso"] = id_recurso
 
     target_url = DOCUMENT_URL_TEMPLATE.format(idRecurso=id_recurso)
     logger.info("Iniciando descarga autenticada desde: %s", target_url)
@@ -137,7 +142,11 @@ async def download_document_and_attachments(
         if k in seen_keys:
             continue
         if not p.exists():
-            logger.warning("Archivo del payload no encontrado, se omite: %s", p)
+            p_norm = _key(p)
+            if "tmp" in p_norm and "ayunta_palma" in p_norm:
+                logger.info("Archivo temporal antiguo de payload, se omite: %s", p)
+            else:
+                logger.warning("Archivo del payload no encontrado, se omite: %s", p)
             continue
         seen_keys.add(k)
         merged.append(p)

@@ -182,3 +182,93 @@ Que deberia hacer el operador:
 5. Si falla:
    - revisar `403` en `/ws/dashboard`
    - revisar logs de `did-fail-load` de notificacion
+
+## 7. Publicacion de nueva version Electron
+
+### 7.1 Publicacion tecnica real (instalador + latest.yml)
+Objetivo:
+- generar una version actualizable por `electron-updater` (no solo aviso visual).
+
+Pasos:
+1. subir version en `morrigan-electron/package.json` (ej: `0.1.8`).
+2. ejecutar en `morrigan-electron`:
+   - `npm.cmd run dist:nsis`
+3. verificar artefactos en `morrigan-electron/release`:
+   - `latest.yml`
+   - `Morrigan Setup X.Y.Z.exe`
+   - `Morrigan Setup X.Y.Z.exe.blockmap`
+
+Resultado:
+- `/updates/latest.yml` apunta a la nueva version.
+- Electron clientes pueden detectar/descargar update diferencial.
+
+### 7.2 Que hace "Publicar nueva version" en frontend (pagina Descargas)
+El boton de frontend en `dashboard-frontend/app/descargas/page.tsx`:
+- NO compila binarios.
+- NO genera `latest.yml`.
+- NO sube instaladores.
+- SI envia un broadcast `admin.alert` para avisar a clientes conectados.
+
+Es decir:
+- "Publicar nueva version" (frontend) = anuncio operativo a usuarios.
+- "dist:nsis" = publicacion tecnica real para auto-update.
+
+### 7.3 Pipeline integrado (boton desde Electron admin)
+En la vista admin de Electron (DashboardView), el flujo "Publicar Version":
+- llama al endpoint `POST /api/admin/electron/release/build`
+- ejecuta en servidor `npm run dist:nsis`
+- deja artefactos en `release` y por tanto en `/updates`
+- se puede seguir por `GET /api/admin/electron/release/status` (logs + estado).
+
+## 8. Automatizacion CI/CD (nuevo)
+
+### 8.1 Workflow incluido
+Se ha anadido:
+- `.github/workflows/morrigan-electron-release.yml`
+
+Que hace:
+1. Instala dependencias de `morrigan-electron`.
+2. Opcionalmente aplica version (`workflow_dispatch` -> `version`).
+3. Ejecuta `npm run dist:nsis`.
+4. Valida artefactos de update:
+   - `release/latest.yml`
+   - `release/*.exe`
+   - `release/*.blockmap`
+5. Sube artefactos a GitHub Actions.
+6. Publica GitHub Release automaticamente (tag o dispatch).
+
+Triggers:
+- Manual (`workflow_dispatch`) para releases operativas.
+- Por tag `morrigan-v*` (ej: `morrigan-v0.1.9`).
+
+### 8.2 Comando operativo recomendado (manual desde Git)
+Ejemplo de tag para release:
+```bash
+git tag morrigan-v0.1.9
+git push origin morrigan-v0.1.9
+```
+
+Con eso se dispara el pipeline y deja los binarios listos como release en GitHub.
+
+### 8.3 Como conectarlo con tu `/updates` real
+Tu auto-update en produccion lee de:
+- `/updates/latest.yml` (servido por `api-gateway` desde `morrigan-electron/release`)
+
+Por tanto, tienes 2 estrategias:
+
+1. Runner self-hosted en el mismo servidor de despliegue (recomendado).
+   - El workflow compila directamente en ese host y los artefactos quedan ya en `morrigan-electron/release`.
+   - No hay paso manual de copia.
+
+2. Runner GitHub hospedado + despliegue posterior.
+   - Descargas artefactos del workflow y los copias al `release` del servidor.
+   - Luego `restart` del stack para refrescar estado si aplica.
+
+### 8.4 Que NO hace este CI por si solo
+- No envia broadcast a usuarios.
+- No reinicia contenedores automaticamente.
+- No reemplaza el boton "Publicar nueva version" del frontend (ese boton solo avisa).
+
+En resumen:
+- CI/CD = genera y publica binarios versionados.
+- Frontend "Publicar" = comunicacion operativa a usuarios.

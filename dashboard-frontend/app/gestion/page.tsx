@@ -30,7 +30,7 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-const KNOWN_SITES = ["madrid", "xaloc_girona", "base_online", "ayunta_palma"];
+const KNOWN_SITES = ["madrid", "xaloc_girona", "base_online", "ayunta_palma", "redsara"];
 
 /**
  * MORRIGAN ADMIN PAGE
@@ -57,6 +57,7 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [claimLimitDraft, setClaimLimitDraft] = useState<Record<string, string>>({});
 
   // User form state
   const [showUserForm, setShowUserForm] = useState(false);
@@ -100,6 +101,15 @@ export default function AdminPage() {
     const id = setInterval(refresh, 10000);
     return () => clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    const next: Record<string, string> = {};
+    configs.forEach((cfg) => {
+      const raw = (cfg as any).claim_limit_per_tick;
+      next[cfg.site_id] = raw === null || raw === undefined ? "" : String(raw);
+    });
+    setClaimLimitDraft(next);
+  }, [configs]);
 
   const sites = useMemo(() => {
     const s = new Set(KNOWN_SITES);
@@ -175,6 +185,25 @@ export default function AdminPage() {
     } catch {
       sileo.error({ title: `Error al ${active ? "activar" : "desactivar"} ${siteId}` });
       setError(`Error al ${active ? "activar" : "desactivar"} ${siteId}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleSaveClaimLimit = async (siteId: string) => {
+    setBusy(`claim-limit-${siteId}`);
+    try {
+      const raw = (claimLimitDraft[siteId] ?? "").trim();
+      const value = raw === "" ? null : Number(raw);
+      if (value !== null && (!Number.isInteger(value) || value <= 0)) {
+        throw new Error("El límite debe ser entero positivo o vacío.");
+      }
+      await configApi.update(siteId, { claim_limit_per_tick: value });
+      sileo.success({ title: `${siteId}: límite de claim actualizado` });
+      await refresh();
+    } catch (err: any) {
+      sileo.error({ title: "Error actualizando límite", description: err?.message || "Fallo inesperado" });
+      setError(`Error actualizando límite de claim para ${siteId}`);
     } finally {
       setBusy(null);
     }
@@ -432,8 +461,8 @@ export default function AdminPage() {
         </div>
 
         <div className="morr-card rounded overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
+          <div className="overflow-x-hidden">
+            <table className="w-full table-fixed text-left border-collapse">
               <thead>
                 <tr className="bg-[rgba(17,19,26,0.55)] border-b border-border/70">
                   <th className="px-6 py-4 text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground/80">
@@ -453,6 +482,9 @@ export default function AdminPage() {
                   </th>
                   <th className="px-6 py-4 text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground/80">
                     Organismo
+                  </th>
+                  <th className="px-6 py-4 text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground/80">
+                    Límite Claim/Tick
                   </th>
                   {canManagePauses && (
                     <th className="px-6 py-4 text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground/80">
@@ -548,6 +580,37 @@ export default function AdminPage() {
                         </span>
                       </td>
 
+                      <td className="px-6 py-4">
+                        {isAdmin ? (
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              min={1}
+                              value={claimLimitDraft[site] ?? ""}
+                              onChange={(e) => setClaimLimitDraft((prev) => ({ ...prev, [site]: e.target.value }))}
+                              placeholder="sin límite"
+                              className="w-28 bg-[rgba(17,19,26,0.55)] border border-border/70 rounded-xl px-3 py-1.5 text-xs text-foreground/90 focus:border-[rgba(108,77,255,0.3)] outline-none transition"
+                            />
+                            <button
+                              onClick={() => handleSaveClaimLimit(site)}
+                              disabled={!!busy}
+                              className={cn(
+                                "morr-focus px-3 py-1.5 rounded-xl",
+                                "text-[10px] font-black uppercase tracking-[0.16em]",
+                                "bg-[rgba(108,77,255,0.10)] text-foreground/95 border border-[rgba(108,77,255,0.28)] hover:bg-[rgba(108,77,255,0.16)]",
+                                "transition active:scale-[0.99] disabled:opacity-50"
+                              )}
+                            >
+                              Guardar
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground/80 font-mono">
+                            {(configs.find((c) => c.site_id === site)?.claim_limit_per_tick ?? "sin límite") as any}
+                          </span>
+                        )}
+                      </td>
+
                       {canManagePauses && (
                         <td className="px-6 py-4">
                           <span className="text-xs text-muted-foreground/80 italic">
@@ -556,8 +619,8 @@ export default function AdminPage() {
                         </td>
                       )}
 
-                      <td className="px-6 py-4 text-right">
-                        <div className="flex items-center justify-end gap-2">
+                      <td className="px-4 py-4 text-right">
+                        <div className="flex flex-wrap items-center justify-end gap-2">
                           {canManagePauses ? (
                             <>
                               {isPaused ? (

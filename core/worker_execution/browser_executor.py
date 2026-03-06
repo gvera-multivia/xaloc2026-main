@@ -40,7 +40,6 @@ async def execute_browser_flow(
         headless = 1 if os.getenv("XALOC_HEADLESS") == "1" else 0
         config = call_with_supported_kwargs(controller.create_config, headless=headless, protocol=protocol)
         config.navegador.perfil_path = Path("profiles/worker").absolute()
-
         mapped_data = controller.map_data(payload)
         mapped_data.update({"protocol": protocol, "headless": headless})
 
@@ -55,6 +54,8 @@ async def execute_browser_flow(
             mapped_data[key] = archivos_para_subir
         elif site_id == "ayunta_palma":
             mapped_data["archivos"] = archivos_para_subir
+        elif site_id == "redsara":
+            mapped_data["archivos"] = archivos_para_subir
 
         datos = call_with_supported_kwargs(controller.create_target, **mapped_data)
         keep_browser_open_disabled = (os.getenv("XALOC_DISABLE_KEEP_BROWSER_OPEN") or "0").strip().lower() in {
@@ -63,9 +64,14 @@ async def execute_browser_flow(
             "yes",
             "on",
         }
-        if (not keep_browser_open_disabled) and site_id in ["madrid", "base_online", "ayunta_palma"]:
+        if site_id == "ayunta_palma":
+            # Palma puede quedar en estado intermedio si se reutiliza ventana/contexto.
+            # Forzamos cierre completo al terminar cada recurso.
+            os.environ["XALOC_KEEP_BROWSER_OPEN"] = "0"
+            os.environ["XALOC_KEEP_TAB_OPEN"] = "0"
+        elif (not keep_browser_open_disabled) and site_id in ["madrid", "base_online", "redsara"]:
             os.environ["XALOC_KEEP_BROWSER_OPEN"] = "1"
-            os.environ["XALOC_KEEP_TAB_OPEN"] = "0" if site_id == "ayunta_palma" else "1"
+            os.environ["XALOC_KEEP_TAB_OPEN"] = "1"
 
         async with AutomationCls(config) as bot:
             if screencast_enabled:
@@ -136,6 +142,9 @@ async def execute_browser_flow(
                 )
             else:
                 payload_updates = payload if payload != original_payload else {}
+                flow_metadata = getattr(bot, "last_flow_metadata", None)
+                if isinstance(flow_metadata, dict) and flow_metadata:
+                    payload_updates = {**payload_updates, **flow_metadata}
                 return ProcessOutcome(
                     success=True,
                     screenshot=str(screenshot_path) if screenshot_path else None,

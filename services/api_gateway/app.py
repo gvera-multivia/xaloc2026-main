@@ -5,6 +5,7 @@ import io
 import json
 import logging
 import os
+import re
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -61,9 +62,27 @@ MORRIGAN_CONFIG_REFRESH_SEC = max(
     30, int((os.getenv("MORRIGAN_CONFIG_REFRESH_SEC") or "120").strip() or "120")
 )
 ELECTRON_AUTH_DEBUG = (os.getenv("ELECTRON_AUTH_DEBUG") or "1").strip().lower() in {"1", "true", "yes", "on"}
+MORRIGAN_PROJECT_DIR = Path((os.getenv("MORRIGAN_PROJECT_DIR") or "morrigan-electron").strip()).resolve()
+MORRIGAN_RELEASE_LOG_LIMIT = max(
+    200, int((os.getenv("MORRIGAN_RELEASE_LOG_LIMIT") or "1200").strip() or "1200")
+)
 
 _frontend_process: asyncio.subprocess.Process | None = None
 _proxy_session: aiohttp.ClientSession | None = None
+_release_lock = asyncio.Lock()
+_release_task: asyncio.Task | None = None
+_release_state: dict[str, Any] = {
+    "running": False,
+    "started_at": None,
+    "finished_at": None,
+    "requested_by": None,
+    "version": None,
+    "step": "idle",
+    "ok": None,
+    "error": None,
+    "logs": [],
+    "artifacts": None,
+}
 
 _HOP_BY_HOP_HEADERS = {
     "connection",
@@ -299,6 +318,185 @@ async def _require_authenticated_user(request: Request) -> dict[str, Any]:
     if ELECTRON_AUTH_DEBUG:
         logger.warning("[electron-auth] authentication failed after all strategies")
     raise HTTPException(status_code=401, detail="Authentication required")
+
+
+async def _require_admin_user(request: Request) -> dict[str, Any]:
+    user = await _require_authenticated_user(request)
+    role = str(user.get("role") or "").strip().lower()
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Admin role required")
+    return user
+
+
+def _release_log(line: str) -> None:
+    text = str(line or "").rstrip()
+    if not text:
+        return
+    logs = _release_state.setdefault("logs", [])
+    logs.append(text)
+    if len(logs) > MORRIGAN_RELEASE_LOG_LIMIT:
+        del logs[: len(logs) - MORRIGAN_RELEASE_LOG_LIMIT]
+
+
+def _validate_version(value: str) -> str:
+    version = str(value or "").strip().lstrip("vV")
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        raise HTTPException(status_code=400, detail="Version invalida. Usa formato X.Y.Z")
+    return version
+
+
+def _update_morrigan_version(new_version: str) -> dict[str, Any]:
+    package_json_path = MORRIGAN_PROJECT_DIR / "package.json"
+    package_lock_path = MORRIGAN_PROJECT_DIR / "package-lock.json"
+
+    if not package_json_path.exists():
+        raise RuntimeError(f"No existe {package_json_path}")
+
+    package_json = json.loads(package_json_path.read_text(encoding="utf-8"))
+    previous_version = str(package_json.get("version") or "").strip()
+    if previous_version == new_version:
+        return {"changed": False, "from": previous_version, "to": new_version}
+
+    package_json["version"] = new_version
+    package_json_path.write_text(json.dumps(package_json, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    if package_lock_path.exists():
+        package_lock = json.loads(package_lock_path.read_text(encoding="utf-8"))
+        package_lock["version"] = new_version
+        packages_root = package_lock.get("packages")
+        if isinstance(packages_root, dict) and isinstance(packages_root.get(""), dict):
+            packages_root[""]["version"] = new_version
+        package_lock_path.write_text(json.dumps(package_lock, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    return {"changed": True, "from": previous_version, "to": new_version}
+
+
+async def _run_release_command(cmd: list[str], *, cwd: Path) -> int:
+    proc = await start_async_process(
+        cmd,
+        cwd=str(cwd),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    assert proc.stdout is not None
+    while True:
+        line = await proc.stdout.readline()
+        if not line:
+            break
+        _release_log(line.decode("utf-8", errors="replace"))
+    return int(await proc.wait() or 0)
+
+
+def _resolve_release_artifacts() -> dict[str, Any]:
+    if not MORRIGAN_RELEASE_DIR.exists():
+        raise RuntimeError(f"No existe directorio release: {MORRIGAN_RELEASE_DIR}")
+
+    latest_yml = MORRIGAN_RELEASE_DIR / "latest.yml"
+    if not latest_yml.exists():
+        raise RuntimeError("No se encontro latest.yml en release.")
+
+    exe_files = sorted(
+        [p for p in MORRIGAN_RELEASE_DIR.glob("*.exe") if p.is_file()],
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if not exe_files:
+        raise RuntimeError("No se encontro instalador .exe en release.")
+    installer = exe_files[0]
+
+    blockmap = Path(str(installer) + ".blockmap")
+    if not blockmap.exists():
+        candidates = sorted(
+            [p for p in MORRIGAN_RELEASE_DIR.glob("*.blockmap") if p.is_file()],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        blockmap = candidates[0] if candidates else None
+
+    return {
+        "releaseDir": str(MORRIGAN_RELEASE_DIR),
+        "installer": {
+            "name": installer.name,
+            "sizeBytes": installer.stat().st_size,
+            "url": f"/updates/{installer.name}",
+        },
+        "latestYml": {
+            "name": latest_yml.name,
+            "sizeBytes": latest_yml.stat().st_size,
+            "url": f"/updates/{latest_yml.name}",
+        },
+        "blockmap": (
+            {
+                "name": blockmap.name,
+                "sizeBytes": blockmap.stat().st_size,
+                "url": f"/updates/{blockmap.name}",
+            }
+            if blockmap
+            else None
+        ),
+    }
+
+
+async def _run_release_pipeline(*, requested_by: str, version: str | None) -> None:
+    async with _release_lock:
+        _release_state.update(
+            {
+                "running": True,
+                "started_at": datetime.now(timezone.utc).isoformat(),
+                "finished_at": None,
+                "requested_by": requested_by,
+                "version": version,
+                "step": "prepare",
+                "ok": None,
+                "error": None,
+                "logs": [],
+                "artifacts": None,
+            }
+        )
+        _release_log(f"[release] Iniciando pipeline en {MORRIGAN_PROJECT_DIR}")
+        try:
+            if version:
+                _release_state["step"] = "version"
+                version_result = _update_morrigan_version(version)
+                if version_result.get("changed"):
+                    _release_log(
+                        f"[release] Version actualizada: {version_result.get('from')} -> {version_result.get('to')}"
+                    )
+                else:
+                    _release_log(f"[release] Version ya estaba en {version}")
+
+            _release_state["step"] = "build"
+            cmd = get_npm_command(["run", "dist:nsis"])
+            _release_log(f"[release] Ejecutando: {' '.join(cmd)} (cwd={MORRIGAN_PROJECT_DIR})")
+            rc = await _run_release_command(cmd, cwd=MORRIGAN_PROJECT_DIR)
+            if rc != 0:
+                raise RuntimeError(f"Fallo npm run dist:nsis (rc={rc})")
+
+            _release_state["step"] = "collect"
+            artifacts = _resolve_release_artifacts()
+            _release_state["artifacts"] = artifacts
+            _release_log("[release] Artefactos listos y publicados en /updates")
+
+            _release_state.update(
+                {
+                    "running": False,
+                    "finished_at": datetime.now(timezone.utc).isoformat(),
+                    "step": "done",
+                    "ok": True,
+                    "error": None,
+                }
+            )
+        except Exception as exc:
+            _release_log(f"[release] ERROR: {exc}")
+            _release_state.update(
+                {
+                    "running": False,
+                    "finished_at": datetime.now(timezone.utc).isoformat(),
+                    "step": "failed",
+                    "ok": False,
+                    "error": str(exc),
+                }
+            )
 
 
 def _resolve_latest_artifact(pattern: str, extension: str, *, required: bool) -> Path | None:
@@ -553,6 +751,39 @@ async def electron_download_bundle(request: Request) -> StreamingResponse:
         media_type="application/zip",
         headers={"Content-Disposition": 'attachment; filename="Morrigan-PlugAndPlay.zip"'},
     )
+
+
+@app.get("/api/admin/electron/release/status")
+async def admin_electron_release_status(request: Request) -> dict[str, Any]:
+    await _require_admin_user(request)
+    return dict(_release_state)
+
+
+@app.post("/api/admin/electron/release/build")
+async def admin_electron_release_build(
+    request: Request,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    global _release_task
+    admin = await _require_admin_user(request)
+    body = payload or {}
+    requested_version_raw = str(body.get("version") or "").strip()
+    requested_version = _validate_version(requested_version_raw) if requested_version_raw else None
+    requested_by = str(admin.get("username") or admin.get("sub") or "admin")
+
+    if _release_task is not None and not _release_task.done():
+        raise HTTPException(status_code=409, detail="Ya hay un release en curso.")
+
+    _release_task = asyncio.create_task(
+        _run_release_pipeline(requested_by=requested_by, version=requested_version)
+    )
+    return {
+        "ok": True,
+        "accepted": True,
+        "requested_by": requested_by,
+        "version": requested_version,
+        "statusUrl": "/api/admin/electron/release/status",
+    }
 
 
 @app.websocket("/ws/dashboard")

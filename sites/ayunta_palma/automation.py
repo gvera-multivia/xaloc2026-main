@@ -5,6 +5,11 @@ Automatización principal para Ayunta Palma.
 from __future__ import annotations
 
 from core.base_automation import BaseAutomation
+from core.autofirma_shared import (
+    prewarm_autofirma_process,
+    stop_autofirma_prewarm,
+    wait_autofirma_prewarm_ready,
+)
 from sites.ayunta_palma.config import AyuntaPalmaConfig
 from sites.ayunta_palma.data_models import AyuntaPalmaTarget
 from sites.ayunta_palma.flows import (
@@ -25,10 +30,14 @@ class AyuntaPalmaAutomation(BaseAutomation):
     async def ejecutar_flujo_completo(self, datos: AyuntaPalmaTarget) -> str:
         if not self.page:
             raise RuntimeError("Automation no inicializada (usar 'async with').")
+        prewarm_proc = None
 
         try:
             if self.context is not None:
                 await preparar_captura_afirma_context(self.context)
+                prewarm_proc = prewarm_autofirma_process(self.logger)
+                if prewarm_proc:
+                    await wait_autofirma_prewarm_ready(prewarm_proc, timeout_ms=5000, logger=self.logger)
 
             self.logger.info("FASE 1: LOGIN EN AYUNTA PALMA")
             self.page = await ejecutar_login(self.page, self.config)
@@ -71,3 +80,4 @@ class AyuntaPalmaAutomation(BaseAutomation):
                     self.logger.warning("No se pudo cerrar la pestaña de ayunta_palma al finalizar: %s", e)
                 finally:
                     self.page = None
+            stop_autofirma_prewarm(prewarm_proc, logger=self.logger)

@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS organismo_config (
     regex_expediente TEXT NOT NULL,
     login_url TEXT NOT NULL,
     recursos_url TEXT NOT NULL,
+    claim_limit_per_tick INTEGER,
     active BOOLEAN NOT NULL DEFAULT TRUE,
     last_sync_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

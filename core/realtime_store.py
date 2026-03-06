@@ -1,11 +1,12 @@
 import json
 import logging
-import os
 import sqlite3
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+from core.redis_client import get_redis_client
 from core.runtime_flags import get_report_pg_dsn, is_pg_source_of_truth_enabled
 
 try:
@@ -22,6 +23,78 @@ def _to_jsonb(value: Optional[dict[str, Any]]) -> Optional[str]:
     if value is None:
         return None
     return json.dumps(value, ensure_ascii=False)
+
+
+def _derive_incident_alert_level(*, incident_type: str, reason: str) -> str:
+    text = f"{incident_type} {reason}".lower()
+    if any(k in text for k in ("blocked", "bloque", "retry_exhausted", "failed", "critical", "fatal")):
+        return "critical"
+    if any(k in text for k in ("requires_gesdoc", "authorization", "autorizaci", "regex_discarded", "discarded")):
+        return "warning"
+    return "critical"
+
+
+def _build_incident_alert_title(*, site_id: str, resource_id: Optional[int]) -> str:
+    site_label = str(site_id or "sistema").replace("_", " ").strip().upper() or "SISTEMA"
+    rid = f" (recurso {int(resource_id)})" if resource_id is not None else ""
+    return f"INCIDENCIA EN {site_label}{rid}"
+
+
+def _publish_incident_events_best_effort(
+    *,
+    logger: logging.Logger,
+    site_id: str,
+    incident_type: str,
+    reason: str,
+    error_code: str,
+    resource_id: Optional[int],
+    expediente: Optional[str],
+) -> None:
+    redis = get_redis_client()
+    if redis is None:
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    timestamp = datetime.now(timezone.utc).isoformat()
+    incident_event = {
+        "type": "incident.new",
+        "timestamp": timestamp,
+        "data": {
+            "site_id": site_id,
+            "incident_type": incident_type,
+            "error_code": error_code,
+            "reason": reason,
+            "resource_id": resource_id,
+            "expediente": expediente or None,
+        },
+    }
+    alert_level = _derive_incident_alert_level(incident_type=incident_type, reason=reason)
+    alert_event = {
+        "type": "admin.alert",
+        "timestamp": timestamp,
+        "data": {
+            "title": _build_incident_alert_title(site_id=site_id, resource_id=resource_id),
+            "body": reason or incident_type,
+            "level": alert_level,
+            "template_id": "incident",
+            "internal_note": "incident_auto",
+            "design_code": None,
+            "sent_by": "system",
+            "site_id": site_id,
+            "incident_type": incident_type,
+            "error_code": error_code,
+            "resource_id": resource_id,
+            "expediente": expediente or None,
+        },
+    }
+    try:
+        loop.create_task(redis.publish("channel:ui_updates", json.dumps(incident_event, ensure_ascii=False)))
+        loop.create_task(redis.publish("channel:ui_updates", json.dumps(alert_event, ensure_ascii=False)))
+    except Exception as exc:
+        logger.debug("No se pudo publicar notificacion realtime de incidencia: %s", exc)
 
 
 class NullRealtimeStore:
@@ -73,8 +146,8 @@ class NullRealtimeStore:
         error_code: Optional[str] = None,
         status: Optional[str] = None,
         screenshot_path: Optional[str] = None,
-    ) -> None:
-        return
+    ) -> bool:
+        return False
 
     def purge_invalid_incidents(self) -> int:
         return 0
@@ -338,7 +411,7 @@ class PostgresRealtimeStore:
         error_code: Optional[str] = None,
         status: Optional[str] = None,
         screenshot_path: Optional[str] = None,
-    ) -> None:
+    ) -> bool:
         ts_start = started_at or _utc_now()
         ts_end = ended_at or ts_start
         incident_type_value = str(incident_type or error_code or "UNKNOWN_INCIDENT").strip() or "UNKNOWN_INCIDENT"
@@ -365,17 +438,8 @@ class PostgresRealtimeStore:
                         %s, %s, %s, %s, %s, %s, %s, %s,
                         %s, %s, %s, %s, %s::jsonb, NOW()
                     )
-                    ON CONFLICT (dedupe_key) DO UPDATE SET
-                        incident_type = EXCLUDED.incident_type,
-                        error_code = EXCLUDED.error_code,
-                        reason = EXCLUDED.reason,
-                        status = EXCLUDED.status,
-                        screenshot_path = EXCLUDED.screenshot_path,
-                        day = EXCLUDED.day,
-                        started_at = EXCLUDED.started_at,
-                        ended_at = EXCLUDED.ended_at,
-                        payload = EXCLUDED.payload,
-                        updated_at = NOW()
+                    ON CONFLICT (dedupe_key) DO NOTHING
+                    RETURNING id
                     """,
                     (
                         dedupe_key,
@@ -393,7 +457,49 @@ class PostgresRealtimeStore:
                         _to_jsonb(payload),
                     ),
                 )
+                inserted_row = cur.fetchone()
+                created = inserted_row is not None
+                if not created:
+                    cur.execute(
+                        """
+                        UPDATE realtime_incidents SET
+                            incident_type = %s,
+                            error_code = %s,
+                            reason = %s,
+                            status = %s,
+                            screenshot_path = %s,
+                            day = %s,
+                            started_at = %s,
+                            ended_at = %s,
+                            payload = %s::jsonb,
+                            updated_at = NOW()
+                        WHERE dedupe_key = %s
+                        """,
+                        (
+                            incident_type_value,
+                            error_code_value,
+                            reason_value,
+                            status_value,
+                            screenshot_value,
+                            ts_start.date(),
+                            ts_start,
+                            ts_end,
+                            _to_jsonb(payload),
+                            dedupe_key,
+                        ),
+                    )
             conn.commit()
+            if created:
+                _publish_incident_events_best_effort(
+                    logger=self.logger,
+                    site_id=site_id,
+                    incident_type=incident_type_value,
+                    reason=reason_value,
+                    error_code=error_code_value,
+                    resource_id=resource_id,
+                    expediente=expediente,
+                )
+            return created
 
     def purge_invalid_incidents(self) -> int:
         # En PG limpiamos incidencias de recursos que ya tienen resultado exitoso.
@@ -648,7 +754,7 @@ class SqliteRealtimeStore:
         error_code: Optional[str] = None,
         status: Optional[str] = None,
         screenshot_path: Optional[str] = None,
-    ) -> None:
+    ) -> bool:
         ts_start = started_at or _utc_now()
         ts_end = ended_at or ts_start
         incident_type_value = str(incident_type or error_code or "UNKNOWN_INCIDENT").strip() or "UNKNOWN_INCIDENT"
@@ -665,7 +771,7 @@ class SqliteRealtimeStore:
             expediente=expediente,
         )
         with self._conn() as conn:
-            conn.execute(
+            cur = conn.execute(
                 """
                 INSERT INTO realtime_incidents (
                     dedupe_key, site_id, resource_id, expediente, incident_type, error_code, reason, status,
@@ -674,17 +780,7 @@ class SqliteRealtimeStore:
                     ?, ?, ?, ?, ?, ?, ?, ?,
                     ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
                 )
-                ON CONFLICT(dedupe_key) DO UPDATE SET
-                    incident_type = excluded.incident_type,
-                    error_code = excluded.error_code,
-                    reason = excluded.reason,
-                    status = excluded.status,
-                    screenshot_path = excluded.screenshot_path,
-                    day = excluded.day,
-                    started_at = excluded.started_at,
-                    ended_at = excluded.ended_at,
-                    payload = excluded.payload,
-                    updated_at = CURRENT_TIMESTAMP
+                ON CONFLICT(dedupe_key) DO NOTHING
                 """,
                 (
                     dedupe_key,
@@ -702,7 +798,48 @@ class SqliteRealtimeStore:
                     _to_jsonb(payload),
                 ),
             )
+            created = int(cur.rowcount or 0) > 0
+            if not created:
+                conn.execute(
+                    """
+                    UPDATE realtime_incidents SET
+                        incident_type = ?,
+                        error_code = ?,
+                        reason = ?,
+                        status = ?,
+                        screenshot_path = ?,
+                        day = ?,
+                        started_at = ?,
+                        ended_at = ?,
+                        payload = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE dedupe_key = ?
+                    """,
+                    (
+                        incident_type_value,
+                        error_code_value,
+                        reason_value,
+                        status_value,
+                        screenshot_value,
+                        ts_start.date().isoformat(),
+                        ts_start.isoformat(),
+                        ts_end.isoformat(),
+                        _to_jsonb(payload),
+                        dedupe_key,
+                    ),
+                )
             conn.commit()
+            if created:
+                _publish_incident_events_best_effort(
+                    logger=self.logger,
+                    site_id=site_id,
+                    incident_type=incident_type_value,
+                    reason=reason_value,
+                    error_code=error_code_value,
+                    resource_id=resource_id,
+                    expediente=expediente,
+                )
+            return created
 
     def purge_invalid_incidents(self) -> int:
         # Limpia incidencias de recursos:

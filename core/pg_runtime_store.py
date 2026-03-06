@@ -204,6 +204,108 @@ class PgRuntimeStore:
                 )
                 return cur.fetchone() is not None
 
+    def recover_stale_queued_job_for_resource(
+        self,
+        *,
+        site_id: str,
+        resource_id: int,
+        stale_seconds: int,
+        reason_prefix: str = "auto_recovered_stale_queued",
+    ) -> dict[str, Any]:
+        """
+        Cancela un job en estado queued si lleva demasiado tiempo sin arrancar.
+        Devuelve metadata de recuperacion para logging.
+        """
+        threshold = max(60, int(stale_seconds))
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, job_id, status, COALESCE(queued_at, updated_at, created_at) AS anchor_ts
+                    FROM jobs
+                    WHERE status IN ('queued', 'processing')
+                      AND COALESCE(payload_json->>'site_id', split_part(dedup_key, ':', 1), '') = %s
+                      AND COALESCE(
+                            CASE
+                                WHEN (payload_json->>'idRecurso') ~ '^[0-9]+$'
+                                    THEN (payload_json->>'idRecurso')::bigint
+                                WHEN (payload_json->>'idRecurso') ~ '^[0-9]+\\.0+$'
+                                    THEN ((payload_json->>'idRecurso')::numeric)::bigint
+                                ELSE NULL
+                            END,
+                            CASE
+                                WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+$'
+                                    THEN split_part(dedup_key, ':', 2)::bigint
+                                WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+\\.0+$'
+                                    THEN (split_part(dedup_key, ':', 2)::numeric)::bigint
+                                ELSE NULL
+                            END
+                      ) = %s
+                    ORDER BY updated_at DESC, id DESC
+                    LIMIT 1
+                    FOR UPDATE
+                    """,
+                    (str(site_id), int(resource_id)),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return {"recovered": False, "reason": "no_active_job"}
+
+                job_row_id = int(row[0])
+                job_id = str(row[1] or "").strip()
+                status = str(row[2] or "").strip().lower()
+                anchor_ts = row[3]
+                if status != "queued":
+                    return {
+                        "recovered": False,
+                        "reason": "active_processing_job",
+                        "job_id": job_id,
+                        "status": status,
+                    }
+                if not anchor_ts:
+                    return {"recovered": False, "reason": "missing_anchor_ts", "job_id": job_id, "status": status}
+
+                age_seconds = int((datetime.now(timezone.utc) - anchor_ts).total_seconds())
+                if age_seconds < threshold:
+                    return {
+                        "recovered": False,
+                        "reason": "not_stale_yet",
+                        "job_id": job_id,
+                        "status": status,
+                        "age_seconds": age_seconds,
+                        "threshold_seconds": threshold,
+                    }
+
+                recovery_msg = (
+                    f"{reason_prefix}: queued_age={age_seconds}s threshold={threshold}s"
+                )
+                cur.execute(
+                    """
+                    UPDATE jobs
+                    SET status = 'cancelled',
+                        finished_at = COALESCE(finished_at, NOW()),
+                        updated_at = NOW(),
+                        error_message = CASE
+                            WHEN COALESCE(error_message, '') = '' THEN %s
+                            ELSE error_message || ' | ' || %s
+                        END
+                    WHERE id = %s
+                      AND status = 'queued'
+                    """,
+                    (recovery_msg, recovery_msg, job_row_id),
+                )
+                updated = cur.rowcount > 0
+            conn.commit()
+
+        return {
+            "recovered": bool(updated),
+            "reason": "stale_queued_cancelled" if updated else "lost_race",
+            "job_id": job_id,
+            "status": status,
+            "age_seconds": age_seconds,
+            "threshold_seconds": threshold,
+        }
+
     def has_successful_job_for_resource(self, *, site_id: str, resource_id: int) -> bool:
         with self._conn() as conn:
             with conn.cursor() as cur:

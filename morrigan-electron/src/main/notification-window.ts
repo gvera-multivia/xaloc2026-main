@@ -1,4 +1,4 @@
-import { BrowserWindow, screen, ipcMain, app } from 'electron'
+import { BrowserWindow, screen, ipcMain, app, Notification } from 'electron'
 import * as path from 'path'
 import logger from './services/logger'
 
@@ -6,6 +6,32 @@ const TOAST_WIDTH = 400
 const TOAST_HEIGHT = 110
 
 let activeToast: BrowserWindow | null = null
+
+function parseBoolEnv(value: string | undefined, fallback = true): boolean {
+    if (value === undefined) return fallback
+    const normalized = String(value).trim().toLowerCase()
+    return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on'
+}
+
+export function showSystemNotification(opts: { title: string; body: string }): void {
+    const enabled = parseBoolEnv(process.env.MORRIGAN_SYSTEM_NOTIFICATIONS, true)
+    if (!enabled) {
+        return
+    }
+    if (!Notification.isSupported()) {
+        return
+    }
+    try {
+        const notif = new Notification({
+            title: opts.title,
+            body: opts.body,
+            silent: false,
+        })
+        notif.show()
+    } catch (err) {
+        logger.debug(`[Notification] No se pudo mostrar notificacion nativa: ${String(err)}`)
+    }
+}
 
 /**
  * Muestra una notificación overlay personalizada tipo antivirus.
@@ -20,8 +46,9 @@ export function showOverlayNotification(opts: {
     body: string
     duration?: number  // ms, default 6000
     type?: string | { type?: string; design_code?: string }
+    persistToSystem?: boolean
 }) {
-    let { title, body, duration = 6000, type } = opts
+    let { title, body, duration = 6000, type, persistToSystem = false } = opts
     let design_code: string | undefined
 
     if (type && typeof type === 'object') {
@@ -75,6 +102,13 @@ export function showOverlayNotification(opts: {
     toast.setVisibleOnAllWorkspaces(true)
 
     activeToast = toast
+    let persisted = false
+
+    const persistOnce = () => {
+        if (!persistToSystem || persisted) return
+        persisted = true
+        showSystemNotification({ title, body })
+    }
 
     const htmlPath = path.join(assetsDir, 'notification.html')
     toast.loadFile(htmlPath)
@@ -89,6 +123,7 @@ export function showOverlayNotification(opts: {
 
         // Auto-destruir después de la duración + animación de salida (350ms)
         setTimeout(() => {
+            persistOnce()
             if (!toast.isDestroyed()) toast.destroy()
             if (activeToast === toast) activeToast = null
         }, duration + 400)
@@ -96,6 +131,7 @@ export function showOverlayNotification(opts: {
 
     // El usuario puede cerrarlo manualmente antes
     ipcMain.once('notification:close', () => {
+        persistOnce()
         if (!toast.isDestroyed()) toast.destroy()
         if (activeToast === toast) activeToast = null
     })

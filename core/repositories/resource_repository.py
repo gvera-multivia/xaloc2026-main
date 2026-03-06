@@ -183,6 +183,48 @@ WHERE {organisme_like_clause}
   AND rs.Expedient IS NOT NULL
 ORDER BY rs.Estado ASC, rs.idRecurso ASC
 """,
+        "redsara": """
+SELECT
+    rs.idRecurso,
+    rs.idExp,
+    rs.Expedient,
+    rs.Organisme,
+    rs.TExp,
+    rs.Estado,
+    rs.numclient,
+    rs.SujetoRecurso,
+    rs.FaseProcedimiento,
+    rs.UsuarioAsignado,
+    rs.cif,
+    c.tipodecliente AS cliente_tipo,
+    c.nif AS cliente_nif,
+    c.nifempresa AS cliente_nif_empresa,
+    c.Nombrefiscal AS cliente_razon_social,
+    c.Nombre AS cliente_nombre,
+    c.Apellido1 AS cliente_apellido1,
+    c.Apellido2 AS cliente_apellido2,
+    c.provincia AS cliente_provincia,
+    c.poblacion AS cliente_municipio,
+    c.calle AS cliente_domicilio,
+    c.numero AS cliente_numero,
+    c.piso AS cliente_planta,
+    c.puerta AS cliente_puerta,
+    c.Cpostal AS cliente_cp,
+    c.email AS cliente_email,
+    c.telefono1 AS cliente_tel1,
+    c.telefono2 AS cliente_tel2,
+    c.movil AS cliente_movil,
+    att.id AS adjunto_id,
+    att.Filename AS adjunto_filename
+FROM Recursos.RecursosExp rs
+INNER JOIN clientes c ON rs.numclient = c.numerocliente
+LEFT JOIN attachments_resource_documents att ON rs.automatic_id = att.automatic_id
+WHERE {organisme_like_clause}
+  AND rs.TExp IN ({texp_list})
+  AND rs.Estado IN (0, 1)
+  AND rs.Expedient IS NOT NULL
+ORDER BY rs.Estado ASC, rs.idRecurso ASC
+""",
     }
 
     def __init__(self, *, conn_str: str, logger: logging.Logger | None = None):
