@@ -58,10 +58,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-service = DashboardService()
 process_manager = ProcessManager(base_dir=".", logs_dir="logs")
 logger = logging.getLogger("dashboard_api")
 CONTROL_PROCESS_NAMES = {"worker", "brain"}
+_service_instance: DashboardService | None = None
+
+
+class _LazyDashboardService:
+    def _get(self) -> DashboardService:
+        global _service_instance
+        if _service_instance is None:
+            _service_instance = DashboardService()
+        return _service_instance
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._get(), name)
+
+
+service = _LazyDashboardService()
 
 FRONTEND_HOST = os.getenv("DASHBOARD_FRONTEND_HOST", "127.0.0.1").strip() or "127.0.0.1"
 FRONTEND_PORT = int((os.getenv("DASHBOARD_FRONTEND_PORT") or "3000").strip() or "3000")
@@ -1460,137 +1474,6 @@ async def api_admin_notifications_debug_publish(
         "published_to_subscribers": int(subscribers),
         "event": event,
     }
-
-
-# ==========================================================================
-# PUBLIC DOCUMENT TOOLS
-# ==========================================================================
-
-import tempfile
-from io import BytesIO
-import zipfile
-from PIL import Image
-
-@app.post("/api/documentos/convert")
-async def api_documentos_convert(files: list[UploadFile] = File(...)):
-    """Convert images to PDF."""
-    if not files:
-        raise HTTPException(status_code=400, detail="No files provided")
-
-    # If just one file, return PDF directly. If multiple, return ZIP of PDFs.
-    converted_files = []
-
-    for upload in files:
-        contents = await upload.read()
-        try:
-            image = Image.open(BytesIO(contents))
-            # Convert to RGB to avoid alpha channel issues in PDF
-            if image.mode in ("RGBA", "P"):
-                image = image.convert("RGB")
-
-            pdf_bytes = BytesIO()
-            image.save(pdf_bytes, format="PDF", resolution=100.0)
-            pdf_bytes.seek(0)
-
-            # Use original filename but change extension to .pdf
-            base_name = os.path.splitext(upload.filename or "image")[0]
-            pdf_filename = f"{base_name}.pdf"
-
-            converted_files.append((pdf_filename, pdf_bytes.read()))
-        except Exception as exc:
-            logger.error(f"Error converting {upload.filename}: {exc}")
-            raise HTTPException(status_code=400, detail=f"No se pudo convertir el archivo {upload.filename}. Asegurate de que sea una imagen valida.")
-
-    if len(converted_files) == 1:
-        # Return single PDF
-        pdf_name, pdf_data = converted_files[0]
-        return Response(
-            content=pdf_data,
-            media_type="application/pdf",
-            headers={"Content-Disposition": f'attachment; filename="{pdf_name}"'}
-        )
-    else:
-        # Return ZIP of PDFs
-        zip_buffer = BytesIO()
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-            for pdf_name, pdf_data in converted_files:
-                zf.writestr(pdf_name, pdf_data)
-
-        zip_buffer.seek(0)
-        return Response(
-            content=zip_buffer.read(),
-            media_type="application/zip",
-            headers={"Content-Disposition": 'attachment; filename="conversiones.zip"'}
-        )
-
-from pypdf import PdfMerger, PdfReader, PdfWriter
-
-@app.post("/api/documentos/bundle")
-async def api_documentos_bundle(files: list[UploadFile] = File(...)):
-    """Merge multiple PDFs into one."""
-    if len(files) < 2:
-        raise HTTPException(status_code=400, detail="Se requieren al menos 2 archivos para fusionar")
-
-    merger = PdfMerger()
-    try:
-        for upload in files:
-            contents = await upload.read()
-            pdf_buffer = BytesIO(contents)
-            merger.append(pdf_buffer)
-
-        output_buffer = BytesIO()
-        merger.write(output_buffer)
-        output_buffer.seek(0)
-
-        return Response(
-            content=output_buffer.read(),
-            media_type="application/pdf",
-            headers={"Content-Disposition": 'attachment; filename="documentos_fusionados.pdf"'}
-        )
-    except Exception as exc:
-        logger.error(f"Error merging PDFs: {exc}")
-        raise HTTPException(status_code=400, detail="Error al fusionar los archivos. Verifica que sean PDFs validos.")
-
-@app.post("/api/documentos/compress")
-async def api_documentos_compress(files: list[UploadFile] = File(...)):
-    """Compress a single PDF."""
-    if not files:
-        raise HTTPException(status_code=400, detail="No file provided")
-
-    upload = files[0]
-    try:
-        contents = await upload.read()
-        reader = PdfReader(BytesIO(contents))
-        writer = PdfWriter()
-
-        for page in reader.pages:
-            writer.add_page(page)
-
-        for page in writer.pages:
-            page.compress_content_streams()
-
-        output_buffer = BytesIO()
-        writer.write(output_buffer)
-        output_buffer.seek(0)
-
-        original_size = len(contents)
-        compressed_size = len(output_buffer.getvalue())
-
-        base_name = os.path.splitext(upload.filename or "document")[0]
-        out_filename = f"{base_name}_comprimido.pdf"
-
-        return Response(
-            content=output_buffer.read(),
-            media_type="application/pdf",
-            headers={
-                "Content-Disposition": f'attachment; filename="{out_filename}"',
-                "X-Original-Size": str(original_size),
-                "X-Compressed-Size": str(compressed_size)
-            }
-        )
-    except Exception as exc:
-        logger.error(f"Error compressing PDF: {exc}")
-        raise HTTPException(status_code=400, detail="Error al comprimir el archivo. Verifica que sea un PDF valido.")
 
 
 @app.post("/api/admin/notifications/broadcast")
