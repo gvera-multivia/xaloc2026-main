@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS organismo_config (
     regex_expediente TEXT NOT NULL,         -- Patrón regex: '^\d{4}/\d{6}-MUL$'
     login_url TEXT NOT NULL,                -- URL de login: 'http://.../login'
     recursos_url TEXT NOT NULL,             -- URL de recursos: 'http://.../recursos/telematicos'
+    claim_limit_per_tick INTEGER,           -- Limite por site en cada tick de claim (NULL = sin limite)
     active INTEGER DEFAULT 1,               -- 1 = Activo, 0 = Inactivo
     last_sync_at TIMESTAMP,                 -- Última sincronización
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

@@ -17,7 +17,7 @@ class MorriganWebSocket {
     private destroyed = false
 
     private buildUrl(): string {
-        if (!this.wsToken) return this.wsUrl
+        if (!ENV.WS_USE_TOKEN_QUERY || !this.wsToken) return this.wsUrl
         const sep = this.wsUrl.includes('?') ? '&' : '?'
         return `${this.wsUrl}${sep}token=${encodeURIComponent(this.wsToken)}`
     }
@@ -61,6 +61,13 @@ class MorriganWebSocket {
                 this.ws = null
                 if (event.code === 4401) {
                     console.warn('[WS] Conexion rechazada por autenticacion invalida (4401)')
+                }
+                // Fallback robusto: si el handshake falla con token en query,
+                // reintentar sin token para usar la cookie de sesion.
+                if (!this.connected && this.wsToken) {
+                    console.warn('[WS] Handshake fallido con token query; fallback a cookie auth.')
+                    this.wsToken = null
+                    this.retryIndex = 0
                 }
                 if (!this.destroyed) {
                     this.scheduleReconnect()

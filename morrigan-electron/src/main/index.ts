@@ -62,6 +62,11 @@ function restartRuntimeRefreshLoop(): void {
 }
 
 app.on('ready', async () => {
+    // Improves Windows native toast routing to Action Center for packaged app.
+    if (process.platform === 'win32') {
+        app.setAppUserModelId('com.xaloc.morrigan')
+    }
+
     await refreshRuntimeConfig()
 
     logger.info('[Main] App ready, creating window (hidden)')
@@ -165,8 +170,14 @@ app.on('ready', async () => {
             _event,
             { title, body, duration, type }: { title: string; body: string; duration?: number; type?: string }
         ) => {
-            logger.info(`[Main] Showing overlay notification: ${title} (Type: ${type || 'default'})`)
-            showOverlayNotification({ title, body, duration: duration ?? 7000, type })
+            logger.info(`[Main] Showing unified notification: ${title} (Type: ${type || 'default'})`)
+            showOverlayNotification({
+                title,
+                body,
+                duration: duration ?? 7000,
+                type,
+                persistToSystem: true,
+            })
         }
     )
 
@@ -199,6 +210,11 @@ app.on('before-quit', () => {
         clearInterval(runtimeRefreshTimer)
         runtimeRefreshTimer = null
     }
+})
+
+// Fired by electron-updater when quitAndInstall() starts update shutdown.
+;(app as any).on('before-quit-for-update', () => {
+    isQuiting = true
 })
 
 app.on('window-all-closed', () => {

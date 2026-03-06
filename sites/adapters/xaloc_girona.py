@@ -35,8 +35,9 @@ SELECT
     
     rs.cif,          -- Para determinar JURIDICA vs FISICA
     c.nifempresa,    -- Fallback CIF
-    rs.Empresa,      -- Razón social
-    c.Nombrefiscal,  -- Fallback Razón social
+    rs.Empresa,      -- RazÃ³n social
+    c.Nombrefiscal,  -- Fallback RazÃ³n social
+    c.tipodecliente AS cliente_tipo,
     
     c.nif AS cliente_nif,
     c.Nombre AS cliente_nombre,
@@ -85,7 +86,20 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
             return {}
 
     @staticmethod
-    def _determinar_tipo_persona(cif_value: str | None, empresa_value: str | None = None) -> str:
+    def _determinar_tipo_persona(
+        cliente_tipo: Any,
+        cif_value: str | None,
+        empresa_value: str | None = None,
+    ) -> str:
+        try:
+            tipo = int(str(cliente_tipo).strip())
+            if tipo == 2:
+                return "JURIDICA"
+            if tipo == 1:
+                return "FISICA"
+        except Exception:
+            pass
+
         cif_clean = (cif_value or "").strip()
         empresa_clean = (empresa_value or "").strip()
         if cif_clean or empresa_clean:
@@ -113,7 +127,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         v = str(value).strip() if value is not None else ""
         cleaned = re.sub(r"\s+", "", v).upper()
         if not cleaned:
-            return "." # Fallback explícito
+            return "." # Fallback explÃ­cito
         return cleaned
 
     @staticmethod
@@ -127,7 +141,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         cif_raw = row.get("cif") or row.get("nifempresa")
         empresa_raw = row.get("Empresa") or row.get("Nombrefiscal")
         
-        tipo_persona = self._determinar_tipo_persona(cif_raw, empresa_raw)
+        tipo_persona = self._determinar_tipo_persona(row.get("cliente_tipo"), cif_raw, empresa_raw)
         mandatario: dict = {"tipo_persona": tipo_persona}
         
         if tipo_persona == "JURIDICA":
@@ -154,7 +168,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 doc_numero, doc_control = self._extraer_documento_control(nif_clean)
                 tipo_doc = self._detectar_tipo_documento(nif_clean)
             else:
-                # Fallback si no hay NIF (aunque debería haber)
+                # Fallback si no hay NIF (aunque deberÃ­a haber)
                 doc_numero, doc_control = "", ""
                 tipo_doc = "NIF"
                 
@@ -171,7 +185,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
 
     def get_motivos_por_fase(self, fase_raw: Any, expediente: str, sujeto_recurso: str = "") -> str:
         config_map = self._load_motivos_config()
-        # Lógica duplicada de xaloc_task.py para asegurar compatibilidad
+        # LÃ³gica duplicada de xaloc_task.py para asegurar compatibilidad
         expediente_txt = self._clean_str(expediente)
         sujeto_txt = self._clean_str(sujeto_recurso).upper()
         fase_norm = self._normalize_text(fase_raw)
@@ -209,7 +223,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         texp_placeholders = ",".join(["?"] * len(texp_values))
         
         query_organisme_raw = config.get("query_organisme", "%XALOC%")
-        # Simplemente asumimos un solo patrón para Xaloc normalmente, pero soportamos split
+        # Simplemente asumimos un solo patrÃ³n para Xaloc normalmente, pero soportamos split
         patterns = [p.strip() for p in query_organisme_raw.split(" ") if p.strip()]
         if not patterns:
             patterns = ["%XALOC%"]
@@ -294,7 +308,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 expediente = expediente_raw
                 is_valid = is_valid_format(expediente)
                 
-                # Caso A: Patrón NT/
+                # Caso A: PatrÃ³n NT/
                 if not is_valid and is_nt_pattern(expediente):
                     corrected = fix_nt_expediente(conn_str, id_exp)
                     if corrected:
@@ -334,7 +348,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                                 """, (fixed, id_exp))
                                 
                                 conn.commit()
-                                print(f"✅ Expediente '{expediente_raw}' corregido a '{fixed}' en todas las tablas para idExp={id_exp}")
+                                print(f"âœ… Expediente '{expediente_raw}' corregido a '{fixed}' en todas las tablas para idExp={id_exp}")
                                 
                                 expediente = fixed
                                 recurso["Expedient"] = fixed
@@ -357,7 +371,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                             )
                         except Exception:
                             pass
-                    continue  # Descartar si el formato sigue siendo inválido
+                    continue  # Descartar si el formato sigue siendo invÃ¡lido
 
                 # 2. Regla de usuario asignado
                 if estado == 1 and authenticated_user and usuario != authenticated_user:
@@ -394,12 +408,20 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
             payload = {
                 "idRecurso": self._convert_value(r.get("idRecurso")),
                 "idExp": self._convert_value(r.get("idExp")),
+                "numclient": self._convert_value(r.get("numclient")),
                 "user_email": "INFO@XVIA-SERVICIOSJURIDICOS.COM",
                 "denuncia_num": expediente,
                 "plate_number": self._normalize_plate(r.get("matricula")),
                 "expediente_num": expediente,
                 "expediente": expediente,  # Alias para el orquestador
                 "sujeto_recurso": sujeto_recurso,
+                "cif": self._clean_str(r.get("cif") or r.get("nifempresa")),
+                "empresa": self._clean_str(r.get("Empresa") or r.get("Nombrefiscal")),
+                "cliente_razon_social": self._clean_str(r.get("Nombrefiscal") or r.get("Empresa")),
+                "cliente_nif": self._clean_str(r.get("cliente_nif")),
+                "cliente_nombre": self._clean_str(r.get("cliente_nombre")),
+                "cliente_apellido1": self._clean_str(r.get("cliente_apellido1")),
+                "cliente_apellido2": self._clean_str(r.get("cliente_apellido2")),
                 "motivos": motivos_text,
                 "adjuntos": r.get("adjuntos") or [],
                 "mandatario": mandatario,

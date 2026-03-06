@@ -11,7 +11,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       python3-venv unixodbc unixodbc-dev freetds-bin tdsodbc gcc g++ ca-certificates libnss3-tools \
       xvfb x11vnc openbox novnc websockify xterm curl \
-      openjdk-17-jre-headless wget unzip xdg-utils desktop-file-utils xdotool && \
+      openjdk-17-jre wget unzip xdg-utils desktop-file-utils xdotool && \
     rm -rf /var/lib/apt/lists/*
 
 # Install AutoFirma CLI for programmatic signing (Linux/Docker)
@@ -33,6 +33,7 @@ COPY infra/docker/playwright-runner-entrypoint.sh /usr/local/bin/playwright-runn
 COPY infra/docker/playwright-runner-visual-entrypoint.sh /usr/local/bin/playwright-runner-visual-entrypoint.sh
 COPY infra/docker/start-ui.sh /usr/local/bin/start-ui.sh
 COPY infra/docker/afirma-handler.sh /usr/local/bin/afirma-handler.sh
+COPY infra/docker/autofirma_proxy.py /app/autofirma_proxy.py
 COPY infra/docker/xaloc-afirma-handler.desktop /usr/share/applications/xaloc-afirma-handler.desktop
 
 RUN python -m venv /opt/venv && \

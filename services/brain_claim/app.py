@@ -22,7 +22,7 @@ from core.repositories import ResourceRepository
 from core.sqlserver_utils import build_sqlserver_connection_string
 from core.xvia_auth import create_authenticated_session_in_place
 from shared.queue import RedisStreamsClient
-from sites.adapters import MadridAdapter, XalocAdapter, BaseOnlineAdapter, AyuntaPalmaAdapter
+from sites.adapters import MadridAdapter, XalocAdapter, BaseOnlineAdapter, AyuntaPalmaAdapter, RedsaraAdapter
 from sites.adapters.site_adapter import SiteAdapter
 from services.brain_claim.processable_validator import validate_candidate
 
@@ -69,6 +69,9 @@ class BrainClaimService:
         seeded = self.admin_store.seed_organismo_config_if_empty()
         if seeded:
             logger.info("[brain-claim] seeded organismo_config en PG: %s", seeded)
+        inserted_missing = self.admin_store.seed_missing_organismo_configs()
+        if inserted_missing:
+            logger.info("[brain-claim] sincronizados site_id faltantes en PG: %s", ", ".join(sorted(inserted_missing)))
         self.sqlserver_conn_str = build_sqlserver_connection_string()
         self.resource_repo = ResourceRepository(conn_str=self.sqlserver_conn_str, logger=logger)
         self.realtime_store = build_realtime_store(logger=logger)
@@ -82,16 +85,36 @@ class BrainClaimService:
         self.claim_dedupe_ttl_seconds = int(
             (os.getenv("BRAIN_CLAIM_DEDUPE_TTL_SECONDS") or "7200").strip() or "7200"
         )
+        self.enable_claim_dedupe_stale_recovery = (
+            (os.getenv("BRAIN_CLAIM_ENABLE_STALE_RECOVERY") or "0").strip().lower()
+            in {"1", "true", "yes", "on"}
+        )
+        self.active_job_stale_seconds = int(
+            (os.getenv("BRAIN_ACTIVE_JOB_STALE_SECONDS") or "28800").strip() or "28800"
+        )
 
         self.adapters: dict[str, SiteAdapter] = {
             "madrid": MadridAdapter(),
             "xaloc_girona": XalocAdapter(),
             "base_online": BaseOnlineAdapter(),
             "ayunta_palma": AyuntaPalmaAdapter(),
+            "redsara": RedsaraAdapter(),
         }
         self.session: Optional[aiohttp.ClientSession] = None
         self.authenticated_user: Optional[str] = None
         self.asignar_url = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos/AsignarA"
+        self._last_configured_sites_signature: Optional[str] = None
+
+    @staticmethod
+    def _site_claim_limit_from_config(config: dict[str, Any]) -> int | None:
+        raw = (config or {}).get("claim_limit_per_tick")
+        if raw in (None, "", "null"):
+            return None
+        try:
+            value = int(raw)
+        except Exception:
+            return None
+        return value if value > 0 else None
 
     @staticmethod
     def _extract_csrf_token(html: str) -> Optional[str]:
@@ -270,6 +293,11 @@ class BrainClaimService:
         if reserved:
             return True
 
+        # Evita bucles de reclaim cada tick: por defecto NO reciclamos la dedupe key
+        # si ya existe. Solo se habilita con BRAIN_CLAIM_ENABLE_STALE_RECOVERY=1.
+        if not self.enable_claim_dedupe_stale_recovery:
+            return False
+
         # If there is no active queued/processing job, the claim dedupe key is stale.
         if self.runtime_store.has_active_job_for_resource(site_id=site_id, resource_id=resource_id):
             return False
@@ -312,8 +340,9 @@ class BrainClaimService:
                 resource_id = None
         expediente = str(candidate.get("Expedient") or "").strip()
         payload = {"candidate": json.loads(json.dumps(candidate, default=str))}
+        created = False
         try:
-            self.realtime_store.record_incident_once(
+            created = self.realtime_store.record_incident_once(
                 site_id=site_id,
                 incident_type=error_code,
                 reason=description,
@@ -326,10 +355,25 @@ class BrainClaimService:
             )
         except Exception as exc:
             logger.warning("[%s] No se pudo registrar incidencia %s: %s", site_id, error_code, exc)
+            return
+
+        if not created:
+            return
 
     async def run_tick(self) -> dict[str, Any]:
         stats = {"claimed": 0, "published_candidates": 0, "incidents_logged": 0, "errors": 0}
         configs = {cfg["site_id"]: cfg for cfg in self.get_active_configs()}
+        configured_sites = sorted(configs.keys())
+        configured_sig = "|".join(configured_sites)
+        if configured_sig != self._last_configured_sites_signature:
+            logger.info("[brain-claim] site_id activos en organismo_config: %s", configured_sites or [])
+            missing_cfg = sorted([site_id for site_id in self.adapters.keys() if site_id not in configs])
+            if missing_cfg:
+                logger.warning(
+                    "[brain-claim] adapters sin config activa en PG (no se ejecutan): %s",
+                    missing_cfg,
+                )
+            self._last_configured_sites_signature = configured_sig
         remaining = self.max_claims
 
         for site_id, adapter in sorted(self.adapters.items(), key=lambda x: x[1].priority):
@@ -338,6 +382,8 @@ class BrainClaimService:
             config = configs.get(site_id)
             if not config:
                 continue
+            site_limit = self._site_claim_limit_from_config(config)
+            site_claimed = 0
             if self.runtime_store.is_site_processing_paused(site_id=site_id):
                 continue
             try:
@@ -357,12 +403,14 @@ class BrainClaimService:
                     config=config,
                     conn_str=self.sqlserver_conn_str,
                     authenticated_user=self.authenticated_user,
-                    limit=remaining,
+                    limit=min(remaining, site_limit) if site_limit is not None else remaining,
                     on_discard=_on_discard,
                     resource_repo=self.resource_repo,
                 )
                 for cand in candidates:
                     if remaining <= 0:
+                        break
+                    if site_limit is not None and site_claimed >= site_limit:
                         break
                     rid_raw = cand.get("idRecurso")
                     try:
@@ -393,7 +441,32 @@ class BrainClaimService:
                         continue
                     if self.admin_store.is_resource_blocked(site_id=site_id, resource_id=rid):
                         continue
-                    if self.runtime_store.has_active_job_for_resource(site_id=site_id, resource_id=rid):
+                    has_active_job = self.runtime_store.has_active_job_for_resource(
+                        site_id=site_id,
+                        resource_id=rid,
+                    )
+                    if has_active_job:
+                        recovery = self.runtime_store.recover_stale_queued_job_for_resource(
+                            site_id=site_id,
+                            resource_id=rid,
+                            stale_seconds=self.active_job_stale_seconds,
+                            reason_prefix="brain_claim_stale_queued_guard",
+                        )
+                        if recovery.get("recovered"):
+                            logger.warning(
+                                "[%s] stale queued recuperado para idRecurso=%s job_id=%s age=%ss (threshold=%ss).",
+                                site_id,
+                                rid,
+                                recovery.get("job_id"),
+                                recovery.get("age_seconds"),
+                                recovery.get("threshold_seconds"),
+                            )
+                            has_active_job = self.runtime_store.has_active_job_for_resource(
+                                site_id=site_id,
+                                resource_id=rid,
+                            )
+
+                    if has_active_job:
                         logger.info(
                             "[%s] descartado idRecurso=%s por job activo en cola (queued/processing).",
                             site_id,
@@ -417,6 +490,7 @@ class BrainClaimService:
                             continue
                         stats["claimed"] += 1
                         remaining -= 1
+                        site_claimed += 1
 
                         payloads = await adapter.build_payloads([cand], on_discard=_on_discard)
                         if not payloads:

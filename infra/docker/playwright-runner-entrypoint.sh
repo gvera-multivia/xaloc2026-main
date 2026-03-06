@@ -12,6 +12,8 @@ AUTOSELECT_RULES_JSON="${XALOC_CERT_AUTOSELECT_RULES_JSON:-}"
 AUTOSELECT_PATTERN="${XALOC_CERT_AUTOSELECT_PATTERN:-}"
 URL_CERT_CONFIG_BAT="${XALOC_URL_CERT_CONFIG_BAT_PATH:-/app/url-cert-config.bat}"
 AFIRMA_ORIGIN="${XALOC_AUTOFIRMA_ORIGIN:-https://palma.sedipualba.es}"
+AFIRMA_ALLOWED_ORIGINS="${XALOC_AUTOFIRMA_ALLOWED_ORIGINS:-}"
+AFIRMA_PROTOCOLS="${XALOC_AUTOFIRMA_PROTOCOLS:-afirma,xalocafirma}"
 AFIRMA_PROTOCOL_POLICY_ENABLED="${XALOC_AUTOFIRMA_PROTOCOL_POLICY_ENABLED:-1}"
 
 # En algunos entornos compose/Windows, HOME puede llegar corrupto (ej. C:Users...).
@@ -127,21 +129,23 @@ write_afirma_protocol_policy() {
   fi
 
   mkdir -p /etc/chromium/policies/managed /etc/opt/chrome/policies/managed /etc/opt/chrome_for_testing/policies/managed /etc/opt/edge/policies/managed
-  export AFIRMA_ORIGIN
+  export AFIRMA_ORIGIN AFIRMA_ALLOWED_ORIGINS AFIRMA_PROTOCOLS
   python3 <<'PY'
 import json
 import os
 import pathlib
 
-origin = (os.getenv("AFIRMA_ORIGIN") or "https://palma.sedipualba.es").strip()
-policy_doc = {
-    "AutoLaunchProtocolsFromOrigins": [
-        {
-            "protocol": "afirma",
-            "allowed_origins": [origin],
-        }
-    ]
-}
+default_origin = (os.getenv("AFIRMA_ORIGIN") or "https://palma.sedipualba.es").strip()
+origins_csv = (os.getenv("AFIRMA_ALLOWED_ORIGINS") or "").strip()
+protocols_csv = (os.getenv("AFIRMA_PROTOCOLS") or "afirma,xalocafirma").strip()
+
+origins = [x.strip() for x in origins_csv.split(",") if x.strip()] if origins_csv else [default_origin]
+protocols = [x.strip() for x in protocols_csv.split(",") if x.strip()]
+if not protocols:
+    protocols = ["afirma", "xalocafirma"]
+
+rules = [{"protocol": proto, "allowed_origins": origins} for proto in protocols]
+policy_doc = {"AutoLaunchProtocolsFromOrigins": rules}
 
 for out_file in [
     pathlib.Path("/etc/chromium/policies/managed/xaloc-afirma-policy.json"),
@@ -153,7 +157,7 @@ for out_file in [
     out_file.write_text(json.dumps(policy_doc, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"[playwright-runner] Policy escrita: {out_file}")
 
-print("[playwright-runner] AutoLaunchProtocolsFromOrigins aplicado para origin:", origin)
+print("[playwright-runner] AutoLaunchProtocolsFromOrigins aplicado. protocols=", protocols, "origins=", origins)
 PY
 }
 
@@ -166,7 +170,35 @@ register_afirma_xdg_handler() {
 
   update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
   xdg-mime default xaloc-afirma-handler.desktop x-scheme-handler/afirma >/dev/null 2>&1 || true
-  echo "[playwright-runner] x-scheme-handler/afirma registrado con xaloc-afirma-handler.desktop"
+  xdg-mime default xaloc-afirma-handler.desktop x-scheme-handler/xalocafirma >/dev/null 2>&1 || true
+  echo "[playwright-runner] x-scheme-handler/afirma y x-scheme-handler/xalocafirma registrados con xaloc-afirma-handler.desktop"
+}
+
+start_autofirma_always_on() {
+  local always_on="${XALOC_AUTOFIRMA_ALWAYS_ON:-1}"
+  if [[ "${always_on,,}" != "1" && "${always_on,,}" != "true" && "${always_on,,}" != "yes" && "${always_on,,}" != "on" ]]; then
+    echo "[playwright-runner] AutoFirma always-on desactivado (XALOC_AUTOFIRMA_ALWAYS_ON=$always_on)."
+    return 0
+  fi
+
+  if ! command -v autofirma >/dev/null 2>&1; then
+    echo "[playwright-runner] Aviso: binario 'autofirma' no encontrado, no se arranca always-on."
+    return 0
+  fi
+
+  if pgrep -f "(^|/| )autofirma( |$)" >/dev/null 2>&1; then
+    echo "[playwright-runner] AutoFirma ya estaba en ejecución (always-on)."
+    return 0
+  fi
+
+  echo "[playwright-runner] Arrancando AutoFirma en modo always-on..."
+  nohup autofirma >/tmp/autofirma-always-on.log 2>&1 &
+  sleep 1
+  if pgrep -f "(^|/| )autofirma( |$)" >/dev/null 2>&1; then
+    echo "[playwright-runner] AutoFirma iniciado en background."
+  else
+    echo "[playwright-runner] Aviso: no se pudo confirmar proceso AutoFirma tras arranque."
+  fi
 }
 
 if [[ ! -f "$CERT_PATH" ]]; then
@@ -183,6 +215,7 @@ mkdir -p "$NSS_DB_DIR" "$GLOBAL_NSS_DB_DIR"
 write_autoselect_policy
 write_afirma_protocol_policy
 register_afirma_xdg_handler
+start_autofirma_always_on
 
 if [[ ! -f "$NSS_DB_DIR/cert9.db" ]]; then
   certutil -N --empty-password -d "sql:$NSS_DB_DIR"
@@ -196,7 +229,12 @@ fi
 p12_pass_file="$(mktemp)"
 db_pass_file="$(mktemp)"
 trap 'rm -f "$p12_pass_file" "$db_pass_file"' EXIT
-printf "%s" "${PLAYWRIGHT_CERT_PASSWORD:-}" > "$p12_pass_file"
+if [[ -n "${PLAYWRIGHT_CERT_PASSWORD:-}" ]]; then
+  printf "%s" "${PLAYWRIGHT_CERT_PASSWORD}" > "$p12_pass_file"
+else
+  # pk12util necesita un fichero no vacio para password vacio.
+  printf "\n" > "$p12_pass_file"
+fi
 printf "\n" > "$db_pass_file"
 
 import_ok=0

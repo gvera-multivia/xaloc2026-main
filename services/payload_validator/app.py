@@ -8,6 +8,7 @@ import signal
 import uuid
 from typing import Any
 
+import pyodbc
 from dotenv import load_dotenv
 
 from core.client_documentation import check_requires_gesdoc
@@ -15,6 +16,7 @@ from core.pg_control_plane_store import PgControlPlaneStore
 from core.pg_pending_authorization_store import PgPendingAuthorizationStore
 from core.realtime_store import build_realtime_store
 from core.redis_client import get_redis_client
+from core.sqlserver_utils import build_sqlserver_connection_string
 from shared.queue import RedisStreamsClient
 
 load_dotenv()
@@ -26,6 +28,7 @@ class PayloadValidatorService:
         redis = get_redis_client()
         if redis is None:
             raise RuntimeError("Redis requerido para payload-validator-service.")
+        self.redis = redis
         self.streams = RedisStreamsClient(redis, logger=logger)
         self.store = PgControlPlaneStore.from_env(logger=logger)
         self.pending_auth_store = PgPendingAuthorizationStore.from_env(logger=logger)
@@ -36,6 +39,7 @@ class PayloadValidatorService:
         self.dlq_candidates = (os.getenv("DLQ_CANDIDATES_STREAM_KEY") or "dlq:candidates").strip() or "dlq:candidates"
         self.group = (os.getenv("VALIDATOR_STREAM_GROUP") or "validator_group").strip() or "validator_group"
         self.consumer = (os.getenv("VALIDATOR_CONSUMER_NAME") or f"validator-{uuid.uuid4().hex[:8]}").strip()
+        self.sqlserver_conn_str = build_sqlserver_connection_string()
 
     @staticmethod
     def _safe_json(value: Any, default: Any) -> Any:
@@ -66,6 +70,139 @@ class PayloadValidatorService:
         except Exception:
             pass
         return raw
+
+    @staticmethod
+    def _to_int_like(value: Any) -> int | None:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except Exception:
+            pass
+        try:
+            as_float = float(str(value).strip())
+            if as_float.is_integer():
+                return int(as_float)
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def _has_identity_fields(payload: dict[str, Any]) -> bool:
+        if str(payload.get("empresa") or payload.get("cliente_razon_social") or "").strip():
+            return True
+        nombre = str(payload.get("cliente_nombre") or payload.get("name") or "").strip()
+        ap1 = str(payload.get("cliente_apellido1") or payload.get("apellido1") or "").strip()
+        return bool(nombre and ap1)
+
+    def _hydrate_payload_from_sql(self, raw_payload: dict[str, Any], resource_id: int | None) -> dict[str, Any]:
+        if resource_id is None:
+            return dict(raw_payload or {})
+
+        payload = dict(raw_payload or {})
+        if self._has_identity_fields(payload) and payload.get("numclient") not in (None, ""):
+            return payload
+
+        conn = pyodbc.connect(self.sqlserver_conn_str)
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT TOP 1
+                    rs.idRecurso,
+                    rs.idExp,
+                    rs.numclient,
+                    rs.Expedient,
+                    rs.Organisme,
+                    rs.SujetoRecurso,
+                    rs.FaseProcedimiento,
+                    rs.Empresa,
+                    rs.cif,
+                    e.matricula,
+                    c.nif,
+                    c.nifempresa,
+                    c.tipodecliente,
+                    c.Nombre,
+                    c.Apellido1,
+                    c.Apellido2,
+                    c.Nombrefiscal,
+                    c.provincia,
+                    c.poblacion,
+                    c.calle,
+                    c.numero,
+                    c.piso,
+                    c.puerta,
+                    c.Cpostal,
+                    c.email,
+                    c.telefono1,
+                    c.telefono2,
+                    c.movil
+                FROM Recursos.RecursosExp rs
+                LEFT JOIN clientes c ON rs.numclient = c.numerocliente
+                LEFT JOIN expedientes e ON rs.idExp = e.idexpediente
+                WHERE rs.idRecurso = ?
+                """,
+                (int(resource_id),),
+            )
+            row = cur.fetchone()
+            if not row:
+                return payload
+
+            cols = [d[0] for d in cur.description]
+            data = dict(zip(cols, row))
+            defaults = {
+                "idRecurso": data.get("idRecurso"),
+                "idExp": data.get("idExp"),
+                "numclient": data.get("numclient"),
+                "expediente": data.get("Expedient"),
+                "Expedient": data.get("Expedient"),
+                "expediente_num": data.get("Expedient"),
+                "num_expediente": data.get("Expedient"),
+                "denuncia_num": data.get("Expedient"),
+                "num_denuncia": data.get("Expedient"),
+                "matricula": data.get("matricula"),
+                "plate_number": data.get("matricula"),
+                "sujeto_recurso": data.get("SujetoRecurso"),
+                "SujetoRecurso": data.get("SujetoRecurso"),
+                "fase_procedimiento": data.get("FaseProcedimiento"),
+                "FaseProcedimiento": data.get("FaseProcedimiento"),
+                "empresa": data.get("Empresa"),
+                "cif": data.get("cif"),
+                "cliente_nif": data.get("nif"),
+                "cliente_nif_empresa": data.get("nifempresa"),
+                "cliente_tipo": data.get("tipodecliente"),
+                "cliente_nombre": data.get("Nombre"),
+                "cliente_apellido1": data.get("Apellido1"),
+                "cliente_apellido2": data.get("Apellido2"),
+                "cliente_razon_social": data.get("Nombrefiscal"),
+                "cliente_provincia": data.get("provincia"),
+                "cliente_municipio": data.get("poblacion"),
+                "cliente_domicilio": data.get("calle"),
+                "cliente_numero": data.get("numero"),
+                "cliente_planta": data.get("piso"),
+                "cliente_puerta": data.get("puerta"),
+                "cliente_cp": data.get("Cpostal"),
+                "cliente_email": data.get("email"),
+                "email": data.get("email"),
+                "user_email": data.get("email"),
+                "cliente_tel1": data.get("telefono1"),
+                "cliente_tel2": data.get("telefono2"),
+                "cliente_movil": data.get("movil"),
+                "name": data.get("Nombre"),
+                "apellido1": data.get("Apellido1"),
+                "apellido2": data.get("Apellido2"),
+                "razon_social": data.get("Nombrefiscal"),
+            }
+            for key, value in defaults.items():
+                if payload.get(key) in (None, "", []):
+                    payload[key] = value
+            if payload.get("email") in (None, "", []):
+                payload["email"] = "info@xvia-serviciosjuridicos.com"
+            if payload.get("user_email") in (None, "", []):
+                payload["user_email"] = str(payload.get("email") or "info@xvia-serviciosjuridicos.com")
+            return payload
+        finally:
+            conn.close()
 
     @staticmethod
     def _normalize_job_type(raw_payload: dict[str, Any]) -> str:
@@ -115,6 +252,10 @@ class PayloadValidatorService:
             external_resource_id = self._normalize_resource_id_str(fields.get("external_resource_id"))
             raw_payload = self._safe_json(fields.get("raw_payload"), {})
             trace_id = str(fields.get("trace_id") or "").strip() or str(uuid.uuid4())
+            rid = self._to_int_like(raw_payload.get("idRecurso"))
+            if rid is None:
+                rid = self._to_int_like(external_resource_id)
+            raw_payload = self._hydrate_payload_from_sql(raw_payload, rid)
 
             if not organism_id:
                 raise ValueError("candidate sin organism_id")

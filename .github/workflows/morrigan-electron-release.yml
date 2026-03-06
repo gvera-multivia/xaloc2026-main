@@ -1,0 +1,101 @@
+name: Morrigan Electron Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version semver opcional (X.Y.Z). Si se omite usa package.json."
+        required: false
+        type: string
+      publish_github_release:
+        description: "Publicar artefactos en GitHub Release"
+        required: true
+        default: true
+        type: boolean
+  push:
+    tags:
+      - "morrigan-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: morrigan-electron
+    outputs:
+      app_version: ${{ steps.meta.outputs.app_version }}
+      release_tag: ${{ steps.meta.outputs.release_tag }}
+      installer_name: ${{ steps.meta.outputs.installer_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: morrigan-electron/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply requested version
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.version != '' }}
+        run: |
+          $version = "${{ inputs.version }}"
+          if ($version -notmatch '^\d+\.\d+\.\d+$') {
+            throw "Version invalida: $version. Usa X.Y.Z"
+          }
+          npm version $version --no-git-tag-version --allow-same-version
+          Write-Host "Version aplicada: $version"
+
+      - name: Build NSIS package
+        run: npm run dist:nsis
+
+      - name: Collect metadata
+        id: meta
+        run: |
+          $version = node -p "require('./package.json').version"
+          $installer = Get-ChildItem release -Filter "*.exe" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $installer) { throw "No se encontro instalador .exe en release/" }
+          $blockmapPath = "$($installer.FullName).blockmap"
+          if (-not (Test-Path $blockmapPath)) {
+            $fallbackBlockmap = Get-ChildItem release -Filter "*.blockmap" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            if ($fallbackBlockmap) { $blockmapPath = $fallbackBlockmap.FullName }
+          }
+          if (-not (Test-Path "release/latest.yml")) { throw "No se encontro release/latest.yml" }
+
+          $releaseTag = "morrigan-v$version"
+          "app_version=$version" >> $env:GITHUB_OUTPUT
+          "release_tag=$releaseTag" >> $env:GITHUB_OUTPUT
+          "installer_name=$($installer.Name)" >> $env:GITHUB_OUTPUT
+          if (-not (Test-Path $blockmapPath)) {
+            Write-Host "No se encontro blockmap especifico; se publicara cualquier *.blockmap disponible."
+          }
+
+      - name: Upload CI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: morrigan-updates-${{ steps.meta.outputs.app_version }}
+          path: |
+            morrigan-electron/release/latest.yml
+            morrigan-electron/release/${{ steps.meta.outputs.installer_name }}
+            morrigan-electron/release/*.blockmap
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: ${{ (github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && inputs.publish_github_release) }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.release_tag }}
+          name: Morrigan ${{ steps.meta.outputs.app_version }}
+          generate_release_notes: true
+          files: |
+            morrigan-electron/release/latest.yml
+            morrigan-electron/release/${{ steps.meta.outputs.installer_name }}
+            morrigan-electron/release/*.blockmap

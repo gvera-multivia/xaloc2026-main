@@ -90,6 +90,11 @@ export const historyApi = {
         api.get<{ items: any[], total: number }>(`/history/successes?${day ? `day=${day}&` : ''}page=${page}&page_size=${pageSize}`),
     getDays: (source = 'all', page = 1, pageSize = 10) =>
         api.get<{ items: any[], total: number }>(`/history/days?source=${source}&page=${page}&page_size=${pageSize}`),
+    resolveClientFolder: (payload: any) =>
+        api.post<{ path: string; exists: boolean; fase_procedimiento?: string | null; fase_folder?: string | null; ruta_cliente?: string }>(
+            '/client-folder',
+            payload,
+        ),
 };
 
 export const controlApi = {
@@ -126,6 +131,8 @@ export const usersApi = {
 
 export const configApi = {
     list: () => api.get<{ items: any[], total: number }>('/config'),
+    update: (siteId: string, updates: Record<string, any>) =>
+        api.put<any>(`/config/${encodeURIComponent(siteId)}`, updates),
     setSiteActive: (siteId: string, active: boolean) =>
         api.post<any>(`/config/${encodeURIComponent(siteId)}/active`, { active }),
 };

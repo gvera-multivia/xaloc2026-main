@@ -92,7 +92,10 @@ export default function QueueCard({ item, index }: QueueCardProps) {
             </span>
           </div>
 
-          <p className="mt-1 text-[11px] font-bold uppercase tracking-wider text-muted-foreground/70 truncate">
+          <p
+            className="mt-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70 leading-tight line-clamp-2"
+            title={String(item.site_id || "")}
+          >
             {item.site_id}
           </p>
 

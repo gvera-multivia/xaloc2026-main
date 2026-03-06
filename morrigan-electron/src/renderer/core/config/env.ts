@@ -10,6 +10,8 @@ export const ENV = {
     WS_URL:
         (import.meta.env.VITE_MORRIGAN_WS_URL as string) ??
         'ws://192.168.184.72/ws/dashboard',
+    WS_USE_TOKEN_QUERY:
+        String(import.meta.env.VITE_MORRIGAN_WS_USE_TOKEN_QUERY ?? '0').toLowerCase() === '1',
     BOOTSTRAP_URL:
         (import.meta.env.VITE_MORRIGAN_BOOTSTRAP_URL as string) ??
         'http://192.168.184.72/morrigan-config.json',

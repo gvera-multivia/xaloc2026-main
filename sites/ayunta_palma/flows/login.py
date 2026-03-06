@@ -32,23 +32,27 @@ async def _abrir_nueva_instancia(page: Page, config: AyuntaPalmaConfig) -> None:
     except PlaywrightTimeoutError:
         pass
 
-    boton_visible = page.locator(selectors.btn_nueva_instancia).first
-    if await boton_visible.count() > 0 and await boton_visible.is_visible():
-        await boton_visible.click()
-        await page.wait_for_timeout(config.delay_ms)
-        return
-
     input_submit = page.locator(selectors.input_nueva_instancia).first
     if await input_submit.count() == 0:
         return
 
+    # 1) Prioridad absoluta: input oculto "Nueva instancia en blanco" (Cancelar).
+    clickable_url = await input_submit.get_attribute("data-clickable-url")
+    if clickable_url and "recuperar=false" in clickable_url.lower():
+        await page.goto(clickable_url, wait_until="domcontentloaded")
+        await page.wait_for_timeout(config.delay_ms)
+        return
+
     if await input_submit.is_visible():
         await input_submit.click()
-    else:
-        clickable_url = await input_submit.get_attribute("data-clickable-url")
-        if clickable_url:
-            await page.goto(clickable_url, wait_until="domcontentloaded")
-    await page.wait_for_timeout(config.delay_ms)
+        await page.wait_for_timeout(config.delay_ms)
+        return
+
+    # 2) Fallback visual, pero SIEMPRE acotado al contenedor del input "Cancelar".
+    boton_visible = page.locator(selectors.btn_nueva_instancia_visible).first
+    if await boton_visible.count() > 0 and await boton_visible.is_visible():
+        await boton_visible.click()
+        await page.wait_for_timeout(config.delay_ms)
 
 
 async def ejecutar_login(page: Page, config: AyuntaPalmaConfig) -> Page:

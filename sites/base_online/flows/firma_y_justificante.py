@@ -5,6 +5,7 @@ import re
 import shutil
 import time
 import unicodedata
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -79,6 +80,22 @@ def _sanitize_filename_component(value: str) -> str:
 def _justificante_filename(num_expediente: str) -> str:
     clean_exp = _sanitize_filename_component(num_expediente)
     return f"JUSTIFICANTE- {clean_exp}.pdf"
+
+
+def _build_unique_path(destino_dir: Path, filename: str) -> Path:
+    base = Path(filename).stem
+    ext = Path(filename).suffix or ".pdf"
+    candidate = destino_dir / f"{base}{ext}"
+    if not candidate.exists():
+        return candidate
+
+    ts = datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
+    candidate = destino_dir / f"{base} ({ts}){ext}"
+    seq = 1
+    while candidate.exists():
+        seq += 1
+        candidate = destino_dir / f"{base} ({ts})_{seq}{ext}"
+    return candidate
 
 
 def _extraer_expediente_desde_success_text(texto: str) -> str | None:
@@ -168,9 +185,7 @@ async def _abrir_modal_firma(page: Page, trigger_locator) -> None:
 
 async def _mover_a_destino(tmp_path: Path, *, destino_dir: Path) -> Path:
     destino_dir.mkdir(parents=True, exist_ok=True)
-    destino_path = destino_dir / tmp_path.name
-    if destino_path.exists():
-        destino_path.unlink()
+    destino_path = _build_unique_path(destino_dir, tmp_path.name)
 
     # copy2 para permitir mover entre unidades/UNC sin WinError 17.
     shutil.copy2(tmp_path, destino_path)
@@ -496,7 +511,7 @@ async def firmar_presentar_y_descargar_justificante(page: Page, *, payload: dict
 
     tmp_dir = Path("tmp") / "base_online" / "justificantes" / str(id_recurso)
     tmp_dir.mkdir(parents=True, exist_ok=True)
-    tmp_path = tmp_dir / _justificante_filename(str(expediente))
+    tmp_path = _build_unique_path(tmp_dir, _justificante_filename(str(expediente)))
 
     logger.info("[BASE] Descargando justificante...")
     download, popup_doc = await _click_y_capturar_descarga_o_popup(page, link)

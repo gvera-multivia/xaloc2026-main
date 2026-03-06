@@ -58,6 +58,23 @@ class BatcherDispatcherService:
         except Exception:
             return default
 
+    @staticmethod
+    def _normalize_id_recurso(normalized_payload: dict[str, Any]) -> Any:
+        value = normalized_payload.get("idRecurso")
+        if value is None or str(value).strip() == "":
+            value = normalized_payload.get("external_resource_id")
+        if value is None or str(value).strip() == "":
+            value = normalized_payload.get("resource_id")
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            return int(text)
+        except Exception:
+            return text
+
     async def _consume_once(self) -> bool:
         await self.streams.ensure_group(stream=self.validated_stream, group=self.group)
         msg = await self.streams.read_group(
@@ -135,6 +152,9 @@ class BatcherDispatcherService:
                         )
                         await self.streams.ack(stream=self.validated_stream, group=self.group, message_id=msg.message_id)
                         continue
+                    id_recurso = self._normalize_id_recurso(normalized_payload)
+                    if id_recurso is not None:
+                        normalized_payload["idRecurso"] = id_recurso
                     job_payload = {
                         "job_id": job_id,
                         "attempt": int(normalized_payload.get("attempt") or 0),
@@ -150,7 +170,7 @@ class BatcherDispatcherService:
                         "site_id": p["organism_id"],
                         "protocol": normalized_payload.get("protocol") or normalized_payload.get("job_type") or "",
                         "payload": normalized_payload,
-                        "resource_id": normalized_payload.get("idRecurso"),
+                        "resource_id": id_recurso,
                     }
                     await self.streams.publish_json(
                         stream=self.jobs_stream,

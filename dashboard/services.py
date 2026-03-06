@@ -255,6 +255,54 @@ class DashboardService:
                 exc,
             )
 
+    async def _publish_admin_alert_async(
+        self,
+        *,
+        title: str,
+        body: str,
+        level: str = "info",
+        sent_by: str = "dashboard",
+        internal_note: str | None = None,
+    ) -> None:
+        redis = get_redis_client()
+        if redis is None:
+            return
+        event = {
+            "type": "admin.alert",
+            "timestamp": datetime.now().astimezone().isoformat(),
+            "data": {
+                "title": str(title or "").strip() or "Aviso operativo",
+                "body": str(body or "").strip() or "Sin detalle",
+                "level": str(level or "info").strip().lower() or "info",
+                "template_id": None,
+                "internal_note": (str(internal_note or "").strip() or None),
+                "sent_by": str(sent_by or "dashboard"),
+            },
+        }
+        await redis.publish("channel:ui_updates", json.dumps(event, ensure_ascii=False))
+
+    def _publish_admin_alert_best_effort(
+        self,
+        *,
+        title: str,
+        body: str,
+        level: str = "info",
+        sent_by: str = "dashboard",
+        internal_note: str | None = None,
+    ) -> None:
+        try:
+            self._run_coro_sync(
+                self._publish_admin_alert_async(
+                    title=title,
+                    body=body,
+                    level=level,
+                    sent_by=sent_by,
+                    internal_note=internal_note,
+                )
+            )
+        except Exception as exc:
+            self.logger.warning("No se pudo publicar admin.alert (best-effort): %s", exc)
+
     @staticmethod
     def _worker_runtime_timeout_seconds() -> int:
         raw = (os.getenv("WORKER_HEARTBEAT_TIMEOUT_SECONDS") or "90").strip()
@@ -567,6 +615,18 @@ class DashboardService:
             raise ValueError("site_id es obligatorio.")
         if "active" in updates:
             updates["active"] = 1 if bool(updates["active"]) else 0
+        if "claim_limit_per_tick" in updates:
+            raw = updates.get("claim_limit_per_tick")
+            if raw in (None, "", "null"):
+                updates["claim_limit_per_tick"] = None
+            else:
+                try:
+                    value = int(raw)
+                except Exception as exc:
+                    raise ValueError("claim_limit_per_tick debe ser entero o null.") from exc
+                if value <= 0:
+                    raise ValueError("claim_limit_per_tick debe ser > 0.")
+                updates["claim_limit_per_tick"] = value
         updated = self.admin_store.update_organismo_config(site_id=site, updates=updates)
         if not updated:
             raise ValueError("No se actualizo configuracion: site no existe o payload vacio.")
@@ -628,9 +688,30 @@ class DashboardService:
         site_id = str(pending.get("site_id") or "").strip()
         if not site_id:
             raise ValueError(f"pending_id {pid} sin site_id.")
-        payload = dict(pending.get("payload") or {})
+        raw_pending_payload = dict(pending.get("payload") or {})
+        # Compatibilidad: algunos pendientes históricos guardaron un sobre con
+        # normalized_payload en lugar del payload de ejecución directo.
+        nested_normalized = raw_pending_payload.get("normalized_payload")
+        if isinstance(nested_normalized, dict) and nested_normalized:
+            payload = dict(nested_normalized)
+            # Conservamos fallbacks del sobre externo por si faltan campos.
+            for k, v in raw_pending_payload.items():
+                payload.setdefault(str(k), v)
+        else:
+            payload = raw_pending_payload
         if not payload:
             raise ValueError(f"pending_id {pid} sin payload.")
+
+        # Guard-rail: asegurar idRecurso en raíz para worker/document_fetcher.
+        rid_value = payload.get("idRecurso")
+        if rid_value is None or str(rid_value).strip() == "":
+            rid_value = (
+                payload.get("external_resource_id")
+                if payload.get("external_resource_id") is not None
+                else pending.get("resource_id")
+            )
+            if rid_value is not None and str(rid_value).strip() != "":
+                payload["idRecurso"] = rid_value
 
         protocol = payload.get("protocol") or payload.get("naturaleza")
         if protocol is not None:
@@ -667,6 +748,18 @@ class DashboardService:
                 "noop": True,
                 "reason": "pending_state_changed_before_mark",
             }
+        try:
+            rid = pending.get("resource_id")
+            rid_txt = f" (recurso {rid})" if rid is not None else ""
+            self._publish_admin_alert_best_effort(
+                title=f"Autorización aprobada{rid_txt}",
+                body=f"Se autorizó {site_id}{rid_txt} y se movió a cola de trabajo.",
+                level="info",
+                sent_by=user,
+                internal_note="pending_auth_approved",
+            )
+        except Exception:
+            pass
         return {
             "ok": True,
             "pending_id": pid,
@@ -720,6 +813,19 @@ class DashboardService:
                 "noop": True,
                 "state_changed": True,
             }
+        try:
+            rid = pending.get("resource_id")
+            rid_txt = f" (recurso {rid})" if rid is not None else ""
+            site_id = str(pending.get("site_id") or "").strip() or "site"
+            self._publish_admin_alert_best_effort(
+                title=f"Autorización rechazada{rid_txt}",
+                body=f"Se rechazó {site_id}{rid_txt}. Motivo: {reject_reason}",
+                level="warning",
+                sent_by=user,
+                internal_note="pending_auth_rejected",
+            )
+        except Exception:
+            pass
         return {
             "ok": True,
             "pending_id": pid,
@@ -734,27 +840,48 @@ class DashboardService:
 
     def resolve_client_folder(self, *, payload: dict[str, Any]) -> dict[str, Any]:
         """Calcula la ruta a la carpeta de justificantes del cliente (RECURSOS TELEMATICOS + subfase)."""
-        from sites.xaloc_girona.flows.descarga_justificante import (
-            _construir_ruta_recursos_telematicos,
+        from core.client_documentation import client_identity_from_payload
+        from core.client_paths import (
+            get_phase_folder_name,
+            get_ruta_cliente_documentacion,
+            get_ruta_recursos_telematicos,
+            resolve_client_docs_base_path,
         )
 
         fase_procedimiento = payload.get("fase_procedimiento")
         try:
-            ruta = _construir_ruta_recursos_telematicos(payload, fase_procedimiento)
+            base_path = resolve_client_docs_base_path()
+            client = client_identity_from_payload(payload)
+            ruta_cliente = get_ruta_cliente_documentacion(client, base_path=base_path)
+            ruta = get_ruta_recursos_telematicos(
+                client=client,
+                base_path=base_path,
+                fase_procedimiento=str(fase_procedimiento or ""),
+            )
+            phase_folder = get_phase_folder_name(str(fase_procedimiento or ""))
         except Exception as exc:
             self.logger.warning("Error construyendo ruta recursos telematicos: %s", exc)
             # Fallback: usar solo RECURSOS TELEMATICOS sin subfase
             from core.client_documentation import (
                 client_identity_from_payload,
             )
-            from core.client_paths import get_ruta_cliente_documentacion, resolve_client_docs_base_path
+            from core.client_paths import (
+                find_or_create_normalized_subfolder,
+                get_ruta_cliente_documentacion,
+                resolve_client_docs_base_path,
+            )
 
             base_path = resolve_client_docs_base_path()
             client = client_identity_from_payload(payload)
             ruta_base = get_ruta_cliente_documentacion(client, base_path=base_path)
-            ruta = ruta_base / "RECURSOS TELEMATICOS"
+            ruta = find_or_create_normalized_subfolder(ruta_base, "RECURSOS TELEMATICOS")
+            ruta_cliente = ruta_base
+            phase_folder = None
 
         return {
             "path": str(ruta),
             "exists": ruta.exists(),
+            "fase_procedimiento": (str(fase_procedimiento or "").strip() or None),
+            "fase_folder": phase_folder,
+            "ruta_cliente": str(ruta_cliente),
         }

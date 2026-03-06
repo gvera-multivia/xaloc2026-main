@@ -44,5 +44,14 @@ def sanitize_filename_component(value: str) -> str:
 
 def call_with_supported_kwargs(fn, **kwargs):
     sig = inspect.signature(fn)
-    supported = {k: v for k, v in kwargs.items() if k in sig.parameters and v is not None}
+    supported = {}
+    for k, v in kwargs.items():
+        if k not in sig.parameters:
+            continue
+        param = sig.parameters[k]
+        # Si el parametro es obligatorio (sin default), no eliminar None:
+        # dejamos que el controlador valide y emita error funcional claro.
+        if v is None and param.default is not inspect._empty:
+            continue
+        supported[k] = v
     return fn(**supported)

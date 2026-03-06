@@ -7,6 +7,7 @@ import { apiClient } from '@/core/api/client'
 import { AUTH } from '@/core/api/endpoints'
 import { UserSessionSchema } from '@/core/api/schemas'
 import { morriganWs } from '@/core/api/ws'
+import type { AxiosError } from 'axios'
 
 export function App() {
     const [bootReady, setBootReady] = useState(false)
@@ -28,10 +29,14 @@ export function App() {
                 setSession(session, persistedToken ?? undefined)
                 morriganWs.connectWithToken(persistedToken)
             } catch (err) {
-                // In production, stale persisted sessions produce invalid WS tokens (403 loop).
-                // Keep the relaxed behavior only in DEV.
+                // Only clear persisted session when backend explicitly says auth is invalid.
+                // On network/CORS/timeout errors we keep local session to avoid false logout
+                // right after updater restart.
+                const axiosErr = err as AxiosError | undefined
+                const status = axiosErr?.response?.status
+                const shouldInvalidate = status === 401 || status === 403
                 const currentSession = useAuthStore.getState().user
-                if (!currentSession || !import.meta.env.DEV) {
+                if (!currentSession || shouldInvalidate) {
                     clearSession()
                 }
             } finally {

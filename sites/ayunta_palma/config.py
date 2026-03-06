@@ -90,3 +90,14 @@ class AyuntaPalmaConfig(BaseConfig):
         "returnUrl=https%3a%2f%2fpalma.sedipualba.es%2fcarpetaciudadana%2fnueva_entrada.aspx%3fidtramite%3d13809"
     )
     selectors: AyuntaPalmaSelectors = field(default_factory=AyuntaPalmaSelectors)
+
+    def __post_init__(self) -> None:
+        # Evita el globo "Restore pages?" que a veces aparece tras cierres abruptos
+        # y puede interferir con el flujo de firma.
+        extra_args = [
+            "--disable-session-crashed-bubble",
+            "--hide-crash-restore-bubble",
+        ]
+        for arg in extra_args:
+            if arg not in self.navegador.args:
+                self.navegador.args.append(arg)
