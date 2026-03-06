@@ -81,7 +81,7 @@ export default function HistoryPage() {
 
   const fetchDays = async () => {
     try {
-      const res = await historyApi.getDays('all', 1, 20);
+      const res = await historyApi.getDays('success', 1, 20);
       const dayList = (res.items || []) as any[];
       setDays(dayList);
       if (dayList.length > 0 && !selectedDay) {

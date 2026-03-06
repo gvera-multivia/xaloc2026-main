@@ -5,16 +5,20 @@ import os
 import json
 import logging
 import sqlite3
+import zipfile
+from io import BytesIO
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
-from typing import Any, Optional
+from typing import Any, Optional, Literal
 from pathlib import Path
 from datetime import datetime, timezone
 
 import aiohttp
+from PIL import Image
 from fastapi import FastAPI, Query, HTTPException, Body, Request, WebSocket, WebSocketDisconnect, Header, Depends, status, UploadFile, File
 from fastapi.responses import Response, FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+from pypdf import PdfReader, PdfWriter
 
 load_dotenv()
 
@@ -92,6 +96,124 @@ _WS_DEBUG_STATS: dict[str, int] = {
     "rejected_invalid_token": 0,
     "rejected_redis_unavailable": 0,
 }
+
+
+def _to_rgb_for_jpeg(image: Image.Image) -> Image.Image:
+    if image.mode == "RGB":
+        return image
+    if image.mode in {"RGBA", "LA"}:
+        background = Image.new("RGB", image.size, (255, 255, 255))
+        alpha = image.split()[-1]
+        background.paste(image.convert("RGB"), mask=alpha)
+        return background
+    if image.mode == "P":
+        if "transparency" in image.info:
+            return _to_rgb_for_jpeg(image.convert("RGBA"))
+        return image.convert("RGB")
+    return image.convert("RGB")
+
+
+def _encode_image_candidate(
+    image: Image.Image,
+    *,
+    fmt: str,
+    jpeg_quality: int,
+    png_compress_level: int,
+) -> tuple[bytes, dict[str, Any]]:
+    tmp = BytesIO()
+    if fmt == "JPEG":
+        image.save(
+            tmp,
+            format="JPEG",
+            quality=jpeg_quality,
+            optimize=True,
+            progressive=True,
+        )
+        return tmp.getvalue(), {
+            "format": "JPEG",
+            "quality": jpeg_quality,
+            "optimize": True,
+            "progressive": True,
+        }
+    image.save(
+        tmp,
+        format="PNG",
+        optimize=True,
+        compress_level=png_compress_level,
+    )
+    return tmp.getvalue(), {
+        "format": "PNG",
+        "optimize": True,
+        "compress_level": png_compress_level,
+    }
+
+
+def _compress_pdf_images_in_writer(
+    writer: PdfWriter,
+    *,
+    jpeg_quality: int,
+    max_image_dim: int,
+    min_gain_ratio: float,
+    png_compress_level: int,
+) -> tuple[int, int, int]:
+    total_images = 0
+    replaced_images = 0
+    skipped_images = 0
+
+    for page in writer.pages:
+        for image_file in page.images:
+            total_images += 1
+            try:
+                original_bytes = image_file.data or b""
+                original_size = len(original_bytes)
+                source = image_file.image
+
+                if max_image_dim > 0:
+                    width, height = source.size
+                    biggest_side = max(width, height)
+                    if biggest_side > max_image_dim:
+                        ratio = max_image_dim / float(biggest_side)
+                        new_size = (
+                            max(1, int(width * ratio)),
+                            max(1, int(height * ratio)),
+                        )
+                        source = source.resize(new_size, Image.Resampling.LANCZOS)
+
+                jpeg_source = _to_rgb_for_jpeg(source)
+                jpeg_bytes, jpeg_kwargs = _encode_image_candidate(
+                    jpeg_source,
+                    fmt="JPEG",
+                    jpeg_quality=jpeg_quality,
+                    png_compress_level=png_compress_level,
+                )
+
+                candidates: list[tuple[bytes, dict[str, Any], Image.Image]] = [
+                    (jpeg_bytes, jpeg_kwargs, jpeg_source)
+                ]
+                if source.mode in {"1", "L", "P", "LA", "RGBA"}:
+                    png_bytes, png_kwargs = _encode_image_candidate(
+                        source,
+                        fmt="PNG",
+                        jpeg_quality=jpeg_quality,
+                        png_compress_level=png_compress_level,
+                    )
+                    candidates.append((png_bytes, png_kwargs, source))
+
+                best_data, best_kwargs, best_image = min(candidates, key=lambda x: len(x[0]))
+                best_size = len(best_data)
+
+                if original_size > 0:
+                    target_size = int(original_size * (1.0 - min_gain_ratio))
+                    if best_size >= target_size:
+                        skipped_images += 1
+                        continue
+
+                image_file.replace(best_image, **best_kwargs)
+                replaced_images += 1
+            except Exception:
+                skipped_images += 1
+
+    return total_images, replaced_images, skipped_images
 
 
 def _is_windows_connection_reset(context: dict[str, Any]) -> bool:
@@ -573,9 +695,9 @@ async def api_history_days(
     source: str = Query("all"),
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
-    _user: dict = Depends(require_user),
+    user: dict = Depends(require_user),
 ) -> dict:
-    return service.list_history_days(source=source, page=page, page_size=page_size)
+    return service.list_history_days(source=source, page=page, page_size=page_size, user=user)
 
 
 @app.get("/api/history/incidents")
@@ -641,9 +763,9 @@ async def api_history_successes(
     day: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(200, ge=1, le=1000),
-    _user: dict = Depends(require_user),
+    user: dict = Depends(require_user),
 ) -> dict:
-    return service.list_history_successes(day=day, page=page, page_size=page_size)
+    return service.list_history_successes(day=day, page=page, page_size=page_size, user=user)
 
 
 @app.get("/api/queue/days")
@@ -1526,6 +1648,176 @@ async def api_admin_broadcast_notification(
         raise HTTPException(status_code=500, detail=f"No se pudo publicar la notificacion: {exc}") from exc
 
     return {"ok": True, "published_to_subscribers": int(subscribers), "event": event}
+
+
+@app.post("/api/documentos/convert")
+async def api_documentos_convert(files: list[UploadFile] = File(...)) -> Response:
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided")
+
+    converted_files: list[tuple[str, bytes]] = []
+    for upload in files:
+        contents = await upload.read()
+        try:
+            image = Image.open(BytesIO(contents))
+            if image.mode in {"RGBA", "P"}:
+                image = image.convert("RGB")
+
+            pdf_bytes = BytesIO()
+            image.save(pdf_bytes, format="PDF", resolution=100.0)
+            pdf_bytes.seek(0)
+
+            base_name = os.path.splitext(upload.filename or "image")[0]
+            converted_files.append((f"{base_name}.pdf", pdf_bytes.read()))
+        except Exception as exc:
+            logger.error("Error converting %s: %s", upload.filename, exc)
+            raise HTTPException(
+                status_code=400,
+                detail=f"No se pudo convertir el archivo {upload.filename}. Asegurate de que sea una imagen valida.",
+            ) from exc
+
+    if len(converted_files) == 1:
+        pdf_name, pdf_data = converted_files[0]
+        return Response(
+            content=pdf_data,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{pdf_name}"'},
+        )
+
+    zip_buffer = BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for pdf_name, pdf_data in converted_files:
+            archive.writestr(pdf_name, pdf_data)
+    zip_buffer.seek(0)
+
+    return Response(
+        content=zip_buffer.read(),
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="conversiones.zip"'},
+    )
+
+
+@app.post("/api/documentos/bundle")
+async def api_documentos_bundle(files: list[UploadFile] = File(...)) -> Response:
+    if len(files) < 2:
+        raise HTTPException(status_code=400, detail="Se requieren al menos 2 archivos para fusionar")
+
+    writer = PdfWriter()
+    try:
+        for upload in files:
+            contents = await upload.read()
+            writer.append(BytesIO(contents))
+
+        output_buffer = BytesIO()
+        writer.write(output_buffer)
+        output_buffer.seek(0)
+        return Response(
+            content=output_buffer.read(),
+            media_type="application/pdf",
+            headers={"Content-Disposition": 'attachment; filename="documentos_fusionados.pdf"'},
+        )
+    except Exception as exc:
+        logger.error("Error merging PDFs: %s", exc)
+        raise HTTPException(
+            status_code=400,
+            detail="Error al fusionar los archivos. Verifica que sean PDFs validos.",
+        ) from exc
+
+
+@app.post("/api/documentos/compress")
+async def api_documentos_compress(
+    files: list[UploadFile] = File(...),
+    profile: Literal["conservador", "equilibrado", "agresivo"] = Query(
+        default="equilibrado",
+        description="Perfil de compresion predefinido",
+    ),
+    quality: int | None = Query(default=None, ge=20, le=95, description="Calidad JPEG para imagenes embebidas"),
+    max_dim: int | None = Query(default=None, ge=0, le=6000, description="Tamano maximo (px) de lado largo; 0 desactiva downscale"),
+    min_gain_percent: int | None = Query(default=None, ge=0, le=80, description="Ganancia minima para sustituir una imagen"),
+    png_compress_level: int | None = Query(default=None, ge=0, le=9, description="Nivel de compresion PNG (0-9)"),
+) -> Response:
+    if not files:
+        raise HTTPException(status_code=400, detail="No file provided")
+
+    upload = files[0]
+    try:
+        presets: dict[str, dict[str, int]] = {
+            "conservador": {"quality": 70, "max_dim": 2400, "min_gain_percent": 2, "png_compress_level": 9},
+            "equilibrado": {"quality": 55, "max_dim": 1800, "min_gain_percent": 3, "png_compress_level": 9},
+            "agresivo": {"quality": 40, "max_dim": 1400, "min_gain_percent": 1, "png_compress_level": 9},
+        }
+        preset = presets[profile]
+        final_quality = int(quality if quality is not None else preset["quality"])
+        final_max_dim = int(max_dim if max_dim is not None else preset["max_dim"])
+        final_min_gain_percent = int(min_gain_percent if min_gain_percent is not None else preset["min_gain_percent"])
+        final_png_compress_level = int(png_compress_level if png_compress_level is not None else preset["png_compress_level"])
+
+        contents = await upload.read()
+        reader = PdfReader(BytesIO(contents))
+        writer = PdfWriter()
+
+        for page in reader.pages:
+            writer.add_page(page)
+
+        total_images, replaced_images, skipped_images = _compress_pdf_images_in_writer(
+            writer,
+            jpeg_quality=final_quality,
+            max_image_dim=final_max_dim,
+            min_gain_ratio=float(final_min_gain_percent) / 100.0,
+            png_compress_level=final_png_compress_level,
+        )
+
+        for page in writer.pages:
+            page.compress_content_streams()
+
+        output_buffer = BytesIO()
+        writer.write(output_buffer)
+        output_buffer.seek(0)
+
+        original_size = len(contents)
+        compressed_size = len(output_buffer.getvalue())
+        output_bytes = output_buffer.getvalue()
+        returned_bytes = output_bytes if compressed_size < original_size else contents
+        returned_size = len(returned_bytes)
+        compression_applied = returned_bytes is output_bytes
+        compression_message = (
+            "Compresion aplicada correctamente."
+            if compression_applied
+            else "No se ha conseguido comprimir mas el PDF."
+        )
+        base_name = os.path.splitext(upload.filename or "document")[0]
+        out_filename = (
+            f"{base_name}_comprimido.pdf"
+            if compression_applied
+            else f"{base_name}_original.pdf"
+        )
+
+        return Response(
+            content=returned_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{out_filename}"',
+                "X-Original-Size": str(original_size),
+                "X-Compressed-Size": str(compressed_size),
+                "X-Returned-Size": str(returned_size),
+                "X-Compression-Applied": "1" if compression_applied else "0",
+                "X-Compression-Message": compression_message,
+                "X-Compression-Profile": profile,
+                "X-Compression-Quality": str(final_quality),
+                "X-Compression-Max-Dim": str(final_max_dim),
+                "X-Compression-Min-Gain-Percent": str(final_min_gain_percent),
+                "X-Compression-Png-Level": str(final_png_compress_level),
+                "X-Compressed-Images-Total": str(total_images),
+                "X-Compressed-Images-Replaced": str(replaced_images),
+                "X-Compressed-Images-Skipped": str(skipped_images),
+            },
+        )
+    except Exception as exc:
+        logger.error("Error compressing PDF: %s", exc)
+        raise HTTPException(
+            status_code=400,
+            detail="Error al comprimir el archivo. Verifica que sea un PDF valido.",
+        ) from exc
 
 
 @app.api_route(

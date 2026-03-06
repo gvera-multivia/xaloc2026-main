@@ -119,17 +119,6 @@ export default function DocumentosPage() {
           <Layers size={18} />
           <span className="font-semibold uppercase text-xs tracking-wider">Fusionar PDFs</span>
         </button>
-        <button
-          onClick={() => { setActiveTab("compress"); clearFiles(); }}
-          className={`flex items-center gap-2 px-4 py-3 rounded border transition-colors ${
-            activeTab === "compress"
-              ? "bg-[rgba(108,77,255,0.15)] border-[rgba(108,77,255,0.4)] text-foreground"
-              : "bg-[rgba(17,19,26,0.55)] border-border/70 text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          <Minimize size={18} />
-          <span className="font-semibold uppercase text-xs tracking-wider">Comprimir PDF</span>
-        </button>
       </div>
 
       <div className="bg-[rgba(17,19,26,0.55)] border border-border/70 rounded p-6">

@@ -3,13 +3,11 @@
 import React, { useState, useEffect, useMemo } from "react";
 import {
   Settings,
-  ShieldCheck,
   Pause,
   Play,
   Power,
   Clock,
   AlertTriangle,
-  Check,
   X,
   UserPlus,
   Users,
@@ -18,8 +16,8 @@ import {
   Lock,
   Bell,
 } from "lucide-react";
-import { queueApi, authApi, configApi, api, usersApi } from "@/lib/api";
-import { QueueItem, PendingAuth, PauseInfo, OrganismoConfig, DashboardUser } from "@/lib/types";
+import { queueApi, configApi, api, usersApi } from "@/lib/api";
+import { QueueItem, PauseInfo, OrganismoConfig, DashboardUser } from "@/lib/types";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { canManagePauses as clientViewCanManagePauses } from "@/lib/permissions";
@@ -40,7 +38,7 @@ const KNOWN_SITES = ["madrid", "xaloc_girona", "base_online", "ayunta_palma", "r
  * - Avoid neon greens/yellows; use restrained "status" colors
  * - Table is matte + terminal-native (clean dividers, minimal hover)
  *
- * Non-admin users can see queue status and manage authorizations,
+ * Non-admin users can see queue status,
  * but pause/unpause/activate buttons are hidden.
  * "Incidencias Recientes" section removed (viewed on separate page).
  */
@@ -50,7 +48,6 @@ export default function AdminPage() {
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
   const [pauses, setPauses] = useState<PauseInfo[]>([]);
   const [configs, setConfigs] = useState<OrganismoConfig[]>([]);
-  const [pendingAuth, setPendingAuth] = useState<PendingAuth[]>([]);
   const [users, setUsers] = useState<DashboardUser[]>([]);
   const [globalReason, setGlobalReason] = useState("");
   const [globalMinutes, setGlobalMinutes] = useState("120");
@@ -71,12 +68,11 @@ export default function AdminPage() {
 
   const refresh = async () => {
     try {
-      const [queueRes, pausesRes, authRes, configRes] = await Promise.all([
+      const [queueRes, pausesRes, configRes] = await Promise.all([
         queueApi.getCurrent(1, 1000),
         isAdmin
           ? api.get<{ items: PauseInfo[] }>("/queue/pauses?active_only=true")
           : Promise.resolve({ items: [] as PauseInfo[] }),
-        authApi.getPending(),
         isAdmin
           ? configApi.list()
           : Promise.resolve({ items: [] as OrganismoConfig[] }),
@@ -85,7 +81,6 @@ export default function AdminPage() {
 
       setQueueItems(queueRes.items || []);
       setPauses(pausesRes.items || []);
-      setPendingAuth(authRes.items || []);
       setConfigs((configRes.items || []) as OrganismoConfig[]);
       setUsers(usersRes.items || []);
       setError("");
@@ -209,36 +204,6 @@ export default function AdminPage() {
     }
   };
 
-  const handleApproveAuth = async (id: number) => {
-    setBusy(`auth-${id}`);
-    try {
-      await authApi.approve(id);
-      sileo.success({ title: "Autorización aprobada", description: `Solicitud #${id} autorizada` });
-      await refresh();
-    } catch {
-      sileo.error({ title: "Error al aprobar autorización" });
-      setError("Error al aprobar autorización");
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const handleRejectAuth = async (id: number) => {
-    const reason = prompt("Motivo del rechazo:");
-    if (!reason) return;
-    setBusy(`auth-${id}`);
-    try {
-      await authApi.reject(id, reason);
-      sileo.success({ title: "Autorización rechazada", description: `Solicitud #${id} rechazada` });
-      await refresh();
-    } catch {
-      sileo.error({ title: "Error al rechazar autorización" });
-      setError("Error al rechazar autorización");
-    } finally {
-      setBusy(null);
-    }
-  };
-
   const handleCreateUser = async () => {
     if (!userForm.username || !userForm.password) {
       sileo.error({ title: "Username y Password requeridos" });
@@ -341,111 +306,6 @@ export default function AdminPage() {
           <p className="text-sm font-medium text-foreground/90">{error}</p>
         </div>
       )}
-
-      {/* =========================
-          Authorizations
-         ========================= */}
-      <section className="space-y-4">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg border border-border/70 bg-[rgba(17,19,26,0.55)] flex items-center justify-center">
-            <ShieldCheck size={18} className="text-[rgba(108,77,255,0.75)]" />
-          </div>
-
-          <h3 className="text-xl font-black uppercase tracking-tight text-foreground/90">
-            Autorizaciones Pendientes
-          </h3>
-
-          <span
-            className={cn(
-              "px-2 py-1 rounded-full text-[10px] font-black uppercase tracking-[0.22em] border",
-              pendingAuth.length > 0
-                ? "border-[rgba(122,15,30,0.32)] bg-[rgba(122,15,30,0.10)] text-foreground/90"
-                : "border-border/70 bg-[rgba(17,19,26,0.55)] text-muted-foreground/80"
-            )}
-          >
-            {pendingAuth.length} Req.
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {pendingAuth.length === 0 ? (
-            <div className="col-span-full py-10 text-center morr-card rounded-2xl border border-dashed border-border/70 text-muted-foreground/80">
-              <p className="text-sm italic">No hay peticiones de autorización pendientes.</p>
-            </div>
-          ) : (
-            pendingAuth.map((auth) => (
-              <div
-                key={auth.id}
-                className={cn(
-                  "morr-card morr-edge rounded p-6 space-y-4",
-                  "transition-all duration-500"
-                )}
-              >
-                <div className="flex justify-between items-start gap-4">
-                  <div className="min-w-0">
-                    <h4 className="font-black text-base uppercase tracking-[0.10em] truncate">
-                      {auth.site_id}
-                    </h4>
-                    <p className="text-xs text-muted-foreground/80 mt-1">
-                      Recurso:{" "}
-                      <span className="text-foreground/90 font-black">#{auth.resource_id}</span>
-                    </p>
-                  </div>
-
-                  <span className="text-[10px] px-2 py-1 rounded-md border border-border/70 bg-[rgba(17,19,26,0.55)] text-muted-foreground/80 font-mono">
-                    {new Date(auth.created_at).toLocaleTimeString()}
-                  </span>
-                </div>
-
-                <div className="rounded-xl border border-border/70 bg-[rgba(11,12,16,0.35)] p-4">
-                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground/80 mb-2">
-                    Motivo
-                  </p>
-                  <p className="text-sm leading-relaxed text-foreground/90">
-                    {auth.reason || "Requiere intervención manual"}
-                  </p>
-                </div>
-
-                <div className="flex gap-2 pt-1">
-                  {/* Approve = Fate */}
-                  <button
-                    onClick={() => handleApproveAuth(auth.id)}
-                    disabled={busy === `auth-${auth.id}`}
-                    className={cn(
-                      "morr-focus flex-1 rounded py-2.5",
-                      "text-[10px] font-black uppercase tracking-[0.2em]",
-                      "bg-[color:var(--morr-fate)] text-white/95",
-                      "border border-transparent",
-                      "hover:bg-[color:var(--morr-fate-hi)]",
-                      "transition-all duration-300 active:scale-[0.98] disabled:opacity-50",
-                      "flex items-center justify-center gap-2"
-                    )}
-                  >
-                    <Check size={14} /> Autorizar
-                  </button>
-
-                  {/* Reject = quiet destructive */}
-                  <button
-                    onClick={() => handleRejectAuth(auth.id)}
-                    disabled={busy === `auth-${auth.id}`}
-                    className={cn(
-                      "morr-focus flex-1 rounded-xl py-2.5",
-                      "text-[11px] font-black uppercase tracking-[0.18em]",
-                      "bg-[rgba(17,19,26,0.55)] text-foreground/90",
-                      "border border-border/70",
-                      "hover:border-[rgba(255,60,80,0.22)] hover:bg-[rgba(255,60,80,0.06)]",
-                      "transition active:scale-[0.99] disabled:opacity-50",
-                      "flex items-center justify-center gap-2"
-                    )}
-                  >
-                    <X size={14} /> Rechazar
-                  </button>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </section>
 
       {/* =========================
           Site Control Table

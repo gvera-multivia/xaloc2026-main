@@ -90,11 +90,12 @@ services:
       DASHBOARD_ENABLE_FRONTEND_PROXY: "0"
       DASHBOARD_ENABLE_WS: "1"
       DASHBOARD_CORS_ORIGINS: "*"
+      REDIS_ENABLED: "1"
       REDIS_URL: redis://redis:6379/0
       AUTH_RBAC_SERVICE_URL: http://auth-rbac-service:8101
       USE_PG_SOURCE_OF_TRUTH: "1"
       QUEUE_MODE: redis_streams
-      DASHBOARD_HISTORY_SOURCE: ${DASHBOARD_HISTORY_SOURCE:-pg}
+      DASHBOARD_HISTORY_SOURCE: ${DASHBOARD_HISTORY_SOURCE:-sqlserver}
       REPORT_PG_DSN: ${REPORT_PG_DSN:-postgresql://xaloc:xaloc_dev_password@postgres:5432/xaloc}
       CLIENT_DOCS_BASE_PATH: /mnt/clientes
     volumes:

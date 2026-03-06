@@ -23,7 +23,6 @@ from pathlib import Path
 
 from playwright.async_api import BrowserContext, Frame, Page
 from core.autofirma_signing_bridge import parse_afirma_url, sign_with_pfx
-from core.autofirma_shared import prepare_autofirma_context
 
 # Usar el logger del sitio para garantizar salida en logs del runner.
 logger = logging.getLogger("xaloc_automation.ayunta_palma")
@@ -34,6 +33,12 @@ logger = logging.getLogger("xaloc_automation.ayunta_palma")
 
 _SIGNING_SUPPORTED = True  # will be False if autofirma binary not found
 _AFIRMA_URI_RE = re.compile(r"((?:afirma|xalocafirma)://[^'\"\\s]+)", re.IGNORECASE)
+_BLOCK_EXTERNAL_PROTOCOL_LAUNCH = (os.getenv("XALOC_AP_FIRMA_ALLOW_EXTERNAL_LAUNCH") or "0").strip().lower() not in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 try:
     # autofirma v1.9 does not have a 'version' subcommand; checking binary exists via -help
@@ -55,6 +60,7 @@ except (FileNotFoundError, subprocess.TimeoutExpired, Exception) as _e:
 _INTERCEPT_SCRIPT = """() => {
     if (window.__xaloc_afirma_interceptor_installed) return;
     window.__xaloc_afirma_interceptor_installed = true;
+    const blockExternalLaunch = __BLOCK_EXTERNAL_LAUNCH__;
 
     window.__afirma_url = window.__afirma_url || null;
     window.__afirma_source = window.__afirma_source || null;
@@ -71,17 +77,21 @@ _INTERCEPT_SCRIPT = """() => {
     // Capture window.open('afirma://...')
     const _origOpen = window.open.bind(window);
     window.open = function(url, ...rest) {
-        if (captureAfirma(url, 'window.open')) {
-            return null;
-        }
+        const captured = captureAfirma(url, 'window.open');
+        if (captured && blockExternalLaunch) return null;
         return _origOpen(url, ...rest);
+    };
+
+    const captureFromAttr = (value, source) => {
+        try { captureAfirma(value, source); } catch(_e) {}
     };
 
     // Capture navigation APIs that often emit afirma:// in Sedipualba.
     try {
         const _origAssign = window.location.assign.bind(window.location);
         window.location.assign = function(url) {
-            if (captureAfirma(url, 'location.assign')) return;
+            const captured = captureAfirma(url, 'location.assign');
+            if (captured && blockExternalLaunch) return;
             return _origAssign(url);
         };
     } catch(e) {
@@ -90,7 +100,8 @@ _INTERCEPT_SCRIPT = """() => {
     try {
         const _origReplace = window.location.replace.bind(window.location);
         window.location.replace = function(url) {
-            if (captureAfirma(url, 'location.replace')) return;
+            const captured = captureAfirma(url, 'location.replace');
+            if (captured && blockExternalLaunch) return;
             return _origReplace(url);
         };
     } catch(e) {
@@ -104,7 +115,8 @@ _INTERCEPT_SCRIPT = """() => {
                 enumerable: hrefDesc.enumerable,
                 get: function() { return hrefDesc.get.call(this); },
                 set: function(url) {
-                    if (captureAfirma(url, 'location.href')) return;
+                    const captured = captureAfirma(url, 'location.href');
+                    if (captured && blockExternalLaunch) return;
                     return hrefDesc.set.call(this, url);
                 }
             });
@@ -118,9 +130,11 @@ _INTERCEPT_SCRIPT = """() => {
         const el = ev.target && ev.target.closest ? ev.target.closest('a[href]') : null;
         if (el) {
             const href = el.href || el.getAttribute('href') || '';
-            if (captureAfirma(href, 'anchor-click-capture')) {
-                ev.preventDefault();
-                ev.stopPropagation();
+            const captured = captureAfirma(href, 'anchor-click-capture');
+            if (captured && blockExternalLaunch) {
+                try { ev.preventDefault(); } catch(_e) {}
+                try { ev.stopPropagation(); } catch(_e) {}
+                try { ev.stopImmediatePropagation(); } catch(_e) {}
             }
         }
     }, true);
@@ -130,8 +144,54 @@ _INTERCEPT_SCRIPT = """() => {
         const _origAnchorClick = HTMLAnchorElement.prototype.click;
         HTMLAnchorElement.prototype.click = function(...args) {
             const href = this.href || this.getAttribute('href') || '';
-            if (captureAfirma(href, 'anchor-prototype-click')) return;
+            const captured = captureAfirma(href, 'anchor-prototype-click');
+            if (captured && blockExternalLaunch) return;
             return _origAnchorClick.apply(this, args);
+        };
+    } catch(e) {
+        // ignore
+    }
+
+    // Capture setAttribute('href'|'src'|'action', 'afirma://...').
+    try {
+        const _origSetAttr = Element.prototype.setAttribute;
+        Element.prototype.setAttribute = function(name, value) {
+            const key = String(name || '').toLowerCase();
+            if (key === 'href' || key === 'src' || key === 'action') {
+                captureFromAttr(value, `setAttribute:${key}`);
+            }
+            return _origSetAttr.call(this, name, value);
+        };
+    } catch(e) {
+        // ignore
+    }
+
+    // Capture submit actions that can carry afirma:// in form.action.
+    try {
+        const _origFormSubmit = HTMLFormElement.prototype.submit;
+        HTMLFormElement.prototype.submit = function(...args) {
+            try { captureFromAttr(this && this.action, 'form.submit.action'); } catch(_e) {}
+            return _origFormSubmit.apply(this, args);
+        };
+    } catch(e) {
+        // ignore
+    }
+
+    // Capture synthetic dispatches where target/action can contain afirma://
+    try {
+        const _origDispatch = EventTarget.prototype.dispatchEvent;
+        EventTarget.prototype.dispatchEvent = function(ev) {
+            try {
+                const self = this || null;
+                const target = (ev && ev.target) || self;
+                captureFromAttr(self && self.href, 'dispatchEvent:self.href');
+                captureFromAttr(self && self.src, 'dispatchEvent:self.src');
+                captureFromAttr(self && self.action, 'dispatchEvent:self.action');
+                captureFromAttr(target && target.href, 'dispatchEvent:target.href');
+                captureFromAttr(target && target.src, 'dispatchEvent:target.src');
+                captureFromAttr(target && target.action, 'dispatchEvent:target.action');
+            } catch(_e) {}
+            return _origDispatch.call(this, ev);
         };
     } catch(e) {
         // ignore
@@ -145,7 +205,6 @@ _INTERCEPT_SCRIPT = """() => {
                 const m = fn.match(/(?:afirma|xalocafirma):\\/\\/[^'\"\\s)]+/i);
                 if (m && m[0]) {
                     captureAfirma(m[0], 'setTimeout-string');
-                    return 0;
                 }
             }
             return _origSetTimeout(fn, delay, ...rest);
@@ -153,19 +212,67 @@ _INTERCEPT_SCRIPT = """() => {
     } catch(e) {
         // ignore
     }
-}"""
+}""".replace("__BLOCK_EXTERNAL_LAUNCH__", "true" if _BLOCK_EXTERNAL_PROTOCOL_LAUNCH else "false")
 
 _WAIT_FOR_URL_SCRIPT = "() => window.__afirma_url !== null && window.__afirma_url !== undefined"
 
 
 async def preparar_captura_afirma_context(context: BrowserContext) -> None:
     """
-    Inicializa la captura de afirma:// al principio del flujo (antes del login):
-    - instala init_script global para todos los documentos/frames futuros
-    - registra listener de consola para detectar "Launched external handler for 'afirma://...'"
+    Inicializa la captura de afirma:// al principio del flujo (antes del login)
+    sin bloquear el flujo nativo del protocolo externo.
     """
-    # Wrapper de compatibilidad: la preparación común vive en core/autofirma_shared.py.
-    await prepare_autofirma_context(context, logger=logger)
+    if getattr(context, "_xaloc_ap_afirma_capture_prepared", False):
+        return
+
+    await context.add_init_script(_INTERCEPT_SCRIPT)
+
+    def _extract_afirma_url(text: str) -> str | None:
+        if not text:
+            return None
+        m = _AFIRMA_URI_RE.search(text)
+        if m:
+            return m.group(1)
+        return None
+
+    def _attach_console_probe(page: Page) -> None:
+        try:
+            if getattr(page, "_xaloc_ap_afirma_console_probe", False):
+                return
+            setattr(page, "_xaloc_ap_afirma_console_probe", True)
+        except Exception:
+            pass
+
+        def _on_console(msg) -> None:
+            try:
+                txt = getattr(msg, "text", "")
+                if callable(txt):
+                    txt = txt()
+                txt = str(txt or "")
+                uri = _extract_afirma_url(txt)
+                if uri:
+                    logger.info(
+                        "[AP-FIRMA] URI detectada en consola (page=%s): %s",
+                        (page.url or "")[:120],
+                        uri[:140],
+                    )
+            except Exception:
+                pass
+
+        try:
+            page.on("console", _on_console)
+        except Exception:
+            pass
+
+    try:
+        for p in context.pages:
+            _attach_console_probe(p)
+        context.on("page", _attach_console_probe)
+    except Exception:
+        pass
+
+    setattr(context, "_xaloc_ap_afirma_capture_prepared", True)
+    logger.info("[AP-FIRMA] Contexto Palma preparado (captura no bloqueante + consola).")
 
 
 async def interceptar_y_capturar_url_afirma(
@@ -431,6 +538,7 @@ _INJECT_FIRMA_SCRIPT = """(firma) => {
     };
 
     const preferredFns = [
+        'procesarFirma', 'processFirma',
         'setFirma', 'establecerFirma', 'recibirFirma',
         'onFirmaOK', 'onFirmaOk', 'firmaOK', 'firmaOk',
         'signatureOK', 'signatureOk', 'setSignature',
@@ -530,13 +638,6 @@ _INJECT_FIRMA_SCRIPT = """(firma) => {
         return null;
     };
 
-    // Primero intentar callback JS del portafirmas (flujo nativo con verificacion "verde").
-    const callbackResEarly = tryCallbacks();
-    if (callbackResEarly) {
-        callbackResEarly.trace_count = (window.__xaloc_firma_trace || []).length;
-        return callbackResEarly;
-    }
-
     // Look for the hidden input that Sedipualba uses to receive the signature
     let candidates = [
         ...document.querySelectorAll('input[id*="hfFirma"]'),
@@ -575,7 +676,8 @@ _INJECT_FIRMA_SCRIPT = """(firma) => {
     trace('hidden_set', { id: input.id || null, name: input.name || null, len: firma.length });
     console.debug('[xaloc] Firma inyectada en:', input.id || input.name, 'len=', firma.length);
 
-    // Reintentar callback tras setear hidden (algunas paginas lo requieren en este orden).
+    // Ejecutar callback solo despues de setear hidden para evitar falsos positivos
+    // (callbacks que no lanzan error pero no consumen la firma).
     const callbackResLate = tryCallbacks();
     if (callbackResLate) {
         callbackResLate.trace_count = (window.__xaloc_firma_trace || []).length;
@@ -725,10 +827,12 @@ async def _click_signar_tots_programatic(page: Page) -> bool:
     in any frame where it can be found.
     """
     strict_button_selectors = [
+        "input[type='submit'][id*='btnFirmar']:not([disabled])",
+        "input[type='submit'][name*='btnFirmar']:not([disabled])",
+        "button.btnFirmar:not([disabled])",
         "button:has-text('Signar tots els documents')",
         "button:has-text('Firmar todos los documentos')",
         "button:has-text('Firmar tots els documents')",
-        "button.btnFirmar",
     ]
     hidden_fallback_selectors = [
         "input[type='submit'][value*='Signar']",
@@ -746,88 +850,117 @@ async def _click_signar_tots_programatic(page: Page) -> bool:
         "1", "true", "yes", "on"
     }
 
-    # Fast-path quirurgico con reintentos: click directo en
-    # ventanaModal -> button.btn.btnFirmar antes de usar heuristicas.
+    # Fast-path con gesto real de usuario (trusted click) en ventanaModal.
+    # Evita falsos "click ok" de JS que no disparan protocolo externo.
     for _ in range(40):
         try:
-            direct_modal_click = await page.evaluate(
-                """() => {
-                    const iframe =
-                        document.querySelector("div.ui-dialog iframe#ventanaModal")
-                        || document.querySelector("iframe#ventanaModal")
-                        || document.querySelector("iframe[src*='/firma/firmar.aspx']");
-                    if (!iframe) return false;
-                    const w = iframe.contentWindow;
-                    const d = iframe.contentDocument || (w && w.document);
-                    if (!d) return false;
-                    const btn =
-                        d.querySelector("button.btn.btnFirmar")
-                        || d.querySelector("button.btnFirmar")
-                        || Array.from(d.querySelectorAll("button")).find((b) => {
-                            const t = (b.textContent || "").toLowerCase().replace(/\\s+/g, " ").trim();
-                            return t.includes("signar tots els documents")
-                                || t.includes("firmar todos los documentos")
-                                || t.includes("firmar tots els documents");
-                        });
-                    if (!btn) return false;
-                    btn.click();
-                    return true;
-                }"""
-            )
-            if direct_modal_click:
-                logger.info("[AP-FIRMA] Click directo en ventanaModal sobre 'Signar tots els documents'.")
+            modal_iframe = page.locator("#ventanaModal").first
+            if await modal_iframe.count() == 0:
+                await asyncio.sleep(0.25)
+                continue
+            handle = await modal_iframe.element_handle()
+            if not handle:
+                await asyncio.sleep(0.25)
+                continue
+            content_frame = await handle.content_frame()
+            if not content_frame:
+                await asyncio.sleep(0.25)
+                continue
+            clicked_fastpath = False
+            for sel in strict_button_selectors:
+                try:
+                    locator = content_frame.locator(sel).first
+                    if await locator.count() == 0:
+                        continue
+                    if not await locator.is_visible():
+                        continue
+                    await locator.scroll_into_view_if_needed()
+                    await locator.click(timeout=3000)
+                    clicked_fastpath = True
+                    logger.info(
+                        "[AP-FIRMA] Click trusted en ventanaModal-fastpath: %s",
+                        sel,
+                    )
+                    break
+                except Exception:
+                    continue
+            if clicked_fastpath:
                 return True
         except Exception:
             pass
         await asyncio.sleep(0.25)
 
     async def _try_locator_click(scope, label: str) -> bool:
-        # 1) Click real de Playwright (trusted) sobre boton visible.
+        # 1) Click real de Playwright (trusted) sobre candidatos visibles.
         for sel in strict_button_selectors:
             try:
-                locator = scope.locator(sel).first
-                if await locator.count() == 0:
+                locator = scope.locator(sel)
+                count = await locator.count()
+                if count == 0:
                     continue
-                if not await locator.is_visible():
-                    continue
-                await locator.scroll_into_view_if_needed()
-                await locator.click(timeout=3000)
-                logger.info("[AP-FIRMA] Boton Signar tots clickado en %s via trusted-click: %s", label, sel)
-                return True
+                max_items = min(count, 4)
+                for idx in range(max_items):
+                    candidate = locator.nth(idx)
+                    try:
+                        if not await candidate.is_visible():
+                            continue
+                        await candidate.scroll_into_view_if_needed()
+                        await candidate.click(timeout=3000)
+                        logger.info(
+                            "[AP-FIRMA] Boton Signar tots clickado en %s via trusted-click: %s (idx=%d/%d)",
+                            label,
+                            sel,
+                            idx + 1,
+                            count,
+                        )
+                        return True
+                    except Exception:
+                        continue
             except Exception:
                 continue
 
         # 1b) Fallback JS si el click trusted no entra.
         for sel in strict_button_selectors:
             try:
-                locator = scope.locator(sel).first
-                if await locator.count() == 0:
+                locator = scope.locator(sel)
+                count = await locator.count()
+                if count == 0:
                     continue
-                if not await locator.is_visible():
-                    continue
-                await locator.scroll_into_view_if_needed()
-                handle = await locator.element_handle()
-                if handle is None:
-                    continue
-                clicked = await handle.evaluate(
-                    """(el) => {
-                        try {
-                            el.click();
-                            return {
-                                ok: true,
-                                mode: 'dom-click',
-                                tag: el.tagName || null,
-                                id: el.id || null,
-                                text: (el.textContent || '').trim().slice(0, 80),
-                            };
-                        } catch (e) {
-                            return { ok: false, err: String(e) };
-                        }
-                    }"""
-                )
-                if isinstance(clicked, dict) and clicked.get("ok"):
-                    logger.info("[AP-FIRMA] Boton Signar tots clickado en %s via JS boton visible: %s (%s)", label, sel, clicked)
-                    return True
+                max_items = min(count, 4)
+                for idx in range(max_items):
+                    candidate = locator.nth(idx)
+                    if not await candidate.is_visible():
+                        continue
+                    await candidate.scroll_into_view_if_needed()
+                    handle = await candidate.element_handle()
+                    if handle is None:
+                        continue
+                    clicked = await handle.evaluate(
+                        """(el) => {
+                            try {
+                                el.click();
+                                return {
+                                    ok: true,
+                                    mode: 'dom-click',
+                                    tag: el.tagName || null,
+                                    id: el.id || null,
+                                    text: (el.textContent || '').trim().slice(0, 80),
+                                };
+                            } catch (e) {
+                                return { ok: false, err: String(e) };
+                            }
+                        }"""
+                    )
+                    if isinstance(clicked, dict) and clicked.get("ok"):
+                        logger.info(
+                            "[AP-FIRMA] Boton Signar tots clickado en %s via JS boton visible: %s (idx=%d/%d, %s)",
+                            label,
+                            sel,
+                            idx + 1,
+                            count,
+                            clicked,
+                        )
+                        return True
             except Exception:
                 continue
 
@@ -1011,6 +1144,21 @@ async def _puede_reintentar_click_signar(page: Page) -> bool:
                 return True
     except Exception:
         pass
+    # Fallback: el boton suele vivir dentro de iframe (ventanaModal).
+    try:
+        for fr in page.frames:
+            checks = [
+                fr.locator("button.btnFirmar:visible").first,
+                fr.locator("button:has-text('Signar tots els documents'):visible").first,
+                fr.locator("button:has-text('Firmar todos los documentos'):visible").first,
+                fr.locator("input[type='submit'][value*='Signar']:visible").first,
+                fr.locator("input[type='submit'][value*='Firmar']:visible").first,
+            ]
+            for loc in checks:
+                if await loc.count() > 0:
+                    return True
+    except Exception:
+        pass
     return False
 
 
@@ -1050,6 +1198,20 @@ async def firmar_programaticamente(
             "Configura SIGNING_PFX_PATH o PLAYWRIGHT_CERT_PATH."
         )
 
+    # Permite ajustar timeout sin tocar codigo (p.ej. expedientes con modal lento).
+    try:
+        env_timeout = int((os.getenv("XALOC_AP_FIRMA_URL_TIMEOUT_MS") or "").strip() or "0")
+        if env_timeout > 0:
+            url_timeout_ms = env_timeout
+    except Exception:
+        pass
+
+    logger.info(
+        "[AP-FIRMA] Modo captura protocolo externo: %s (XALOC_AP_FIRMA_ALLOW_EXTERNAL_LAUNCH=%s)",
+        "block-and-capture" if _BLOCK_EXTERNAL_PROTOCOL_LAUNCH else "allow-external-launch",
+        os.getenv("XALOC_AP_FIRMA_ALLOW_EXTERNAL_LAUNCH", "0"),
+    )
+
     console_capture: dict[str, str] = {}
     net_diag_enabled = (os.getenv("XALOC_AP_FIRMA_NET_DIAG") or "1").strip().lower() in {"1", "true", "yes", "on"}
     net_events: list[dict] = []
@@ -1062,6 +1224,21 @@ async def firmar_programaticamente(
         m = _AFIRMA_URI_RE.search(text)
         if m:
             return m.group(1)
+        # Fallback tolerante: a veces Chromium escribe mensajes no estandar.
+        lower = text.lower()
+        for scheme in ("afirma://", "xalocafirma://"):
+            idx = lower.find(scheme)
+            if idx < 0:
+                continue
+            tail = text[idx:]
+            for sep in ("'", "\"", " ", "\n", "\r", "\t", ")"):
+                pos = tail.find(sep)
+                if pos > 0:
+                    tail = tail[:pos]
+                    break
+            candidate = tail.strip()
+            if candidate and candidate.lower().startswith(("afirma://", "xalocafirma://")):
+                return candidate
         return None
 
     def _attach_console_listener(p: Page) -> None:
@@ -1263,7 +1440,6 @@ async def firmar_programaticamente(
     deadline = loop.time() + (url_timeout_ms / 1000)
     next_click_retry_at = loop.time() + 2.0
     click_retry_count = 0
-    clicked_signar_once = bool(clicked)
     max_click_retries = max(1, int((os.getenv("XALOC_AP_FIRMA_MAX_RETRY_CLICKS") or "3").strip() or "3"))
 
     while loop.time() < deadline:
@@ -1282,14 +1458,11 @@ async def firmar_programaticamente(
         if (
             loop.time() >= next_click_retry_at
             and not url_afirma
-            and not clicked_signar_once
             and click_retry_count < max_click_retries
         ):
             if await _puede_reintentar_click_signar(page):
                 click_retry_count += 1
                 clicked_retry = await _click_signar_tots_programatic(page)
-                if clicked_retry:
-                    clicked_signar_once = True
                 logger.info(
                     "[AP-FIRMA][DIAG] Reintento click Signar tots #%d/%d -> %s",
                     click_retry_count,
@@ -1323,6 +1496,26 @@ async def firmar_programaticamente(
                             "[AP-FIRMA][DIAG] Usando URL afirma:// capturada por handler XDG (%d chars, file=%s, log=%s).",
                             len(url_afirma),
                             handler_latest_file,
+                            handler_log_file,
+                        )
+                        break
+            except Exception:
+                pass
+
+        # Fallback extra: leer tail del log del handler por si .latest no se actualizo.
+        if not url_afirma:
+            try:
+                if handler_log_file.exists():
+                    tail = handler_log_file.read_text(encoding="utf-8", errors="ignore")
+                    if len(tail) > 12000:
+                        tail = tail[-12000:]
+                    handler_uri = _extract_afirma_url(tail)
+                    if handler_uri:
+                        url_afirma = handler_uri
+                        source_afirma = "xdg-handler-log-tail"
+                        logger.info(
+                            "[AP-FIRMA][DIAG] Usando URL afirma:// capturada por handler log tail (%d chars, log=%s).",
+                            len(url_afirma),
                             handler_log_file,
                         )
                         break
@@ -1404,6 +1597,32 @@ async def firmar_programaticamente(
         await asyncio.sleep(0.15)
 
     if not url_afirma:
+        # Diagnostico extra de archivos del handler para aislar si el problema
+        # es "no se lanza handler" vs "se lanza pero no se lee la URI".
+        try:
+            latest_exists = handler_latest_file.exists()
+            latest_size = handler_latest_file.stat().st_size if latest_exists else 0
+            latest_preview = ""
+            if latest_exists and latest_size > 0:
+                latest_preview = handler_latest_file.read_text(encoding="utf-8", errors="ignore").strip()[:200]
+            log_exists = handler_log_file.exists()
+            log_size = handler_log_file.stat().st_size if log_exists else 0
+            log_tail = ""
+            if log_exists and log_size > 0:
+                raw = handler_log_file.read_text(encoding="utf-8", errors="ignore")
+                log_tail = raw[-400:].replace("\n", "\\n")
+            logger.warning(
+                "[AP-FIRMA][DIAG][TIMEOUT] handler latest_exists=%s latest_size=%s latest_preview=%s log_exists=%s log_size=%s log_tail=%s",
+                latest_exists,
+                latest_size,
+                latest_preview,
+                log_exists,
+                log_size,
+                log_tail,
+            )
+        except Exception as e:
+            logger.warning("[AP-FIRMA][DIAG][TIMEOUT] handler file diag error: %s", e)
+
         if diag_enabled:
             for idx, frame in enumerate(list(frames_with_intercept), start=1):
                 try:

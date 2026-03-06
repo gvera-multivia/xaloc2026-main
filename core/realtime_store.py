@@ -152,6 +152,15 @@ class NullRealtimeStore:
     def purge_invalid_incidents(self) -> int:
         return 0
 
+    def clear_incident(
+        self,
+        *,
+        site_id: str,
+        resource_id: Optional[int],
+        incident_type: Optional[str] = None,
+    ) -> int:
+        return 0
+
 
 @dataclass
 class PostgresConfig:
@@ -521,6 +530,63 @@ class PostgresRealtimeStore:
                 deleted = int(cur.rowcount or 0)
             conn.commit()
             return deleted
+
+    def clear_incident(
+        self,
+        *,
+        site_id: str,
+        resource_id: Optional[int],
+        incident_type: Optional[str] = None,
+    ) -> int:
+        site = str(site_id or "").strip()
+        if not site:
+            return 0
+        incident = str(incident_type or "").strip() or None
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                if resource_id is None:
+                    if incident:
+                        cur.execute(
+                            """
+                            DELETE FROM realtime_incidents
+                            WHERE site_id = %s
+                              AND resource_id IS NULL
+                              AND incident_type = %s
+                            """,
+                            (site, incident),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            DELETE FROM realtime_incidents
+                            WHERE site_id = %s
+                              AND resource_id IS NULL
+                            """,
+                            (site,),
+                        )
+                else:
+                    if incident:
+                        cur.execute(
+                            """
+                            DELETE FROM realtime_incidents
+                            WHERE site_id = %s
+                              AND resource_id = %s
+                              AND incident_type = %s
+                            """,
+                            (site, int(resource_id), incident),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            DELETE FROM realtime_incidents
+                            WHERE site_id = %s
+                              AND resource_id = %s
+                            """,
+                            (site, int(resource_id)),
+                        )
+                deleted = int(cur.rowcount or 0)
+            conn.commit()
+        return deleted
 
 
 class SqliteRealtimeStore:
@@ -892,6 +958,62 @@ class SqliteRealtimeStore:
                       )
                     """
                 )
+            deleted = int(cur.rowcount or 0)
+            conn.commit()
+            return deleted
+
+    def clear_incident(
+        self,
+        *,
+        site_id: str,
+        resource_id: Optional[int],
+        incident_type: Optional[str] = None,
+    ) -> int:
+        site = str(site_id or "").strip()
+        if not site:
+            return 0
+        incident = str(incident_type or "").strip() or None
+        with self._conn() as conn:
+            if resource_id is None:
+                if incident:
+                    cur = conn.execute(
+                        """
+                        DELETE FROM realtime_incidents
+                        WHERE site_id = ?
+                          AND resource_id IS NULL
+                          AND incident_type = ?
+                        """,
+                        (site, incident),
+                    )
+                else:
+                    cur = conn.execute(
+                        """
+                        DELETE FROM realtime_incidents
+                        WHERE site_id = ?
+                          AND resource_id IS NULL
+                        """,
+                        (site,),
+                    )
+            else:
+                if incident:
+                    cur = conn.execute(
+                        """
+                        DELETE FROM realtime_incidents
+                        WHERE site_id = ?
+                          AND resource_id = ?
+                          AND incident_type = ?
+                        """,
+                        (site, int(resource_id), incident),
+                    )
+                else:
+                    cur = conn.execute(
+                        """
+                        DELETE FROM realtime_incidents
+                        WHERE site_id = ?
+                          AND resource_id = ?
+                        """,
+                        (site, int(resource_id)),
+                    )
             deleted = int(cur.rowcount or 0)
             conn.commit()
             return deleted

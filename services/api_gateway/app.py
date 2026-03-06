@@ -543,6 +543,10 @@ def _build_runtime_config(request: Request) -> dict[str, Any]:
     default_api = str(request.base_url).rstrip("/")
     api_base_url = (os.getenv("MORRIGAN_API_BASE_URL") or default_api).strip().rstrip("/")
     ws_url = (os.getenv("MORRIGAN_WS_URL") or _build_ws_url_from_api_base(api_base_url)).strip().rstrip("/")
+    token = _extract_bearer_from_authorization(request.headers.get("authorization")) or request.cookies.get("dashboard_access_token")
+    if token:
+        separator = "&" if "?" in ws_url else "?"
+        ws_url = f"{ws_url}{separator}token={token}"
     bootstrap_url = (
         os.getenv("MORRIGAN_BOOTSTRAP_URL")
         or f"{api_base_url}/morrigan-config.json"

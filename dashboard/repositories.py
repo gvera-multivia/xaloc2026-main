@@ -43,19 +43,47 @@ class PostgresHistoryRepository:
             self.logger.warning("No se pudo conectar a PostgreSQL para historico: %s", exc)
             return None
 
-    def list_days(self, *, source: str) -> list[str]:
+    def _build_user_filter_clause(
+        self,
+        *,
+        user_candidates: Optional[list[str]] = None,
+        payload_alias: str = "payload",
+    ) -> tuple[str, list[Any]]:
+        candidates = [str(v or "").strip() for v in (user_candidates or []) if str(v or "").strip()]
+        if not candidates:
+            return "", []
+        payload_user_expr = (
+            f"UPPER(COALESCE("
+            f"{payload_alias}->>'UsuarioAsignado', "
+            f"{payload_alias}->>'usuario', "
+            f"{payload_alias}->>'username', "
+            f"{payload_alias}->>'xvia_username', "
+            f"{payload_alias}->>'user', "
+            f"''))"
+        )
+        placeholders = ", ".join(["UPPER(%s)"] * len(candidates))
+        return f" AND {payload_user_expr} IN ({placeholders})", candidates
+
+    def list_days(self, *, source: str, user_candidates: Optional[list[str]] = None) -> list[str]:
         source_norm = (source or "").strip().lower()
         conn = self._conn()
         if conn is None:
             return []
         days: set[str] = set()
+        user_filter_sql, user_params = self._build_user_filter_clause(
+            user_candidates=user_candidates,
+            payload_alias="payload",
+        )
         try:
             with conn.cursor() as cur:
                 if source_norm in {"all", "incidents"}:
                     cur.execute("SELECT DISTINCT day::text FROM realtime_incidents")
                     days.update(str(row[0]) for row in cur.fetchall() if row and row[0])
                 if source_norm in {"all", "success"}:
-                    cur.execute("SELECT DISTINCT day::text FROM realtime_task_results WHERE status='success'")
+                    cur.execute(
+                        f"SELECT DISTINCT day::text FROM realtime_task_results WHERE status='success'{user_filter_sql}",
+                        user_params,
+                    )
                     days.update(str(row[0]) for row in cur.fetchall() if row and row[0])
             return sorted(days, reverse=True)
         except Exception as exc:
@@ -115,28 +143,40 @@ class PostgresHistoryRepository:
         finally:
             conn.close()
 
-    def list_successes(self, *, day: str, page: int, page_size: int) -> dict[str, Any]:
+    def list_successes(
+        self,
+        *,
+        day: str,
+        page: int,
+        page_size: int,
+        user_candidates: Optional[list[str]] = None,
+    ) -> dict[str, Any]:
         conn = self._conn()
         if conn is None:
             return {"items": [], "page": page, "page_size": page_size, "total": 0}
         offset = max(0, (page - 1) * page_size)
+        user_filter_sql, user_params = self._build_user_filter_clause(
+            user_candidates=user_candidates,
+            payload_alias="payload",
+        )
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT COUNT(*) FROM realtime_task_results WHERE day = %s::date AND status='success'",
-                    (day,),
+                    f"SELECT COUNT(*) FROM realtime_task_results WHERE day = %s::date AND status='success'{user_filter_sql}",
+                    (day, *user_params),
                 )
                 total = int(cur.fetchone()[0] or 0)
                 cur.execute(
-                    """
+                    f"""
                     SELECT site_id, resource_id, job_id, protocol, day::text, started_at, ended_at, payload, result
                     FROM realtime_task_results
                     WHERE day = %s::date
                       AND status = 'success'
+                      {user_filter_sql}
                     ORDER BY started_at DESC
                     LIMIT %s OFFSET %s
                     """,
-                    (day, page_size, offset),
+                    (day, *user_params, page_size, offset),
                 )
                 rows = cur.fetchall()
                 items = []
@@ -195,12 +235,13 @@ class SQLServerHistoryRepository:
     def _date_expr() -> str:
         return "CONVERT(varchar(10), rs.FUsuarioCompletado, 23)"
 
-    def _build_where(self) -> tuple[str, list[Any]]:
+    def _build_where(self, *, assigned_user: Optional[str] = None) -> tuple[str, list[Any]]:
         clauses = ["rs.FUsuarioCompletado IS NOT NULL"]
         params: list[Any] = []
-        if self.assigned_user:
+        effective_user = (assigned_user or "").strip() or self.assigned_user
+        if effective_user:
             clauses.append("UPPER(LTRIM(RTRIM(rs.UsuarioAsignado))) = UPPER(?)")
-            params.append(self.assigned_user)
+            params.append(effective_user)
         return " AND ".join(clauses), params
 
     def _resource_columns(self, conn) -> set[str]:
@@ -229,13 +270,13 @@ class SQLServerHistoryRepository:
                 return f"rs.[{column_name}] AS [{alias}]"
         return f"NULL AS [{alias}]"
 
-    def list_days(self, *, source: str) -> list[str]:
+    def list_days(self, *, source: str, assigned_user: Optional[str] = None) -> list[str]:
         if (source or "").strip().lower() not in {"all", "success"}:
             return []
         conn = self._conn()
         if conn is None:
             return []
-        where_sql, params = self._build_where()
+        where_sql, params = self._build_where(assigned_user=assigned_user)
         query = f"""
             SELECT DISTINCT {self._date_expr()} AS day
             FROM Recursos.RecursosExp rs
@@ -252,12 +293,19 @@ class SQLServerHistoryRepository:
         finally:
             conn.close()
 
-    def list_successes(self, *, day: str, page: int, page_size: int) -> dict[str, Any]:
+    def list_successes(
+        self,
+        *,
+        day: str,
+        page: int,
+        page_size: int,
+        assigned_user: Optional[str] = None,
+    ) -> dict[str, Any]:
         conn = self._conn()
         if conn is None:
             return {"items": [], "page": page, "page_size": page_size, "total": 0}
         offset = max(0, (page - 1) * page_size)
-        where_sql, params = self._build_where()
+        where_sql, params = self._build_where(assigned_user=assigned_user)
         where_with_day = f"{where_sql} AND {self._date_expr()} = ?"
         try:
             cur = conn.cursor()

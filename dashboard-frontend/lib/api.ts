@@ -1,9 +1,26 @@
 export const API_BASE = '/api';
 
+function readAuthToken(): string | null {
+    if (typeof window === 'undefined') return null;
+    try {
+        const value = window.localStorage.getItem('dashboard_access_token');
+        return value && value.trim() ? value.trim() : null;
+    } catch {
+        return null;
+    }
+}
+
 async function fetcher<T>(path: string, options?: RequestInit): Promise<T> {
+    const headers = new Headers(options?.headers || {});
+    const token = readAuthToken();
+    if (token && !headers.has('Authorization')) {
+        headers.set('Authorization', `Bearer ${token}`);
+    }
+
     const res = await fetch(`${API_BASE}${path}`, {
         credentials: 'include',
         ...options,
+        headers,
     });
     if (!res.ok) {
         const errorText = await res.text().catch(() => 'Unknown error');
@@ -112,7 +129,7 @@ export const authApi = {
 };
 
 export const sessionApi = {
-    login: (username: string, password: string) => api.post<{ ok: boolean; user: { sub: string; username: string; role: string } }>(
+    login: (username: string, password: string) => api.post<{ ok: boolean; token?: string; user: { sub: string; username: string; role: string } }>(
         '/auth/login',
         { username, password },
     ),

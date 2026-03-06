@@ -33,7 +33,25 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     const connect = () => {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const host = window.location.host;
-      const wsUrl = process.env.NEXT_PUBLIC_WS_URL || `${protocol}//${host}/ws/dashboard`;
+      const token = (() => {
+        try {
+          return window.localStorage.getItem('dashboard_access_token') || '';
+        } catch {
+          return '';
+        }
+      })();
+      const baseWsUrl = process.env.NEXT_PUBLIC_WS_URL || `${protocol}//${host}/ws/dashboard`;
+      const wsUrl = (() => {
+        if (!token.trim()) return baseWsUrl;
+        try {
+          const u = new URL(baseWsUrl, window.location.origin);
+          u.searchParams.set('token', token.trim());
+          return u.toString();
+        } catch {
+          const sep = baseWsUrl.includes('?') ? '&' : '?';
+          return `${baseWsUrl}${sep}token=${encodeURIComponent(token.trim())}`;
+        }
+      })();
 
       console.log('Connecting to WebSocket:', wsUrl);
       const socket = new WebSocket(wsUrl);

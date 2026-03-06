@@ -317,15 +317,43 @@ class DashboardService:
         end = start + page_size
         return {"items": items[start:end], "page": page, "page_size": page_size, "total": len(items)}
 
-    def list_history_days(self, *, source: str, page: int, page_size: int) -> dict[str, Any]:
+    @staticmethod
+    def _history_user_candidates(user: Optional[dict[str, Any]]) -> list[str]:
+        if not isinstance(user, dict):
+            return []
+        candidates = []
+        for key in ("xvia_username", "username"):
+            value = str(user.get(key) or "").strip()
+            if value and value not in candidates:
+                candidates.append(value)
+        return candidates
+
+    def list_history_days(
+        self,
+        *,
+        source: str,
+        page: int,
+        page_size: int,
+        user: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
         source_norm = (source or "all").strip().lower()
+        user_candidates = self._history_user_candidates(user)
         if source_norm == "incidents":
             days = self.incidents_history_repo.list_days(source="incidents")
         elif source_norm == "success":
-            days = self.success_history_repo.list_days(source="success")
+            if isinstance(self.success_history_repo, SQLServerHistoryRepository):
+                # SQL Server keeps filtering by configured UsuarioAsignado (existing behavior).
+                days = self.success_history_repo.list_days(source="success")
+            else:
+                days = self.success_history_repo.list_days(source="success", user_candidates=user_candidates)
         else:
+            if isinstance(self.success_history_repo, SQLServerHistoryRepository):
+                # SQL Server keeps filtering by configured UsuarioAsignado (existing behavior).
+                success_days = self.success_history_repo.list_days(source="success")
+            else:
+                success_days = self.success_history_repo.list_days(source="success", user_candidates=user_candidates)
             days = sorted(
-                set(self.success_history_repo.list_days(source="success"))
+                set(success_days)
                 | set(self.incidents_history_repo.list_days(source="incidents")),
                 reverse=True,
             )
@@ -335,9 +363,28 @@ class DashboardService:
         day_value = (day or "").strip() or utc_today_iso()
         return self.incidents_history_repo.list_incidents(day=day_value, page=page, page_size=page_size)
 
-    def list_history_successes(self, *, day: str | None, page: int, page_size: int) -> dict[str, Any]:
+    def list_history_successes(
+        self,
+        *,
+        day: str | None,
+        page: int,
+        page_size: int,
+        user: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
         day_value = (day or "").strip() or utc_today_iso()
-        return self.success_history_repo.list_successes(day=day_value, page=page, page_size=page_size)
+        user_candidates = self._history_user_candidates(user)
+        if isinstance(self.success_history_repo, SQLServerHistoryRepository):
+            return self.success_history_repo.list_successes(
+                day=day_value,
+                page=page,
+                page_size=page_size,
+            )
+        return self.success_history_repo.list_successes(
+            day=day_value,
+            page=page,
+            page_size=page_size,
+            user_candidates=user_candidates,
+        )
 
     def list_queue_days(self, *, page: int, page_size: int) -> dict[str, Any]:
         days = self.queue_repo.list_days()

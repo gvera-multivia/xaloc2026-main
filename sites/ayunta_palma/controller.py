@@ -23,6 +23,9 @@ class AyuntaPalmaController:
     def create_config(self, *, headless: bool) -> AyuntaPalmaConfig:
         config = AyuntaPalmaConfig()
         config.navegador.headless = bool(headless)
+        # Palma: evitar desactivar ExternalProtocolDialog a nivel global.
+        # Necesitamos que Chromium procese el protocolo afirma:// de forma nativa.
+        config.autofirma_auto_open = False
         return config
 
     def create_target_strict(

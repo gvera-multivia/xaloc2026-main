@@ -472,7 +472,7 @@ class RedsaraAdapter(SiteAdapter):
             empresa_doc = self._normalize_document_id(r.get("cliente_nif_empresa"))
             nif_persona = self._normalize_document_id(r.get("cliente_nif"))
             if is_company:
-                nif = cif_doc
+                nif = self._normalize_document_id(cif_doc or empresa_doc)
                 if not nif:
                     if on_discard:
                         on_discard(
@@ -481,7 +481,7 @@ class RedsaraAdapter(SiteAdapter):
                                 "idRecurso": r.get("idRecurso"),
                                 "Expedient": r.get("Expedient"),
                                 "tipo_incidencia": "SITE_RULE_DISCARDED",
-                                "motivo": "Empresa (cliente_tipo=2) sin CIF en rs.cif; recurso descartado para evitar presentacion incorrecta.",
+                                "motivo": "Empresa (cliente_tipo=2) sin CIF en rs.cif ni clientes.nifempresa; recurso descartado para evitar presentacion incorrecta.",
                             }
                         )
                     continue

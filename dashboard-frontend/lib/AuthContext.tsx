@@ -7,6 +7,7 @@ export type DashboardUser = {
   sub: string;
   username: string;
   role: 'admin' | 'user' | string;
+  xvia_username?: string | null;
 };
 
 type AuthContextType = {
@@ -37,7 +38,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const login = useCallback(async (username: string, password: string) => {
-    await sessionApi.login(username, password);
+    const data = await sessionApi.login(username, password);
+    const token = String(data?.token || '').trim();
+    if (typeof window !== 'undefined') {
+      if (token) {
+        window.localStorage.setItem('dashboard_access_token', token);
+      } else {
+        window.localStorage.removeItem('dashboard_access_token');
+      }
+    }
     await refresh();
   }, [refresh]);
 
@@ -45,6 +54,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       await sessionApi.logout();
     } finally {
+      if (typeof window !== 'undefined') {
+        window.localStorage.removeItem('dashboard_access_token');
+      }
       setUser(null);
     }
   }, []);
