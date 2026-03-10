@@ -26,5 +26,6 @@ reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 
 reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 16 /t REG_SZ /d "{\"pattern\":\"https://cert.valid.aoc.cat:443/*\",\"filter\":{\"SUBJECT\":{\"CN\":\"%CN%\"}}}" /f >nul
 reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 17 /t REG_SZ /d "{\"pattern\":\"https://palma.sedipualba.es/*\",\"filter\":{\"SUBJECT\":{\"CN\":\"%CN%\"}}}" /f >nul
 reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 18 /t REG_SZ /d "{\"pattern\":\"https://identificacionssl.sedipualba.es/*\",\"filter\":{\"SUBJECT\":{\"CN\":\"%CN%\"}}}" /f >nul
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 19 /t REG_SZ /d "{\"pattern\":\"https://aoberta.terrassa.cat/*\",\"filter\":{\"SUBJECT\":{\"CN\":\"%CN%\"}}}" /f >nul
 :: Solo imprimimos esto si llegamos aqui
 echo EXITOSOS

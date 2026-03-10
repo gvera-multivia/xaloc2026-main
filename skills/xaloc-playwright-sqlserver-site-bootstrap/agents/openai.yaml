@@ -1,0 +1,4 @@
+interface:
+  display_name: "Xaloc Playwright Sqlserver Site Bootstrap"
+  short_description: "Crear e integrar sites Playwright con SQL Server en Xaloc"
+  default_prompt: "Usa $xaloc-playwright-sqlserver-site-bootstrap para crear e integrar un site Playwright nuevo con SQL Server, backend y frontend en este repo."

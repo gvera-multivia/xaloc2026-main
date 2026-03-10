@@ -1,59 +1,70 @@
-{
-    "configs": [
-        {
-            "site_id": "xaloc_girona",
-            "query_organisme": "%XALOC%",
-            "filtro_texp": "2,3",
-            "regex_expediente": "^\\d{4}/\\d+(?:-(?:MUL|SAD))?$",
-            "claim_limit_per_tick": null,
-            "login_url": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login",
-            "recursos_url": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos",
-            "active": true,
-            "notes": "XALOC Girona - Multas de tráfico"
-        },
-        {
-            "site_id": "madrid",
-            "query_organisme": "%SUBDIRECCION GNAL GESTION MULTAS DE MADRID%",
-            "filtro_texp": "2,3",
-            "regex_expediente": "^(\\d{3}/\\d{8,9}\\.\\d|\\d{8,9}\\.\\d)$",
-            "claim_limit_per_tick": null,
-            "login_url": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login",
-            "recursos_url": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos",
-            "active": true,
-            "notes": "SUBDIRECCION GNAL GESTION MULTAS DE MADRID - Multas de tráfico"
-        },
-        {
-            "site_id": "base_online",
-            "query_organisme": "%BASE%",
-            "filtro_texp": "2,3",
-            "regex_expediente": "^(\\d{5}-\\d{4}[/\\-]\\d{1,5}-GIM|\\d{2}-\\d{3}-\\d{3}-\\d{4}-\\d{2}-\\d{7}|\\d-\\d{4}[/\\-]\\d{4,6}-(EXE|ECC))$",
-            "claim_limit_per_tick": null,
-            "login_url": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login",
-            "recursos_url": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos",
-            "active": true,
-            "notes": "BASE Online - Trámites de multas"
-        },
-        {
-            "site_id": "ayunta_palma",
-            "query_organisme": "%AYUNTAMIENTO DE PALMA DE MALLORCA%",
-            "filtro_texp": "2,3",
-            "regex_expediente": "^([A-Z]{2}\\s?)?\\d{7,8}$",
-            "claim_limit_per_tick": null,
-            "login_url": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login",
-            "recursos_url": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos",
-            "active": true,
-            "notes": "Ayuntamiento de Palma - sede sedipualba"
-        },
-        {
-            "site_id": "redsara",
-            "query_organisme": "%AJUNTAMENT DE BARCELONA%|%SECTOR DE SEGURIDAD Y MOVILIDAD DEL AYUNTAMIENTO DE BARCELONA%|%CENTRO DE TRATAMIENTO DE DENUNCIAS AUTOMATIZADAS DE LEON%|%AYUNTAMIENTO DE PALMA DE MALLORCA%|%AJUNTAMENT MIGJORN GRAN%|%AYUNTAMIENTO DE SANTIAGO DE COMPOSTELA%|%AYUNTAMIENTO DE MOSTOLES%|%ISLAS BALEARES, AGENCIA TRIBUTARIA MUNICIPAL%|%AGENCIA TRIBUTARIA MUNICIPAL DE ISLAS BALEARES%|%AGENCIA TRIBITARIA ISLAS BALEARES (ATIB)%|%AGENCIA TRIBUTARIA ISLAS BALEARES (ATIB)%|%JEFATURA DE TRAFICO%|%JEFATURA PROVINCIAL DE TRAFICO%|%JEFATURA PROVINCIAL DE TRÁFICO%|%JEFATURA TERRITORIAL DE PONTEVEDRA - SERVICIO DE MOVILIDAD%",
-            "filtro_texp": "2,3",
-            "regex_expediente": "^.+$",
-            "claim_limit_per_tick": 2,
-            "login_url": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login",
-            "recursos_url": "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos",
-            "active": true,
-            "notes": "REDSARA multi-organismo (validacion oficial por patron en adapter)"
-        }
-    ]
+﻿{
+    "configs":  [
+                    {
+                        "site_id":  "xaloc_girona",
+                        "query_organisme":  "%XALOC%",
+                        "filtro_texp":  "2,3",
+                        "regex_expediente":  "^\\d{4}/\\d+(?:-(?:MUL|SAD))?$",
+                        "claim_limit_per_tick":  null,
+                        "login_url":  "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login",
+                        "recursos_url":  "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos",
+                        "active":  true,
+                        "notes":  "XALOC Girona - Multas de trÃ¡fico"
+                    },
+                    {
+                        "site_id":  "madrid",
+                        "query_organisme":  "%SUBDIRECCION GNAL GESTION MULTAS DE MADRID%",
+                        "filtro_texp":  "2,3",
+                        "regex_expediente":  "^(\\d{3}/\\d{8,9}\\.\\d|\\d{8,9}\\.\\d)$",
+                        "claim_limit_per_tick":  null,
+                        "login_url":  "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login",
+                        "recursos_url":  "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos",
+                        "active":  true,
+                        "notes":  "SUBDIRECCION GNAL GESTION MULTAS DE MADRID - Multas de trÃ¡fico"
+                    },
+                    {
+                        "site_id":  "base_online",
+                        "query_organisme":  "%BASE%",
+                        "filtro_texp":  "2,3",
+                        "regex_expediente":  "^(\\d{5}-\\d{4}[/\\-]\\d{1,5}-GIM|\\d{2}-\\d{3}-\\d{3}-\\d{4}-\\d{2}-\\d{7}|\\d-\\d{4}[/\\-]\\d{4,6}-(EXE|ECC))$",
+                        "claim_limit_per_tick":  null,
+                        "login_url":  "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login",
+                        "recursos_url":  "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos",
+                        "active":  true,
+                        "notes":  "BASE Online - TrÃ¡mites de multas"
+                    },
+                    {
+                        "site_id":  "ayunta_palma",
+                        "query_organisme":  "%AYUNTAMIENTO DE PALMA DE MALLORCA%",
+                        "filtro_texp":  "2,3",
+                        "regex_expediente":  "^([A-Z]{2}\\s?)?\\d{7,8}$",
+                        "claim_limit_per_tick":  null,
+                        "login_url":  "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login",
+                        "recursos_url":  "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos",
+                        "active":  true,
+                        "notes":  "Ayuntamiento de Palma - sede sedipualba"
+                    },
+                    {
+                        "site_id":  "redsara",
+                        "query_organisme":  "%AJUNTAMENT DE BARCELONA%|%SECTOR DE SEGURIDAD Y MOVILIDAD DEL AYUNTAMIENTO DE BARCELONA%|%CENTRO DE TRATAMIENTO DE DENUNCIAS AUTOMATIZADAS DE LEON%|%AYUNTAMIENTO DE PALMA DE MALLORCA%|%AJUNTAMENT MIGJORN GRAN%|%AYUNTAMIENTO DE SANTIAGO DE COMPOSTELA%|%AYUNTAMIENTO DE MOSTOLES%|%ISLAS BALEARES, AGENCIA TRIBUTARIA MUNICIPAL%|%AGENCIA TRIBUTARIA MUNICIPAL DE ISLAS BALEARES%|%AGENCIA TRIBITARIA ISLAS BALEARES (ATIB)%|%AGENCIA TRIBUTARIA ISLAS BALEARES (ATIB)%|%JEFATURA DE TRAFICO%|%JEFATURA PROVINCIAL DE TRAFICO%|%JEFATURA PROVINCIAL DE TRÃFICO%|%JEFATURA TERRITORIAL DE PONTEVEDRA - SERVICIO DE MOVILIDAD%",
+                        "filtro_texp":  "2,3",
+                        "regex_expediente":  "^.+$",
+                        "claim_limit_per_tick":  2,
+                        "login_url":  "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login",
+                        "recursos_url":  "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos",
+                        "active":  true,
+                        "notes":  "REDSARA multi-organismo (validacion oficial por patron en adapter)"
+                    },
+                    {
+                        "site_id":  "terrassa",
+                        "query_organisme":  "%AYUNTAMIENTO DE TERRASSA%",
+                        "filtro_texp":  "2,3",
+                        "regex_expediente":  "^.+$",
+                        "claim_limit_per_tick":  null,
+                        "login_url":  "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login",
+                        "recursos_url":  "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos",
+                        "active":  true,
+                        "notes":  "Ayuntamiento de Terrassa - validacion de expediente por lista oficial en adapter"
+                    }
+                ]
 }

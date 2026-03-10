@@ -3,7 +3,7 @@ import re
 # Formato correcto: YYYY/NNNNNN-MUL (N entre 1 y muchos dígitos, generalmente 6)
 # Basado en la regex de claim_one_resource (aunque no la leí directamente del config, 
 # asumo un formato robusto para Xaloc Girona)
-VALID_EXP_REGEX = re.compile(r'^\d{4}/\d+(?:-(?:MUL|SAD))?$')
+VALID_EXP_REGEX = re.compile(r'^(\d{4}/\d+(?:-(?:MUL|SAD))?|\d{4}-\d+-APR)$')
 
 def is_valid_format(expediente: str) -> bool:
     """Checks if the expediente matches the correct Xaloc Girona format."""

@@ -18,7 +18,7 @@ logger = logging.getLogger("brain")
 
 
 class BaseOnlineAdapter(SiteAdapter):
-    DEFAULT_REGEX_EXPEDIENTE = r"^(\d{5}-\d{4}[/\-]\d{4,5}-GIM|\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{7}|\d-\d{4}[/\-]\d{4,6}-(EXE|ECC))$"
+    DEFAULT_REGEX_EXPEDIENTE = r"^(\d{5}-\d{4}[/\-]\d{4,5}-GIM|\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{6,7}|\d-\d{4}[/\-]\d{4,6}-(EXE|ECC))$"
     SQL_FETCH_RECURSOS_BASE = """
 SELECT
     rs.idRecurso,

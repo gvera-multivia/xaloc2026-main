@@ -44,6 +44,11 @@ SITES: dict[str, SiteDefinition] = {
         automation_path="sites.redsara.automation:RedsaraAutomation",
         controller_path="sites.redsara.controller:get_controller",
     ),
+    "terrassa": SiteDefinition(
+        site_id="terrassa",
+        automation_path="sites.terrassa.automation:TerrassaAutomation",
+        controller_path="sites.terrassa.controller:get_controller",
+    ),
 }
 
 

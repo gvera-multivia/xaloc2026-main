@@ -1,0 +1,4 @@
+interface:
+  display_name: "Xaloc Standalone To Production Xvia Integration"
+  short_description: "Integrar main_*_payload_by_id al flujo productivo Docker Xvia"
+  default_prompt: "Usa $xaloc-standalone-to-production-xvia-integration para pasar un flujo standalone por id a produccion completa en brain, worker, dashboard y docker."

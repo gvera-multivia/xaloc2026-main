@@ -22,7 +22,7 @@ from core.repositories import ResourceRepository
 from core.sqlserver_utils import build_sqlserver_connection_string
 from core.xvia_auth import create_authenticated_session_in_place
 from shared.queue import RedisStreamsClient
-from sites.adapters import MadridAdapter, XalocAdapter, BaseOnlineAdapter, AyuntaPalmaAdapter, RedsaraAdapter
+from sites.adapters import MadridAdapter, XalocAdapter, BaseOnlineAdapter, AyuntaPalmaAdapter, RedsaraAdapter, TerrassaAdapter
 from sites.adapters.site_adapter import SiteAdapter
 from services.brain_claim.processable_validator import validate_candidate
 
@@ -99,6 +99,7 @@ class BrainClaimService:
             "base_online": BaseOnlineAdapter(),
             "ayunta_palma": AyuntaPalmaAdapter(),
             "redsara": RedsaraAdapter(),
+            "terrassa": TerrassaAdapter(),
         }
         self.session: Optional[aiohttp.ClientSession] = None
         self.authenticated_user: Optional[str] = None

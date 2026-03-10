@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeout
 
@@ -144,6 +145,82 @@ async def _click_enlace_robusto(page: Page, enlace, url_destino: str, config: Ba
     return page
 
 
+async def _resolve_cert_button(page: Page, selector: str, timeout_ms: int):
+    locator = page.locator(selector)
+    deadline = time.monotonic() + (max(1, int(timeout_ms)) / 1000.0)
+    last_count = 0
+
+    while time.monotonic() < deadline:
+        try:
+            await locator.first.wait_for(state="attached", timeout=900)
+        except Exception:
+            await page.wait_for_timeout(150)
+            continue
+
+        try:
+            count = await locator.count()
+        except Exception:
+            count = 0
+        last_count = count
+        if count <= 0:
+            await page.wait_for_timeout(150)
+            continue
+
+        for idx in range(count):
+            candidate = locator.nth(idx)
+            try:
+                if await candidate.is_visible():
+                    return candidate, "visible", idx, count
+            except Exception:
+                continue
+
+        await page.wait_for_timeout(150)
+
+    if last_count > 0:
+        return locator.first, "attached", 0, last_count
+
+    raise PlaywrightTimeout(f"No se encontro boton certificado con selector: {selector}")
+
+
+async def _click_cert_button_robusto(page: Page, selector: str, timeout_ms: int, click_timeout_ms: int) -> None:
+    boton_cert, mode, idx, total = await _resolve_cert_button(page, selector, timeout_ms)
+    logging.info("[FASE 1.4] Boton certificado localizado (%s, idx=%s, total=%s)", mode, idx, total)
+
+    try:
+        await boton_cert.scroll_into_view_if_needed(timeout=1200)
+    except Exception:
+        pass
+
+    try:
+        await boton_cert.click(timeout=click_timeout_ms, no_wait_after=True)
+        return
+    except Exception as e:
+        logging.warning("[FASE 1.5] Click normal en certificado fallo: %s", e)
+
+    try:
+        await boton_cert.click(timeout=click_timeout_ms, no_wait_after=True, force=True)
+        return
+    except Exception as e:
+        logging.warning("[FASE 1.5] Click force en certificado fallo: %s", e)
+
+    clicked = await page.evaluate(
+        """({ selector }) => {
+            const nodes = Array.from(document.querySelectorAll(selector))
+            if (!nodes.length) return false
+            const visible = nodes.find((el) => {
+                const cs = window.getComputedStyle(el)
+                const r = el.getBoundingClientRect()
+                return cs && cs.display !== 'none' && cs.visibility !== 'hidden' && r.width > 0 && r.height > 0
+            })
+            ;(visible || nodes[0]).click()
+            return true
+        }""",
+        {"selector": selector},
+    )
+    if not clicked:
+        raise RuntimeError(f"No se pudo clickar el boton de certificado con selector: {selector}")
+
+
 async def ejecutar_login_base(page: Page, config: BaseOnlineConfig) -> Page:
     logging.info(f"[FASE 1.1] Navegando a landing: {config.url_base}")
 
@@ -172,9 +249,8 @@ async def ejecutar_login_base(page: Page, config: BaseOnlineConfig) -> Page:
     logging.debug(f"[FASE 1.4] URL actual: {page.url}")
     logging.debug(f"[FASE 1.4] Selector boton certificado: {config.cert_button_selector}")
 
-    boton_cert = page.locator(config.cert_button_selector).first
     try:
-        await boton_cert.wait_for(state="attached", timeout=config.flow_timeouts.cert_button_visible)
+        await _resolve_cert_button(page, config.cert_button_selector, config.flow_timeouts.cert_button_visible)
         logging.info("[FASE 1.4] OK Boton de certificado encontrado")
     except PlaywrightTimeout:
         logging.error("[FASE 1.4] X Boton de certificado no encontrado en 20s")
@@ -182,7 +258,12 @@ async def ejecutar_login_base(page: Page, config: BaseOnlineConfig) -> Page:
         raise
 
     logging.info("[FASE 1.5] Pulsando boton de certificado...")
-    await boton_cert.click(timeout=config.timeouts.login, no_wait_after=True, force=True)
+    await _click_cert_button_robusto(
+        page=page,
+        selector=config.cert_button_selector,
+        timeout_ms=config.flow_timeouts.cert_button_visible,
+        click_timeout_ms=config.timeouts.login,
+    )
     await page.wait_for_timeout(config.delay_ms)
 
     logging.info("[FASE 1.6] Esperando salida de VALid / acceso post-login...")

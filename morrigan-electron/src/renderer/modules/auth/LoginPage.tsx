@@ -1,18 +1,22 @@
-﻿import { useState } from 'react'
+﻿import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/core/auth/auth.store'
-import { apiClient } from '@/core/api/client'
-import { AUTH } from '@/core/api/endpoints'
-import { UserSessionSchema } from '@/core/api/schemas'
-import { morriganWs } from '@/core/api/ws'
+import { AuthService } from '@/core/auth/auth.service'
 
 export function LoginPage() {
   const [usernameOrEmail, setUsernameOrEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  const { setSession } = useAuthStore()
+  const { credentials } = useAuthStore()
   const navigate = useNavigate()
+
+  useEffect(() => {
+    if (credentials) {
+      setUsernameOrEmail(credentials.username)
+      setPassword(credentials.password)
+    }
+  }, [credentials])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -20,16 +24,7 @@ export function LoginPage() {
     setLoading(true)
 
     try {
-      console.log('Login attempt with baseURL:', apiClient.defaults.baseURL)
-      const loginRes = await apiClient.post(AUTH.LOGIN, { username: usernameOrEmail, password })
-      // El server devuelve el usuario en la respuesta del login — no hace falta un GET /auth/me adicional
-      const userData = loginRes.data?.user
-      const rawToken = loginRes.data?.token ?? loginRes.data?.access_token ?? null
-      if (!userData) throw new Error('No user in login response')
-      const session = UserSessionSchema.parse(userData)
-      setSession(session, rawToken)
-      morriganWs.connectWithToken(rawToken)
-      window.morrigan.auth.notifyLoginSuccess()
+      await AuthService.login(usernameOrEmail, password)
       navigate('/')
     } catch (err: any) {
       console.error('Login error:', err)
@@ -37,7 +32,7 @@ export function LoginPage() {
       if (status === 401) {
         setError('Credenciales incorrectas.')
       } else if (!status) {
-        setError(`Error interno local: ${err.message} (URL: ${apiClient.defaults.baseURL})`)
+        setError(`Error de red o servidor no alcanzable: ${err.message}`)
       } else {
         setError(`Error del servidor (${status}).`)
       }

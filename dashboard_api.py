@@ -1820,6 +1820,132 @@ async def api_documentos_compress(
         ) from exc
 
 
+@app.get("/api/test")
+async def test_access():
+    # First check the mount root itself
+    mount_root = "/mnt/dptos"
+    target_path = "/mnt/dptos/4 DPTO -  JURIDICO/CARPETAS VIRTUALES/PARA REVISAR - - - DEV Y ORGANISMOS LLAMADOS/ANNA Descargas/Adria Descargas/revisar"
+    try:
+        mount_ok = os.path.exists(mount_root)
+        mount_contents = os.listdir(mount_root) if mount_ok else []
+        target_exists = os.path.exists(target_path)
+        target_files = os.listdir(target_path) if target_exists else []
+        return {
+            "mount_root_exists": mount_ok,
+            "mount_root_contents": mount_contents[:20],  # Limit to 20 entries
+            "target_exists": target_exists,
+            "target_files": target_files[:20],
+            "error": None
+        }
+    except Exception as e:
+        return {
+            "mount_root_exists": os.path.exists(mount_root),
+            "target_exists": False,
+            "target_files": [],
+            "error": str(e)
+        }
+
+
+@app.get("/api/count")
+async def count_files_endpoint() -> dict:
+    import smtplib
+    from email.mime.text import MIMEText
+
+    STATE_FILE = "folder_state.json"
+    SMTP_HOST = "smtp.ionos.es"
+    SMTP_PORT = 587
+    SMTP_USER = "gvera@xvia-serviciosjuridicos.com"
+    SMTP_PASS = "NetMulti01"
+    EMAIL_TO = "jara@multivia.net"
+
+    def _load_state():
+        if not os.path.exists(STATE_FILE):
+            return None
+        with open(STATE_FILE, "r") as f:
+            return json.load(f)
+
+    def _save_state(state):
+        with open(STATE_FILE, "w") as f:
+            json.dump(state, f)
+
+    def _send_email(previous, current):
+        from datetime import datetime, timezone
+        body = f"""
+No se detectan cambios en la carpeta.
+
+Archivos anteriores: {previous}
+Archivos actuales: {current}
+
+Fecha: {datetime.now(timezone.utc).isoformat()}
+"""
+        msg = MIMEText(body)
+        msg["Subject"] = "Alerta: sin cambios en carpeta"
+        msg["From"] = SMTP_USER
+        msg["To"] = EMAIL_TO
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASS)
+            server.send_message(msg)
+
+    try:
+        total = 0
+        folder_path = "/mnt/dptos/4 DPTO -  JURIDICO/CARPETAS VIRTUALES/PARA REVISAR - - - DEV Y ORGANISMOS LLAMADOS/ANNA Descargas/Adria Descargas/revisar"
+        most_recent_file = None
+        most_recent_time = 0.0
+
+        for root, dirs, files in os.walk(folder_path):
+            total += len(files)
+            for file in files:
+                file_path = os.path.join(root, file)
+                try:
+                    mtime = os.path.getmtime(file_path)
+                    if mtime > most_recent_time:
+                        most_recent_time = mtime
+                        most_recent_file = file
+                except OSError:
+                    pass
+
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+
+        state = _load_state()
+        previous_count = None if state is None else state.get("count")
+
+        # Alert if count is the same as previous (no change)
+        alert = (previous_count is not None and total == previous_count)
+
+        if alert:
+            try:
+                _send_email(previous_count, total)
+            except Exception as email_err:
+                logger.error(f"Fallo al enviar email alerta: {email_err}")
+
+        _save_state({"count": total, "checkedAt": now.isoformat()})
+
+        response = {
+            "ok": True,
+            "count": total,
+            "previous": previous_count,
+            "alert": alert,
+            "checkedAt": now.isoformat()
+        }
+
+        if most_recent_file:
+            response["lastFile"] = most_recent_file
+            try:
+                dt = datetime.fromtimestamp(most_recent_time, tz=timezone.utc)
+                response["lastModified"] = dt.isoformat()
+            except Exception:
+                pass
+
+        return response
+    except Exception as e:
+        return {
+            "ok": False,
+            "error": str(e)
+        }
+
+
 @app.api_route(
     "/{rest_of_path:path}",
     methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],

@@ -4,5 +4,14 @@ from .madrid import MadridAdapter
 from .xaloc_girona import XalocAdapter
 from .ayunta_palma import AyuntaPalmaAdapter
 from .redsara import RedsaraAdapter
+from .terrassa import TerrassaAdapter
 
-__all__ = ["SiteAdapter", "BaseOnlineAdapter", "MadridAdapter", "XalocAdapter", "AyuntaPalmaAdapter", "RedsaraAdapter"]
+__all__ = [
+    "SiteAdapter",
+    "BaseOnlineAdapter",
+    "MadridAdapter",
+    "XalocAdapter",
+    "AyuntaPalmaAdapter",
+    "RedsaraAdapter",
+    "TerrassaAdapter",
+]

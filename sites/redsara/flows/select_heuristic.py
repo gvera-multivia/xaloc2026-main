@@ -10,6 +10,8 @@ PROVINCE_ALIASES = {
     "coruna": "a coruna",
     "gerona": "girona",
     "lerida": "lleida",
+    "vizcaya": "bizkaia",
+    "vizkaya": "bizkaia",
     "san sebastian": "donostia / san sebastian",
     "vitoria": "vitoria / gasteiz",
     "baleares": "illes balears",
@@ -18,12 +20,16 @@ PROVINCE_ALIASES = {
 CITY_ALIASES = {
     # Errores frecuentes en origen de datos
     "fornells de la seva": "fornells de la selva",
+    "palau solita i plegamas": "palau-solita i plegamans",
+    "palau solita i plegamans": "palau-solita i plegamans",
+    "palau-solita i plegamas": "palau-solita i plegamans",
 }
 
 # Patrones para variaciones frecuentes no cubiertas por alias exacto.
 # Se evalúan sobre texto ya normalizado (sin tildes, en minúsculas).
 CITY_ALIAS_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"^fornells de la se[vb]a$"), "fornells de la selva"),
+    (re.compile(r"^palau[\s-]+solita\s+[iy]\s+plegama(?:s|ns)$"), "palau-solita i plegamans"),
 ]
 
 

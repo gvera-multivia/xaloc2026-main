@@ -12,7 +12,12 @@ from core.base_config import BaseConfig
 
 @dataclass
 class XalocSelectors:
-    cert_button: str = "#btnContinuaCert, [data-testid='certificate-btn']"
+    cert_button: str = (
+        "button#btnContinuaCert, "
+        "button[data-testid='certificate-btn'], "
+        "button#btnContinuaCertCaptcha, "
+        "button.btn-certificatDigital"
+    )
     cookie_buttons: List[str] = field(
         default_factory=lambda: [
             r"Acceptar",
@@ -43,7 +48,12 @@ class XalocConfig(BaseConfig):
 
     # Legacy aliases kept for backward compatibility with existing flow code.
     tramite_link_pattern: str = r"Tramitaci[oó] en l[ií]nia|Tramitaci[oó]n en l[ií]nea"
-    cert_button_selector: str = "#btnContinuaCert, [data-testid='certificate-btn']"
+    cert_button_selector: str = (
+        "button#btnContinuaCert, "
+        "button[data-testid='certificate-btn'], "
+        "button#btnContinuaCertCaptcha, "
+        "button.btn-certificatDigital"
+    )
     url_post_login: str = "**/seu.xalocgirona.cat/sta/**"
 
     # Configuracion de tiempos de espera

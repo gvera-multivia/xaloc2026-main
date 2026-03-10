@@ -1,0 +1,4 @@
+interface:
+  display_name: "Xaloc Playwright Standalone Site Smoke"
+  short_description: "Crear sites Playwright con runner local standalone en Xaloc"
+  default_prompt: "Usa $xaloc-playwright-standalone-site-smoke para crear un site Playwright y un runner local tipo main_*_payload_by_id.py sin worker ni brain."

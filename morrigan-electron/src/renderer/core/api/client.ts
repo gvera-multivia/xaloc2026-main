@@ -1,6 +1,7 @@
 import axios, { type AxiosError } from 'axios'
 import { ENV } from '@/core/config/env'
 import { useAuthStore } from '@/core/auth/auth.store'
+import { AuthService } from '@/core/auth/auth.service'
 
 export const apiClient = axios.create({
     baseURL: ENV.API_BASE_URL,
@@ -18,15 +19,21 @@ apiClient.interceptors.response.use(
         const status = error.response?.status
 
         if (status === 401) {
-            // En desarrollo Electron, las cookies cross-origin fallan a menudo. 
-            // Si ya tenemos sesión en el store, no la limpiamos ni redirigimos
-            // porque el usuario es persistente localmente.
-            const hasPersistedUser = !!useAuthStore.getState().user
-            if (hasPersistedUser) {
-                return Promise.reject(error)
+            // Empujar autoreintento si tenemos credenciales
+            const { credentials } = useAuthStore.getState()
+            const originalRequest = error.config as any
+
+            if (credentials && !originalRequest?._retry) {
+                originalRequest._retry = true
+                console.log('[apiClient] 401 detected, attempting transparent auto-login...')
+                const success = await AuthService.autoLogin()
+                if (success) {
+                    console.log('[apiClient] Auto-login successful, retrying original request')
+                    return apiClient(originalRequest)
+                }
             }
 
-            // Limpiar sesión y redirigir a login solo si realmente no estamos autenticados
+            // Si llegamos aquí es que no había credenciales o falló el auto-login
             useAuthStore.getState().clearSession()
             window.location.hash = '/login'
             return Promise.reject(error)

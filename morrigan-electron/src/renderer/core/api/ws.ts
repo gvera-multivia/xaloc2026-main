@@ -1,6 +1,7 @@
 import { ENV } from '@/core/config/env'
 import type { WsEvent } from '@/core/api/schemas'
 import { WsEventSchema } from '@/core/api/schemas'
+import { AuthService } from '@/core/auth/auth.service'
 
 type WsEventHandler = (event: WsEvent) => void
 
@@ -60,7 +61,10 @@ class MorriganWebSocket {
                 this.connected = false
                 this.ws = null
                 if (event.code === 4401) {
-                    console.warn('[WS] Conexion rechazada por autenticacion invalida (4401)')
+                    console.warn('[WS] Conexion rechazada por autenticacion invalida (4401). Intentando auto-login...')
+                    // No llamamos directamente a connect() aquí para evitar bucles infinitos;
+                    // AuthService.autoLogin() llamará a connectWithToken() si tiene éxito.
+                    AuthService.autoLogin()
                 }
                 // Fallback robusto: si el handshake falla con token en query,
                 // reintentar sin token para usar la cookie de sesion.

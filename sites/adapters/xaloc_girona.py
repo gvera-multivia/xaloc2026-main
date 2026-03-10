@@ -35,8 +35,8 @@ SELECT
     
     rs.cif,          -- Para determinar JURIDICA vs FISICA
     c.nifempresa,    -- Fallback CIF
-    rs.Empresa,      -- RazÃ³n social
-    c.Nombrefiscal,  -- Fallback RazÃ³n social
+    rs.Empresa,      -- Razón social
+    c.Nombrefiscal,  -- Fallback Razón social
     c.tipodecliente AS cliente_tipo,
     
     c.nif AS cliente_nif,

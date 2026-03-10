@@ -97,7 +97,12 @@ class BaseOnlineConfig(BaseConfig):
     base_online_link_selector: str = "a.logo_text[href*='/sav/valid'], a.logo_text[href*='base.cat/sav/valid']"
 
     # Login / VÀLid
-    cert_button_selector: str = "#btnContinuaCert, [data-testid='certificate-btn']"
+    cert_button_selector: str = (
+        "button#btnContinuaCert, "
+        "button[data-testid='certificate-btn'], "
+        "button#btnContinuaCertCaptcha, "
+        "button.btn-certificatDigital"
+    )
     url_post_login: str = "**/commons-desktop/index.*"
     stealth_disable_webdriver: bool = True
 

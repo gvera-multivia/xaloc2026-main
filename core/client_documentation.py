@@ -242,7 +242,11 @@ def select_required_client_documents(
     all_files = [p for p in ruta_docu.rglob("*") if p.is_file()]
     
     # Filtro de ruido: Solo nos interesan archivos dentro de carpetas DOCUMENTACION
-    all_files = [f for f in all_files if "DOCUMENTA" in str(f).upper()]
+    # Se excluye la carpeta DOCUMENTACION PARA RECURSOS por posibles confusiones.
+    all_files = [
+        f for f in all_files
+        if "DOCUMENTA" in str(f).upper() and "DOCUMENTACION PARA RECURSOS" not in str(f).upper()
+    ]
 
     buckets = defaultdict(list)
     for file_path in all_files:
@@ -595,7 +599,11 @@ def check_requires_gesdoc(payload: dict, base_path: str | None = None) -> tuple[
     all_files = [p for p in ruta_docu.rglob("*") if p.is_file()]
     
     # Filtrar solo archivos en carpetas DOCUMENTACION
-    doc_files = [f for f in all_files if "DOCUMENTA" in str(f).upper()]
+    # Se excluye la carpeta DOCUMENTACION PARA RECURSOS por posibles confusiones.
+    doc_files = [
+        f for f in all_files
+        if "DOCUMENTA" in str(f).upper() and "DOCUMENTACION PARA RECURSOS" not in str(f).upper()
+    ]
     
     # Buscar cualquier archivo que contenga "aut" en el nombre
     aut_files = [

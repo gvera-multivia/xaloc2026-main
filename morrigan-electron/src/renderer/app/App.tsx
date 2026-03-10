@@ -5,8 +5,8 @@ import { useAuthStore } from '@/core/auth/auth.store'
 import { initRuntimeConfig } from '@/core/config/runtime'
 import { apiClient } from '@/core/api/client'
 import { AUTH } from '@/core/api/endpoints'
-import { UserSessionSchema } from '@/core/api/schemas'
 import { morriganWs } from '@/core/api/ws'
+import { AuthService } from '@/core/auth/auth.service'
 import type { AxiosError } from 'axios'
 
 export function App() {
@@ -23,15 +23,24 @@ export function App() {
                 await initRuntimeConfig()
 
                 // Validate persisted cookie session on each startup.
-                const meRes = await apiClient.get(AUTH.ME)
-                const session = UserSessionSchema.parse(meRes.data.user)
-                const persistedToken = useAuthStore.getState().token
-                setSession(session, persistedToken ?? undefined)
-                morriganWs.connectWithToken(persistedToken)
+                try {
+                    await apiClient.get(AUTH.ME)
+                    console.log('[App] Session validated via cookie')
+                    const persistedToken = useAuthStore.getState().token
+                    morriganWs.connectWithToken(persistedToken)
+                } catch (err: any) {
+                    if (err.response?.status === 401) {
+                        console.log('[App] Cookie session invalid, attempting auto-login')
+                        const success = await AuthService.autoLogin()
+                        if (!success) {
+                            clearSession()
+                        }
+                    } else {
+                        throw err
+                    }
+                }
             } catch (err) {
-                // Only clear persisted session when backend explicitly says auth is invalid.
-                // On network/CORS/timeout errors we keep local session to avoid false logout
-                // right after updater restart.
+                console.error('[App] Bootstrap error:', err)
                 const axiosErr = err as AxiosError | undefined
                 const status = axiosErr?.response?.status
                 const shouldInvalidate = status === 401 || status === 403

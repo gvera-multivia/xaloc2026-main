@@ -68,6 +68,7 @@ default_patterns = [
     "https://cert.valid.aoc.cat:443/*",
     "https://palma.sedipualba.es/*",
     "https://identificacionssl.sedipualba.es/*",
+    "https://aoberta.terrassa.cat/*",
 ]
 
 def _parse_rules_from_bat(path: pathlib.Path):

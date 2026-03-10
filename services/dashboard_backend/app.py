@@ -14,6 +14,9 @@ from fastapi import Body, Depends, HTTPException
 from core.redis_client import get_redis_client
 from dashboard_api import app, require_admin
 
+import smtplib
+from email.mime.text import MIMEText
+
 __all__ = ["app"]
 
 _ALLOWED_LEVELS = {"info", "warning", "critical"}
@@ -130,6 +133,99 @@ def _template_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
 @app.on_event("startup")
 async def _dashboard_backend_startup() -> None:
     _seed_default_templates()
+
+
+@app.get("/api/count")
+async def count_files_endpoint() -> dict:
+    STATE_FILE = "folder_state.json"
+    SMTP_HOST = "smtp.ionos.es"
+    SMTP_PORT = 587
+    SMTP_USER = "gvera@xvia-serviciosjuridicos.com"
+    SMTP_PASS = "NetMulti01"
+    EMAIL_TO = "jara@multivia.net"
+
+    def _load_state():
+        if not os.path.exists(STATE_FILE):
+            return None
+        with open(STATE_FILE, "r") as f:
+            return json.load(f)
+
+    def _save_state(state):
+        with open(STATE_FILE, "w") as f:
+            json.dump(state, f)
+
+    def _send_email(previous, current):
+        body = f"""
+No se detectan cambios en la carpeta.
+
+Archivos anteriores: {previous}
+Archivos actuales: {current}
+
+Fecha: {datetime.now(timezone.utc).isoformat()}
+"""
+        msg = MIMEText(body)
+        msg["Subject"] = "Alerta: sin cambios en carpeta"
+        msg["From"] = SMTP_USER
+        msg["To"] = EMAIL_TO
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASS)
+            server.send_message(msg)
+
+    try:
+        total = 0
+        folder_path = "/mnt/dptos/4 DPTO -  JURIDICO/CARPETAS VIRTUALES/PARA REVISAR - - - DEV Y ORGANISMOS LLAMADOS/ANNA Descargas/Adria Descargas/revisar"
+        most_recent_file = None
+        most_recent_time = 0.0
+
+        for root, dirs, files in os.walk(folder_path):
+            total += len(files)
+            for file in files:
+                file_path = os.path.join(root, file)
+                try:
+                    mtime = os.path.getmtime(file_path)
+                    if mtime > most_recent_time:
+                        most_recent_time = mtime
+                        most_recent_file = file
+                except OSError:
+                    pass
+
+        now = datetime.now(timezone.utc)
+        state = _load_state()
+        previous_count = None if state is None else state.get("count")
+
+        alert = (previous_count is not None and total == previous_count)
+
+        if alert:
+            try:
+                _send_email(previous_count, total)
+            except Exception as email_err:
+                print(f"Fallo al enviar email alerta: {email_err}")
+
+        _save_state({"count": total, "checkedAt": now.isoformat()})
+
+        response = {
+            "ok": True,
+            "count": total,
+            "previous": previous_count,
+            "alert": alert,
+            "checkedAt": now.isoformat()
+        }
+
+        if most_recent_file:
+            response["lastFile"] = most_recent_file
+            try:
+                dt = datetime.fromtimestamp(most_recent_time, tz=timezone.utc)
+                response["lastModified"] = dt.isoformat()
+            except Exception:
+                pass
+
+        return response
+    except Exception as e:
+        return {
+            "ok": False,
+            "error": str(e)
+        }
 
 
 @app.get("/api/admin/notifications/templates")

@@ -10,7 +10,7 @@ import os
 import re
 import time
 
-from playwright.async_api import Page
+from playwright.async_api import Page, TimeoutError as PlaywrightTimeout
 
 from sites.xaloc_girona.config import XalocConfig
 
@@ -151,6 +151,87 @@ async def _is_sta_ready(page: Page, url_pattern: str) -> bool:
         return False
 
 
+async def _resolve_cert_button(page: Page, selector: str, timeout_ms: int):
+    locator = page.locator(selector)
+    deadline = time.monotonic() + (max(1, int(timeout_ms)) / 1000.0)
+    last_count = 0
+
+    while time.monotonic() < deadline:
+        try:
+            await locator.first.wait_for(state="attached", timeout=800)
+        except Exception:
+            await page.wait_for_timeout(150)
+            continue
+
+        try:
+            count = await locator.count()
+        except Exception:
+            count = 0
+        last_count = count
+        if count <= 0:
+            await page.wait_for_timeout(150)
+            continue
+
+        for idx in range(count):
+            candidate = locator.nth(idx)
+            try:
+                if await candidate.is_visible():
+                    return candidate, "visible", idx, count
+            except Exception:
+                continue
+
+        await page.wait_for_timeout(150)
+
+    if last_count > 0:
+        return locator.first, "attached", 0, last_count
+
+    raise PlaywrightTimeout(f"No se encontro boton certificado con selector: {selector}")
+
+
+async def _click_cert_button_robusto(page: Page, selector: str, timeout_ms: int, click_timeout_ms: int) -> None:
+    boton_cert, mode, idx, total = await _resolve_cert_button(page, selector, timeout_ms)
+    logging.info(
+        "Boton certificado localizado (%s, idx=%s, total=%s).",
+        mode,
+        idx,
+        total,
+    )
+
+    try:
+        await boton_cert.scroll_into_view_if_needed(timeout=1200)
+    except Exception:
+        pass
+
+    try:
+        await boton_cert.click(timeout=click_timeout_ms, no_wait_after=True)
+        return
+    except Exception as e:
+        logging.warning("Click normal en boton certificado fallo: %s", e)
+
+    try:
+        await boton_cert.click(timeout=click_timeout_ms, no_wait_after=True, force=True)
+        return
+    except Exception as e:
+        logging.warning("Click force en boton certificado fallo: %s", e)
+
+    clicked = await page.evaluate(
+        """({ selector }) => {
+            const nodes = Array.from(document.querySelectorAll(selector))
+            if (!nodes.length) return false
+            const visible = nodes.find((el) => {
+                const cs = window.getComputedStyle(el)
+                const r = el.getBoundingClientRect()
+                return cs && cs.display !== 'none' && cs.visibility !== 'hidden' && r.width > 0 && r.height > 0
+            })
+            ;(visible || nodes[0]).click()
+            return true
+        }""",
+        {"selector": selector},
+    )
+    if not clicked:
+        raise RuntimeError(f"No se pudo clickar el boton de certificado con selector: {selector}")
+
+
 async def _aceptar_cookies_si_aparece(page: Page, config: XalocConfig) -> None:
     posibles = config.selectors.cookie_buttons
     for patron in posibles:
@@ -201,15 +282,13 @@ async def ejecutar_login(page: Page, config: XalocConfig) -> Page:
     await _attach_cert_debug_observers(valid_page)
 
     logging.info("Esperando el boton de certificado...")
-    boton_cert = valid_page.locator(config.selectors.cert_button).first
-    await boton_cert.wait_for(state="visible", timeout=config.flow_timeouts.cert_button_appear)
-
     logging.info("Pulsando boton de certificado...")
-    try:
-        await boton_cert.click(timeout=config.timeouts.login, no_wait_after=True)
-    except Exception:
-        # Fallback when overlays intercept click in some environments.
-        await boton_cert.click(timeout=config.timeouts.login, no_wait_after=True, force=True)
+    await _click_cert_button_robusto(
+        page=valid_page,
+        selector=config.selectors.cert_button,
+        timeout_ms=config.flow_timeouts.cert_button_appear,
+        click_timeout_ms=config.timeouts.login,
+    )
     await valid_page.wait_for_timeout(config.delay_ms)
 
     logging.info("Esperando retorno al formulario STA...")

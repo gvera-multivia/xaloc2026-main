@@ -1222,6 +1222,54 @@ async def _verificar_firma_realizada(page: Page, config: AyuntaPalmaConfig) -> N
         )
 
 
+async def _subir_via_selector_ficheros(
+    page: Page,
+    config: AyuntaPalmaConfig,
+    archivos: list[Path],
+) -> None:
+    """
+    Usa el selector nativo Playwright expect_file_chooser() para dar los archivos
+    al widget JS nuevo de "SelectorFicheros".
+    """
+    logger.info("[AP-DIAG] Lanzando file_chooser para SelectorFicheros")
+
+    # Hacer click en el boton "Enviar fitxer" o "Enviar fichero" para abrir el dialog
+    # El boton tiene la clase .btn-icono y contiene un span o texto descriptivo.
+    btn_enviar = page.locator(
+        "button:has-text('Enviar fitxer'), button:has-text('Enviar fichero'), button[data-icono='list.svg']"
+    ).first
+
+    async with page.expect_file_chooser() as fc_info:
+        await btn_enviar.click()
+    
+    file_chooser = await fc_info.value
+    rutas = [str(p.resolve()) for p in archivos]
+    logger.info(f"[AP-DIAG] Subiendo en file_chooser: {rutas}")
+    await file_chooser.set_files(rutas)
+
+    # Esperar a que el widget complete su subida AJAX. 
+    # Cuando acaba, el hidden input hfNuevoFichero pasa a tener la clave "files" con datos.
+    hf_selector = config.selectors.hf_nuevo_fichero
+    deadline = 30
+    import json as _json
+    for _ in range(deadline):
+        hf_check = await page.locator(hf_selector).first.get_attribute("value") or ""
+        try:
+            hf_check_data = _json.loads(hf_check)
+            if hf_check_data.get("files"):
+                logger.info("[AP-DIAG] Upload via SelectorFicheros completado. files=%s", hf_check_data["files"])
+                # Dar un pequenyo buffer para evitar condiciones de carrera de UI
+                await page.wait_for_timeout(1000)
+                return
+        except Exception:
+            pass
+        await page.wait_for_timeout(1000)
+
+    logger.warning(
+        "[AP-DIAG] Timeout esperando confirmacion en hfNuevoFichero tras upload. Continuando."
+    )
+
+
 async def subir_documentos(
     page: Page,
     config: AyuntaPalmaConfig,
@@ -1266,15 +1314,19 @@ async def subir_documentos(
     modal_fichero = page.locator("#ctl00_ctl00_cphM_cph_pnlNuevoFichero").first
     await modal_fichero.wait_for(state="visible", timeout=15000)
 
-    ruta = [str(p) for p in archivos]
-    await page.set_input_files(selectors.archivo_input, ruta)
-    await _esperar_subida_completa(page, config)
+    await _subir_via_selector_ficheros(page, config, archivos)
     logger.info("[AP-DIAG] Upload de archivos completado.")
+
+    logger.info("[AP-DIAG] Esperando 5 segundos antes de aceptar documento...")
+    await page.wait_for_timeout(5000)
 
     clicked_aceptar = False
     try:
         clicked_aceptar = await page.evaluate("""() => {
-            const btn = document.querySelector("input[id$='_btnNuevoFicheroAceptar']");
+            // Buscamos el boton visual "Aceptar" en lugar del hidden input
+            // Tiene data-icono="aceptar.svg" o clase "btn-bl2" y dice "Aceptar"
+            const btns = Array.from(document.querySelectorAll("button"));
+            const btn = btns.find(b => b.textContent && b.textContent.includes("Aceptar") && b.closest(".btn-bar"));
             if (btn) {
                 btn.click();
                 return true;

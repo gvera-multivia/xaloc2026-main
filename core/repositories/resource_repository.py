@@ -225,6 +225,43 @@ WHERE {organisme_like_clause}
   AND rs.Expedient IS NOT NULL
 ORDER BY rs.Estado ASC, rs.idRecurso ASC
 """,
+        "terrassa": """
+SELECT
+    rs.idRecurso,
+    rs.idExp,
+    rs.Expedient,
+    rs.Organisme,
+    rs.TExp,
+    rs.Estado,
+    rs.numclient,
+    rs.SujetoRecurso,
+    rs.FaseProcedimiento,
+    rs.UsuarioAsignado,
+    rs.FAlta,
+    rs.Matricula AS rs_matricula,
+    c.tipodecliente AS cliente_tipo,
+    c.nif AS cliente_nif,
+    c.nifempresa AS cliente_nif_empresa,
+    c.Nombre AS cliente_nombre,
+    c.Apellido1 AS cliente_apellido1,
+    c.Apellido2 AS cliente_apellido2,
+    c.Nombrefiscal AS cliente_razon_social,
+    e.matricula AS exp_matricula,
+    pe.matricula AS pub_matricula,
+    pe.[publicación] AS pub_publicacion,
+    att.id AS adjunto_id,
+    att.Filename AS adjunto_filename
+FROM Recursos.RecursosExp rs
+LEFT JOIN clientes c ON rs.numclient = c.numerocliente
+LEFT JOIN expedientes e ON rs.idExp = e.idexpediente
+LEFT JOIN pubExp pe ON pe.Idpublic = e.Idpublic
+LEFT JOIN attachments_resource_documents att ON rs.automatic_id = att.automatic_id
+WHERE {organisme_like_clause}
+  AND rs.TExp IN ({texp_list})
+  AND rs.Estado IN (0, 1)
+  AND rs.Expedient IS NOT NULL
+ORDER BY rs.Estado ASC, rs.idRecurso ASC
+""",
     }
 
     def __init__(self, *, conn_str: str, logger: logging.Logger | None = None):

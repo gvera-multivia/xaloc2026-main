@@ -79,7 +79,8 @@ class AyuntaPalmaSelectors:
     alegaciones_input: str = "input[type='text'].form-control"
     alegaciones_textarea: str = "textarea.form-control"
     alegaciones_confirm: str = "button:has-text(\"Confirmar\")"
-    archivo_input: str = "#ctl00_ctl00_cphM_cph_mfuNuevoFichero_pnl input[type='file']"
+    hf_nuevo_fichero: str = "#ctl00_ctl00_cphM_cph_hfNuevoFichero"
+    selector_ficheros_ajax_url: str = "https://palma.sedipualba.es/selectorficheros/ajax.aspx"
 
 
 @dataclass

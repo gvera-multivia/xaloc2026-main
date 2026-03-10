@@ -101,6 +101,7 @@ services:
     volumes:
       - ../../:/app
       - clientes_smb:/mnt/clientes:rw
+      - dptos_smb:/mnt/dptos:rw
     ports:
       - "8788:8788"
     depends_on:
@@ -145,6 +146,7 @@ services:
       - ../../:/app
       - dashboard_frontend_node_modules:/app/dashboard-frontend/node_modules
       - dashboard_frontend_next:/app/dashboard-frontend/.next
+      - dptos_smb:/mnt/dptos:rw
     depends_on:
       dashboard-backend-service:
         condition: service_started
@@ -374,3 +376,9 @@ volumes:
         type: cifs
         o: "username=Guillem Vera,password=1234,vers=3.0,rw,iocharset=utf8"
         device: "//192.168.184.150/clientes"
+  dptos_smb:
+      driver: local
+      driver_opts:
+        type: cifs
+        o: "username=Guillem Vera,password=1234,vers=3.0,rw,iocharset=utf8"
+        device: "//192.168.184.150/dptos multivia"
