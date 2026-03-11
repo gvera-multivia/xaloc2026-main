@@ -1,0 +1,151 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - text: 
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - generic:
+          - link "14 °C":
+            - /url: http://www.aemet.es/va/eltiempo/prediccion/municipios/valencia-id46250
+            - img [ref=e8] [cursor=pointer]
+            - generic [ref=e9] [cursor=pointer]: 14 °C
+      - list [ref=e10]:
+        - listitem [ref=e11]:
+          - link "València al minut" [ref=e12] [cursor=pointer]:
+            - /url: http://www.valencia.es/valenciaalminut/
+        - listitem [ref=e13]:
+          - link "Govern obert" [ref=e14] [cursor=pointer]:
+            - /url: https://www.valencia.es/val/ajuntament/govern-obert
+        - listitem [ref=e15]:
+          - link "Visit València" [ref=e16] [cursor=pointer]:
+            - /url: https://www.visitvalencia.com/va
+        - listitem [ref=e17]:
+          - link "Seu Electrònica" [ref=e18] [cursor=pointer]:
+            - /url: https://sede.valencia.es/sede/?lang=2
+        - listitem [ref=e19]:
+          - link "Cita prèvia" [ref=e20] [cursor=pointer]:
+            - /url: https://www.valencia.es/val/tramits/cita-previa
+        - listitem [ref=e21]:
+          - link "AppValència" [ref=e22] [cursor=pointer]:
+            - /url: http://www.valencia.es/appvalencia/
+        - listitem [ref=e23]:
+          - link "Facebook" [ref=e24] [cursor=pointer]:
+            - /url: https://www.facebook.com/AjuntamentVLC
+        - listitem [ref=e25]:
+          - link "Twitter" [ref=e26] [cursor=pointer]:
+            - /url: https://twitter.com/ajuntamentvlc
+        - listitem [ref=e27]:
+          - link "Instagram" [ref=e28] [cursor=pointer]:
+            - /url: https://instagram.com/ajuntamentvlc
+      - list [ref=e32]:
+        - generic:
+          - listitem [ref=e33]:
+            - link "Val" [ref=e34] [cursor=pointer]:
+              - /url: "#"
+          - listitem [ref=e35]:
+            - link "Cas" [ref=e36] [cursor=pointer]:
+              - /url: "#"
+    - generic [ref=e38]:
+      - list [ref=e39]:
+        - listitem [ref=e40]:
+          - link "Inici" [ref=e41] [cursor=pointer]:
+            - /url: https://www.valencia.es
+        - listitem [ref=e42]:
+          - link "Ajuntament" [ref=e43] [cursor=pointer]:
+            - /url: https://www.valencia.es/val/ajuntament
+        - listitem [ref=e44]:
+          - link "La ciutat" [ref=e45] [cursor=pointer]:
+            - /url: https://www.valencia.es/val/la-ciutat
+        - listitem [ref=e46]:
+          - link "Tràmits" [ref=e47] [cursor=pointer]:
+            - /url: https://www.valencia.es/val/tramits
+        - listitem [ref=e48]:
+          - link "Atenció ciutadana" [ref=e49] [cursor=pointer]:
+            - /url: https://www.valencia.es/val/atencio-ciutadana
+        - listitem [ref=e50]:
+          - link "Actualitat" [ref=e51] [cursor=pointer]:
+            - /url: https://www.valencia.es/val/actualitat
+      - generic [ref=e53]:
+        - generic [ref=e54]:
+          - text: 
+          - textbox "Cercar en la seu" [ref=e56]
+          - button "" [ref=e58]
+        - link "Ajuda i preguntes freqüents" [ref=e60] [cursor=pointer]:
+          - /url: /sede/menuContent.xhtml/PREGUNTAS_FRECUENTES_FAQS
+          - generic [ref=e62]: Ajuda i preguntes freqüents
+  - generic [ref=e63]:
+    - generic [ref=e64]:
+      - link "Seu Electrònica" [ref=e66] [cursor=pointer]:
+        - /url: /sede
+      - link "Carpeta ciutadana" [ref=e68] [cursor=pointer]:
+        - /url: /sede/carpeta/index.xhtml
+        - img "Carpeta ciutadana" [ref=e69]
+    - generic [ref=e72]:
+      - generic [ref=e73]:
+        - generic [ref=e74]:
+          - button "Carpeta ciutadana" [ref=e75] [cursor=pointer]
+          - button "" [ref=e76] [cursor=pointer]
+        - generic [ref=e77]:
+          - button "Tràmits" [ref=e78] [cursor=pointer]
+          - button "" [ref=e79] [cursor=pointer]
+          - generic [ref=e80]:
+            - button "Matèries" [ref=e82] [cursor=pointer]
+            - button "Circumstàncies personals" [ref=e84] [cursor=pointer]
+            - button "Col·lectiu destinatari" [ref=e86] [cursor=pointer]
+            - button "Certificat d'empadronament" [ref=e88] [cursor=pointer]
+            - link "Queixes i suggeriments" [ref=e90] [cursor=pointer]:
+              - /url: https://www.valencia.es/val/atencio-ciutadana
+        - generic [ref=e91]:
+          - button "Publicacions oficials" [ref=e92] [cursor=pointer]
+          - button "" [ref=e93] [cursor=pointer]
+        - generic [ref=e94]:
+          - button "Sobre la seu" [ref=e95] [cursor=pointer]
+          - button "" [ref=e96] [cursor=pointer]
+        - generic [ref=e97]:
+          - button "Gestors de servicis" [ref=e98] [cursor=pointer]
+          - button "" [ref=e99] [cursor=pointer]
+        - button "Registre electrònic" [ref=e101] [cursor=pointer]
+        - button "Verificador de documents" [ref=e103] [cursor=pointer]
+      - button "Desplegar" [ref=e105] [cursor=pointer]
+  - generic [ref=e106]:
+    - generic [ref=e110]:
+      - button "Inici" [ref=e111] [cursor=pointer]
+      - generic [ref=e112]: ">"
+      - text: Tràmits
+    - generic [ref=e115]:
+      - generic [ref=e116]: Selecció d'organisme destí
+      - generic [ref=e118]:
+        - generic [ref=e120]:
+          - generic [ref=e121]: A continuació, ha de seleccionar el destí de la sol·licitud que vol presentar. Pot seleccionar si vol presentar-la al Registre Electrònic del Ajuntament de València o a una altra administració.
+          - table [ref=e123]:
+            - rowgroup [ref=e124]:
+              - row "Ajuntament de València" [ref=e125]:
+                - cell "Ajuntament de València" [ref=e126]:
+                  - radio "Ajuntament de València" [checked] [ref=e127]
+                  - text: Ajuntament de València
+              - row "Un altre organisme" [ref=e128]:
+                - cell "Un altre organisme" [ref=e129]:
+                  - radio "Un altre organisme" [ref=e130]
+                  - text: Un altre organisme
+        - generic:
+          - button "Tornar" [ref=e132] [cursor=pointer]
+          - button "Següent" [ref=e134] [cursor=pointer]
+  - generic [ref=e136]:
+    - generic [ref=e137]:
+      - heading "Ajuntament de Valéncia" [level=1] [ref=e139]
+      - generic [ref=e142]:
+        - paragraph [ref=e143]: Pl. de l'Ajuntament, 1 - 46002 València
+        - paragraph [ref=e144]:
+          - text: Tel.:96 352 54 78
+          - generic "Correu Electrónic" [ref=e145]:
+            - link "informacion@valencia.es" [ref=e146] [cursor=pointer]:
+              - /url: mailto:informacion@valencia.es
+    - generic [ref=e147]:
+      - link "Preguntes freqüents (FAQS)" [ref=e149] [cursor=pointer]:
+        - /url: /sede/menuContent.xhtml/PREGUNTAS_FRECUENTES_FAQS
+      - link "Accesibilitat" [ref=e151] [cursor=pointer]:
+        - /url: /sede/menuContent.xhtml/ACCESIBILIDAD_WEB
+      - link "Mapa de la seu" [ref=e153] [cursor=pointer]:
+        - /url: /sede/menuContent.xhtml/MAPA_WEB_DE_LA_SEDE
+      - link "Política de privacitat" [ref=e155] [cursor=pointer]:
+        - /url: https://www.valencia.es/val/politica-privacitat
+  - generic [ref=e156] [cursor=pointer]: Anar a inici de pàgina
