@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import logging
 import re
@@ -18,6 +18,7 @@ from core.address_defaults import (
 )
 from core.contact_defaults import get_default_contact_email, get_default_contact_phone_fixed
 from core.guardians import GroqTokenGuardian, ResourceContext
+from core.validation.validators import normalize_plate_with_fallback
 from .site_adapter import SiteAdapter
 
 logger = logging.getLogger("brain")
@@ -658,7 +659,7 @@ class MadridAdapter(SiteAdapter):
                 "numclient": self._convert_value(r.get("numclient")),
                 "sujeto_recurso": self._clean_str(r.get("SujetoRecurso")),
                 "fase_procedimiento": fase_raw,
-                "plate_number": plate_number,
+                "plate_number": normalize_plate_with_fallback(plate_number),
                 "plate_number_source": plate_src,
                 "user_phone": get_default_contact_phone_fixed(),
                 "inter_telefono": get_default_contact_phone_fixed(),

@@ -13,6 +13,7 @@ from core.address_defaults import get_default_country_es_ascii
 from core.contact_defaults import get_default_contact_email, get_default_contact_mobile, get_default_contact_phone_fixed
 from core.guardians import GroqTokenGuardian, ResourceContext
 from core.sqlserver_utils import build_sqlserver_connection_string
+from core.validation.validators import normalize_plate_with_fallback
 
 logger = logging.getLogger("brain")
 
@@ -505,7 +506,7 @@ class BaseOnlineAdapter(SiteAdapter):
                 "p1_telefon_fix": contact_fixed,
                 "user_email": contact_email,
                 "p1_correu": contact_email,
-                "plate_number": self._clean_str(r.get("matricula")),
+                "plate_number": normalize_plate_with_fallback(r.get("matricula")),
                 "data_denuncia": data_denuncia,
                 "nif": nif,
                 "name": self._clean_str(r.get("SujetoRecurso")).upper(),

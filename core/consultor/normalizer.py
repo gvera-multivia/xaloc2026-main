@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from core.address_defaults import get_default_country_es_ascii
+from core.validation.validators import normalize_plate_with_fallback
 from .contracts import CanonicalResourceV1
 
 
@@ -75,6 +76,8 @@ def normalize_resource_row(*, site_id: str, row: dict[str, Any]) -> CanonicalRes
         raw.get("pub_matricula"),
         raw.get("matricula"),
     )
+    normalized_plate = normalize_plate_with_fallback(vehicle_plate)
+
     if _clean(raw.get("rs_matricula")):
         plate_source = "rs_matricula"
     elif _clean(raw.get("exp_matricula")):
@@ -87,7 +90,7 @@ def normalize_resource_row(*, site_id: str, row: dict[str, Any]) -> CanonicalRes
         plate_source = "none"
 
     vehicle = {
-        "plate": {"value": vehicle_plate, "source": plate_source},
+        "plate": {"value": normalized_plate, "source": plate_source},
         "incident_date": _first_non_empty(raw.get("dia_denuncia"), raw.get("FAlta")),
         "publication_text": _clean(raw.get("pub_publicacion")),
     }

@@ -80,3 +80,32 @@ def validate_plate_spain(plate: str) -> tuple[bool, Optional[str]]:
         return True, None
     
     return False, "Formato de matrícula española inválido"
+
+def normalize_plate_with_fallback(plate: Optional[str]) -> str:
+    """
+    Intenta limpiar y validar una matrícula con formatos españoles conocidos.
+    Si la matrícula es inválida, retorna "." como un fallback explícito.
+    """
+    if not plate:
+        return "."
+    
+    # Remove all whitespace and special characters
+    cleaned = re.sub(r"[^A-Z0-9]", "", str(plate).upper())
+    if not cleaned:
+        return "."
+        
+    # Modern format: 1234BBB (4 digits + 3 consonants)
+    if re.match(r"^\d{4}[BCDFGHJKLMNPQRSTVWXYZ]{3}$", cleaned):
+        return cleaned
+        
+    # Old format: GI1234AZ (1-2 letters + 4 digits + 0-2 letters)
+    if re.match(r"^[A-Z]{1,2}\d{4}[A-Z]{0,2}$", cleaned):
+        return cleaned
+        
+    # Special formats: Mopeds (C), Trailers (R), Agricultural (E) -> starts with letter, 4 digits, 3 letters
+    if re.match(r"^[C|R|E]\d{4}[A-Z]{3}$", cleaned):
+        return cleaned
+        
+    # If no known format matched, fallback to "."
+    return "."
+

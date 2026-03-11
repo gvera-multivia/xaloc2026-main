@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import re
 from datetime import datetime
@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from core.contact_defaults import get_default_contact_email
+from core.validation.validators import normalize_plate_with_fallback
 from .site_adapter import SiteAdapter
 from core.xaloc_expediente_utils import is_valid_format, fix_format
 
@@ -80,11 +81,7 @@ class XalocAdapter(SiteAdapter):
 
     @staticmethod
     def _normalize_plate(value: Any) -> str:
-        v = str(value).strip() if value is not None else ""
-        cleaned = re.sub(r"\s+", "", v).upper()
-        if not cleaned:
-            return "." # Fallback explÃƒÂ­cito
-        return cleaned
+        return normalize_plate_with_fallback(value)
 
     @staticmethod
     def _convert_value(v: Any) -> Any:

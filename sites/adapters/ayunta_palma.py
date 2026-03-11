@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from core.contact_defaults import get_default_contact_email, get_default_contact_mobile
+from core.validation.validators import normalize_plate_with_fallback
 from .site_adapter import SiteAdapter
 
 logger = logging.getLogger("brain")
@@ -42,8 +43,7 @@ class AyuntaPalmaAdapter(SiteAdapter):
 
     @staticmethod
     def _normalize_plate(v: Any) -> str:
-        txt = str(v or "").strip().upper()
-        return re.sub(r"\s+", "", txt)
+        return normalize_plate_with_fallback(v)
 
     @staticmethod
     def _convert_value(v: Any) -> Any:
@@ -333,8 +333,6 @@ class AyuntaPalmaAdapter(SiteAdapter):
                 payload["apellido2"] = self._clean_str(r.get("cliente_apellido2"))
 
             # Minimos para controller/worker
-            if not payload.get("matricula"):
-                payload["matricula"] = "."
             if tipo_persona == "PersonaFisica" and not payload.get("documento"):
                 if on_discard:
                     on_discard(

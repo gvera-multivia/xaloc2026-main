@@ -10,6 +10,7 @@ from typing import Any, Optional
 
 from core.client_documentation import build_required_client_documents_for_payload
 from core.sqlserver_utils import build_sqlserver_connection_string
+from core.validation.validators import normalize_plate_with_fallback
 from .site_adapter import SiteAdapter
 
 logger = logging.getLogger("brain")
@@ -340,19 +341,8 @@ class TerrassaAdapter(SiteAdapter):
                 apellido2 = self._clean(r.get("cliente_apellido2"))
 
             fecha_infraccion = self._format_date_ddmmyyyy(r.get("FAlta"))
-            matricula, matricula_source = self._resolve_plate(r)
-            if not matricula:
-                if on_discard:
-                    on_discard(
-                        {
-                            "site_id": self.site_id,
-                            "idRecurso": rid,
-                            "Expedient": expediente,
-                            "tipo_incidencia": "SITE_RULE_DISCARDED",
-                            "motivo": "Terrassa descartado: no se pudo inferir matricula",
-                        }
-                    )
-                continue
+            matricula_raw, matricula_source = self._resolve_plate(r)
+            matricula = normalize_plate_with_fallback(matricula_raw)
 
             sujeto = self._clean(r.get("SujetoRecurso") or nombre)
             asunto, alegaciones, observaciones = self._build_texts_by_fase(
