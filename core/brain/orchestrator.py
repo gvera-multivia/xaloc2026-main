@@ -22,6 +22,8 @@ from core.xvia_auth import create_authenticated_session_in_place
 from core.nt_expediente_fixer import is_nt_pattern, fix_nt_expediente
 from core.client_documentation import check_requires_gesdoc
 from core.address_classifier import classify_addresses_batch_with_ai, classify_address_fallback
+from core.contact_defaults import get_default_contact_email
+from core.repositories import ResourceRepository
 from sites.adapters import MadridAdapter, XalocAdapter, BaseOnlineAdapter, AyuntaPalmaAdapter, RedsaraAdapter
 from sites.adapters.site_adapter import SiteAdapter
 
@@ -113,10 +115,27 @@ class BrainOrchestrator:
         sqlserver_conn_str: str,
         dry_run: bool = False
     ):
+        self.logger = logger
+        allow_legacy = (os.getenv("ALLOW_LEGACY_BRAIN_ORCHESTRATOR") or "0").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        self.logger.warning(
+            "core.brain.orchestrator.BrainOrchestrator está deprecado. "
+            "Runtime activo: services/brain_claim/app.py."
+        )
+        if not allow_legacy:
+            raise RuntimeError(
+                "Legacy BrainOrchestrator deshabilitado. "
+                "Use services/brain_claim/app.py. "
+                "Para rollback de emergencia: ALLOW_LEGACY_BRAIN_ORCHESTRATOR=1."
+            )
         self.db = sqlite_db
         self.sqlserver_conn_str = sqlserver_conn_str
+        self.resource_repo = ResourceRepository(conn_str=self.sqlserver_conn_str, logger=self.logger)
         self.dry_run = dry_run
-        self.logger = logger
         self.session: Optional[aiohttp.ClientSession] = None
         self.authenticated_user: Optional[str] = None
         self.queue_backend = QUEUE_MODE
@@ -559,7 +578,7 @@ class BrainOrchestrator:
         return {
             "idRecurso": self._convert_value(recurso["idRecurso"]),
             "idExp": self._convert_value(recurso.get("idExp")),
-            "user_email": "INFO@XVIA-SERVICIOSJURIDICOS.COM",
+            "user_email": get_default_contact_email(uppercase=True),
             "denuncia_num": expediente,
             "plate_number": _normalize_plate(recurso.get("matricula")),
             "expediente_num": expediente,
@@ -712,6 +731,7 @@ class BrainOrchestrator:
                     authenticated_user=self.authenticated_user,
                     limit=fetch_limit,
                     on_discard=_on_discard,
+                    resource_repo=self.resource_repo,
                 )
                 if not candidates:
                     self.logger.info(f"[{site_id}] Sin candidatos remotos validos.")

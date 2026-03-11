@@ -7,10 +7,10 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Optional
 
-import pyodbc
-
 from .site_adapter import SiteAdapter
 from core.address_classifier import classify_address_fallback
+from core.address_defaults import get_default_country_es_ascii
+from core.contact_defaults import get_default_contact_email, get_default_contact_mobile, get_default_contact_phone_fixed
 from core.guardians import GroqTokenGuardian, ResourceContext
 from core.sqlserver_utils import build_sqlserver_connection_string
 
@@ -19,58 +19,6 @@ logger = logging.getLogger("brain")
 
 class BaseOnlineAdapter(SiteAdapter):
     DEFAULT_REGEX_EXPEDIENTE = r"^(\d{5}-\d{4}[/\-]\d{4,5}-GIM|\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{6,7}|\d-\d{4}[/\-]\d{4,6}-(EXE|ECC))$"
-    SQL_FETCH_RECURSOS_BASE = """
-SELECT
-    rs.idRecurso,
-    rs.idExp,
-    rs.Expedient,
-    rs.Organisme,
-    rs.TExp,
-    rs.Estado,
-    rs.numclient,
-    rs.SujetoRecurso,
-    rs.FaseProcedimiento,
-    rs.UsuarioAsignado,
-    rs.FAlta,
-    e.dia AS dia_denuncia,
-    e.matricula,
-    rs.cif,
-    CASE WHEN rs.TExp = 2 THEN rs.ConducNom ELSE di.ConducNom END AS conduc_nom,
-    CASE WHEN rs.TExp = 2 THEN rs.Conducdni ELSE di.Conducdni END AS conduc_dni,
-    CASE WHEN rs.TExp = 2 THEN rs.ConducAdr ELSE di.ConducAdr END AS conduc_adr,
-    CASE WHEN rs.TExp = 2 THEN rs.ConducCodpost ELSE di.ConducCodpost END AS conduc_codpost,
-    CASE WHEN rs.TExp = 2 THEN rs.ConducPobl ELSE di.ConducPobl END AS conduc_pobl,
-    CASE WHEN rs.TExp = 2 THEN rs.Conducprov ELSE NULL END AS conduc_prov,
-    c.nif AS cliente_nif,
-    c.Nombre AS cliente_nombre,
-    c.Apellido1 AS cliente_apellido1,
-    c.Apellido2 AS cliente_apellido2,
-    c.Nombrefiscal AS cliente_razon_social,
-    c.provincia AS cliente_provincia,
-    c.poblacion AS cliente_municipio,
-    c.calle AS cliente_domicilio,
-    c.numero AS cliente_numero,
-    c.escalera AS cliente_escalera,
-    c.piso AS cliente_planta,
-    c.puerta AS cliente_puerta,
-    c.Cpostal AS cliente_cp,
-    c.email AS cliente_email,
-    c.telefono1 AS cliente_tel1,
-    c.telefono2 AS cliente_tel2,
-    c.movil AS cliente_movil,
-    att.id AS adjunto_id,
-    att.Filename AS adjunto_filename
-FROM Recursos.RecursosExp rs
-INNER JOIN clientes c ON rs.numclient = c.numerocliente
-INNER JOIN expedientes e ON rs.idExp = e.idexpediente
-LEFT JOIN DadesIdentif di ON rs.idExp = di.idExp
-LEFT JOIN attachments_resource_documents att ON rs.automatic_id = att.automatic_id
-WHERE {organisme_like_clause}
-  AND rs.TExp IN ({texp_list})
-  AND rs.Estado IN (0, 1)
-  AND rs.Expedient IS NOT NULL
-ORDER BY rs.Estado ASC, rs.idRecurso ASC
-"""
 
     _P1_SIGLAS = {
         "AG", "AL", "AP", "AR", "AU", "AV", "AY", "BJ", "BO", "BR", "CA", "CG", "CH", "CI", "CJ", "CL", "CM",
@@ -222,6 +170,71 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         exp = cls._clean_str(expediente).upper()
         return bool(re.match(r"^\d{5}-\d{4}[/\-]\d{4,5}-GIM$", exp))
 
+    @classmethod
+    def _materialize_from_canonical_if_present(cls, record: dict[str, Any]) -> dict[str, Any]:
+        out = dict(record or {})
+        canonical = out.get("__canonical_v1")
+        if not isinstance(canonical, dict):
+            return out
+
+        resource = canonical.get("resource") or {}
+        client = canonical.get("client") or {}
+        vehicle = canonical.get("vehicle") or {}
+        attachments = canonical.get("attachments") or []
+        client_doc = client.get("document") or {}
+        client_name = client.get("name") or {}
+        client_contact = client.get("contact") or {}
+        client_address = client.get("address") or {}
+        plate = vehicle.get("plate") or {}
+
+        out["idRecurso"] = out.get("idRecurso", resource.get("id"))
+        out["idExp"] = out.get("idExp", resource.get("exp_id"))
+        out["numclient"] = out.get("numclient", resource.get("numclient"))
+        out["Expedient"] = out.get("Expedient", resource.get("expedient"))
+        out["Organisme"] = out.get("Organisme", resource.get("organism"))
+        out["TExp"] = out.get("TExp", resource.get("texp"))
+        out["Estado"] = out.get("Estado", resource.get("state"))
+        out["UsuarioAsignado"] = out.get("UsuarioAsignado", resource.get("assigned_user"))
+        out["FaseProcedimiento"] = out.get("FaseProcedimiento", resource.get("phase"))
+        out["SujetoRecurso"] = out.get("SujetoRecurso", resource.get("subject_name"))
+        out["FUsuarioCompletado"] = out.get("FUsuarioCompletado", resource.get("completed_at"))
+
+        out["cliente_tipo"] = out.get("cliente_tipo", client.get("type"))
+        out["cliente_nif"] = out.get("cliente_nif", client_doc.get("nif"))
+        out["cliente_nif_empresa"] = out.get("cliente_nif_empresa", client_doc.get("cif"))
+        out["cif"] = out.get("cif", client_doc.get("cif"))
+        out["cliente_nombre"] = out.get("cliente_nombre", client_name.get("first"))
+        out["cliente_apellido1"] = out.get("cliente_apellido1", client_name.get("last1"))
+        out["cliente_apellido2"] = out.get("cliente_apellido2", client_name.get("last2"))
+        out["cliente_razon_social"] = out.get("cliente_razon_social", client_name.get("business"))
+        out["cliente_email"] = out.get("cliente_email", client_contact.get("email"))
+        out["cliente_tel1"] = out.get("cliente_tel1", client_contact.get("phone1"))
+        out["cliente_tel2"] = out.get("cliente_tel2", client_contact.get("phone2"))
+        out["cliente_movil"] = out.get("cliente_movil", client_contact.get("mobile"))
+
+        out["cliente_domicilio"] = out.get("cliente_domicilio", client_address.get("street_name"))
+        out["cliente_numero"] = out.get("cliente_numero", client_address.get("number"))
+        out["cliente_escalera"] = out.get("cliente_escalera", client_address.get("stair"))
+        out["cliente_planta"] = out.get("cliente_planta", client_address.get("floor"))
+        out["cliente_puerta"] = out.get("cliente_puerta", client_address.get("door"))
+        out["cliente_cp"] = out.get("cliente_cp", client_address.get("zip"))
+        out["cliente_municipio"] = out.get("cliente_municipio", client_address.get("city"))
+        out["cliente_provincia"] = out.get("cliente_provincia", client_address.get("province"))
+        out["address_sigla"] = out.get("address_sigla", client_address.get("street_type"))
+
+        out["conduc_adr"] = out.get("conduc_adr", client_address.get("street_name"))
+        out["conduc_codpost"] = out.get("conduc_codpost", client_address.get("zip"))
+        out["conduc_pobl"] = out.get("conduc_pobl", client_address.get("city"))
+        out["conduc_prov"] = out.get("conduc_prov", client_address.get("province"))
+
+        out["matricula"] = out.get("matricula", plate.get("value"))
+        out["rs_matricula"] = out.get("rs_matricula", plate.get("value") if plate.get("source") == "rs_matricula" else None)
+        out["exp_matricula"] = out.get("exp_matricula", plate.get("value") if plate.get("source") == "exp_matricula" else None)
+        out["pub_matricula"] = out.get("pub_matricula", plate.get("value") if plate.get("source") == "pub_matricula" else None)
+        out["dia_denuncia"] = out.get("dia_denuncia", vehicle.get("incident_date"))
+        out["adjuntos"] = out.get("adjuntos", attachments)
+        return out
+
     def _parse_expediente_base(self, expediente: str) -> dict:
         exp = self._clean_str(expediente).upper()
         m_gim = re.match(r"^(?P<id_ens>\d{5})-(?P<any>\d{4})[/\-](?P<num>\d{4,5})-GIM$", exp)
@@ -293,6 +306,8 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         on_discard: Optional[SiteAdapter.DiscardCallback] = None,
         resource_repo: Any | None = None,
     ) -> list[dict]:
+        if resource_repo is None:
+            raise RuntimeError("[base_online] fetch_candidates requires injected resource_repo (consultor/repository).")
         regex_pattern = self._clean_str(config.get("regex_expediente")) or self.DEFAULT_REGEX_EXPEDIENTE
         regex = self._regex_expediente_cache.get(regex_pattern)
         if regex is None:
@@ -303,125 +318,46 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 regex = self._regex_expediente_fallback
             self._regex_expediente_cache[regex_pattern] = regex
 
-        if resource_repo is not None:
-            recursos_map: dict[int, dict] = {}
-            resources = resource_repo.get_pending_resources(site_id=self.site_id, config=config, limit=limit)
-            for resource in resources:
-                record = dict(resource.metadata or {})
-                rid = record.get("idRecurso")
-                if not rid:
-                    continue
-                rid_int = int(rid)
-                recursos_map[rid_int] = record
+        recursos_map: dict[int, dict] = {}
+        resources = resource_repo.get_pending_resources(site_id=self.site_id, config=config, limit=limit)
+        for resource in resources:
+            record = self._materialize_from_canonical_if_present(dict(resource.metadata or {}))
+            rid = record.get("idRecurso")
+            if not rid:
+                continue
+            rid_int = int(rid)
+            recursos_map[rid_int] = record
 
-            out: list[dict] = []
-            for _, recurso in recursos_map.items():
-                if limit and len(out) >= limit:
-                    break
+        out: list[dict] = []
+        for _, recurso in recursos_map.items():
+            if limit and len(out) >= limit:
+                break
 
-                expediente = self._clean_str(recurso.get("Expedient")).upper()
-                expediente = re.sub(r"\s+", "", expediente)
-                if not expediente or not regex.match(expediente):
-                    if on_discard:
-                        on_discard(
-                            {
-                                "site_id": self.site_id,
-                                "idRecurso": recurso.get("idRecurso"),
-                                "Expedient": expediente,
-                                "tipo_incidencia": "REGEX_DISCARDED",
-                                "motivo": f"Expediente no valido para BASE: {expediente}",
-                            }
-                        )
-                    continue
-                recurso["Expedient"] = expediente
+            expediente = self._clean_str(recurso.get("Expedient")).upper()
+            expediente = re.sub(r"\s+", "", expediente)
+            if not expediente or not regex.match(expediente):
+                if on_discard:
+                    on_discard(
+                        {
+                            "site_id": self.site_id,
+                            "idRecurso": recurso.get("idRecurso"),
+                            "Expedient": expediente,
+                            "tipo_incidencia": "REGEX_DISCARDED",
+                            "motivo": f"Expediente no valido para BASE: {expediente}",
+                        }
+                    )
+                continue
+            recurso["Expedient"] = expediente
 
-                estado = int(recurso.get("Estado") or 0)
-                usuario = self._clean_str(recurso.get("UsuarioAsignado"))
-                if estado == 1 and authenticated_user and usuario != authenticated_user:
-                    continue
-                if estado == 1 and not authenticated_user:
-                    continue
+            estado = int(recurso.get("Estado") or 0)
+            usuario = self._clean_str(recurso.get("UsuarioAsignado"))
+            if estado == 1 and authenticated_user and usuario != authenticated_user:
+                continue
+            if estado == 1 and not authenticated_user:
+                continue
 
-                out.append(recurso)
-            return out
-
-        filtro_texp = self._clean_str(config.get("filtro_texp"))
-        try:
-            texp_values = [int(x.strip()) for x in filtro_texp.split(",") if x.strip()]
-        except Exception:
-            texp_values = [2, 3]
-        if not texp_values:
-            texp_values = [2, 3]
-        texp_placeholders = ",".join(["?"] * len(texp_values))
-
-        query_organisme_raw = self._clean_str(config.get("query_organisme")) or "%"
-        patterns = [p.strip() for p in query_organisme_raw.split(" ") if p.strip()]
-        if not patterns:
-            patterns = ["%"]
-        like_clauses = ["rs.Organisme LIKE ?"] * len(patterns)
-        organisme_like_clause = " AND ".join(like_clauses)
-
-        query = self.SQL_FETCH_RECURSOS_BASE.format(
-            organisme_like_clause=organisme_like_clause,
-            texp_list=texp_placeholders,
-        )
-
-        conn = pyodbc.connect(conn_str)
-        try:
-            cursor = conn.cursor()
-            cursor.execute(query, patterns + texp_values)
-            columns = [column[0] for column in cursor.description]
-
-            recursos_map: dict[int, dict] = {}
-            for row in cursor.fetchall():
-                record = dict(zip(columns, row))
-                rid = record.get("idRecurso")
-                if not rid:
-                    continue
-                rid_int = int(rid)
-
-                if rid_int not in recursos_map:
-                    recursos_map[rid_int] = {**record, "adjuntos": []}
-
-                adj_id = record.get("adjunto_id")
-                if adj_id:
-                    recursos_map[rid_int]["adjuntos"].append({
-                        "id": int(adj_id),
-                        "filename": record.get("adjunto_filename"),
-                    })
-
-            out: list[dict] = []
-            for _, recurso in recursos_map.items():
-                if limit and len(out) >= limit:
-                    break
-
-                expediente = self._clean_str(recurso.get("Expedient")).upper()
-                expediente = re.sub(r"\s+", "", expediente)
-                if not expediente or not regex.match(expediente):
-                    if on_discard:
-                        on_discard(
-                            {
-                                "site_id": self.site_id,
-                                "idRecurso": recurso.get("idRecurso"),
-                                "Expedient": expediente,
-                                "tipo_incidencia": "REGEX_DISCARDED",
-                                "motivo": f"Expediente no valido para BASE: {expediente}",
-                            }
-                        )
-                    continue
-                recurso["Expedient"] = expediente
-
-                estado = int(recurso.get("Estado") or 0)
-                usuario = self._clean_str(recurso.get("UsuarioAsignado"))
-                if estado == 1 and authenticated_user and usuario != authenticated_user:
-                    continue
-                if estado == 1 and not authenticated_user:
-                    continue
-
-                out.append(recurso)
-            return out
-        finally:
-            conn.close()
+            out.append(recurso)
+        return out
 
     async def build_payloads(
         self,
@@ -494,8 +430,8 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 "address_zip": cp,
                 "address_city": poblacion.upper(),
                 "address_province": provincia.upper(),
-                "address_country": "ESPANA",
-                "address_pais": "ESPANA",
+                "address_country": get_default_country_es_ascii(),
+                "address_pais": get_default_country_es_ascii(),
                 "address_esc": (clasif.get("escalera") or r.get("cliente_escalera") or "").upper(),
                 "address_planta": (clasif.get("planta") or r.get("cliente_planta") or "").upper(),
                 "address_puerta": (clasif.get("puerta") or r.get("cliente_puerta") or "").upper(),
@@ -553,9 +489,9 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
 
             expone, solicita = self._get_motivos_base(fase_raw, expediente_raw, r.get("SujetoRecurso"))
             data_denuncia = self._format_date_ddmmyyyy(r.get("dia_denuncia")) or self._format_date_ddmmyyyy(r.get("FAlta"))
-            contact_mobile = "722761154"
-            contact_fixed = "932531411"
-            contact_email = "info@xvia-serviciosjuridicos.com"
+            contact_mobile = get_default_contact_mobile()
+            contact_fixed = get_default_contact_phone_fixed()
+            contact_email = get_default_contact_email()
 
             payload = {
                 "idRecurso": self._convert_value(r["idRecurso"]),

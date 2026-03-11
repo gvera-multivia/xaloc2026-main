@@ -19,6 +19,7 @@ from core.autofirma_shared import (
     wait_autofirma_prewarm_ready,
     wait_for_afirma_uri_trigger,
 )
+from core.address_defaults import get_default_country_es_ascii
 from core.client_documentation import client_identity_from_payload
 from core.client_paths import get_ruta_recursos_telematicos, resolve_client_docs_base_path
 from core.pdf_bundle import bundle_documents_to_single_pdf_for_palma
@@ -1392,7 +1393,11 @@ async def rellenar_paso1_datos_solicitante_redsara(page: Page, config: RedsaraCo
         wait_for_options=True,
     )
     await _fill_dnt_input(page, "represented", "streetName", data.represented_address)
-    await _select_dnt_option_by_id(page, select_id=config.selectors.represented_country_id, option_text="ESPANA")
+    await _select_dnt_option_by_id(
+        page,
+        select_id=config.selectors.represented_country_id,
+        option_text=get_default_country_es_ascii(),
+    )
     await _select_dnt_option_by_id(
         page,
         select_id=config.selectors.represented_province_id,

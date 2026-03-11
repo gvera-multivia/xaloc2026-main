@@ -4,18 +4,27 @@ import os
 import re
 import unicodedata
 
+from core.address_defaults import (
+    get_representative_city,
+    get_representative_country,
+    get_representative_province,
+    get_representative_street_full,
+    get_representative_street_type,
+    get_representative_zip,
+)
+from core.contact_defaults import get_default_contact_email, get_default_contact_mobile
 from sites.redsara.config import RedsaraConfig
 from sites.redsara.data_models import RedsaraTarget
 
-REP_STREET_TYPE_FIXED = "Ronda"
-REP_ADDRESS_FIXED = "GENERAL MITRE 169"
-REP_COUNTRY_FIXED = "ESPANA"
-REP_PROVINCE_FIXED = "BARCELONA"
-REP_CITY_FIXED = "BARCELONA"
-REP_ZIP_FIXED = "08022"
+REP_STREET_TYPE_FIXED = get_representative_street_type().title()
+REP_ADDRESS_FIXED = get_representative_street_full()
+REP_COUNTRY_FIXED = get_representative_country()
+REP_PROVINCE_FIXED = get_representative_province()
+REP_CITY_FIXED = get_representative_city()
+REP_ZIP_FIXED = get_representative_zip()
 
-PHONE_FIXED = "722761154"
-EMAIL_FIXED = "info@xvia-serviciosjuridicos.com"
+PHONE_FIXED = get_default_contact_mobile()
+EMAIL_FIXED = get_default_contact_email()
 
 _RE_NIF = re.compile(r"^\d{8}[A-Z]$", re.IGNORECASE)
 _RE_NIE = re.compile(r"^[XYZ]\d{7}[A-Z]$", re.IGNORECASE)
@@ -236,7 +245,7 @@ def _normalize_city_for_redsara(raw: str | None) -> str:
         body_norm = "".join(ch for ch in body_norm if unicodedata.category(ch) != "Mn")
         body_norm = " ".join(body_norm.split())
         if body_norm == "franqueses del valles" and article == "LES":
-            candidate = "FRANQUESES DEL VALLÃƒË†S, LES"
+            candidate = "FRANQUESES DEL VALLES, LES"
 
     return candidate
 
@@ -265,29 +274,50 @@ class RedsaraController:
         config.navegador.headless = bool(headless)
         return config
 
+    @staticmethod
+    def _canonical_get(data: dict, path: str):
+        canonical = (data or {}).get("__canonical_v1")
+        node = canonical if isinstance(canonical, dict) else None
+        for part in path.split("."):
+            if not isinstance(node, dict):
+                return None
+            node = node.get(part)
+        return node
+
+    @classmethod
+    def _pick(cls, data: dict, *keys: str, canonical_path: str | None = None):
+        for key in keys:
+            value = data.get(key)
+            if value not in (None, "", []):
+                return value
+        if canonical_path:
+            value = cls._canonical_get(data, canonical_path)
+            if value not in (None, "", []):
+                return value
+        return None
+
     def map_data(self, data: dict) -> dict:
-        base_doc_number = data.get("interested_doc_number") or data.get("nif") or data.get("interested_nif")
+        base_doc_number = self._pick(
+            data,
+            "interested_doc_number",
+            "nif",
+            "interested_nif",
+            canonical_path="client.document.nif",
+        ) or self._pick(data, "cif", "cliente_nif_empresa", canonical_path="client.document.cif")
         doc_type = _resolve_doc_type(
             base_doc_number,
-            data.get("interested_doc_type") or data.get("tipo_doc_interesado"),
+            self._pick(data, "interested_doc_type", "tipo_doc_interesado"),
         )
-        is_empresa = _is_company_by_cliente_tipo(data.get("cliente_tipo")) or bool(data.get("interested_is_company")) or (
+        is_empresa = _is_company_by_cliente_tipo(self._pick(data, "cliente_tipo", canonical_path="client.type")) or bool(data.get("interested_is_company")) or (
             (doc_type or "").strip().upper() == "CIF"
         )
         if is_empresa:
-            doc_number = (
-                data.get("interested_doc_number")
-                or data.get("cif")
-                or data.get("cliente_nif_empresa")
-            )
+            doc_number = self._pick(data, "interested_doc_number", "cif", "cliente_nif_empresa", canonical_path="client.document.cif")
             doc_type = "CIF"
         else:
             doc_number = base_doc_number
         street_name = (
-            data.get("interested_address")
-            or data.get("address_street")
-            or data.get("cliente_domicilio")
-            or data.get("domicilio")
+            self._pick(data, "interested_address", "address_street", "cliente_domicilio", "domicilio", canonical_path="client.address.street_name")
         )
         street_name = str(street_name or "").strip()
         street_type = _infer_street_type(
@@ -300,29 +330,20 @@ class RedsaraController:
         if is_empresa:
             # Para empresa: el campo "name" del formulario equivale a businessName (razon social).
             interested_name = (
-                data.get("interested_razon_social")
-                or data.get("razon_social")
-                or data.get("empresa")
-                or data.get("cliente_razon_social")
+                self._pick(data, "interested_razon_social", "razon_social", "empresa", "cliente_razon_social", canonical_path="client.name.business")
             )
             interested_surname1 = ""
             interested_surname2 = ""
         else:
             # Para persona fisica: usar campos estructurados de cliente.
             interested_name = (
-                data.get("interested_name")
-                or data.get("nombre")
-                or data.get("cliente_nombre")
+                self._pick(data, "interested_name", "nombre", "cliente_nombre", canonical_path="client.name.first")
             )
             interested_surname1 = (
-                data.get("interested_surname1")
-                or data.get("surname1")
-                or data.get("cliente_apellido1")
+                self._pick(data, "interested_surname1", "surname1", "cliente_apellido1", canonical_path="client.name.last1")
             )
             interested_surname2 = (
-                data.get("interested_surname2")
-                or data.get("surname2")
-                or data.get("cliente_apellido2")
+                self._pick(data, "interested_surname2", "surname2", "cliente_apellido2", canonical_path="client.name.last2")
                 or ""
             )
         return {
@@ -343,18 +364,20 @@ class RedsaraController:
             "interested_surname2": _normalize_person_name_for_redsara(interested_surname2),
             "interested_street_type": street_type,
             "interested_address": street_name,
-            "interested_province": data.get("interested_province") or data.get("address_province"),
-            "interested_city": _normalize_city_for_redsara(data.get("interested_city") or data.get("address_city")),
-            "interested_zip": data.get("interested_zip") or data.get("address_zip"),
+            "interested_province": self._pick(data, "interested_province", "address_province", canonical_path="client.address.province"),
+            "interested_city": _normalize_city_for_redsara(
+                self._pick(data, "interested_city", "address_city", canonical_path="client.address.city")
+            ),
+            "interested_zip": self._pick(data, "interested_zip", "address_zip", canonical_path="client.address.zip"),
             # Contacto interesado fijo (datos corporativos)
             "interested_phone": PHONE_FIXED,
             "interested_email": EMAIL_FIXED,
             "interested_is_company": is_empresa,
             "email_alert": data.get("email_alert"),
-            "destination_organism_code": data.get("destination_organism_code") or data.get("organism_code"),
-            "subject": data.get("subject") or data.get("asunto"),
-            "exposes": data.get("exposes") or data.get("expone"),
-            "solicit": data.get("solicit") or data.get("solicita"),
+            "destination_organism_code": self._pick(data, "destination_organism_code", "organism_code"),
+            "subject": self._pick(data, "subject", "asunto"),
+            "exposes": self._pick(data, "exposes", "expone"),
+            "solicit": self._pick(data, "solicit", "solicita"),
             "archivos": data.get("archivos") or [],
         }
 

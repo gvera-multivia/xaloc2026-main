@@ -6,11 +6,12 @@ from __future__ import annotations
 
 from playwright.async_api import Locator, Page, TimeoutError as PlaywrightTimeoutError, expect
 
+from core.contact_defaults import get_default_contact_email, get_default_contact_mobile
 from sites.ayunta_palma.config import AyuntaPalmaConfig, AyuntaPalmaSelectors
 from sites.ayunta_palma.data_models import AyuntaPalmaTarget
 
-PALMA_CONTACT_EMAIL = "info@xvia-serviciosjuridicos.com"
-PALMA_CONTACT_PHONE = "722761154"
+PALMA_CONTACT_EMAIL = get_default_contact_email()
+PALMA_CONTACT_PHONE = get_default_contact_mobile()
 
 
 async def _abrir_modal_nuevo_interesado(page: Page, selectors: AyuntaPalmaSelectors, delay_ms: int) -> None:

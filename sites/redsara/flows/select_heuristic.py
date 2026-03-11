@@ -63,7 +63,7 @@ def normalize_city_alias(raw: str | None) -> str:
         body = m.group("body").strip()
         candidate = f"{body}, {article}"
         if _normalize_py(body) == "franqueses del valles" and article.lower() == "les":
-            candidate = "Franqueses del Vallès, Les"
+            candidate = "Franqueses del Valles, Les"
 
     candidate_norm = _normalize_py(candidate)
 

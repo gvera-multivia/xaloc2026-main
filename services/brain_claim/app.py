@@ -18,6 +18,7 @@ from core.redis_client import get_redis_client
 from core.pg_admin_store import PgAdminStore
 from core.pg_runtime_store import PgRuntimeStore
 from core.realtime_store import build_realtime_store
+from core.consultor import ConsultorResourceRepositoryAdapter, ConsultorService
 from core.repositories import ResourceRepository
 from core.sqlserver_utils import build_sqlserver_connection_string
 from core.xvia_auth import create_authenticated_session_in_place
@@ -74,6 +75,8 @@ class BrainClaimService:
             logger.info("[brain-claim] sincronizados site_id faltantes en PG: %s", ", ".join(sorted(inserted_missing)))
         self.sqlserver_conn_str = build_sqlserver_connection_string()
         self.resource_repo = ResourceRepository(conn_str=self.sqlserver_conn_str, logger=logger)
+        self.consultor = ConsultorService(conn_str=self.sqlserver_conn_str, logger=logger, repository=self.resource_repo)
+        self.consultor_repo = ConsultorResourceRepositoryAdapter(self.consultor)
         self.realtime_store = build_realtime_store(logger=logger)
         self.redis = get_redis_client()
         if self.redis is None:
@@ -406,7 +409,7 @@ class BrainClaimService:
                     authenticated_user=self.authenticated_user,
                     limit=min(remaining, site_limit) if site_limit is not None else remaining,
                     on_discard=_on_discard,
-                    resource_repo=self.resource_repo,
+                    resource_repo=self.consultor_repo,
                 )
                 for cand in candidates:
                     if remaining <= 0:

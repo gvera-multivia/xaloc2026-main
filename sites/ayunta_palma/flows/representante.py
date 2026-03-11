@@ -7,10 +7,11 @@ from __future__ import annotations
 import asyncio
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
+from core.contact_defaults import get_default_contact_email, get_default_contact_mobile
 from sites.ayunta_palma.config import AyuntaPalmaConfig
 
-REPRESENTANTE_EMAIL = "info@xvia-serviciosjuridicos.com"
-REPRESENTANTE_TELEFONO = "722761154"
+REPRESENTANTE_EMAIL = get_default_contact_email()
+REPRESENTANTE_TELEFONO = get_default_contact_mobile()
 
 
 async def _esperar_velo_oculto(page: Page, config: AyuntaPalmaConfig, timeout_ms: int = 6000) -> None:

@@ -1,14 +1,12 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-import pyodbc
-
+from core.contact_defaults import get_default_contact_email
 from .site_adapter import SiteAdapter
-from core.nt_expediente_fixer import is_nt_pattern, fix_nt_expediente
 from core.xaloc_expediente_utils import is_valid_format, fix_format
 
 
@@ -16,48 +14,6 @@ class XalocAdapter(SiteAdapter):
     ADJUNTO_URL_TEMPLATE = (
         "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf-adjuntos/{id}"
     )
-
-    SQL_FETCH_RECURSOS_XALOC = """
-SELECT 
-    rs.idRecurso,
-    rs.idExp,
-    rs.Expedient,
-    rs.Organisme,
-    rs.TExp,
-    rs.Estado,
-    rs.numclient,
-    rs.SujetoRecurso,
-    rs.FaseProcedimiento,
-    rs.FUsuarioCompletado,
-    rs.UsuarioAsignado,
-    
-    e.matricula,     -- Ahora viene de la tabla expedientes
-    
-    rs.cif,          -- Para determinar JURIDICA vs FISICA
-    c.nifempresa,    -- Fallback CIF
-    rs.Empresa,      -- Razón social
-    c.Nombrefiscal,  -- Fallback Razón social
-    c.tipodecliente AS cliente_tipo,
-    
-    c.nif AS cliente_nif,
-    c.Nombre AS cliente_nombre,
-    c.Apellido1 AS cliente_apellido1,
-    c.Apellido2 AS cliente_apellido2,
-    
-    att.id AS adjunto_id,
-    att.Filename AS adjunto_filename
-
-FROM Recursos.RecursosExp rs
-INNER JOIN clientes c ON rs.numclient = c.numerocliente
-INNER JOIN expedientes e ON rs.idExp = e.idexpediente
-LEFT JOIN attachments_resource_documents att ON rs.automatic_id = att.automatic_id
-WHERE {organisme_like_clause}
-  AND rs.TExp IN ({texp_list})
-  AND rs.Estado IN (0, 1)
-  AND rs.FUsuarioCompletado IS NULL
-  AND rs.Expedient IS NOT NULL
-ORDER BY rs.Estado ASC, rs.idRecurso ASC
-"""
 
     def __init__(self):
         super().__init__(site_id="xaloc_girona", priority=1)
@@ -127,7 +83,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         v = str(value).strip() if value is not None else ""
         cleaned = re.sub(r"\s+", "", v).upper()
         if not cleaned:
-            return "." # Fallback explÃ­cito
+            return "." # Fallback explÃƒÂ­cito
         return cleaned
 
     @staticmethod
@@ -136,6 +92,46 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         if isinstance(v, Decimal):
             return float(v)
         return v
+
+    @classmethod
+    def _materialize_from_canonical_if_present(cls, record: dict[str, Any]) -> dict[str, Any]:
+        out = dict(record or {})
+        canonical = out.get("__canonical_v1")
+        if not isinstance(canonical, dict):
+            return out
+
+        resource = canonical.get("resource") or {}
+        client = canonical.get("client") or {}
+        vehicle = canonical.get("vehicle") or {}
+        attachments = canonical.get("attachments") or []
+        client_doc = client.get("document") or {}
+        client_name = client.get("name") or {}
+        plate = vehicle.get("plate") or {}
+
+        out["idRecurso"] = out.get("idRecurso", resource.get("id"))
+        out["idExp"] = out.get("idExp", resource.get("exp_id"))
+        out["numclient"] = out.get("numclient", resource.get("numclient"))
+        out["Expedient"] = out.get("Expedient", resource.get("expedient"))
+        out["Organisme"] = out.get("Organisme", resource.get("organism"))
+        out["TExp"] = out.get("TExp", resource.get("texp"))
+        out["Estado"] = out.get("Estado", resource.get("state"))
+        out["UsuarioAsignado"] = out.get("UsuarioAsignado", resource.get("assigned_user"))
+        out["FUsuarioCompletado"] = out.get("FUsuarioCompletado", resource.get("completed_at"))
+        out["FaseProcedimiento"] = out.get("FaseProcedimiento", resource.get("phase"))
+        out["SujetoRecurso"] = out.get("SujetoRecurso", resource.get("subject_name"))
+
+        out["cliente_tipo"] = out.get("cliente_tipo", client.get("type"))
+        out["cliente_nif"] = out.get("cliente_nif", client_doc.get("nif"))
+        out["nifempresa"] = out.get("nifempresa", client_doc.get("cif"))
+        out["cif"] = out.get("cif", client_doc.get("cif"))
+        out["Empresa"] = out.get("Empresa", client_name.get("business"))
+        out["Nombrefiscal"] = out.get("Nombrefiscal", client_name.get("business"))
+        out["cliente_nombre"] = out.get("cliente_nombre", client_name.get("first"))
+        out["cliente_apellido1"] = out.get("cliente_apellido1", client_name.get("last1"))
+        out["cliente_apellido2"] = out.get("cliente_apellido2", client_name.get("last2"))
+        out["matricula"] = out.get("matricula", plate.get("value"))
+        out["adjuntos"] = out.get("adjuntos", attachments)
+        return out
 
     def _build_mandatario_data(self, row: dict) -> dict:
         cif_raw = row.get("cif") or row.get("nifempresa")
@@ -168,7 +164,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 doc_numero, doc_control = self._extraer_documento_control(nif_clean)
                 tipo_doc = self._detectar_tipo_documento(nif_clean)
             else:
-                # Fallback si no hay NIF (aunque deberÃ­a haber)
+                # Fallback si no hay NIF (aunque deberÃƒÂ­a haber)
                 doc_numero, doc_control = "", ""
                 tipo_doc = "NIF"
                 
@@ -185,7 +181,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
 
     def get_motivos_por_fase(self, fase_raw: Any, expediente: str, sujeto_recurso: str = "") -> str:
         config_map = self._load_motivos_config()
-        # LÃ³gica duplicada de xaloc_task.py para asegurar compatibilidad
+        # LÃƒÂ³gica duplicada de xaloc_task.py para asegurar compatibilidad
         expediente_txt = self._clean_str(expediente)
         sujeto_txt = self._clean_str(sujeto_recurso).upper()
         fase_norm = self._normalize_text(fase_raw)
@@ -218,172 +214,83 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         on_discard: Optional[SiteAdapter.DiscardCallback] = None,
         resource_repo: Any | None = None,
     ) -> list[dict]:
-        use_resource_repo = resource_repo is not None
-        texp_values = [2, 3] # Hardcoded logic from xaloc_task.py
-        texp_placeholders = ",".join(["?"] * len(texp_values))
-        
-        query_organisme_raw = config.get("query_organisme", "%XALOC%")
-        # Simplemente asumimos un solo patrÃ³n para Xaloc normalmente, pero soportamos split
-        patterns = [p.strip() for p in query_organisme_raw.split(" ") if p.strip()]
-        if not patterns:
-            patterns = ["%XALOC%"]
-            
-        like_clauses = ["rs.Organisme LIKE ?"] * len(patterns)
-        organisme_like_clause = " AND ".join(like_clauses)
-        
-        query = self.SQL_FETCH_RECURSOS_XALOC.format(
-            organisme_like_clause=organisme_like_clause,
-            texp_list=texp_placeholders
-        )
+        if resource_repo is None:
+            raise RuntimeError("[xaloc_girona] fetch_candidates requires injected resource_repo (consultor/repository).")
 
-        conn = pyodbc.connect(conn_str)
-        try:
-            cursor = conn.cursor()
-            recursos_map: dict[int, dict] = {}
-            if use_resource_repo:
-                resources = resource_repo.get_pending_resources(site_id=self.site_id, config=config, limit=limit)
-                for resource in resources:
-                    record = dict(resource.metadata or {})
-                    rid = record.get("idRecurso")
-                    if not rid:
-                        continue
-                    rid_int = int(rid)
-                    adjuntos = list(record.get("adjuntos") or [])
-                    for adj in adjuntos:
-                        if "url" not in adj and adj.get("id") is not None:
-                            adj["url"] = self.ADJUNTO_URL_TEMPLATE.format(id=int(adj["id"]))
-                    record["adjuntos"] = adjuntos
-                    recursos_map[rid_int] = record
-            else:
-                cursor.execute(query, patterns + texp_values)
-                columns = [column[0] for column in cursor.description]
-                for row in cursor.fetchall():
-                    record = dict(zip(columns, row))
-                    rid = record.get("idRecurso")
-                    if not rid: continue
-                    rid_int = int(rid)
+        recursos_map: dict[int, dict] = {}
+        resources = resource_repo.get_pending_resources(site_id=self.site_id, config=config, limit=limit)
+        for resource in resources:
+            record = self._materialize_from_canonical_if_present(dict(resource.metadata or {}))
+            rid = record.get("idRecurso")
+            if not rid:
+                continue
+            rid_int = int(rid)
+            adjuntos = list(record.get("adjuntos") or [])
+            for adj in adjuntos:
+                if "url" not in adj and adj.get("id") is not None:
+                    adj["url"] = self.ADJUNTO_URL_TEMPLATE.format(id=int(adj["id"]))
+            record["adjuntos"] = adjuntos
+            recursos_map[rid_int] = record
 
-                    if rid_int not in recursos_map:
-                        recursos_map[rid_int] = {**record, "adjuntos": []}
+        out: list[dict] = []
+        for _, recurso in recursos_map.items():
+            if limit and len(out) >= limit:
+                break
 
-                    adj_id = record.get("adjunto_id")
-                    if adj_id:
-                        filename = self._clean_str(record.get("adjunto_filename"))
-                        if filename:
-                            recursos_map[rid_int]["adjuntos"].append({
-                                "id": int(adj_id),
-                                "filename": filename,
-                                "url": self.ADJUNTO_URL_TEMPLATE.format(id=int(adj_id)),
-                            })
+            rid = recurso.get("idRecurso")
+            expediente_raw = self._clean_str(recurso.get("Expedient"))
+            estado = int(recurso.get("Estado") or 0)
+            usuario = self._clean_str(recurso.get("UsuarioAsignado"))
+            fecha_completado = recurso.get("FUsuarioCompletado")
 
-            out: list[dict] = []
-            for _, recurso in recursos_map.items():
-                if limit and len(out) >= limit: break
-                
-                rid = recurso.get("idRecurso")
-                id_exp = recurso.get("idExp")
-                expediente_raw = self._clean_str(recurso.get("Expedient"))
-                estado = int(recurso.get("Estado") or 0)
-                usuario = self._clean_str(recurso.get("UsuarioAsignado"))
-                fecha_completado = recurso.get("FUsuarioCompletado")
+            if fecha_completado is not None and str(fecha_completado).strip():
+                if on_discard:
+                    try:
+                        on_discard(
+                            {
+                                "site_id": self.site_id,
+                                "idRecurso": rid,
+                                "Expedient": expediente_raw,
+                                "tipo_incidencia": "COMPLETED_DISCARDED",
+                                "motivo": "Recurso descartado por FUsuarioCompletado informado.",
+                            }
+                        )
+                    except Exception:
+                        pass
+                continue
 
-                # Excluir de forma defensiva recursos ya completados.
-                if fecha_completado is not None and str(fecha_completado).strip():
-                    if on_discard:
-                        try:
-                            on_discard(
-                                {
-                                    "site_id": self.site_id,
-                                    "idRecurso": rid,
-                                    "Expedient": expediente_raw,
-                                    "tipo_incidencia": "COMPLETED_DISCARDED",
-                                    "motivo": "Recurso descartado por FUsuarioCompletado informado.",
-                                }
-                            )
-                        except Exception:
-                            pass
-                    continue
-                
-                # 1. Validar formato y aplicar correcciones
-                expediente = expediente_raw
-                is_valid = is_valid_format(expediente)
-                
-                # Caso A: PatrÃ³n NT/
-                if not is_valid and is_nt_pattern(expediente):
-                    corrected = fix_nt_expediente(conn_str, id_exp)
-                    if corrected:
-                        expediente = corrected
-                        recurso["Expedient"] = corrected
-                        is_valid = is_valid_format(expediente)
-                
-                # Caso B: Otros errores de formato (guiones, falta de L)
-                if not is_valid:
-                    fixed = fix_format(expediente)
-                    if fixed != expediente:
-                        if is_valid_format(fixed):
-                            # Actualizar base de datos de manera exhaustiva (como en NT fixer)
-                            try:
-                                # 1. UPDATE expedientes
-                                cursor.execute(
-                                    "UPDATE expedientes SET numexpediente = ? WHERE idexpediente = ?",
-                                    (fixed, id_exp)
-                                )
-                                # 2. UPDATE recursos.RecursosExp
-                                cursor.execute(
-                                    "UPDATE recursos.RecursosExp SET Expedient = ? WHERE IdExp = ?",
-                                    (fixed, id_exp)
-                                )
-                                # 3. UPDATE ListasPresentacion
-                                cursor.execute(
-                                    "UPDATE ListasPresentacion SET numexpediente = ? WHERE Idexpediente = ?",
-                                    (fixed, id_exp)
-                                )
-                                # 4. UPDATE pubExp
-                                cursor.execute("""
-                                    UPDATE p 
-                                    SET p.Exp = ?
-                                    FROM pubExp p 
-                                    JOIN recursos.RecursosExp r ON r.IdPublic = p.idpublic
-                                    WHERE r.IdExp = ?
-                                """, (fixed, id_exp))
-                                
-                                conn.commit()
-                                print(f"âœ… Expediente '{expediente_raw}' corregido a '{fixed}' en todas las tablas para idExp={id_exp}")
-                                
-                                expediente = fixed
-                                recurso["Expedient"] = fixed
-                                is_valid = True
-                            except Exception as e:
-                                print(f"Error actualizando expediente mal formateado {rid}: {e}")
-                                conn.rollback()
+            expediente = expediente_raw
+            is_valid = is_valid_format(expediente)
+            if not is_valid:
+                fixed = fix_format(expediente)
+                if fixed != expediente and is_valid_format(fixed):
+                    expediente = fixed
+                    recurso["Expedient"] = fixed
+                    is_valid = True
 
-                if not is_valid:
-                    if on_discard:
-                        try:
-                            on_discard(
-                                {
-                                    "site_id": self.site_id,
-                                    "idRecurso": rid,
-                                    "Expedient": expediente_raw,
-                                    "tipo_incidencia": "REGEX_DISCARDED",
-                                    "motivo": f"Expediente no valido para xaloc_girona: {expediente_raw}",
-                                }
-                            )
-                        except Exception:
-                            pass
-                    continue  # Descartar si el formato sigue siendo invÃ¡lido
+            if not is_valid:
+                if on_discard:
+                    try:
+                        on_discard(
+                            {
+                                "site_id": self.site_id,
+                                "idRecurso": rid,
+                                "Expedient": expediente_raw,
+                                "tipo_incidencia": "REGEX_DISCARDED",
+                                "motivo": f"Expediente no valido para xaloc_girona: {expediente_raw}",
+                            }
+                        )
+                    except Exception:
+                        pass
+                continue
 
-                # 2. Regla de usuario asignado
-                if estado == 1 and authenticated_user and usuario != authenticated_user:
-                    continue
-                if estado == 1 and not authenticated_user:
-                    continue
-                
-                out.append(recurso)
-            return out
-        finally:
-            conn.close()
+            if estado == 1 and authenticated_user and usuario != authenticated_user:
+                continue
+            if estado == 1 and not authenticated_user:
+                continue
 
+            out.append(recurso)
+        return out
     async def build_payloads(
         self,
         candidates: list[dict],
@@ -409,7 +316,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 "idRecurso": self._convert_value(r.get("idRecurso")),
                 "idExp": self._convert_value(r.get("idExp")),
                 "numclient": self._convert_value(r.get("numclient")),
-                "user_email": "INFO@XVIA-SERVICIOSJURIDICOS.COM",
+                "user_email": get_default_contact_email(uppercase=True),
                 "denuncia_num": expediente,
                 "plate_number": self._normalize_plate(r.get("matricula")),
                 "expediente_num": expediente,

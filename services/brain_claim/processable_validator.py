@@ -59,6 +59,29 @@ def _parse_date(value: Any) -> datetime | None:
         return None
 
 
+def _canonical_get(candidate: dict[str, Any], path: str) -> Any:
+    node: Any = candidate.get("__canonical_v1") if isinstance(candidate, dict) else None
+    if not isinstance(node, dict):
+        return None
+    for part in path.split("."):
+        if not isinstance(node, dict):
+            return None
+        node = node.get(part)
+    return node
+
+
+def _pick(candidate: dict[str, Any], *keys: str, canonical_path: str | None = None) -> Any:
+    for key in keys:
+        value = candidate.get(key)
+        if value not in (None, "", []):
+            return value
+    if canonical_path:
+        value = _canonical_get(candidate, canonical_path)
+        if value not in (None, "", []):
+            return value
+    return None
+
+
 def validate_candidate(
     *,
     site_id: str,
@@ -66,14 +89,14 @@ def validate_candidate(
     runtime_store: Any,
     admin_store: Any,
 ) -> ValidationResult:
-    rid_raw = candidate.get("idRecurso")
+    rid_raw = _pick(candidate, "idRecurso", canonical_path="resource.id")
     try:
         rid = int(rid_raw)
     except Exception:
-        return ValidationResult(False, "RESOURCE_INVALID", "Recurso sin idRecurso válido.")
+        return ValidationResult(False, "RESOURCE_INVALID", "Recurso sin idRecurso valido.")
 
     site = _clean_str(site_id)
-    expediente = _clean_str(candidate.get("Expedient"))
+    expediente = _clean_str(_pick(candidate, "Expedient", "expediente", canonical_path="resource.expedient"))
     if not expediente:
         return ValidationResult(False, "REF_MISSING", "Falta referencia/expediente.")
 
@@ -89,7 +112,6 @@ def validate_candidate(
     except Exception:
         pass
 
-    # Deadline guard: only if known date fields exist.
     deadline_fields = (
         "fecha_limite",
         "FechaLimite",
@@ -107,28 +129,29 @@ def validate_candidate(
         if deadline.tzinfo is None:
             deadline = deadline.replace(tzinfo=timezone.utc)
         if deadline < datetime.now(timezone.utc):
-            return ValidationResult(False, "DEADLINE_EXPIRED", "Fecha límite vencida.")
+            return ValidationResult(False, "DEADLINE_EXPIRED", "Fecha limite vencida.")
 
     if site == "madrid":
-        direccion = _clean_str(candidate.get("cliente_domicilio"))
+        direccion = _clean_str(_pick(candidate, "cliente_domicilio", canonical_path="client.address.street_name"))
         if not direccion:
-            return ValidationResult(False, "ADDR_MISSING", "Falta dirección para Madrid.")
+            return ValidationResult(False, "ADDR_MISSING", "Falta direccion para Madrid.")
         doc = (
-            _clean_str(candidate.get("cliente_nif"))
-            or _clean_str(candidate.get("cliente_nif_empresa"))
-            or _clean_str(candidate.get("cif"))
+            _clean_str(_pick(candidate, "cliente_nif", canonical_path="client.document.nif"))
+            or _clean_str(_pick(candidate, "cliente_nif_empresa", "cif", canonical_path="client.document.cif"))
         )
         if not doc:
             return ValidationResult(False, "DOC_MISSING", "Falta NIF/NIE/CIF para Madrid.")
 
     if site == "base_online":
-        protocolo = _infer_protocol_for_base(_clean_str(candidate.get("FaseProcedimiento")))
+        protocolo = _infer_protocol_for_base(
+            _clean_str(_pick(candidate, "FaseProcedimiento", "fase_procedimiento", canonical_path="resource.phase"))
+        )
         if protocolo == "P1":
-            if not _clean_str(candidate.get("conduc_adr")):
-                return ValidationResult(False, "ADDR_MISSING", "P1 sin dirección de conductor.")
-            if not _clean_str(candidate.get("conduc_dni")):
+            if not _clean_str(_pick(candidate, "conduc_adr", canonical_path="client.address.street_name")):
+                return ValidationResult(False, "ADDR_MISSING", "P1 sin direccion de conductor.")
+            if not _clean_str(_pick(candidate, "conduc_dni", canonical_path="client.document.nif")):
                 return ValidationResult(False, "DOC_MISSING", "P1 sin documento del conductor.")
-            if not _clean_str(candidate.get("conduc_nom")):
+            if not _clean_str(_pick(candidate, "conduc_nom", "SujetoRecurso", canonical_path="resource.subject_name")):
                 return ValidationResult(False, "DOC_MISSING", "P1 sin nombre del conductor.")
 
     return ValidationResult(True, None, None)

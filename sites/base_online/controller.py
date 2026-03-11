@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from core.address_defaults import get_default_country_es_ascii
+from core.contact_defaults import get_default_contact_email, get_default_contact_phone_fixed
 from sites.base_online.config import BaseOnlineConfig
 from sites.base_online.data_models import (
     BaseOnlineAddressData,
@@ -23,6 +25,28 @@ class BaseOnlineController:
         config = BaseOnlineConfig()
         config.navegador.headless = bool(headless)
         return config
+
+    @staticmethod
+    def _canonical_get(data: dict, path: str):
+        canonical = (data or {}).get("__canonical_v1")
+        node = canonical if isinstance(canonical, dict) else None
+        for part in path.split("."):
+            if not isinstance(node, dict):
+                return None
+            node = node.get(part)
+        return node
+
+    @classmethod
+    def _pick(cls, data: dict, *keys: str, canonical_path: str | None = None):
+        for key in keys:
+            value = data.get(key)
+            if value not in (None, "", []):
+                return value
+        if canonical_path:
+            value = cls._canonical_get(data, canonical_path)
+            if value not in (None, "", []):
+                return value
+        return None
 
     def create_target(
         self,
@@ -78,7 +102,7 @@ class BaseOnlineController:
             movil = (p1_telefon_mobil or "").strip()
             fijo = (p1_telefon_fix or "").strip()
             if not movil and not fijo:
-                fallback = (os.getenv("BASE_ONLINE_DEFAULT_PHONE") or "").strip() or "932531411"
+                fallback = (os.getenv("BASE_ONLINE_DEFAULT_PHONE") or "").strip() or get_default_contact_phone_fixed()
                 if fallback:
                     movil = fallback
             if not movil and not fijo:
@@ -90,7 +114,7 @@ class BaseOnlineController:
         def _resolve_contact_email() -> str:
             email = (p1_correu or "").strip()
             if not email:
-                email = (os.getenv("BASE_ONLINE_DEFAULT_EMAIL") or "").strip() or "info@xvia-serviciosjuridicos.com"
+                email = (os.getenv("BASE_ONLINE_DEFAULT_EMAIL") or "").strip() or get_default_contact_email()
             if not email:
                 raise ValueError("base_online: falta correo de contacto (p1_correu).")
             return email
@@ -198,47 +222,37 @@ class BaseOnlineController:
         return {
             "payload": data,
             "p1_telefon_mobil": (
-                data.get("p1_telefon_mobil")
-                or data.get("user_phone")
-                or data.get("telefono")
-                or data.get("telefono1")
-                or data.get("cliente_tel1")
-                or data.get("cliente_movil")
-                or data.get("movil")
-                or data.get("mobile")
+                self._pick(data, "p1_telefon_mobil", "user_phone", "telefono", "telefono1", "cliente_tel1", "cliente_movil", "movil", "mobile")
+                or self._pick(data, canonical_path="client.contact.mobile")
+                or self._pick(data, canonical_path="client.contact.phone1")
             ),
             "p1_telefon_fix": (
-                data.get("p1_telefon_fix")
-                or data.get("telefono2")
-                or data.get("cliente_tel2")
-                or data.get("phone")
+                self._pick(data, "p1_telefon_fix", "telefono2", "cliente_tel2", "phone")
+                or self._pick(data, canonical_path="client.contact.phone2")
             ),
             "p1_correu": (
-                data.get("p1_correu")
-                or data.get("user_email")
-                or data.get("email")
-                or data.get("correo")
-                or data.get("cliente_email")
+                self._pick(data, "p1_correu", "user_email", "email", "correo", "cliente_email", canonical_path="client.contact.email")
                 or (os.getenv("BASE_ONLINE_DEFAULT_EMAIL") or "").strip()
-                or "info@xvia-serviciosjuridicos.com"
+                or get_default_contact_email()
             ),
-            "p1_matricula": data.get("p1_matricula") or data.get("plate_number"),
-            "p1_expedient_id_ens": data.get("p1_expedient_id_ens") or data.get("expediente_id_ens"),
-            "p1_expedient_any": data.get("p1_expedient_any") or data.get("expediente_any"),
-            "p1_expedient_num": data.get("p1_expedient_num") or data.get("expediente_num"),
+            "p1_matricula": self._pick(data, "p1_matricula", "plate_number", canonical_path="vehicle.plate.value"),
+            "p1_expedient_id_ens": self._pick(data, "p1_expedient_id_ens", "expediente_id_ens"),
+            "p1_expedient_any": self._pick(data, "p1_expedient_any", "expediente_any"),
+            "p1_expedient_num": self._pick(data, "p1_expedient_num", "expediente_num", canonical_path="resource.expedient"),
             "p1_num_butlleti": data.get("p1_num_butlleti") or data.get("num_butlleti"),
             "p1_data_denuncia": data.get("p1_data_denuncia") or data.get("data_denuncia"),
-            "p1_identificacio": data.get("p1_identificacio") or data.get("nif"),
+            "p1_identificacio": self._pick(data, "p1_identificacio", "nif", canonical_path="client.document.nif"),
             "p1_llicencia_conduccio": data.get("p1_llicencia_conduccio") or data.get("llicencia_conduccio"),
             "p1_nom_complet": data.get("p1_nom_complet"),
             "p1_adreca": data.get("p1_adreca"),
             "p1_address_sigla": data.get("p1_address_sigla") or data.get("address_sigla") or "CL",
-            "p1_address_street": data.get("p1_address_street") or data.get("address_street"),
+            "p1_address_street": self._pick(data, "p1_address_street", "address_street", canonical_path="client.address.street_name"),
             "p1_address_number": data.get("p1_address_number") or data.get("address_number") or "S/N",
-            "p1_address_zip": data.get("p1_address_zip") or data.get("address_zip"),
-            "p1_address_city": data.get("p1_address_city") or data.get("address_city"),
-            "p1_address_province": data.get("p1_address_province") or data.get("address_province"),
-            "p1_address_pais": data.get("p1_address_pais") or data.get("address_pais") or data.get("address_country"),
+            "p1_address_zip": self._pick(data, "p1_address_zip", "address_zip", canonical_path="client.address.zip"),
+            "p1_address_city": self._pick(data, "p1_address_city", "address_city", canonical_path="client.address.city"),
+            "p1_address_province": self._pick(data, "p1_address_province", "address_province", canonical_path="client.address.province"),
+            "p1_address_pais": self._pick(data, "p1_address_pais", "address_pais", "address_country", canonical_path="client.address.country")
+            or get_default_country_es_ascii(),
             "p1_address_ampliacion_municipio": data.get("p1_address_ampliacion_municipio"),
             "p1_address_ampliacion_calle": data.get("p1_address_ampliacion_calle"),
             "p2_nif": data.get("p2_nif") or data.get("nif") or data.get("cliente_nif") or data.get("cif"),

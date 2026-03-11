@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any, Optional
 
 from core.client_documentation import build_required_client_documents_for_payload
-from core.repositories import ResourceRepository
 from core.sqlserver_utils import build_sqlserver_connection_string
 from .site_adapter import SiteAdapter
 
@@ -299,6 +298,52 @@ class RedsaraAdapter(SiteAdapter):
         return out
 
     @classmethod
+    def _materialize_from_canonical_if_present(cls, record: dict[str, Any]) -> dict[str, Any]:
+        out = dict(record or {})
+        canonical = out.get("__canonical_v1")
+        if not isinstance(canonical, dict):
+            return out
+
+        resource = canonical.get("resource") or {}
+        client = canonical.get("client") or {}
+        attachments = canonical.get("attachments") or []
+        client_doc = client.get("document") or {}
+        client_name = client.get("name") or {}
+        client_contact = client.get("contact") or {}
+        client_address = client.get("address") or {}
+
+        out["idRecurso"] = out.get("idRecurso", resource.get("id"))
+        out["idExp"] = out.get("idExp", resource.get("exp_id"))
+        out["numclient"] = out.get("numclient", resource.get("numclient"))
+        out["Expedient"] = out.get("Expedient", resource.get("expedient"))
+        out["Organisme"] = out.get("Organisme", resource.get("organism"))
+        out["TExp"] = out.get("TExp", resource.get("texp"))
+        out["Estado"] = out.get("Estado", resource.get("state"))
+        out["UsuarioAsignado"] = out.get("UsuarioAsignado", resource.get("assigned_user"))
+        out["FaseProcedimiento"] = out.get("FaseProcedimiento", resource.get("phase"))
+        out["SujetoRecurso"] = out.get("SujetoRecurso", resource.get("subject_name"))
+
+        out["cliente_tipo"] = out.get("cliente_tipo", client.get("type"))
+        out["cliente_nif"] = out.get("cliente_nif", client_doc.get("nif"))
+        out["cliente_nif_empresa"] = out.get("cliente_nif_empresa", client_doc.get("cif"))
+        out["cif"] = out.get("cif", client_doc.get("cif"))
+        out["cliente_nombre"] = out.get("cliente_nombre", client_name.get("first"))
+        out["cliente_apellido1"] = out.get("cliente_apellido1", client_name.get("last1"))
+        out["cliente_apellido2"] = out.get("cliente_apellido2", client_name.get("last2"))
+        out["cliente_razon_social"] = out.get("cliente_razon_social", client_name.get("business"))
+        out["cliente_email"] = out.get("cliente_email", client_contact.get("email"))
+        out["cliente_tel1"] = out.get("cliente_tel1", client_contact.get("phone1"))
+        out["cliente_tel2"] = out.get("cliente_tel2", client_contact.get("phone2"))
+        out["cliente_movil"] = out.get("cliente_movil", client_contact.get("mobile"))
+        out["address_sigla"] = out.get("address_sigla", client_address.get("street_type"))
+        out["cliente_domicilio"] = out.get("cliente_domicilio", client_address.get("street_name"))
+        out["cliente_cp"] = out.get("cliente_cp", client_address.get("zip"))
+        out["cliente_municipio"] = out.get("cliente_municipio", client_address.get("city"))
+        out["cliente_provincia"] = out.get("cliente_provincia", client_address.get("province"))
+        out["adjuntos"] = out.get("adjuntos", attachments)
+        return out
+
+    @classmethod
     def _load_motivos_config(cls) -> dict[str, Any]:
         path = Path("config_motivos.json")
         if not path.exists():
@@ -383,9 +428,9 @@ class RedsaraAdapter(SiteAdapter):
         on_discard: Optional[SiteAdapter.DiscardCallback] = None,
         resource_repo: Any | None = None,
     ) -> list[dict]:
+        if resource_repo is None:
+            raise RuntimeError("[redsara] fetch_candidates requires injected resource_repo (consultor/repository).")
         repo = resource_repo
-        if repo is None:
-            repo = ResourceRepository(conn_str=conn_str)
 
         cfg = dict(config or {})
         cfg["query_organisme"] = self._merge_query_organisme(cfg.get("query_organisme"))
@@ -396,7 +441,7 @@ class RedsaraAdapter(SiteAdapter):
         for resource in resources:
             if limit and len(out) >= limit:
                 break
-            recurso = dict(resource.metadata or {})
+            recurso = self._materialize_from_canonical_if_present(dict(resource.metadata or {}))
             expediente = self._normalize_expediente(recurso.get("Expedient"))
             recurso["Expedient"] = expediente
             organisme = self._clean_str(recurso.get("Organisme"))

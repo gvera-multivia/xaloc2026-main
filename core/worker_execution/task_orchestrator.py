@@ -11,6 +11,7 @@ import aiohttp
 import pyodbc
 
 from core.client_documentation import RequiredClientDocumentsError, build_required_client_documents_for_payload
+from core.contact_defaults import get_default_contact_email
 from core.pdf_bundle import bundle_documents_to_single_pdf_for_palma
 from core.sqlserver_utils import build_sqlserver_connection_string
 from core.xvia_auth import mark_resource_complete
@@ -21,7 +22,7 @@ from .runner_client import execute_via_runner_service, use_remote_playwright_run
 
 logger = logging.getLogger("worker.task_orchestrator")
 TMP_ROOT = Path("tmp")
-DEFAULT_CONTACT_EMAIL = "info@xvia-serviciosjuridicos.com"
+DEFAULT_CONTACT_EMAIL = get_default_contact_email()
 
 
 def _payload_has_identity_fields(payload: dict) -> bool:

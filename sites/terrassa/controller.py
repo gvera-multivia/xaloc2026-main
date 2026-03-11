@@ -24,6 +24,28 @@ class TerrassaController:
     def _clean(v: object) -> str:
         return str(v or "").strip()
 
+    @staticmethod
+    def _canonical_get(data: dict, path: str):
+        canonical = (data or {}).get("__canonical_v1")
+        node = canonical if isinstance(canonical, dict) else None
+        for part in path.split("."):
+            if not isinstance(node, dict):
+                return None
+            node = node.get(part)
+        return node
+
+    @classmethod
+    def _pick(cls, data: dict, *keys: str, canonical_path: str | None = None):
+        for key in keys:
+            value = data.get(key)
+            if value not in (None, "", []):
+                return value
+        if canonical_path:
+            value = cls._canonical_get(data, canonical_path)
+            if value not in (None, "", []):
+                return value
+        return None
+
     @classmethod
     def _norm(cls, v: object) -> str:
         txt = cls._clean(v).lower()
@@ -72,27 +94,43 @@ class TerrassaController:
 
     def map_data(self, data: dict) -> dict:
         src = dict(data or {})
+        if src.get("is_company") in (True, False):
+            is_company = bool(src.get("is_company"))
+        else:
+            cliente_tipo = self._pick(src, "cliente_tipo", canonical_path="client.type")
+            is_company = False
+            try:
+                if int(str(cliente_tipo).strip()) == 2:
+                    is_company = True
+            except Exception:
+                pass
+            if self._pick(src, "cif", "cliente_nif_empresa", canonical_path="client.document.cif"):
+                is_company = True
+
         return {
-            "idRecurso": src.get("idRecurso"),
-            "idExp": src.get("idExp"),
-            "numclient": src.get("numclient"),
-            "expediente": src.get("expediente") or src.get("Expedient"),
-            "is_company": bool(src.get("is_company")),
-            "document_type_value": src.get("document_type_value") or src.get("tipus_document_value"),
-            "document_number": src.get("document_number") or src.get("nif"),
-            "nombre": src.get("nombre") or src.get("name") or src.get("sujeto_recurso"),
-            "apellido1": src.get("apellido1"),
-            "apellido2": src.get("apellido2"),
-            "fecha_infraccion": src.get("fecha_infraccion") or src.get("data_infraccion") or src.get("FAlta"),
-            "matricula": src.get("matricula") or src.get("plate_number"),
-            "marca": src.get("marca") or "Otros",
-            "alegaciones": src.get("alegaciones") or src.get("motivos") or src.get("expone"),
-            "observaciones": src.get("observaciones") or src.get("solicita"),
-            "documentos": src.get("documentos") or [],
-            "archivos": src.get("archivos") or src.get("archivos_adjuntos") or [],
+            "idRecurso": self._pick(src, "idRecurso", canonical_path="resource.id"),
+            "idExp": self._pick(src, "idExp", canonical_path="resource.exp_id"),
+            "numclient": self._pick(src, "numclient", canonical_path="resource.numclient"),
+            "expediente": self._pick(src, "expediente", "Expedient", canonical_path="resource.expedient"),
+            "is_company": is_company,
+            "document_type_value": self._pick(src, "document_type_value", "tipus_document_value"),
+            "document_number": self._pick(src, "document_number", "nif", canonical_path="client.document.nif")
+            or self._pick(src, "cif", "cliente_nif_empresa", canonical_path="client.document.cif"),
+            "nombre": self._pick(src, "nombre", "name", "sujeto_recurso", canonical_path="client.name.first")
+            or self._pick(src, canonical_path="client.name.business")
+            or self._pick(src, "SujetoRecurso", canonical_path="resource.subject_name"),
+            "apellido1": self._pick(src, "apellido1", canonical_path="client.name.last1"),
+            "apellido2": self._pick(src, "apellido2", canonical_path="client.name.last2"),
+            "fecha_infraccion": self._pick(src, "fecha_infraccion", "data_infraccion", "FAlta"),
+            "matricula": self._pick(src, "matricula", "plate_number", canonical_path="vehicle.plate.value"),
+            "marca": self._pick(src, "marca") or "Otros",
+            "alegaciones": self._pick(src, "alegaciones", "motivos", "expone"),
+            "observaciones": self._pick(src, "observaciones", "solicita"),
+            "documentos": self._pick(src, "documentos") or [],
+            "archivos": self._pick(src, "archivos", "archivos_adjuntos") or [],
             "headless": src.get("headless", True),
-            "fase_procedimiento": src.get("fase_procedimiento") or "",
-            "sujeto_recurso": src.get("sujeto_recurso") or src.get("SujetoRecurso") or "",
+            "fase_procedimiento": self._pick(src, "fase_procedimiento", "FaseProcedimiento", canonical_path="resource.phase") or "",
+            "sujeto_recurso": self._pick(src, "sujeto_recurso", "SujetoRecurso", canonical_path="resource.subject_name") or "",
         }
 
     def create_target(

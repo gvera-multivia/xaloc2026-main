@@ -6,9 +6,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-import pyodbc
-
 from core.address_classifier import classify_address_fallback
+from core.address_defaults import (
+    get_default_country_es_label,
+    get_representative_city,
+    get_representative_number,
+    get_representative_province,
+    get_representative_street_name,
+    get_representative_street_type,
+    get_representative_zip,
+)
+from core.contact_defaults import get_default_contact_email, get_default_contact_phone_fixed
 from core.guardians import GroqTokenGuardian, ResourceContext
 from .site_adapter import SiteAdapter
 
@@ -20,65 +28,6 @@ class MadridAdapter(SiteAdapter):
         "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf-adjuntos/{id}"
     )
     DEFAULT_REGEX_EXPEDIENTE = r"^(\d{3}/\d{8,9}\.\d|\d{8,9}\.\d)$"
-
-    SQL_FETCH_RECURSOS_MADRID = """
-SELECT 
-    rs.idRecurso,
-    rs.idExp,
-    rs.Expedient,
-    rs.Organisme,
-    rs.TExp,
-    rs.Estado,
-    rs.numclient,
-    rs.SujetoRecurso,
-    rs.FaseProcedimiento,
-    rs.UsuarioAsignado,
-    rs.notas,
-    rs.matricula AS rs_matricula,
-
-    e.matricula,
-    e.Idpublic AS exp_idpublic,
-
-    pe.publicaciÃ³n AS pub_publicacion,
-
-    rs.cif,
-
-    -- Datos detallados del cliente para NOTIFICACIÃ“N
-    c.nif AS cliente_nif,
-    c.nifempresa AS cliente_nif_empresa,
-    c.tipodecliente AS cliente_tipo,
-    c.Nombre AS cliente_nombre,
-    c.Apellido1 AS cliente_apellido1,
-    c.Apellido2 AS cliente_apellido2,
-    c.Nombrefiscal AS cliente_razon_social,
-    c.provincia AS cliente_provincia,
-    c.poblacion AS cliente_municipio,
-    c.calle AS cliente_domicilio,
-    c.numero AS cliente_numero,
-    c.escalera AS cliente_escalera,
-    c.piso AS cliente_planta,
-    c.puerta AS cliente_puerta,
-    c.Cpostal AS cliente_cp,
-    c.email AS cliente_email,
-    c.telefono1 AS cliente_tel1,
-    c.telefono2 AS cliente_tel2,
-    c.movil AS cliente_movil,
-
-    -- Adjuntos (agrupados luego)
-    att.id AS adjunto_id,
-    att.Filename AS adjunto_filename
-
-FROM Recursos.RecursosExp rs
-INNER JOIN clientes c ON rs.numclient = c.numerocliente
-INNER JOIN expedientes e ON rs.idExp = e.idexpediente
-LEFT JOIN pubExp pe ON pe.Idpublic = e.Idpublic
-LEFT JOIN attachments_resource_documents att ON rs.automatic_id = att.automatic_id
-WHERE {organisme_like_clause}
-  AND rs.TExp IN ({texp_list})
-  AND rs.Estado IN (0, 1)
-  AND rs.Expedient IS NOT NULL
-ORDER BY rs.Estado ASC, rs.idRecurso ASC
-"""
 
     RE_DNI = re.compile(r"^\d{8}[A-Z]$")
     RE_NIE = re.compile(r"^[XYZ]\d{7}[A-Z]$")
@@ -142,6 +91,65 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         t = str(text).strip().lower()
         return "".join(c for c in unicodedata.normalize("NFD", t) if unicodedata.category(c) != "Mn")
 
+    @classmethod
+    def _materialize_from_canonical_if_present(cls, record: dict[str, Any]) -> dict[str, Any]:
+        out = dict(record or {})
+        canonical = out.get("__canonical_v1")
+        if not isinstance(canonical, dict):
+            return out
+
+        resource = canonical.get("resource") or {}
+        client = canonical.get("client") or {}
+        vehicle = canonical.get("vehicle") or {}
+        attachments = canonical.get("attachments") or []
+        client_doc = client.get("document") or {}
+        client_name = client.get("name") or {}
+        client_contact = client.get("contact") or {}
+        client_address = client.get("address") or {}
+        plate = vehicle.get("plate") or {}
+
+        out["idRecurso"] = out.get("idRecurso", resource.get("id"))
+        out["idExp"] = out.get("idExp", resource.get("exp_id"))
+        out["numclient"] = out.get("numclient", resource.get("numclient"))
+        out["Expedient"] = out.get("Expedient", resource.get("expedient"))
+        out["Organisme"] = out.get("Organisme", resource.get("organism"))
+        out["TExp"] = out.get("TExp", resource.get("texp"))
+        out["Estado"] = out.get("Estado", resource.get("state"))
+        out["UsuarioAsignado"] = out.get("UsuarioAsignado", resource.get("assigned_user"))
+        out["FaseProcedimiento"] = out.get("FaseProcedimiento", resource.get("phase"))
+        out["SujetoRecurso"] = out.get("SujetoRecurso", resource.get("subject_name"))
+
+        out["cliente_tipo"] = out.get("cliente_tipo", client.get("type"))
+        out["cliente_nif"] = out.get("cliente_nif", client_doc.get("nif"))
+        out["cliente_nif_empresa"] = out.get("cliente_nif_empresa", client_doc.get("cif"))
+        out["cif"] = out.get("cif", client_doc.get("cif"))
+        out["cliente_nombre"] = out.get("cliente_nombre", client_name.get("first"))
+        out["cliente_apellido1"] = out.get("cliente_apellido1", client_name.get("last1"))
+        out["cliente_apellido2"] = out.get("cliente_apellido2", client_name.get("last2"))
+        out["cliente_razon_social"] = out.get("cliente_razon_social", client_name.get("business"))
+        out["cliente_email"] = out.get("cliente_email", client_contact.get("email"))
+        out["cliente_tel1"] = out.get("cliente_tel1", client_contact.get("phone1"))
+        out["cliente_tel2"] = out.get("cliente_tel2", client_contact.get("phone2"))
+        out["cliente_movil"] = out.get("cliente_movil", client_contact.get("mobile"))
+        out["cliente_domicilio"] = out.get("cliente_domicilio", client_address.get("street_name"))
+        out["cliente_numero"] = out.get("cliente_numero", client_address.get("number"))
+        out["cliente_escalera"] = out.get("cliente_escalera", client_address.get("stair"))
+        out["cliente_planta"] = out.get("cliente_planta", client_address.get("floor"))
+        out["cliente_puerta"] = out.get("cliente_puerta", client_address.get("door"))
+        out["cliente_cp"] = out.get("cliente_cp", client_address.get("zip"))
+        out["cliente_municipio"] = out.get("cliente_municipio", client_address.get("city"))
+        out["cliente_provincia"] = out.get("cliente_provincia", client_address.get("province"))
+        out["address_sigla"] = out.get("address_sigla", client_address.get("street_type"))
+
+        out["matricula"] = out.get("matricula", plate.get("value"))
+        out["rs_matricula"] = out.get("rs_matricula", plate.get("value") if plate.get("source") == "rs_matricula" else None)
+        out["exp_matricula"] = out.get("exp_matricula", plate.get("value") if plate.get("source") == "exp_matricula" else None)
+        out["pub_matricula"] = out.get("pub_matricula", plate.get("value") if plate.get("source") == "pub_matricula" else None)
+        out["pub_publicacion"] = out.get("pub_publicacion", vehicle.get("publication_text"))
+
+        out["adjuntos"] = out.get("adjuntos", attachments)
+        return out
+
     def fetch_candidates(
         self,
         *,
@@ -152,6 +160,8 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         on_discard: Optional[SiteAdapter.DiscardCallback] = None,
         resource_repo: Any | None = None,
     ) -> list[dict]:
+        if resource_repo is None:
+            raise RuntimeError("[madrid] fetch_candidates requires injected resource_repo (consultor/repository).")
         regex_pattern = self._clean_str(config.get("regex_expediente")) or self.DEFAULT_REGEX_EXPEDIENTE
         regex = self._regex_expediente_cache.get(regex_pattern)
         if regex is None:
@@ -165,181 +175,78 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
         config = dict(config or {})
         config["query_organisme"] = self._sanitize_query_organisme(config.get("query_organisme"))
 
-        if resource_repo is not None:
-            recursos_map: dict[int, dict] = {}
-            resources = resource_repo.get_pending_resources(site_id=self.site_id, config=config, limit=limit)
-            for resource in resources:
-                record = dict(resource.metadata or {})
-                rid = record.get("idRecurso")
-                if not rid:
-                    continue
-                rid_int = int(rid)
-                adjuntos: list[dict[str, Any]] = []
-                for adj in list(record.get("adjuntos") or []):
-                    adj_copy = dict(adj or {})
-                    adj_id = adj_copy.get("id")
-                    if adj_id is not None and "url" not in adj_copy:
-                        adj_copy["url"] = self.ADJUNTO_URL_TEMPLATE.format(id=int(adj_id))
-                    adjuntos.append(adj_copy)
-                record["adjuntos"] = adjuntos
-                recursos_map[rid_int] = record
+        recursos_map: dict[int, dict] = {}
+        resources = resource_repo.get_pending_resources(site_id=self.site_id, config=config, limit=limit)
+        for resource in resources:
+            record = self._materialize_from_canonical_if_present(dict(resource.metadata or {}))
+            rid = record.get("idRecurso")
+            if not rid:
+                continue
+            rid_int = int(rid)
+            adjuntos: list[dict[str, Any]] = []
+            for adj in list(record.get("adjuntos") or []):
+                adj_copy = dict(adj or {})
+                adj_id = adj_copy.get("id")
+                if adj_id is not None and "url" not in adj_copy:
+                    adj_copy["url"] = self.ADJUNTO_URL_TEMPLATE.format(id=int(adj_id))
+                adjuntos.append(adj_copy)
+            record["adjuntos"] = adjuntos
+            recursos_map[rid_int] = record
 
-            out: list[dict] = []
-            for _, recurso in recursos_map.items():
-                if limit and len(out) >= limit:
-                    break
+        out: list[dict] = []
+        for _, recurso in recursos_map.items():
+            if limit and len(out) >= limit:
+                break
 
-                expediente = self._clean_str(recurso.get("Expedient")).upper()
-                expediente = re.sub(r"\s+", "", expediente)
-                if not expediente or not regex.match(expediente):
-                    if on_discard:
-                        try:
-                            on_discard(
-                                {
-                                    "site_id": self.site_id,
-                                    "idRecurso": recurso.get("idRecurso"),
-                                    "Expedient": expediente,
-                                    "tipo_incidencia": "REGEX_DISCARDED",
-                                    "motivo": f"Expediente no valido para madrid: {expediente}",
-                                }
-                            )
-                        except Exception:
-                            pass
-                    continue
-                recurso["Expedient"] = expediente
-
-                fase_norm = self._normalize_text(recurso.get("FaseProcedimiento"))
-                if any(x in fase_norm for x in ["reclamacion", "embargo", "apremio"]):
-                    if on_discard:
-                        try:
-                            on_discard(
-                                {
-                                    "site_id": "madrid",
-                                    "idRecurso": recurso.get("idRecurso"),
-                                    "Expedient": recurso.get("Expedient"),
-                                    "tipo_incidencia": "SITE_RULE_DISCARDED",
-                                    "motivo": (
-                                        "Madrid: trÃ¡mite no reclamable por regla de sede (fase negra: "
-                                        f"{self._clean_str(recurso.get('FaseProcedimiento'))}). "
-                                        "Revisar si el trÃ¡mite estÃ¡ mal formado o si debe tratarse manualmente."
-                                    ),
-                                }
-                            )
-                        except Exception:
-                            pass
-                    continue
-
-                estado = int(recurso.get("Estado") or 0)
-                usuario = self._clean_str(recurso.get("UsuarioAsignado"))
-                if estado == 1 and authenticated_user and usuario != authenticated_user:
-                    continue
-                if estado == 1 and not authenticated_user:
-                    continue
-
-                out.append(recurso)
-            return out
-
-        texp_values = [2, 3]
-        texp_placeholders = ",".join(["?"] * len(texp_values))
-
-        # Manejar mÃºltiples patrones LIKE (separados por espacios)
-        query_organisme_raw = config.get("query_organisme", "%")
-        patterns = [p.strip() for p in str(query_organisme_raw).split("|") if p.strip()]
-
-        if not patterns:
-            patterns = ["%"]
-
-        like_clauses = ["rs.Organisme LIKE ?"] * len(patterns)
-        organisme_like_clause = " OR ".join(like_clauses)
-
-        query = self.SQL_FETCH_RECURSOS_MADRID.format(organisme_like_clause=organisme_like_clause, texp_list=texp_placeholders)
-
-        conn = pyodbc.connect(conn_str)
-        try:
-            cursor = conn.cursor()
-            cursor.execute(query, patterns + texp_values)
-            columns = [column[0] for column in cursor.description]
-
-            recursos_map: dict[int, dict] = {}
-            for row in cursor.fetchall():
-                record = dict(zip(columns, row))
-                rid = record.get("idRecurso")
-                if not rid:
-                    continue
-                rid_int = int(rid)
-
-                if rid_int not in recursos_map:
-                    recursos_map[rid_int] = {**record, "adjuntos": []}
-
-                adj_id = record.get("adjunto_id")
-                if adj_id:
-                    filename = self._clean_str(record.get("adjunto_filename"))
-                    if filename:
-                        recursos_map[rid_int]["adjuntos"].append(
+            expediente = self._clean_str(recurso.get("Expedient")).upper()
+            expediente = re.sub(r"\s+", "", expediente)
+            if not expediente or not regex.match(expediente):
+                if on_discard:
+                    try:
+                        on_discard(
                             {
-                                "id": int(adj_id),
-                                "filename": filename,
-                                "url": self.ADJUNTO_URL_TEMPLATE.format(id=int(adj_id)),
+                                "site_id": self.site_id,
+                                "idRecurso": recurso.get("idRecurso"),
+                                "Expedient": expediente,
+                                "tipo_incidencia": "REGEX_DISCARDED",
+                                "motivo": f"Expediente no valido para madrid: {expediente}",
                             }
                         )
+                    except Exception:
+                        pass
+                continue
+            recurso["Expedient"] = expediente
 
-            out: list[dict] = []
-            for _, recurso in recursos_map.items():
-                if limit and len(out) >= limit:
-                    break
+            fase_norm = self._normalize_text(recurso.get("FaseProcedimiento"))
+            if any(x in fase_norm for x in ["reclamacion", "embargo", "apremio"]):
+                if on_discard:
+                    try:
+                        on_discard(
+                            {
+                                "site_id": "madrid",
+                                "idRecurso": recurso.get("idRecurso"),
+                                "Expedient": recurso.get("Expedient"),
+                                "tipo_incidencia": "SITE_RULE_DISCARDED",
+                                "motivo": (
+                                    "Madrid: trÃ¡mite no reclamable por regla de sede (fase negra: "
+                                    f"{self._clean_str(recurso.get('FaseProcedimiento'))}). "
+                                    "Revisar si el trÃ¡mite estÃ¡ mal formado o si debe tratarse manualmente."
+                                ),
+                            }
+                        )
+                    except Exception:
+                        pass
+                continue
 
-                expediente = self._clean_str(recurso.get("Expedient")).upper()
-                expediente = re.sub(r"\s+", "", expediente)
-                if not expediente or not regex.match(expediente):
-                    if on_discard:
-                        try:
-                            on_discard(
-                                {
-                                    "site_id": self.site_id,
-                                    "idRecurso": recurso.get("idRecurso"),
-                                    "Expedient": expediente,
-                                    "tipo_incidencia": "REGEX_DISCARDED",
-                                    "motivo": f"Expediente no valido para madrid: {expediente}",
-                                }
-                            )
-                        except Exception:
-                            pass
-                    continue
-                recurso["Expedient"] = expediente
+            estado = int(recurso.get("Estado") or 0)
+            usuario = self._clean_str(recurso.get("UsuarioAsignado"))
+            if estado == 1 and authenticated_user and usuario != authenticated_user:
+                continue
+            if estado == 1 and not authenticated_user:
+                continue
 
-                fase_norm = self._normalize_text(recurso.get("FaseProcedimiento"))
-                if any(x in fase_norm for x in ["reclamacion", "embargo", "apremio"]):
-                    if on_discard:
-                        try:
-                            on_discard(
-                                {
-                                    "site_id": "madrid",
-                                    "idRecurso": recurso.get("idRecurso"),
-                                    "Expedient": recurso.get("Expedient"),
-                                    "tipo_incidencia": "SITE_RULE_DISCARDED",
-                                    "motivo": (
-                                        "Madrid: trÃ¡mite no reclamable por regla de sede (fase negra: "
-                                        f"{self._clean_str(recurso.get('FaseProcedimiento'))}). "
-                                        "Revisar si el trÃ¡mite estÃ¡ mal formado o si debe tratarse manualmente."
-                                    ),
-                                }
-                            )
-                        except Exception:
-                            pass
-                    continue
-
-                estado = int(recurso.get("Estado") or 0)
-                usuario = self._clean_str(recurso.get("UsuarioAsignado"))
-                if estado == 1 and authenticated_user and usuario != authenticated_user:
-                    continue
-                if estado == 1 and not authenticated_user:
-                    continue
-
-                out.append(recurso)
-
-            return out
-        finally:
-            conn.close()
+            out.append(recurso)
+        return out
 
     @staticmethod
     def _inferir_prefijo_expediente(*, fase_raw: str, es_empresa: bool) -> str:
@@ -714,27 +621,33 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
 
             tipo_numeracion = "NUM" if self._clean_str(notif_numero) else "S/N"
             provincia_notif = self._clean_str(r.get("cliente_provincia")).upper() or poblacion.upper()
+            representative_city = get_representative_city()
+            representative_province = get_representative_province()
+            representative_street_name = get_representative_street_name()
+            representative_number = get_representative_number()
+            representative_zip = get_representative_zip()
+            representative_street_type = get_representative_street_type()
 
             representante = {
-                "rep_tipo_via": "RONDA",
+                "rep_tipo_via": representative_street_type,
                 "rep_tipo_numeracion": "NUM",
-                "representative_city": "BARCELONA",
-                "representative_province": "BARCELONA",
-                "representative_country": "ESPAÃ‘A",
-                "representative_street": "GENERAL MITRE",
-                "representative_number": "169",
-                "representative_zip": "08022",
-                "representative_email": "info@xvia-serviciosjuridicos.com",
-                "representative_phone": "932531411",
-                "rep_nombre_via": "GENERAL MITRE",
-                "rep_numero": "169",
-                "rep_cp": "08022",
-                "rep_municipio": "BARCELONA",
-                "rep_provincia": "BARCELONA",
-                "rep_pais": "ESPAÃ‘A",
-                "rep_email": "info@xvia-serviciosjuridicos.com",
-                "rep_movil": "932531411",
-                "rep_telefono": "932531411",
+                "representative_city": representative_city,
+                "representative_province": representative_province,
+                "representative_country": get_default_country_es_label(),
+                "representative_street": representative_street_name,
+                "representative_number": representative_number,
+                "representative_zip": representative_zip,
+                "representative_email": get_default_contact_email(),
+                "representative_phone": get_default_contact_phone_fixed(),
+                "rep_nombre_via": representative_street_name,
+                "rep_numero": representative_number,
+                "rep_cp": representative_zip,
+                "rep_municipio": representative_city,
+                "rep_provincia": representative_province,
+                "rep_pais": get_default_country_es_label(),
+                "rep_email": get_default_contact_email(),
+                "rep_movil": get_default_contact_phone_fixed(),
+                "rep_telefono": get_default_contact_phone_fixed(),
                 "rep_tipo_numeracion": "NUM",
             }
 
@@ -747,8 +660,8 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 "fase_procedimiento": fase_raw,
                 "plate_number": plate_number,
                 "plate_number_source": plate_src,
-                "user_phone": "932531411",
-                "inter_telefono": "932531411",
+                "user_phone": get_default_contact_phone_fixed(),
+                "inter_telefono": get_default_contact_phone_fixed(),
                 "inter_email_check": bool(self._clean_str(r.get("cliente_email"))),
                 **representante,
                 "notif_tipo_documento": self._detectar_tipo_documento(nif),
@@ -757,7 +670,7 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 "notif_surname1": self._clean_str(r.get("cliente_apellido1")).upper(),
                 "notif_surname2": self._clean_str(r.get("cliente_apellido2")).upper(),
                 "notif_razon_social": self._clean_str(r.get("cliente_razon_social")).upper(),
-                "notif_pais": "ESPAÃ‘A",
+                "notif_pais": get_default_country_es_label(),
                 "notif_provincia": provincia_notif,
                 "notif_municipio": poblacion.upper(),
                 "notif_tipo_via": notif_tipo_via,
@@ -769,9 +682,9 @@ ORDER BY rs.Estado ASC, rs.idRecurso ASC
                 "notif_planta": self._clean_str(notif_planta),
                 "notif_puerta": self._clean_str(notif_puerta),
                 "notif_codigo_postal": self._clean_str(r.get("cliente_cp")),
-                "notif_email": "info@xvia-serviciosjuridicos.com",
+                "notif_email": get_default_contact_email(),
                 "notif_movil": "",
-                "notif_telefono": "932531411",
+                "notif_telefono": get_default_contact_phone_fixed(),
                 **exp_parts,
                 # Alias directos para el controller (evita depender de map_data)
                 "exp_tipo": exp_parts.get("expediente_tipo"),

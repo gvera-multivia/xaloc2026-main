@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from core.contact_defaults import get_default_contact_email, get_default_contact_mobile
 from sites.ayunta_palma.config import AyuntaPalmaConfig
 from sites.ayunta_palma.data_models import (
     AyuntaPalmaAlegaciones,
@@ -102,23 +103,63 @@ class AyuntaPalmaController:
 
     create_target = create_target_strict
 
+    @staticmethod
+    def _canonical_get(data: dict, path: str):
+        canonical = (data or {}).get("__canonical_v1")
+        node = canonical if isinstance(canonical, dict) else None
+        for part in path.split("."):
+            if not isinstance(node, dict):
+                return None
+            node = node.get(part)
+        return node
+
+    @classmethod
+    def _pick(cls, data: dict, *keys: str, canonical_path: str | None = None):
+        for key in keys:
+            value = data.get(key)
+            if value not in (None, "", []):
+                return value
+        if canonical_path:
+            value = cls._canonical_get(data, canonical_path)
+            if value not in (None, "", []):
+                return value
+        return None
+
     def map_data(self, data: dict) -> dict:
+        tipo_persona = self._pick(data, "tipo_persona", "persona_tipo")
+        if not tipo_persona:
+            client_type = self._pick(data, "cliente_tipo", "tipodecliente", canonical_path="client.type")
+            doc_cif = self._pick(data, "nif_empresa", "cif", canonical_path="client.document.cif")
+            if str(client_type) == "2" or bool(doc_cif):
+                tipo_persona = "PersonaJuridica"
+            else:
+                tipo_persona = "PersonaFisica"
+
+        email = self._pick(data, "email", "correo", "cliente_email", canonical_path="client.contact.email")
+        telefono = self._pick(data, "telefono", "movil", "cliente_movil", "cliente_tel1", canonical_path="client.contact.mobile")
+        if not telefono:
+            telefono = self._pick(data, "cliente_tel1", canonical_path="client.contact.phone1")
+        if not email:
+            email = get_default_contact_email()
+        if not telefono:
+            telefono = get_default_contact_mobile()
+
         return {
-            "tipo_persona": data.get("tipo_persona") or data.get("persona_tipo"),
-            "tipo_documento": data.get("tipo_documento"),
-            "documento": data.get("documento") or data.get("identificacion"),
-            "nombre": data.get("nombre"),
-            "apellido1": data.get("apellido1"),
-            "apellido2": data.get("apellido2"),
-            "pais": data.get("pais"),
-            "nif_empresa": data.get("nif_empresa"),
-            "razon_social": data.get("razon_social"),
-            "email": data.get("email") or data.get("correo"),
-            "telefono": data.get("telefono") or data.get("movil"),
-            "expediente": data.get("expediente"),
-            "matricula": data.get("matricula"),
-            "expone": data.get("expone"),
-            "solicita": data.get("solicita"),
+            "tipo_persona": tipo_persona,
+            "tipo_documento": self._pick(data, "tipo_documento"),
+            "documento": self._pick(data, "documento", "identificacion", canonical_path="client.document.nif"),
+            "nombre": self._pick(data, "nombre", "cliente_nombre", canonical_path="client.name.first"),
+            "apellido1": self._pick(data, "apellido1", "cliente_apellido1", canonical_path="client.name.last1"),
+            "apellido2": self._pick(data, "apellido2", "cliente_apellido2", canonical_path="client.name.last2"),
+            "pais": self._pick(data, "pais"),
+            "nif_empresa": self._pick(data, "nif_empresa", "cif", canonical_path="client.document.cif"),
+            "razon_social": self._pick(data, "razon_social", "cliente_razon_social", canonical_path="client.name.business"),
+            "email": email,
+            "telefono": telefono,
+            "expediente": self._pick(data, "expediente", "Expedient", canonical_path="resource.expedient"),
+            "matricula": self._pick(data, "matricula", "plate_number", canonical_path="vehicle.plate.value"),
+            "expone": self._pick(data, "expone"),
+            "solicita": self._pick(data, "solicita"),
             "archivos": data.get("archivos") or data.get("documentos"),
             "payload": data,
         }

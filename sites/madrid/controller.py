@@ -1,6 +1,6 @@
 """
 Controlador del sitio Madrid Ayuntamiento.
-Corregido para validación BDC y segregación de secciones.
+Corregido para validaciÃ³n BDC y segregaciÃ³n de secciones.
 """
 
 from __future__ import annotations
@@ -28,10 +28,32 @@ class MadridController:
     display_name = "Madrid Ayuntamiento"
 
     def create_config(self, *, headless: bool) -> MadridConfig:
-        """Crea la configuración para el sitio Madrid."""
+        """Crea la configuraciÃ³n para el sitio Madrid."""
         config = MadridConfig()
         config.navegador.headless = bool(headless)
         return config
+
+    @staticmethod
+    def _canonical_get(data: dict, path: str):
+        canonical = (data or {}).get("__canonical_v1")
+        node = canonical if isinstance(canonical, dict) else None
+        for part in path.split("."):
+            if not isinstance(node, dict):
+                return None
+            node = node.get(part)
+        return node
+
+    @classmethod
+    def _pick(cls, data: dict, *keys: str, canonical_path: str | None = None):
+        for key in keys:
+            value = data.get(key)
+            if value not in (None, "", []):
+                return value
+        if canonical_path:
+            value = cls._canonical_get(data, canonical_path)
+            if value not in (None, "", []):
+                return value
+        return None
 
     def create_target_strict(
         self,
@@ -59,7 +81,7 @@ class MadridController:
         rep_email: str | None = None,
         rep_movil: str | None = None,
         rep_telefono: str | None = None,
-        # Notificación (si no se copia, hay que informar todo)
+        # NotificaciÃ³n (si no se copia, hay que informar todo)
         notif_copiar_desde: str | None = None,
         notif_tipo_documento: str | None = None,
         notif_numero_documento: str | None = None,
@@ -96,7 +118,7 @@ class MadridController:
 
         exp_tipo_norm = _require("exp_tipo", exp_tipo)
         if exp_tipo_norm not in {"opcion1", "opcion2"}:
-            raise ValueError("madrid: 'exp_tipo' inválido (usa 'opcion1' o 'opcion2').")
+            raise ValueError("madrid: 'exp_tipo' invÃ¡lido (usa 'opcion1' o 'opcion2').")
         tipo_exp = TipoExpediente.OPCION2 if exp_tipo_norm == "opcion2" else TipoExpediente.OPCION1
 
         if tipo_exp == TipoExpediente.OPCION1:
@@ -146,7 +168,7 @@ class MadridController:
         try:
             tipo_doc = TipoDocumento[tipo_doc_raw]
         except KeyError as e:
-            raise ValueError("madrid: 'notif_tipo_documento' inválido (NIF, NIE, PASAPORTE).") from e
+            raise ValueError("madrid: 'notif_tipo_documento' invÃ¡lido (NIF, NIE, PASAPORTE).") from e
 
         notificacion = NotificacionData(
             copiar_desde=(notif_copiar_desde or "").strip(),
@@ -165,7 +187,7 @@ class MadridController:
                 tipo_via=_require("notif_tipo_via", notif_tipo_via),
                 nombre_via=_require("notif_nombre_via", notif_nombre_via),
                 tipo_numeracion=(notif_tipo_numeracion or "S/N").strip(),  # Default S/N si no hay
-                numero=(notif_numero or "").strip(),  # Opcional: puede no tener número
+                numero=(notif_numero or "").strip(),  # Opcional: puede no tener nÃºmero
                 portal=(notif_portal or "").strip(),
                 escalera=(notif_escalera or "").strip(),
                 planta=(notif_planta or "").strip(),
@@ -174,8 +196,8 @@ class MadridController:
             ),
             contacto=ContactoData(
                 email=_require("notif_email", notif_email),
-                movil=(notif_movil or "").strip(),  # Opcional: puede no tener móvil
-                telefono=(notif_telefono or "").strip(),  # Opcional: puede no tener teléfono fijo
+                movil=(notif_movil or "").strip(),  # Opcional: puede no tener mÃ³vil
+                telefono=(notif_telefono or "").strip(),  # Opcional: puede no tener telÃ©fono fijo
             ),
         )
 
@@ -187,11 +209,11 @@ class MadridController:
 
         nat = _require("naturaleza", naturaleza)
         if nat not in naturaleza_map:
-            raise ValueError("madrid: 'naturaleza' inválida (A, R o I).")
+            raise ValueError("madrid: 'naturaleza' invÃ¡lida (A, R o I).")
 
         form_data = MadridFormData(
             expediente=expediente,
-            matricula=(matricula or "").strip(),  # Opcional: algunos expedientes no tienen matrícula
+            matricula=(matricula or "").strip(),  # Opcional: algunos expedientes no tienen matrÃ­cula
             interesado=interesado,
             representante=representante,
             notificacion=notificacion,
@@ -219,14 +241,11 @@ class MadridController:
         Mapea claves genéricas de DB a argumentos de create_target.
         """
         return {
-            # ID del recurso (para nombrar archivos)
-            "idRecurso": data.get("idRecurso"),
-            # Permite dos formatos:
-            # - "genérico" (plate_number, representative_*, etc.) para worker-tasks
-            # - "avanzado" (matricula, rep_*, exp_*) para sobreescribir defaults del controlador
-            "matricula": data.get("matricula") or data.get("plate_number"),
-            "inter_telefono": data.get("inter_telefono") or data.get("user_phone"),
-            "inter_email_check": data.get("inter_email_check"),
+            "idRecurso": self._pick(data, "idRecurso", canonical_path="resource.id"),
+            "matricula": self._pick(data, "matricula", "plate_number", canonical_path="vehicle.plate.value"),
+            "inter_telefono": self._pick(data, "inter_telefono", "user_phone", canonical_path="client.contact.phone1")
+            or self._pick(data, canonical_path="client.contact.mobile"),
+            "inter_email_check": self._pick(data, "inter_email_check"),
             "rep_tipo_via": data.get("rep_tipo_via"),
             "rep_nombre_via": data.get("rep_nombre_via") or data.get("representative_street"),
             "rep_tipo_numeracion": data.get("rep_tipo_numeracion"),
@@ -241,23 +260,23 @@ class MadridController:
             "notif_copiar_desde": data.get("notif_copiar_desde"),
             "notif_tipo_documento": data.get("notif_tipo_documento"),
             "notif_numero_documento": data.get("notif_numero_documento"),
-            "notif_nombre": data.get("notif_nombre") or data.get("notif_name"),
+            "notif_nombre": self._pick(data, "notif_nombre", "notif_name", canonical_path="client.name.first"),
             "notif_apellido1": data.get("notif_apellido1") or data.get("notif_surname1"),
             "notif_apellido2": data.get("notif_apellido2") or data.get("notif_surname2"),
             "notif_razon_social": data.get("notif_razon_social"),
-            "notif_pais": data.get("notif_pais"),
-            "notif_provincia": data.get("notif_provincia"),
-            "notif_municipio": data.get("notif_municipio"),
+            "notif_pais": self._pick(data, "notif_pais", canonical_path="client.address.country"),
+            "notif_provincia": self._pick(data, "notif_provincia", canonical_path="client.address.province"),
+            "notif_municipio": self._pick(data, "notif_municipio", canonical_path="client.address.city"),
             "notif_tipo_via": data.get("notif_tipo_via"),
-            "notif_nombre_via": data.get("notif_nombre_via"),
+            "notif_nombre_via": self._pick(data, "notif_nombre_via", canonical_path="client.address.street_name"),
             "notif_tipo_numeracion": data.get("notif_tipo_numeracion"),
-            "notif_numero": data.get("notif_numero"),
+            "notif_numero": self._pick(data, "notif_numero", canonical_path="client.address.number"),
             "notif_portal": data.get("notif_portal"),
-            "notif_escalera": data.get("notif_escalera"),
-            "notif_planta": data.get("notif_planta"),
-            "notif_puerta": data.get("notif_puerta"),
-            "notif_codigo_postal": data.get("notif_codigo_postal"),
-            "notif_email": data.get("notif_email"),
+            "notif_escalera": self._pick(data, "notif_escalera", canonical_path="client.address.stair"),
+            "notif_planta": self._pick(data, "notif_planta", canonical_path="client.address.floor"),
+            "notif_puerta": self._pick(data, "notif_puerta", canonical_path="client.address.door"),
+            "notif_codigo_postal": self._pick(data, "notif_codigo_postal", canonical_path="client.address.zip"),
+            "notif_email": self._pick(data, "notif_email", canonical_path="client.contact.email"),
             "notif_movil": data.get("notif_movil"),
             "notif_telefono": data.get("notif_telefono"),
             "exp_tipo": data.get("exp_tipo") or data.get("expediente_tipo"),
@@ -267,12 +286,13 @@ class MadridController:
             "exp_lll": data.get("exp_lll") or data.get("expediente_lll"),
             "exp_aaaa": data.get("exp_aaaa") or data.get("expediente_aaaa"),
             "exp_exp_num": data.get("exp_exp_num") or data.get("expediente_exp_num"),
-            "naturaleza": data.get("naturaleza"),
-            "expone": data.get("expone"),
-            "solicita": data.get("solicita"),
+            "naturaleza": self._pick(data, "naturaleza"),
+            "expone": self._pick(data, "expone"),
+            "solicita": self._pick(data, "solicita"),
             "archivos": data.get("archivos") or data.get("archivos_adjuntos"),
             "payload": data,
         }
 
 def get_controller() -> MadridController:
     return MadridController()
+
