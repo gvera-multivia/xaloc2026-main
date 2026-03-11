@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from core.client_documentation import build_required_client_documents_for_payload
+from core.client_docs_service import get_required_client_documents
 from core.sqlserver_utils import build_sqlserver_connection_string
 from .site_adapter import SiteAdapter
 
@@ -581,7 +581,7 @@ class RedsaraAdapter(SiteAdapter):
             }
 
             try:
-                client_docs = await build_required_client_documents_for_payload(
+                client_docs = await get_required_client_documents(
                     payload,
                     sqlserver_conn_str=conn_str,
                     strict=False,

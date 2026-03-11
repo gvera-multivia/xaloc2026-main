@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import logging
 import re
-import shutil
 import unicodedata
-from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from playwright.async_api import Page, TimeoutError
 
@@ -15,11 +13,11 @@ from core.errors import RestartWithProfileResetError, RetryWithoutAttemptError
 if TYPE_CHECKING:
     from sites.madrid.config import MadridConfig
 
-from core.client_documentation import client_identity_from_payload
-from core.client_paths import (
-    find_or_create_normalized_subfolder,
-    get_ruta_cliente_documentacion,
-    resolve_client_docs_base_path,
+from core.justificantes_storage import (
+    build_non_overwrite_path,
+    build_receipt_filename,
+    resolve_receipt_dir_from_payload,
+    save_receipt_from_tmp,
 )
 
 logger = logging.getLogger(__name__)
@@ -76,67 +74,19 @@ async def _detectar_tramite_en_curso(page: Page) -> bool:
     return any(t in text for t in tokens)
 
 
-def _get_folder_name_from_fase(fase_raw: Any) -> str:
-    motivo_to_folder = {
-        "identificacion": "IDENTIFICACIONES",
-        "denuncia": "ALEGACIONES",
-        "propuesta de resolucion": "ALEGACIONES",
-        "extraordinario de revision": "EXTRAORDINARIOS DE REVISION",
-        "subsanacion": "SUBSANACIONES",
-        "reclamaciones": "RECLAMACIONES",
-        "requerimiento embargo": "EMBARGOS",
-        "sancion": "SANCIONES",
-        "apremio": "APREMIOS",
-        "embargo": "EMBARGOS",
-    }
-
-    fase_norm = _normalize_text(fase_raw)
-    for motivo_key, folder_name in motivo_to_folder.items():
-        if motivo_key in fase_norm:
-            return folder_name
-
-    logger.warning("No match for phase '%s', defaulting to base folder.", fase_raw)
-    return ""
-
-
-def _construir_ruta_recursos_telematicos(payload: dict, fase_procedimiento: Any = None) -> Path:
-    client = client_identity_from_payload(payload)
-    base_path = resolve_client_docs_base_path()
-    ruta_cliente_base = get_ruta_cliente_documentacion(client, base_path=base_path)
-    logger.info("Madrid justificante: ruta cliente base resuelta a %s", ruta_cliente_base)
-
-    ruta_recursos = find_or_create_normalized_subfolder(ruta_cliente_base, "RECURSOS TELEMÁTICOS")
-
-    if fase_procedimiento:
-        folder_name = _get_folder_name_from_fase(fase_procedimiento)
-        if folder_name:
-            return find_or_create_normalized_subfolder(ruta_recursos, folder_name)
-
-    return ruta_recursos
+def _construir_ruta_recursos_telematicos(payload: dict, fase_procedimiento: str | None = None) -> Path:
+    return resolve_receipt_dir_from_payload(
+        payload=payload,
+        fase_procedimiento=str(fase_procedimiento or "").strip() or None,
+    )
 
 
 def _justificante_filename(num_expediente: str) -> str:
-    clean_exp = str(num_expediente).replace("/", "-").replace("\\", "-")
-    clean_exp = re.sub(r'[<>:"|?*\x00-\x1F]', "_", clean_exp).strip().rstrip(". ")
-    if not clean_exp:
-        clean_exp = "UNKNOWN"
-    return f"JUSTIFICANTE - {clean_exp}.pdf"
+    return build_receipt_filename(expediente=num_expediente, template="JUSTIFICANTE - {expediente}.pdf")
 
 
 def _build_unique_path(destino_dir: Path, filename: str) -> Path:
-    base = Path(filename).stem
-    ext = Path(filename).suffix or ".pdf"
-    candidate = destino_dir / f"{base}{ext}"
-    if not candidate.exists():
-        return candidate
-
-    ts = datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
-    candidate = destino_dir / f"{base} ({ts}){ext}"
-    seq = 1
-    while candidate.exists():
-        seq += 1
-        candidate = destino_dir / f"{base} ({ts})_{seq}{ext}"
-    return candidate
+    return build_non_overwrite_path(destino_dir, filename)
 
 
 async def _guardar_justificante_temporal(download: Any, *, num_expediente: str, tmp_dir: Path) -> Path:
@@ -148,11 +98,11 @@ async def _guardar_justificante_temporal(download: Any, *, num_expediente: str, 
 
 
 def _mover_justificante_a_destino(tmp_path: Path, *, destino_dir: Path) -> Path:
-    destino_dir.mkdir(parents=True, exist_ok=True)
-    destino_path = _build_unique_path(destino_dir, tmp_path.name)
-    shutil.move(str(tmp_path), str(destino_path))
-    logger.info("Justificante movido a: %s", destino_path)
-    return destino_path
+    return save_receipt_from_tmp(
+        tmp_path=tmp_path,
+        destino_dir=destino_dir,
+        filename=tmp_path.name,
+    )
 
 
 def _normalizar_anotacion(value: str) -> str:

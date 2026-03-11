@@ -20,7 +20,7 @@ from core.realtime_store import build_realtime_store
 from core.runtime_flags import get_queue_mode
 from core.xvia_auth import create_authenticated_session_in_place
 from core.nt_expediente_fixer import is_nt_pattern, fix_nt_expediente
-from core.client_documentation import check_requires_gesdoc
+from core.client_docs_service import requires_gesdoc_authorization
 from core.address_classifier import classify_addresses_batch_with_ai, classify_address_fallback
 from core.contact_defaults import get_default_contact_email
 from core.repositories import ResourceRepository
@@ -610,7 +610,7 @@ class BrainOrchestrator:
         requires_gesdoc = False
         reason = None
         if not skip_gesdoc_check:
-            requires_gesdoc, reason = check_requires_gesdoc(payload)
+            requires_gesdoc, reason = requires_gesdoc_authorization(payload)
         resource_id = payload.get("idRecurso")
         try:
             resource_id = int(resource_id) if resource_id is not None else None

@@ -524,10 +524,10 @@ class BaseOnlineAdapter(SiteAdapter):
             }
 
             try:
-                from core.client_documentation import build_required_client_documents_for_payload
+                from core.client_docs_service import get_required_client_documents
 
                 conn_str = build_sqlserver_connection_string()
-                client_docs = await build_required_client_documents_for_payload(
+                client_docs = await get_required_client_documents(
                     payload,
                     sqlserver_conn_str=conn_str,
                     strict=False,

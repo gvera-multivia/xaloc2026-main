@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from core.client_documentation import build_required_client_documents_for_payload
+from core.client_docs_service import get_required_client_documents
 from core.sqlserver_utils import build_sqlserver_connection_string
 from core.validation.validators import normalize_plate_with_fallback
 from .site_adapter import SiteAdapter
@@ -377,7 +377,7 @@ class TerrassaAdapter(SiteAdapter):
             }
 
             try:
-                files = await build_required_client_documents_for_payload(
+                files = await get_required_client_documents(
                     payload,
                     sqlserver_conn_str=conn_str,
                     strict=False,

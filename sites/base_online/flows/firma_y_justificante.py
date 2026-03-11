@@ -2,10 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
-import shutil
 import time
-import unicodedata
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -13,11 +10,11 @@ import asyncio
 import base64
 from playwright.async_api import Page, TimeoutError
 
-from core.client_documentation import client_identity_from_payload
-from core.client_paths import (
-    find_or_create_normalized_subfolder,
-    get_ruta_cliente_documentacion,
-    resolve_client_docs_base_path,
+from core.justificantes_storage import (
+    build_non_overwrite_path,
+    build_receipt_filename,
+    resolve_receipt_dir_from_payload,
+    save_receipt_from_tmp,
 )
 
 logger = logging.getLogger(__name__)
@@ -26,76 +23,18 @@ SUCCESS_TIMEOUT_MS = 180000
 POPUP_TIMEOUT_MS = 30000
 DOWNLOAD_TIMEOUT_MS = 90000
 
-
-def _normalize_text(text: str) -> str:
-    if not text:
-        return ""
-    text = str(text).strip().lower()
-    text = "".join(c for c in unicodedata.normalize("NFD", text) if unicodedata.category(c) != "Mn")
-    return text
-
-
-def _get_folder_name_from_fase(fase_raw: Any) -> str:
-    motivo_to_folder = {
-        "identificacion": "IDENTIFICACIONES",
-        "denuncia": "ALEGACIONES",
-        "propuesta de resolucion": "ALEGACIONES",
-        "extraordinario de revision": "EXTRAORDINARIOS DE REVISIÓN",
-        "subsanacion": "SUBSANACIONES",
-        "reclamaciones": "RECLAMACIONES",
-        "requerimiento embargo": "EMBARGOS",
-        "sancion": "SANCIONES",
-        "apremio": "APREMIOS",
-        "embargo": "EMBARGOS",
-    }
-    fase_norm = _normalize_text(fase_raw)
-    for key, folder in motivo_to_folder.items():
-        if key in fase_norm:
-            return folder
-    return ""
-
-
 def _construir_ruta_recursos_telematicos(payload: dict, fase_procedimiento: Any = None) -> Path:
-    client = client_identity_from_payload(payload)
-    base_path = resolve_client_docs_base_path()
-    ruta_cliente_base = get_ruta_cliente_documentacion(client, base_path=base_path)
-    logger.info("[BASE] Ruta cliente base resuelta a: %s", ruta_cliente_base)
-
-    ruta_recursos = find_or_create_normalized_subfolder(ruta_cliente_base, "RECURSOS TELEMÁTICOS")
-    if fase_procedimiento:
-        folder = _get_folder_name_from_fase(fase_procedimiento)
-        if folder:
-            return find_or_create_normalized_subfolder(ruta_recursos, folder)
-    return ruta_recursos
-
-
-def _sanitize_filename_component(value: str) -> str:
-    value = str(value or "").strip()
-    value = value.replace("/", "-").replace("\\", "-")
-    value = re.sub(r'[<>:"|?*\x00-\x1F]', "_", value)
-    value = value.rstrip(". ")
-    return value or "UNKNOWN"
-
+    return resolve_receipt_dir_from_payload(
+        payload=payload,
+        fase_procedimiento=str(fase_procedimiento or "").strip() or None,
+    )
 
 def _justificante_filename(num_expediente: str) -> str:
-    clean_exp = _sanitize_filename_component(num_expediente)
-    return f"JUSTIFICANTE- {clean_exp}.pdf"
+    return build_receipt_filename(expediente=num_expediente, template="JUSTIFICANTE- {expediente}.pdf")
 
 
 def _build_unique_path(destino_dir: Path, filename: str) -> Path:
-    base = Path(filename).stem
-    ext = Path(filename).suffix or ".pdf"
-    candidate = destino_dir / f"{base}{ext}"
-    if not candidate.exists():
-        return candidate
-
-    ts = datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
-    candidate = destino_dir / f"{base} ({ts}){ext}"
-    seq = 1
-    while candidate.exists():
-        seq += 1
-        candidate = destino_dir / f"{base} ({ts})_{seq}{ext}"
-    return candidate
+    return build_non_overwrite_path(destino_dir, filename)
 
 
 def _extraer_expediente_desde_success_text(texto: str) -> str | None:
@@ -184,13 +123,11 @@ async def _abrir_modal_firma(page: Page, trigger_locator) -> None:
 
 
 async def _mover_a_destino(tmp_path: Path, *, destino_dir: Path) -> Path:
-    destino_dir.mkdir(parents=True, exist_ok=True)
-    destino_path = _build_unique_path(destino_dir, tmp_path.name)
-
-    # copy2 para permitir mover entre unidades/UNC sin WinError 17.
-    shutil.copy2(tmp_path, destino_path)
-    tmp_path.unlink(missing_ok=True)
-    return destino_path
+    return save_receipt_from_tmp(
+        tmp_path=tmp_path,
+        destino_dir=destino_dir,
+        filename=tmp_path.name,
+    )
 
 
 async def _descargar_pdf_via_fetch(page: Page, url: str) -> bytes:
