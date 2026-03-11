@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import base64
 import logging
-import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -19,8 +18,11 @@ if TYPE_CHECKING:
 
 from core.client_paths import (
     ClientIdentity,
-    get_ruta_recursos_telematicos,
-    resolve_client_docs_base_path,
+)
+from core.justificantes_storage import (
+    build_receipt_filename,
+    resolve_receipt_dir_for_client,
+    save_receipt_from_tmp,
 )
 
 logger = logging.getLogger(__name__)
@@ -145,35 +147,27 @@ def _save_receipt_to_client_folder(
             apellido2=datos.apellido2,
         )
 
-    base_path = resolve_client_docs_base_path()
-    dest_dir = get_ruta_recursos_telematicos(
+    dest_dir = resolve_receipt_dir_for_client(
         client=client,
-        base_path=base_path,
         fase_procedimiento=datos.fase_procedimiento or None,
     )
     logger.info("Carpeta destino: %s", dest_dir)
 
     # Build filename: JUSTIFICANTE <expediente>.pdf (no overwrite)
-    exp_safe = datos.expediente.replace("/", "-").replace("\\", "-").strip()
-    nombre_base = f"JUSTIFICANTE {exp_safe}"
-    ruta_final = dest_dir / f"{nombre_base}.pdf"
+    filename = build_receipt_filename(
+        expediente=datos.expediente,
+        template="JUSTIFICANTE {expediente}.pdf",
+    )
 
-    if ruta_final.exists():
-        ts = datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
-        ruta_final = dest_dir / f"{nombre_base} ({ts}).pdf"
-        idx = 1
-        while ruta_final.exists():
-            idx += 1
-            ruta_final = dest_dir / f"{nombre_base} ({ts})_{idx}.pdf"
-
-    logger.info("Copiando justificante a: %s", ruta_final.name)
     try:
-        shutil.copy2(tmp_path, ruta_final)
-        tmp_path.unlink(missing_ok=True)
-        logger.info("OK Justificante guardado en: %s", ruta_final)
+        ruta_final = save_receipt_from_tmp(
+            tmp_path=tmp_path,
+            destino_dir=dest_dir,
+            filename=filename,
+        )
     except Exception as e:
         logger.error("Error al copiar justificante: %s", e)
-        raise RuntimeError(f"No se pudo copiar el justificante a {ruta_final}: {e}") from e
+        raise RuntimeError(f"No se pudo copiar el justificante al cliente: {e}") from e
 
     return ruta_final
 

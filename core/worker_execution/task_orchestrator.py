@@ -10,7 +10,8 @@ from typing import Optional
 import aiohttp
 import pyodbc
 
-from core.client_documentation import RequiredClientDocumentsError, build_required_client_documents_for_payload
+from core.client_documentation import RequiredClientDocumentsError
+from core.client_docs_service import get_required_client_documents
 from core.contact_defaults import get_default_contact_email
 from core.pdf_bundle import bundle_documents_to_single_pdf_for_palma
 from core.sqlserver_utils import build_sqlserver_connection_string
@@ -231,7 +232,7 @@ async def _append_required_client_docs(
 
     gesdoc_user = os.getenv("GESDOC_USER")
     gesdoc_pwd = os.getenv("GESDOC_PWD")
-    extra_docs = await build_required_client_documents_for_payload(
+    extra_docs = await get_required_client_documents(
         payload,
         gesdoc_user=gesdoc_user,
         gesdoc_pwd=gesdoc_pwd,

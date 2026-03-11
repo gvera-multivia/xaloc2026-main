@@ -5,23 +5,16 @@ Flujo de descarga del justificante de registro tras el envío del trámite.
 from __future__ import annotations
 
 import logging
-import re
-import shutil
-import unicodedata
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
 
 from playwright.async_api import Page, TimeoutError
 
-if TYPE_CHECKING:
-    from core.client_documentation import ClientIdentity
-
-from core.client_documentation import (
-    client_identity_from_payload,
-    get_ruta_cliente_documentacion,
+from core.justificantes_storage import (
+    build_receipt_filename,
+    resolve_receipt_dir_from_payload,
+    save_receipt_from_tmp,
 )
-from core.client_paths import find_or_create_normalized_subfolder, resolve_client_docs_base_path
 
 logger = logging.getLogger(__name__)
 
@@ -132,129 +125,7 @@ async def _descargar_pdf_desde_url(page: Page, url: str, destino: Path) -> None:
         raise RuntimeError(f"No se pudo descargar el PDF por fetch: {e}") from e
 
 
-def _normalize_text(text: str) -> str:
-    """
-    Normaliza texto para comparación flexible:
-    - Convierte a minúsculas
-    - Elimina acentos/tildes
-    - Elimina espacios extra
-    """
-    if not text:
-        return ""
-    text = str(text).strip().lower()
-    # Eliminar acentos usando NFD (Canonical Decomposition)
-    text = "".join(
-        c for c in unicodedata.normalize("NFD", text) 
-        if unicodedata.category(c) != "Mn"
-    )
-    return text
-
-
-def _get_folder_name_from_fase(fase_raw: Any) -> str:
-    """
-    Mapea el valor de FaseProcedimiento al nombre de carpeta estandarizado.
-    
-    Args:
-        fase_raw: Valor de FaseProcedimiento desde el payload
-    
-    Returns:
-        Nombre de carpeta estandarizado
-    
-    Raises:
-        ValueError: Si no se encuentra mapeo para la fase
-    """
-    # Mapeo de motivos (keys de config_motivos.json) a nombres de carpetas
-    MOTIVO_TO_FOLDER = {
-        "identificacion": "IDENTIFICACIONES",
-        "denuncia": "ALEGACIONES",
-        "propuesta de resolucion": "ALEGACIONES",
-        "extraordinario de revision": "EXTRAORDINARIOS DE REVISIÓN",
-        "subsanacion": "SUBSANACIONES",
-        "reclamaciones": "RECLAMACIONES",
-        "requerimiento embargo": "EMBARGOS",
-        "sancion": "SANCIONES",
-        "apremio": "APREMIOS",
-        "embargo": "EMBARGOS",
-    }
-    
-    fase_norm = _normalize_text(fase_raw)
-    
-    # Buscar coincidencia en los motivos
-    for motivo_key, folder_name in MOTIVO_TO_FOLDER.items():
-        if motivo_key in fase_norm:
-            return folder_name
-    
-    raise ValueError(f"No se encontró carpeta para la fase: {fase_raw}")
-
-
-def _folder_matches(folder_name: str, target_name: str) -> bool:
-    """
-    Comprueba si un nombre de carpeta coincide con el nombre objetivo
-    usando comparación flexible.
-    
-    Args:
-        folder_name: Nombre de carpeta existente
-        target_name: Nombre de carpeta objetivo (estandarizado)
-    
-    Returns:
-        True si coinciden, False en caso contrario
-    """
-    folder_norm = _normalize_text(folder_name)
-    target_norm = _normalize_text(target_name)
-    
-    # Coincidencia exacta después de normalización
-    if folder_norm == target_norm:
-        return True
-    
-    # Extraer palabras clave del nombre objetivo
-    target_words = set(target_norm.split())
-    folder_words = set(folder_norm.split())
-    
-    # Verificar si todas las palabras clave están presentes (permite variaciones de orden)
-    # Por ejemplo: "EXTRAORDINARIOS DE REVISIÓN" vs "RECURSOS EXTRAORDINARIOS DE REVISIÓN"
-    if target_words.issubset(folder_words):
-        return True
-    
-    # Verificar variaciones singular/plural
-    # Eliminar 's' final de cada palabra y comparar
-    target_singular = {w.rstrip('s') for w in target_words}
-    folder_singular = {w.rstrip('s') for w in folder_words}
-    
-    if target_singular == folder_singular:
-        return True
-    
-    return False
-
-
-def _find_or_create_subfolder(base_path: Path, folder_name: str) -> Path:
-    """
-    Busca una subcarpeta con coincidencia flexible o la crea si no existe.
-    
-    Args:
-        base_path: Ruta base donde buscar/crear la subcarpeta
-        folder_name: Nombre de carpeta estandarizado a buscar/crear
-    
-    Returns:
-        Path a la subcarpeta encontrada o creada
-    """
-    logger.info(f"Buscando carpeta '{folder_name}' en {base_path}...")
-    
-    # Buscar carpetas existentes con coincidencia flexible
-    if base_path.exists():
-        for item in base_path.iterdir():
-            if item.is_dir() and _folder_matches(item.name, folder_name):
-                logger.info(f"OK Carpeta encontrada: {item.name}")
-                return item
-    
-    # No se encontró, crear con nombre estandarizado
-    new_folder = base_path / folder_name
-    new_folder.mkdir(parents=True, exist_ok=True)
-    logger.info(f"OK Carpeta creada: {folder_name}")
-    
-    return new_folder
-
-
-def _construir_ruta_recursos_telematicos(payload: dict, fase_procedimiento: Any = None) -> Path:
+def _construir_ruta_recursos_telematicos(payload: dict, fase_procedimiento: str | None = None) -> Path:
     """
     Construye la ruta a la subcarpeta específica dentro de RECURSOS TELEMATICOS.
     
@@ -267,40 +138,12 @@ def _construir_ruta_recursos_telematicos(payload: dict, fase_procedimiento: Any 
     """
     logger.info("Construyendo ruta a carpeta RECURSOS TELEMATICOS...")
     
-    # Obtener identidad del cliente desde el payload
-    client = client_identity_from_payload(payload)
-    
-    # Resolver base_path con fallback seguro por plataforma.
-    base_path = resolve_client_docs_base_path()
-    
-    # Obtener ruta base del cliente (incluye: base_path / letra / nombre_cliente)
-    ruta_cliente_base = get_ruta_cliente_documentacion(client, base_path=base_path)
-    
-    # Reusar carpeta equivalente si existe (ej. "RECURSOS TELEMÁTICOS")
-    # para evitar duplicados por tildes.
-    ruta_recursos = find_or_create_normalized_subfolder(
-        ruta_cliente_base,
-        "RECURSOS TELEMÁTICOS",
+    ruta = resolve_receipt_dir_from_payload(
+        payload=payload,
+        fase_procedimiento=str(fase_procedimiento or "").strip() or None,
     )
-    
-    logger.info(f"Ruta RECURSOS TELEMATICOS: {ruta_recursos}")
-    
-    # Si se proporciona fase_procedimiento, buscar/crear subcarpeta específica
-    logger.info(f"DEBUG: fase_procedimiento recibido = '{fase_procedimiento}' (tipo: {type(fase_procedimiento).__name__})")
-    if fase_procedimiento:
-        logger.info(f"DEBUG: Entrando en logica de subcarpeta para fase_procedimiento='{fase_procedimiento}'")
-        try:
-            folder_name = _get_folder_name_from_fase(fase_procedimiento)
-            logger.info(f"DEBUG: Nombre de carpeta determinado: '{folder_name}'")
-            ruta_subfolder = _find_or_create_subfolder(ruta_recursos, folder_name)
-            logger.info(f"Ruta final con subcarpeta: {ruta_subfolder}")
-            return ruta_subfolder
-        except ValueError as e:
-            logger.warning(f"No se pudo determinar subcarpeta: {e}. Usando carpeta base.")
-    else:
-        logger.warning(f"DEBUG: fase_procedimiento es falsy, usando carpeta base. Valor: '{fase_procedimiento}'")
-    
-    return ruta_recursos
+    logger.info(f"Ruta RECURSOS TELEMATICOS: {ruta}")
+    return ruta
 
 
 def _renombrar_y_mover_justificante(
@@ -308,9 +151,6 @@ def _renombrar_y_mover_justificante(
 ) -> Path:
     """
     Renombra el justificante temporal y lo mueve a la carpeta de destino.
-    
-    Usa shutil.copy2 en lugar de rename() para permitir movimiento entre
-    unidades diferentes (ej: tmp local -> \\SERVER-DOC red).
     
     Args:
         temporal: Ruta del archivo temporal descargado
@@ -320,35 +160,20 @@ def _renombrar_y_mover_justificante(
     Returns:
         Ruta final del justificante guardado
     """
-    # Construir nombre final base
-    nombre_base = f"JUSTIFICANTE {num_expediente}"
-    ruta_final = destino_dir / f"{nombre_base}.pdf"
+    filename = build_receipt_filename(
+        expediente=num_expediente,
+        template="JUSTIFICANTE {expediente}.pdf",
+    )
 
-    # Nunca sobrescribir justificantes previos del mismo expediente:
-    # si existe, generar nombre con fecha/hora para mantener histórico.
-    if ruta_final.exists():
-        timestamp = datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
-        ruta_final = destino_dir / f"{nombre_base} ({timestamp}).pdf"
-        intento = 1
-        while ruta_final.exists():
-            intento += 1
-            ruta_final = destino_dir / f"{nombre_base} ({timestamp})_{intento}.pdf"
-
-    logger.info(f"Copiando justificante a: {ruta_final.name}")
-    
-    # Usar shutil.copy2 para copiar entre unidades diferentes
-    # En Windows, rename() falla con WinError 17 al intentar mover entre unidades
     try:
-        shutil.copy2(temporal, ruta_final)
-        logger.info(f"OK Justificante copiado exitosamente")
-        
-        # Eliminar el archivo temporal después de copiarlo
-        temporal.unlink()
-        logger.info(f"OK Archivo temporal eliminado")
-        
+        ruta_final = save_receipt_from_tmp(
+            tmp_path=temporal,
+            destino_dir=destino_dir,
+            filename=filename,
+        )
     except Exception as e:
         logger.error(f"Error al copiar justificante: {e}")
-        raise RuntimeError(f"No se pudo copiar el justificante a {ruta_final}: {e}") from e
+        raise RuntimeError(f"No se pudo copiar el justificante al cliente: {e}") from e
     
     logger.info(f"OK Justificante guardado en: {ruta_final}")
     return ruta_final

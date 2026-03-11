@@ -14,7 +14,7 @@ from sites.adapters.xaloc_girona import XalocAdapter
 import sites.adapters.base as base_mod
 import sites.adapters.redsara as redsara_mod
 import sites.adapters.terrassa as terrassa_mod
-import core.client_documentation as client_docs_mod
+import core.client_docs_service as client_docs_service_mod
 
 
 class _LegacyRepo:
@@ -139,7 +139,7 @@ def test_madrid_payload_parity_legacy_vs_consultor(monkeypatch) -> None:
 def test_base_online_payload_parity_legacy_vs_consultor(monkeypatch) -> None:
     adapter = BaseOnlineAdapter()
     monkeypatch.setattr(adapter._groq_guardian, "classify_batch", _fake_classify_batch)
-    monkeypatch.setattr(client_docs_mod, "build_required_client_documents_for_payload", _fake_docs_builder)
+    monkeypatch.setattr(client_docs_service_mod, "get_required_client_documents", _fake_docs_builder)
     monkeypatch.setattr(base_mod, "build_sqlserver_connection_string", lambda: "unused")
 
     row = {
@@ -193,7 +193,7 @@ def test_base_online_payload_parity_legacy_vs_consultor(monkeypatch) -> None:
 
 def test_redsara_payload_parity_legacy_vs_consultor(monkeypatch) -> None:
     adapter = RedsaraAdapter()
-    monkeypatch.setattr(redsara_mod, "build_required_client_documents_for_payload", _fake_docs_builder)
+    monkeypatch.setattr(redsara_mod, "get_required_client_documents", _fake_docs_builder)
     monkeypatch.setattr(redsara_mod, "build_sqlserver_connection_string", lambda: "unused")
 
     row = {
@@ -236,7 +236,7 @@ def test_redsara_payload_parity_legacy_vs_consultor(monkeypatch) -> None:
 
 def test_terrassa_payload_parity_legacy_vs_consultor(monkeypatch) -> None:
     adapter = TerrassaAdapter()
-    monkeypatch.setattr(terrassa_mod, "build_required_client_documents_for_payload", _fake_docs_builder)
+    monkeypatch.setattr(terrassa_mod, "get_required_client_documents", _fake_docs_builder)
     monkeypatch.setattr(terrassa_mod, "build_sqlserver_connection_string", lambda: "unused")
 
     row = {
