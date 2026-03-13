@@ -1,0 +1,149 @@
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import logging
+from dataclasses import asdict
+from pathlib import Path
+from typing import Any
+
+from actualizaciones.ajuntament_barcelona.automation import AjuntamentBarcelonaAutomation
+from actualizaciones.ajuntament_barcelona.controller import AjuntamentBarcelonaController
+
+
+HARDCODED_NUMEROCLIENTE = 42249
+LOG_PATH = Path("actualizaciones/ajuntament_barcelona/ajuntament_barcelona.log")
+
+
+def _configure_logger() -> logging.Logger:
+    logger = logging.getLogger("xaloc_automation.ajuntament_barcelona")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+
+    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    has_file_handler = any(
+        isinstance(h, logging.FileHandler) and Path(getattr(h, "baseFilename", "")).resolve() == LOG_PATH.resolve()
+        for h in logger.handlers
+    )
+    if not has_file_handler:
+        formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+        fh = logging.FileHandler(LOG_PATH, encoding="utf-8")
+        fh.setFormatter(formatter)
+        logger.addHandler(fh)
+    return logger
+
+
+def build_payload(numero_cliente: int = HARDCODED_NUMEROCLIENTE) -> dict[str, Any]:
+    return {
+        "idRecurso": None,
+        "idExp": None,
+        "expediente": "",
+        "fase_procedimiento": "",
+        "sujeto_recurso": "",
+        "numclient": int(numero_cliente),
+        "nombre": "",
+        "apellido1": "",
+        "apellido2": "",
+        "nif": "",
+        "nifempresa": "",
+        "tramite_url": "https://seuelectronica.ajuntament.barcelona.cat/oficinavirtual/ca/tramit/20200001444",
+        "archivos": [],
+    }
+
+
+async def run_flow(payload: dict[str, Any], *, headless: bool) -> dict[str, Any]:
+    logger = logging.getLogger("xaloc_automation.ajuntament_barcelona")
+    controller = AjuntamentBarcelonaController()
+    mapped = controller.map_data(payload)
+    mapped["headless"] = bool(headless)
+    datos = controller.create_target(**mapped)
+    config = controller.create_config(headless=bool(headless))
+    config.navegador.perfil_path = Path("profiles/worker").absolute()
+    logger.info(
+        "ajuntament_barcelona.main run_flow START numclient=%s headless=%s",
+        payload.get("numclient"),
+        headless,
+    )
+
+    try:
+        async with AjuntamentBarcelonaAutomation(config) as bot:
+            screenshot = await bot.ejecutar_flujo_completo(datos)
+        payload_updates = {
+            "ajuntament_barcelona_download_pdf_path": datos.payload.get("ajuntament_barcelona_download_pdf_path"),
+            "ajuntament_barcelona_pdf_text_path": datos.payload.get("ajuntament_barcelona_pdf_text_path"),
+            "ajuntament_barcelona_pdf_meta_path": datos.payload.get("ajuntament_barcelona_pdf_meta_path"),
+            "ajuntament_barcelona_pdf_text_preview": datos.payload.get("ajuntament_barcelona_pdf_text_preview"),
+            "ajuntament_barcelona_multes_no_trobat_remeses_exists": datos.payload.get(
+                "ajuntament_barcelona_multes_no_trobat_remeses_exists"
+            ),
+        }
+        logger.info("ajuntament_barcelona.main run_flow END success=1 screenshot=%s", screenshot)
+        return {
+            "success": True,
+            "error": None,
+            "screenshot": screenshot,
+            "payload_updates": payload_updates,
+        }
+    except Exception as exc:
+        logger.exception("ajuntament_barcelona.main run_flow END success=0 error=%s", exc)
+        return {
+            "success": False,
+            "error": str(exc),
+            "screenshot": None,
+            "payload_updates": {},
+        }
+
+
+def main() -> None:
+    logger = _configure_logger()
+    parser = argparse.ArgumentParser(description="Standalone smoke test for ajuntament_barcelona.")
+    parser.add_argument(
+        "--numerocliente",
+        type=int,
+        default=HARDCODED_NUMEROCLIENTE,
+        help=f"Numero de cliente (default hardcodeado: {HARDCODED_NUMEROCLIENTE})",
+    )
+    parser.add_argument("--dump-only", action="store_true", help="Solo generar JSON de validacion")
+    parser.add_argument("--run-flow", action="store_true", help="Ejecutar flujo Playwright local")
+    parser.add_argument("--headless", action="store_true", help="Ejecutar navegador oculto")
+    args = parser.parse_args()
+    logger.info(
+        "ajuntament_barcelona.main START numerocliente=%s dump_only=%s run_flow=%s headless=%s",
+        args.numerocliente,
+        args.dump_only,
+        args.run_flow,
+        args.headless,
+    )
+
+    base_input: dict[str, Any] = {"numerocliente": int(args.numerocliente)}
+    payload = build_payload(args.numerocliente)
+
+    controller = AjuntamentBarcelonaController()
+    mapped = controller.map_data(payload)
+    target = controller.create_target(**mapped)
+
+    out = Path("tmp")
+    out.mkdir(parents=True, exist_ok=True)
+    raw_path = out / "ajuntament_barcelona_base_input_numclient_{}.json".format(args.numerocliente)
+    payload_path = out / "ajuntament_barcelona_payload_numclient_{}.json".format(args.numerocliente)
+    mapped_path = out / "ajuntament_barcelona_mapped_numclient_{}.json".format(args.numerocliente)
+    raw_path.write_text(json.dumps(base_input, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    payload_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    mapped_path.write_text(json.dumps(asdict(target), ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    print(f"[OK] base input: {raw_path}")
+    print(f"[OK] payload: {payload_path}")
+    print(f"[OK] mapped target: {mapped_path}")
+    logger.info("ajuntament_barcelona.main artifacts written payload=%s mapped=%s", payload_path, mapped_path)
+
+    if args.dump_only and not args.run_flow:
+        return
+
+    if args.run_flow:
+        result = asyncio.run(run_flow(payload, headless=bool(args.headless)))
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    logger.info("ajuntament_barcelona.main END")
+
+
+if __name__ == "__main__":
+    main()

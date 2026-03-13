@@ -1,0 +1,21 @@
+{
+  "idRecurso": null,
+  "expediente": "",
+  "archivos_adjuntos": [],
+  "payload": {
+    "idRecurso": null,
+    "idExp": null,
+    "expediente": "",
+    "fase_procedimiento": "",
+    "sujeto_recurso": "",
+    "numclient": 42249,
+    "nombre": "",
+    "apellido1": "",
+    "apellido2": "",
+    "nif": "",
+    "nifempresa": "",
+    "tramite_url": "https://atc.gencat.cat/es/gestions/certificats/certificats-tributaris/",
+    "archivos": []
+  },
+  "headless": true
+}
