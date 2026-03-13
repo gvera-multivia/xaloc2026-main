@@ -48,7 +48,7 @@ class AtcAutomation(BaseAutomation):
         except Exception:
             # Guardar estado visual tambien en caso de error antes de cerrar.
             try:
-                await self.page.screenshot(path=shot, full_page=True)
+                await current_page.screenshot(path=shot, full_page=True)
                 self.logger.info("atc.flujo ERROR screenshot=%s", shot)
             except Exception:
                 pass

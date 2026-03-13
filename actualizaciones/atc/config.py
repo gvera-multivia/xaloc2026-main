@@ -22,5 +22,4 @@ class AtcConfig(BaseConfig):
     navigation_timeout: int = 60000
 
     def __post_init__(self) -> None:
-        # Forzar Chrome en este site (no Edge).
         self.navegador.canal = "chrome"

@@ -67,9 +67,6 @@ async def run_flow(payload: dict[str, Any], *, headless: bool) -> dict[str, Any]
             screenshot = await bot.ejecutar_flujo_completo(datos)
         payload_updates = {
             "atc_download_pdf_path": datos.payload.get("atc_download_pdf_path"),
-            "atc_pdf_text_path": datos.payload.get("atc_pdf_text_path"),
-            "atc_pdf_meta_path": datos.payload.get("atc_pdf_meta_path"),
-            "atc_pdf_text_preview": datos.payload.get("atc_pdf_text_preview"),
         }
         logger.info("atc.main run_flow END success=1 screenshot=%s", screenshot)
         return {

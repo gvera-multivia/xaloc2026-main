@@ -1,14 +1,14 @@
 from __future__ import annotations
-from urllib.parse import urljoin
+
 import logging
-import re
 import os
-from typing import TYPE_CHECKING
-import pandas as pd
+import re
 from typing import TYPE_CHECKING
 
+import pandas as pd
+
 if TYPE_CHECKING:
-    from playwright.async_api import Page
+    from playwright.async_api import BrowserContext, Page
     from ..config import AjuntamentBarcelonaConfig
     from ..data_models import AjuntamentBarcelonaTarget
 
@@ -20,7 +20,7 @@ DOWNLOAD_DIR = "actualizaciones/ajuntament_barcelona/downloads/documentos_multas
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 
-async def descargar_documentos(page, context):
+async def descargar_documentos(page: "Page", context: "BrowserContext") -> None:
 
     # Recoger identificadores antes de navegar
     idents = await page.evaluate(
@@ -47,15 +47,6 @@ async def descargar_documentos(page, context):
                 "ajuntament_barcelona.descargar_documentos multa=%d detail_url=%s",
                 i,
                 page.url,
-            )
-
-            # Guardar la página de detalle como PDF
-            detail_pdf_path = os.path.join(DOWNLOAD_DIR, f"{ident}_detall.pdf")
-            await page.pdf(path=detail_pdf_path)
-            logger.info(
-                "ajuntament_barcelona.descargar_documentos multa=%d detail_pdf_saved=%s",
-                i,
-                detail_pdf_path,
             )
 
             # Contar formularios de descarga (action=detalleMulteAc.do?do=getDocument)
@@ -261,10 +252,28 @@ async def run_multes(
     await page2.wait_for_load_state("networkidle")
     logger.info("ajuntament_barcelona.multes popup2 url=%s", page2.url)
 
+    try:
+        select_any = page2.locator("select[name='anySeleccio']")
+        await select_any.first.wait_for(state="visible", timeout=5000)
+        await select_any.first.select_option("TOTS")
+        cercar_btn = page2.locator('[id="cercar"]')
+        await cercar_btn.first.wait_for(state="visible", timeout=5000)
+        await cercar_btn.first.click()
+        await page2.wait_for_load_state("networkidle", timeout=10000)
+        logger.info("ajuntament_barcelona.multes anySeleccio selected=TOTS cercar clicked")
+    except Exception:
+        logger.info("ajuntament_barcelona.multes anySeleccio not found (continuing)")
+
     no_remeses_cell = page2.get_by_role(
         "cell", name=re.compile(r"No s'han trobat remeses", re.IGNORECASE)
     )
-    exists_no_remeses = await no_remeses_cell.count() > 0
+    no_dades_text = page2.get_by_text(
+        re.compile(
+            r"no consten dades de la vostra empresa o entitat",
+            re.IGNORECASE,
+        )
+    )
+    exists_no_remeses = await no_remeses_cell.count() > 0 or await no_dades_text.count() > 0
     logger.info(
         "ajuntament_barcelona.multes no_remeses_exists=%d", int(exists_no_remeses)
     )
@@ -302,7 +311,7 @@ async def run_multes(
             }
         )
 
-        logger.info("ajuntament_barcelona.multes multes_df rows=%d", len(df))
+        logger.info("ajuntament_barcelona.multes multes_df rows=%d\n%s", len(df), df.to_string())
         await descargar_documentos(page2, page2.context)
 
     if isinstance(datos.payload, dict):

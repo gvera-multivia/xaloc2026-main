@@ -1,0 +1,1650 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+ajuntament_barcelona/__init__.py
+ajuntament_barcelona/automation.py
+ajuntament_barcelona/config.py
+ajuntament_barcelona/controller.py
+ajuntament_barcelona/data_models.py
+ajuntament_barcelona/Documentacion.md
+ajuntament_barcelona/downloads/documentos_multas/6232MJW_0_imagen.jpg
+ajuntament_barcelona/flows/__init__.py
+ajuntament_barcelona/flows/confirmacion.py
+ajuntament_barcelona/flows/documentos.py
+ajuntament_barcelona/flows/formulario.py
+ajuntament_barcelona/flows/login.py
+ajuntament_barcelona/flows/multes.py
+atc/__init__.py
+atc/automation.py
+atc/config.py
+atc/controller.py
+atc/data_models.py
+atc/Documentacion.md
+atc/downloads/ed13684e-4e62-4573-a969-a57683d7b4ed-1029.json
+atc/downloads/ed13684e-4e62-4573-a969-a57683d7b4ed-1029.txt
+atc/flows/__init__.py
+atc/flows/confirmacion.py
+atc/flows/documentos.py
+atc/flows/formulario.py
+atc/flows/login.py
+main_ajuntament_barcelona_payload_by_id.py
+main_atc_payload_by_id.py
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="ajuntament_barcelona/__init__.py">
+"""Site package."""
+</file>
+
+<file path="ajuntament_barcelona/automation.py">
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+
+from core.base_automation import BaseAutomation
+from .config import AjuntamentBarcelonaConfig
+from .data_models import AjuntamentBarcelonaTarget
+from .flows import run_login, run_formulario, run_documentos, run_confirmacion, run_multes
+
+
+class AjuntamentBarcelonaAutomation(BaseAutomation):
+    def __init__(self, config: AjuntamentBarcelonaConfig):
+        super().__init__(config)
+        self.config = config
+
+    async def _pause_before_close(self) -> None:
+        self.logger.info("ajuntament_barcelona.flujo pause END (pulsa Enter en consola para cerrar navegador)")
+        await asyncio.to_thread(
+            input, "Ajuntament Barcelona flujo finalizado. Pulsa Enter para cerrar el navegador..."
+        )
+
+    async def ejecutar_flujo_completo(self, datos: AjuntamentBarcelonaTarget) -> str:
+        if not self.page:
+            raise RuntimeError("Automation no inicializada (usar 'async with').")
+
+        shot = self.config.dir_screenshots / "ajuntament_barcelona_standalone.png"
+        try:
+            current_page = self.page
+            self.logger.info(
+                "ajuntament_barcelona.flujo START numclient=%s expediente=%s",
+                datos.payload.get("numclient"),
+                datos.expediente,
+            )
+            current_page = await run_login(current_page, self.config, datos)
+            self.logger.info("ajuntament_barcelona.flujo login OK")
+            current_page = await run_formulario(current_page, self.config, datos)
+            self.logger.info("ajuntament_barcelona.flujo formulario OK")
+            current_page = await run_documentos(current_page, self.config, datos)
+            self.logger.info("ajuntament_barcelona.flujo documentos OK")
+            current_page = await run_confirmacion(current_page, self.config, datos)
+            self.logger.info("ajuntament_barcelona.flujo confirmacion OK")
+            current_page = await run_multes(current_page, self.config, datos)
+            self.logger.info("ajuntament_barcelona.flujo multes OK")
+
+            self.page = current_page
+            await current_page.screenshot(path=shot, full_page=True)
+            self.logger.info("ajuntament_barcelona.flujo END screenshot=%s", shot)
+            return str(Path(shot))
+        except Exception:
+            try:
+                await self.page.screenshot(path=shot, full_page=True)
+                self.logger.info("ajuntament_barcelona.flujo ERROR screenshot=%s", shot)
+            except Exception:
+                pass
+            raise
+        finally:
+            await self._pause_before_close()
+</file>
+
+<file path="ajuntament_barcelona/config.py">
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+from core.base_config import BaseConfig
+
+
+@dataclass
+class AjuntamentBarcelonaConfig(BaseConfig):
+    site_id: str = "ajuntament_barcelona"
+    url_base: str = "https://seuelectronica.ajuntament.barcelona.cat/oficinavirtual/ca/tramit/20200001444"
+    url_confirm_ca: str = (
+        "https://seuelectronica.ajuntament.barcelona.cat/APPS/portaltramits/formulari/"
+        "ptbcertnegatiui/T19b/confirma/ca/PTCIU.html?stepName=viewConfirmFormulariStep"
+    )
+    url_confirm_es: str = (
+        "https://seuelectronica.ajuntament.barcelona.cat/APPS/portaltramits/formulari/"
+        "ptbcertnegatiui/T19b/confirma/es/PTCIU.html?stepName=viewConfirmFormulariStep"
+    )
+    dir_logs: Path = Path("actualizaciones/ajuntament_barcelona")
+    telefono_principal: str = "722761154"
+    default_timeout: int = 30000
+    navigation_timeout: int = 60000
+
+    def __post_init__(self) -> None:
+        self.navegador.canal = "chrome"
+</file>
+
+<file path="ajuntament_barcelona/controller.py">
+from __future__ import annotations
+
+from pathlib import Path
+
+from .config import AjuntamentBarcelonaConfig
+from .data_models import AjuntamentBarcelonaTarget
+
+
+class AjuntamentBarcelonaController:
+    site_id = "ajuntament_barcelona"
+    display_name = "Ajuntament Barcelona"
+
+    def create_config(self, *, headless: bool):
+        cfg = AjuntamentBarcelonaConfig()
+        cfg.navegador.headless = bool(headless)
+        return cfg
+
+    def map_data(self, data: dict) -> dict:
+        return dict(data or {})
+
+    def create_target(self, **kwargs) -> AjuntamentBarcelonaTarget:
+        archivos = kwargs.get("archivos") or []
+        return AjuntamentBarcelonaTarget(
+            idRecurso=kwargs.get("idRecurso"),
+            expediente=str(kwargs.get("expediente") or ""),
+            archivos_adjuntos=[Path(str(p)) for p in archivos],
+            payload=dict(kwargs),
+            headless=bool(kwargs.get("headless", True)),
+        )
+
+
+def get_controller() -> AjuntamentBarcelonaController:
+    return AjuntamentBarcelonaController()
+</file>
+
+<file path="ajuntament_barcelona/data_models.py">
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+
+@dataclass
+class AjuntamentBarcelonaTarget:
+    idRecurso: int | None = None
+    expediente: str = ""
+    archivos_adjuntos: list[Path] = field(default_factory=list)
+    payload: dict[str, Any] = field(default_factory=dict)
+    headless: bool = True
+</file>
+
+<file path="ajuntament_barcelona/Documentacion.md">
+# Ajuntament Barcelona (Standalone Smoke)
+
+URL objetivo:
+- `https://seuelectronica.ajuntament.barcelona.cat/oficinavirtual/ca/tramit/20200001444`
+
+Arquitectura:
+- `config.py`
+- `data_models.py`
+- `controller.py`
+- `automation.py`
+- `flows/login.py`
+- `flows/formulario.py`
+- `flows/documentos.py`
+- `flows/confirmacion.py`
+- `main_ajuntament_barcelona_payload_by_id.py`
+
+Estado actual:
+- Flujo base sin scraping/clicks.
+- Solo navegacion, esperas y screenshot final.
+</file>
+
+<file path="ajuntament_barcelona/flows/__init__.py">
+"""Flow modules for this site."""
+
+from .login import run_login
+from .formulario import run_formulario
+from .documentos import run_documentos
+from .confirmacion import run_confirmacion
+from .multes import run_multes
+
+__all__ = ["run_login", "run_formulario", "run_documentos", "run_confirmacion", "run_multes"]
+</file>
+
+<file path="ajuntament_barcelona/flows/confirmacion.py">
+from __future__ import annotations
+
+import logging
+import re
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from playwright.async_api import Page
+    from ..config import AjuntamentBarcelonaConfig
+    from ..data_models import AjuntamentBarcelonaTarget
+
+
+logger = logging.getLogger("xaloc_automation.ajuntament_barcelona")
+
+
+async def run_confirmacion(
+    page: "Page",
+    config: "AjuntamentBarcelonaConfig",
+    datos: "AjuntamentBarcelonaTarget",
+) -> "Page":
+    logger.info("ajuntament_barcelona.confirmacion START")
+    await page.wait_for_load_state("domcontentloaded")
+
+    download_link = page.get_by_role(
+        "link",
+        name=re.compile(
+            r"Certificat negatiu de deute|Certificado negativo de deuda", re.IGNORECASE
+        ),
+    ).first
+
+    try:
+        await download_link.wait_for(state="visible", timeout=5000)
+    except Exception:
+        # Fallback: navegar directamente a la URL de confirmacion segun idioma detectado.
+        current_url = page.url.lower()
+        target_url = (
+            config.url_confirm_es if "/es/" in current_url else config.url_confirm_ca
+        )
+        await page.goto(target_url, wait_until="domcontentloaded")
+        await page.wait_for_load_state("networkidle")
+        download_link = page.get_by_role(
+            "link",
+            name=re.compile(
+                r"Certificat negatiu de deute|Certificado negativo de deuda",
+                re.IGNORECASE,
+            ),
+        ).first
+
+    async with page.expect_download() as dl_info:
+        await download_link.click()
+    download = await dl_info.value
+
+    downloads_dir = Path("actualizaciones/ajuntament_barcelona/downloads")
+    downloads_dir.mkdir(parents=True, exist_ok=True)
+    filename = download.suggested_filename or "ajuntament_barcelona_documento.pdf"
+    destination = downloads_dir / filename
+    await download.save_as(str(destination))
+    logger.info("ajuntament_barcelona.confirmacion download_saved=%s", destination)
+
+    if isinstance(datos.payload, dict):
+        datos.payload["ajuntament_barcelona_download_pdf_path"] = str(destination)
+
+    logger.info("ajuntament_barcelona.confirmacion done")
+    return page
+</file>
+
+<file path="ajuntament_barcelona/flows/documentos.py">
+from __future__ import annotations
+
+import logging
+import re
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from playwright.async_api import Page
+    from ..config import AjuntamentBarcelonaConfig
+    from ..data_models import AjuntamentBarcelonaTarget
+
+
+logger = logging.getLogger("xaloc_automation.ajuntament_barcelona")
+
+
+async def _find_first_visible_input(page: "Page", selectors: list[str], attempts: int = 60):
+    for _ in range(attempts):
+        for selector in selectors:
+            loc = page.locator(selector)
+            count = await loc.count()
+            for idx in range(count):
+                cand = loc.nth(idx)
+                try:
+                    if await cand.is_visible():
+                        return cand
+                except Exception:
+                    continue
+        await page.wait_for_timeout(250)
+    return None
+
+
+async def run_documentos(page: "Page", config: "AjuntamentBarcelonaConfig", datos: "AjuntamentBarcelonaTarget") -> "Page":
+    _ = (config, datos)
+    logger.info("ajuntament_barcelona.documentos START")
+
+    cert_btn = page.get_by_test_id("certificate-btn")
+    if await cert_btn.count():
+        logger.info("ajuntament_barcelona.documentos certificate-btn present, clicking")
+        await cert_btn.first.click()
+        await page.wait_for_load_state("domcontentloaded")
+        await page.wait_for_load_state("networkidle")
+    else:
+        logger.info("ajuntament_barcelona.documentos certificate-btn not present, assuming already authenticated")
+
+    # Espera fuerte: el formulario real esta listo cuando aparece el select de tipo doc.
+    tipo_id = page.locator("#T19b_REP_docTipus")
+    await tipo_id.first.wait_for(state="visible", timeout=30000)
+
+    # Telefono principal (prioriza label; fallback por ids/names reales del formulario T19b).
+    telefono = page.get_by_label(
+        re.compile(r"Tel[eèé]fon.*principal|Tel[eé]fono.*principal", re.IGNORECASE)
+    ).first
+    telefono_ok = False
+    try:
+        if await telefono.count():
+            await telefono.wait_for(state="visible", timeout=5000)
+            await telefono.click()
+            await telefono.fill(config.telefono_principal)
+            telefono_ok = True
+    except Exception:
+        telefono_ok = False
+
+    if not telefono_ok:
+        telefono = await _find_first_visible_input(
+            page,
+            [
+                "input#T19b_REP_telPrincipal",
+                "input[name='T19b_REP_telPrincipal']",
+                "input[id*='T19b_REP_tel' i]",
+                "input[name*='T19b_REP_tel' i]",
+                "input[id*='telefon' i]",
+                "input[name*='telefon' i]",
+                "input[id*='telefono' i]",
+                "input[name*='telefono' i]",
+            ],
+            attempts=60,
+        )
+        if telefono:
+            await telefono.click()
+            await telefono.fill(config.telefono_principal)
+            telefono_ok = True
+
+    if telefono_ok:
+        logger.info("ajuntament_barcelona.documentos telefono OK")
+    else:
+        logger.warning("ajuntament_barcelona.documentos telefono NOT FOUND (continuando flujo)")
+
+    await tipo_id.first.select_option("PR.R.DNI")
+
+    cert_negativo = page.locator("#T19b_tipcert__XX\\.K\\.NEGDEUDA")
+    if await cert_negativo.count():
+        await cert_negativo.first.check()
+    else:
+        await page.get_by_role(
+            "radio",
+            name=re.compile(r"Certificat negatiu de deute|Certificado negativo de deuda", re.IGNORECASE),
+        ).first.check()
+
+    idioma_radio = page.locator("#T19b_idioma__DV\\.R\\.ID_CA")
+    if await idioma_radio.count():
+        await idioma_radio.first.check()
+    else:
+        await page.get_by_role(
+            "radio",
+            name=re.compile(r"Catal", re.IGNORECASE),
+        ).first.check()
+
+    continuar = page.locator("#continuar")
+    await continuar.first.wait_for(state="visible", timeout=15000)
+    await continuar.first.click()
+
+    await page.get_by_role("button", name=re.compile(r"Enviar", re.IGNORECASE)).first.click(timeout=90000)
+    try:
+        await page.wait_for_load_state("networkidle", timeout=90000)
+    except Exception:
+        await page.wait_for_load_state("domcontentloaded", timeout=90000)
+
+    logger.info("ajuntament_barcelona.documentos done")
+    return page
+</file>
+
+<file path="ajuntament_barcelona/flows/formulario.py">
+from __future__ import annotations
+
+import logging
+import re
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from playwright.async_api import Page
+    from ..config import AjuntamentBarcelonaConfig
+    from ..data_models import AjuntamentBarcelonaTarget
+
+
+logger = logging.getLogger("xaloc_automation.ajuntament_barcelona")
+
+
+async def run_formulario(page: "Page", config: "AjuntamentBarcelonaConfig", datos: "AjuntamentBarcelonaTarget") -> "Page":
+    _ = (config, datos)
+    logger.info("ajuntament_barcelona.formulario START")
+
+    if page.is_closed():
+        alive_pages = [p for p in page.context.pages if not p.is_closed()]
+        if not alive_pages:
+            raise RuntimeError("formulario: no hay paginas activas")
+        page = alive_pages[-1]
+
+    await page.wait_for_load_state("domcontentloaded")
+
+    # Si ya estamos en init (tramite iniciado), no reintentar click.
+    if "/formulari/" in page.url.lower() and "/init/" in page.url.lower():
+        logger.info("ajuntament_barcelona.formulario already_in_init url=%s", page.url)
+        return page
+
+    starter_button = page.locator("#starter-buttons").get_by_role(
+        "button",
+        name=re.compile(r"Inicia el tr.*mit|Iniciar el tr.*mite", re.IGNORECASE),
+    ).first
+    starter_fallback = page.get_by_role(
+        "button",
+        name=re.compile(r"Inicia el tr.*mit|Iniciar el tr.*mite", re.IGNORECASE),
+    ).first
+
+    clicked = False
+    last_error = None
+    for attempt in range(1, 4):
+        try:
+            if await starter_button.count():
+                await starter_button.wait_for(state="visible", timeout=8000)
+                await starter_button.scroll_into_view_if_needed()
+                await starter_button.click(timeout=8000)
+            else:
+                await starter_fallback.wait_for(state="visible", timeout=8000)
+                await starter_fallback.scroll_into_view_if_needed()
+                await starter_fallback.click(timeout=8000)
+            clicked = True
+            logger.info("ajuntament_barcelona.formulario starter clicked attempt=%s", attempt)
+            break
+        except Exception as exc:
+            last_error = exc
+            logger.warning("ajuntament_barcelona.formulario starter click failed attempt=%s err=%s", attempt, exc)
+            await page.wait_for_timeout(800)
+
+    if not clicked:
+        # Si tras fallar ya hemos entrado al init, continuar igualmente.
+        if "/formulari/" in page.url.lower() and "/init/" in page.url.lower():
+            logger.info("ajuntament_barcelona.formulario starter_not_clicked_but_already_init url=%s", page.url)
+            return page
+        raise RuntimeError(f"formulario: no se pudo iniciar el tramite: {last_error}")
+
+    try:
+        await page.wait_for_load_state("networkidle", timeout=config.navigation_timeout)
+    except Exception:
+        await page.wait_for_load_state("domcontentloaded", timeout=config.navigation_timeout)
+
+    # En algunas ejecuciones aparece una pantalla intermedia para escoger certificado.
+    cert_clicked = False
+    cert_selector = "#btnContinuaCert, [data-testid='certificate-btn']"
+    for attempt in range(1, 9):
+        if page.is_closed():
+            alive_pages = [p for p in page.context.pages if not p.is_closed()]
+            if not alive_pages:
+                logger.warning("ajuntament_barcelona.formulario cert_btn: no hay pagina viva (attempt=%s)", attempt)
+                break
+            page = alive_pages[-1]
+
+        cert_btn = page.locator(cert_selector).first
+        cert_btn_count = await cert_btn.count()
+        logger.info(
+            "ajuntament_barcelona.formulario cert_btn probe attempt=%s count=%s url=%s",
+            attempt,
+            cert_btn_count,
+            page.url,
+        )
+        if cert_btn_count:
+            try:
+                await cert_btn.wait_for(state="visible", timeout=2500)
+                await cert_btn.scroll_into_view_if_needed()
+                await cert_btn.click(timeout=5000)
+                cert_clicked = True
+                logger.info("ajuntament_barcelona.formulario cert_btn clicked attempt=%s", attempt)
+                break
+            except Exception as exc:
+                logger.warning(
+                    "ajuntament_barcelona.formulario cert_btn click failed attempt=%s err=%s",
+                    attempt,
+                    exc,
+                )
+        await page.wait_for_timeout(700)
+
+    if cert_clicked:
+        try:
+            await page.wait_for_load_state("networkidle", timeout=config.navigation_timeout)
+        except Exception:
+            await page.wait_for_load_state("domcontentloaded", timeout=config.navigation_timeout)
+    else:
+        logger.info("ajuntament_barcelona.formulario cert_btn not present after starter (continuing)")
+
+    logger.info("ajuntament_barcelona.formulario done url=%s", page.url)
+    return page
+</file>
+
+<file path="ajuntament_barcelona/flows/login.py">
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from playwright.async_api import Page
+    from ..config import AjuntamentBarcelonaConfig
+    from ..data_models import AjuntamentBarcelonaTarget
+
+
+logger = logging.getLogger("xaloc_automation.ajuntament_barcelona")
+
+
+async def _get_alive_page(page: "Page") -> "Page":
+    if not page.is_closed():
+        return page
+    alive_pages = [p for p in page.context.pages if not p.is_closed()]
+    if not alive_pages:
+        raise RuntimeError("login: no hay paginas activas en el contexto")
+    return alive_pages[-1]
+
+
+async def _wait_page_ready(page: "Page", timeout_ms: int) -> None:
+    page = await _get_alive_page(page)
+    try:
+        await page.wait_for_load_state("networkidle", timeout=timeout_ms)
+    except Exception:
+        # Fallback para portales con llamadas largas o cierres/reaperturas de target.
+        page = await _get_alive_page(page)
+        await page.wait_for_load_state("domcontentloaded", timeout=timeout_ms)
+
+
+async def run_login(page: "Page", config: "AjuntamentBarcelonaConfig", datos: "AjuntamentBarcelonaTarget") -> "Page":
+    _ = datos
+    logger.info("ajuntament_barcelona.login goto=%s", config.url_base)
+    page.set_default_timeout(config.default_timeout)
+    page.set_default_navigation_timeout(config.navigation_timeout)
+
+    await page.goto(config.url_base, wait_until="domcontentloaded")
+    await _wait_page_ready(page, timeout_ms=config.navigation_timeout)
+
+    page = await _get_alive_page(page)
+    logger.info("ajuntament_barcelona.login done url=%s", page.url)
+    return page
+</file>
+
+<file path="ajuntament_barcelona/flows/multes.py">
+from __future__ import annotations
+from urllib.parse import urljoin
+import logging
+import re
+import os
+from typing import TYPE_CHECKING
+import pandas as pd
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from playwright.async_api import Page
+    from ..config import AjuntamentBarcelonaConfig
+    from ..data_models import AjuntamentBarcelonaTarget
+
+
+logger = logging.getLogger("xaloc_automation.ajuntament_barcelona")
+
+
+DOWNLOAD_DIR = "actualizaciones/ajuntament_barcelona/downloads/documentos_multas"
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+
+async def descargar_documentos(page, context):
+
+    # Recoger identificadores antes de navegar
+    idents = await page.evaluate(
+        """() => Array.from(document.querySelectorAll("a[title='Documents Associats']"))
+               .map(a => a.innerText.trim())"""
+    )
+
+    logger.info(
+        "ajuntament_barcelona.descargar_documentos multas_encontradas=%d", len(idents)
+    )
+
+    for i, ident in enumerate(idents):
+
+        logger.info(
+            "ajuntament_barcelona.descargar_documentos multa=%d ident=%s", i, ident
+        )
+
+        try:
+            # Navegar a la página de detalle
+            async with page.expect_navigation(wait_until="domcontentloaded", timeout=15000):
+                await page.evaluate(f"document.getElementById('form{i}').submit()")
+
+            logger.info(
+                "ajuntament_barcelona.descargar_documentos multa=%d detail_url=%s",
+                i,
+                page.url,
+            )
+
+            # Contar formularios de descarga (action=detalleMulteAc.do?do=getDocument)
+            num_doc_forms = await page.evaluate(
+                """() => document.querySelectorAll("form[action*='getDocument']").length"""
+            )
+            logger.info(
+                "ajuntament_barcelona.descargar_documentos multa=%d doc_forms=%d",
+                i,
+                num_doc_forms,
+            )
+
+            for j in range(num_doc_forms):
+                try:
+                    async with page.expect_download(timeout=15000) as dl_info:
+                        await page.evaluate(
+                            f"document.querySelectorAll(\"form[action*='getDocument']\")[{j}].submit()"
+                        )
+                    download = await dl_info.value
+                    filename = f"{ident}_{j}_{download.suggested_filename or 'document.pdf'}"
+                    path = os.path.join(DOWNLOAD_DIR, filename)
+                    await download.save_as(path)
+                    logger.info(
+                        "ajuntament_barcelona.descargar_documentos multa=%d doc=%d saved=%s",
+                        i,
+                        j,
+                        path,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "ajuntament_barcelona.descargar_documentos multa=%d doc=%d error=%s",
+                        i,
+                        j,
+                        e,
+                    )
+
+            # Volver al listado
+            await page.go_back(wait_until="domcontentloaded")
+
+        except Exception as e:
+            logger.warning(
+                "ajuntament_barcelona.descargar_documentos multa=%d error=%s",
+                i,
+                e,
+            )
+            try:
+                await page.go_back(wait_until="domcontentloaded")
+            except Exception:
+                pass
+
+
+async def run_multes(
+    page: "Page",
+    config: "AjuntamentBarcelonaConfig",
+    datos: "AjuntamentBarcelonaTarget",
+) -> "Page":
+    _ = config
+    multes_url = "https://ajuntament.barcelona.cat/hisenda/ca/tramits-gestions/multes-de-transit?profile=1#procedures"
+    logger.info("ajuntament_barcelona.multes START url=%s", multes_url)
+    await page.goto(multes_url, wait_until="domcontentloaded")
+    await page.wait_for_load_state("networkidle")
+    logger.info("ajuntament_barcelona.multes page url=%s", page.url)
+
+    # Suele ser un acordeon/fieldset previo al enlace de consulta.
+    try:
+        await page.locator(".field > div:nth-child(5)").first.click(timeout=5000)
+        logger.info("ajuntament_barcelona.multes accordion clicked")
+    except Exception:
+        logger.info("ajuntament_barcelona.multes accordion not clicked (continuing)")
+
+    link_consulta = (
+        page.locator("a[href*='ptbportal/login.do'][target='_blank']")
+        .filter(
+            has_text=re.compile(
+                r"Consulta multes pagades i/o pendents|Consulta multes pagades i/o",
+                re.IGNORECASE,
+            )
+        )
+        .first
+    )
+    if await link_consulta.count() == 0:
+        link_consulta = page.get_by_role(
+            "link",
+            name=re.compile(
+                r"Consulta multes pagades i/o pendents|Consulta multes pagades i/o",
+                re.IGNORECASE,
+            ),
+        ).first
+
+    logger.info(
+        "ajuntament_barcelona.multes link_consulta count=%s",
+        await link_consulta.count(),
+    )
+    await link_consulta.wait_for(state="visible", timeout=15000)
+    await link_consulta.scroll_into_view_if_needed()
+    async with page.expect_popup(timeout=15000) as p1_info:
+        await link_consulta.click(force=True)
+    page1 = await p1_info.value
+    await page1.wait_for_load_state("domcontentloaded")
+    await page1.wait_for_load_state("networkidle")
+    logger.info("ajuntament_barcelona.multes popup1 url=%s", page1.url)
+
+    # Inicio con certificado si aplica.
+    cert_btn = page1.get_by_test_id("certificate-btn")
+    logger.info(
+        "ajuntament_barcelona.multes cert_btn count=%s",
+        await cert_btn.count(),
+    )
+    if await cert_btn.count():
+        await cert_btn.first.click()
+        await page1.wait_for_load_state("domcontentloaded")
+        await page1.wait_for_load_state("networkidle")
+        logger.info("ajuntament_barcelona.multes cert_btn clicked")
+
+    # Prioridad: "Accedir a la meva carpeta"; fallback: "Accedir".
+    try:
+        primary_access = page1.locator(
+            "input[type='submit'][value='Accedir a la meva carpeta']"
+        ).first
+        logger.info(
+            "ajuntament_barcelona.multes primary_access count=%s",
+            await primary_access.count(),
+        )
+        await primary_access.wait_for(state="visible", timeout=10000)
+        await primary_access.click()
+        logger.info("ajuntament_barcelona.multes primary_access clicked")
+    except Exception:
+        fallback_access = page1.locator("input[type='submit'][value='Accedir']").first
+        logger.info(
+            "ajuntament_barcelona.multes fallback_access count=%s",
+            await fallback_access.count(),
+        )
+        await fallback_access.wait_for(state="visible", timeout=10000)
+        await fallback_access.click()
+        logger.info("ajuntament_barcelona.multes fallback_access clicked")
+
+    try:
+        await page1.wait_for_load_state("networkidle", timeout=15000)
+    except Exception:
+        await page1.wait_for_load_state("domcontentloaded", timeout=15000)
+    logger.info("ajuntament_barcelona.multes post_access url=%s", page1.url)
+
+    tab_multes = page1.locator("a#contact-tab")
+    try:
+        await page1.wait_for_load_state("networkidle", timeout=5000)
+    except Exception:
+        pass
+    logger.info(
+        "ajuntament_barcelona.multes tab_multes count=%s",
+        await tab_multes.count(),
+    )
+    try:
+        await tab_multes.first.wait_for(state="visible", timeout=10000)
+        try:
+            tab_class = await tab_multes.first.get_attribute("class")
+        except Exception:
+            tab_class = None
+        logger.info(
+            "ajuntament_barcelona.multes tab_multes visible=1 class=%s",
+            tab_class,
+        )
+        await tab_multes.first.click()
+        logger.info("ajuntament_barcelona.multes tab_multes clicked via #contact-tab")
+    except Exception:
+        logger.info("ajuntament_barcelona.multes tab_multes fallback via role=tab")
+        await page1.get_by_role(
+            "tab", name=re.compile(r"Multes", re.IGNORECASE)
+        ).first.click()
+        logger.info("ajuntament_barcelona.multes tab_multes clicked via role")
+    try:
+        await page1.wait_for_load_state("networkidle", timeout=5000)
+    except Exception:
+        pass
+    logger.info("ajuntament_barcelona.multes post_tab url=%s", page1.url)
+
+    card_multes_pendents = (
+        page1.locator(".card-result.object-tramit")
+        .filter(has_text=re.compile(r"Multes pendents", re.IGNORECASE))
+        .first
+    )
+    card_emultes = (
+        page1.locator(".card-result.object-tramit")
+        .filter(has_text=re.compile(r"eMultes", re.IGNORECASE))
+        .first
+    )
+    logger.info(
+        "ajuntament_barcelona.multes cards counts multes_pendents=%s emultes=%s",
+        await card_multes_pendents.count(),
+        await card_emultes.count(),
+    )
+
+    async with page1.expect_popup() as p2_info:
+        try:
+            await card_multes_pendents.wait_for(state="visible", timeout=8000)
+            await card_multes_pendents.click()
+            logger.info("ajuntament_barcelona.multes card clicked=Multes pendents")
+        except Exception:
+            await card_emultes.wait_for(state="visible", timeout=8000)
+            await card_emultes.click()
+            logger.info("ajuntament_barcelona.multes card clicked=eMultes")
+    page2 = await p2_info.value
+    await page2.wait_for_load_state("domcontentloaded")
+    await page2.wait_for_load_state("networkidle")
+    logger.info("ajuntament_barcelona.multes popup2 url=%s", page2.url)
+
+    try:
+        select_any = page2.locator("select[name='anySeleccio']")
+        await select_any.first.wait_for(state="visible", timeout=5000)
+        await select_any.first.select_option("TOTS")
+        await page2.wait_for_load_state("networkidle", timeout=10000)
+        logger.info("ajuntament_barcelona.multes anySeleccio selected=TOTS")
+    except Exception:
+        logger.info("ajuntament_barcelona.multes anySeleccio not found (continuing)")
+
+    no_remeses_cell = page2.get_by_role(
+        "cell", name=re.compile(r"No s'han trobat remeses", re.IGNORECASE)
+    )
+    exists_no_remeses = await no_remeses_cell.count() > 0
+    logger.info(
+        "ajuntament_barcelona.multes no_remeses_exists=%d", int(exists_no_remeses)
+    )
+
+    if not exists_no_remeses:
+        data = await page2.evaluate(
+            """
+        () => {
+            const forms = document.querySelectorAll("form[id^='form']");
+
+            return Array.from(forms).map(f => ({
+                identif: f.querySelector("input[name='identificacio']")?.value || "",
+                fet: f.querySelector("input[name='fetDenunciat']")?.value || "",
+                adreca: f.querySelector("input[name='adreca']")?.value || "",
+                data: f.querySelector("input[name='data']")?.value || "",
+                situacio: "VOLUNTÀRIA", 
+                expedient: f.querySelector("input[name='numExpediente']")?.value || "",
+                import: f.querySelector("input[name='importe']")?.value || ""
+            }));
+        }
+        """
+        )
+
+        df = pd.DataFrame(data)
+
+        df = df.rename(
+            columns={
+                "identif": "Identif",
+                "fet": "Fet denunciat",
+                "adreca": "Adreça",
+                "data": "Data",
+                "situacio": "Situació",
+                "expedient": "Expedient",
+                "import": "Import",
+            }
+        )
+
+        logger.info("ajuntament_barcelona.multes multes_df rows=%d", len(df))
+        await descargar_documentos(page2, page2.context)
+
+    if isinstance(datos.payload, dict):
+        datos.payload["ajuntament_barcelona_multes_no_trobat_remeses_exists"] = bool(
+            exists_no_remeses
+        )
+
+    logger.info("ajuntament_barcelona.multes done")
+    return page2
+</file>
+
+<file path="atc/__init__.py">
+"""Site package."""
+</file>
+
+<file path="atc/automation.py">
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+
+from core.base_automation import BaseAutomation
+from .config import AtcConfig
+from .data_models import AtcTarget
+from .flows import run_login, run_formulario, run_documentos, run_confirmacion
+
+
+class AtcAutomation(BaseAutomation):
+    def __init__(self, config: AtcConfig):
+        super().__init__(config)
+        self.config = config
+
+    async def _pause_before_close(self) -> None:
+        self.logger.info("atc.flujo pause END (pulsa Enter en consola para cerrar navegador)")
+        await asyncio.to_thread(
+            input, "ATC flujo finalizado. Pulsa Enter para cerrar el navegador..."
+        )
+
+    async def ejecutar_flujo_completo(self, datos: AtcTarget) -> str:
+        if not self.page:
+            raise RuntimeError("Automation no inicializada (usar 'async with').")
+
+        shot = self.config.dir_screenshots / "atc_standalone.png"
+        try:
+            current_page = self.page
+            self.logger.info(
+                "atc.flujo START numclient=%s expediente=%s",
+                datos.payload.get("numclient"),
+                datos.expediente,
+            )
+            current_page = await run_login(current_page, self.config, datos)
+            self.logger.info("atc.flujo login OK")
+            current_page = await run_formulario(current_page, self.config, datos)
+            self.logger.info("atc.flujo formulario OK")
+            current_page = await run_documentos(current_page, self.config, datos)
+            self.logger.info("atc.flujo documentos OK")
+            current_page = await run_confirmacion(current_page, self.config, datos)
+            self.logger.info("atc.flujo confirmacion OK")
+
+            self.page = current_page
+            await current_page.screenshot(path=shot, full_page=True)
+            self.logger.info("atc.flujo END screenshot=%s", shot)
+            return str(Path(shot))
+        except Exception:
+            # Guardar estado visual tambien en caso de error antes de cerrar.
+            try:
+                await self.page.screenshot(path=shot, full_page=True)
+                self.logger.info("atc.flujo ERROR screenshot=%s", shot)
+            except Exception:
+                pass
+            raise
+        finally:
+            await self._pause_before_close()
+</file>
+
+<file path="atc/config.py">
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+from core.base_config import BaseConfig
+
+
+@dataclass
+class AtcConfig(BaseConfig):
+    site_id: str = "atc"
+    url_base: str = "https://atc.gencat.cat/es/gestions/certificats/certificats-tributaris/"
+    url_certificats: str = "https://atc.gencat.cat/es/gestions/certificats/certificats-tributaris/"
+    # El archivo resultante sera: actualizaciones/atc/atc.log
+    dir_logs: Path = Path("actualizaciones/atc")
+    start_cta_selector: str = (
+        "a:has-text('Inicia el tramit'),"
+        "a:has-text('Iniciar tramite'),"
+        "a:has-text('Tramitar')"
+    )
+    default_timeout: int = 30000
+    navigation_timeout: int = 60000
+
+    def __post_init__(self) -> None:
+        # Forzar Chrome en este site (no Edge).
+        self.navegador.canal = "chrome"
+</file>
+
+<file path="atc/controller.py">
+from __future__ import annotations
+
+from pathlib import Path
+
+from .config import AtcConfig
+from .data_models import AtcTarget
+
+
+class AtcController:
+    site_id = "atc"
+    display_name = "ATC Gencat"
+
+    def create_config(self, *, headless: bool):
+        cfg = AtcConfig()
+        cfg.navegador.headless = bool(headless)
+        return cfg
+
+    def map_data(self, data: dict) -> dict:
+        return dict(data or {})
+
+    def create_target(self, **kwargs) -> AtcTarget:
+        archivos = kwargs.get("archivos") or []
+        return AtcTarget(
+            idRecurso=kwargs.get("idRecurso"),
+            expediente=str(kwargs.get("expediente") or ""),
+            archivos_adjuntos=[Path(str(p)) for p in archivos],
+            payload=dict(kwargs),
+            headless=bool(kwargs.get("headless", True)),
+        )
+
+
+def get_controller() -> AtcController:
+    return AtcController()
+</file>
+
+<file path="atc/data_models.py">
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+
+@dataclass
+class AtcTarget:
+    idRecurso: int | None = None
+    expediente: str = ""
+    archivos_adjuntos: list[Path] = field(default_factory=list)
+    payload: dict[str, Any] = field(default_factory=dict)
+    headless: bool = True
+</file>
+
+<file path="atc/Documentacion.md">
+# ATC (Standalone Smoke)
+
+URL objetivo:
+- `https://atc.gencat.cat/es/gestions/certificats/certificats-tributaris/`
+
+Archivos base creados:
+- `sites/atc/config.py`
+- `sites/atc/data_models.py`
+- `sites/atc/controller.py`
+- `sites/atc/automation.py`
+- `sites/atc/flows/login.py`
+- `sites/atc/flows/formulario.py`
+- `sites/atc/flows/documentos.py`
+- `sites/atc/flows/confirmacion.py`
+- `main_atc_payload_by_id.py`
+
+Flujo actual (smoke):
+1. Abre la landing de certificados tributarios.
+2. Intenta aceptar cookies.
+3. Busca CTA de inicio de tramite (`Inicia el tramit/tràmit`, `Tramitar`).
+4. Si hay ficheros en payload, intenta subirlos por `input[type=file]`.
+5. Se queda en pantalla de tramite y toma screenshot final.
+
+Comandos:
+```powershell
+python actualizaciones/main_atc_payload_by_id.py --dump-only
+python actualizaciones/main_atc_payload_by_id.py --run-flow
+```
+
+Pendiente para scraping real:
+- Ajustar `SQL_BY_NUMCLIENT` y `build_payload_from_row(...)` en `actualizaciones/main_atc_payload_by_id.py` segun fuente final.
+- Ajustar selectores reales en `flows/*` con inspeccion del portal.
+- Definir pasos de identificacion/firma cuando se valide el camino de tramite.
+</file>
+
+<file path="atc/downloads/ed13684e-4e62-4573-a969-a57683d7b4ed-1029.json">
+{
+  "pdf_path": "actualizaciones\\atc\\downloads\\ed13684e-4e62-4573-a969-a57683d7b4ed-1029.PDF",
+  "txt_path": "actualizaciones\\atc\\downloads\\ed13684e-4e62-4573-a969-a57683d7b4ed-1029.txt",
+  "pages": 1,
+  "chars": 1594
+}
+</file>
+
+<file path="atc/downloads/ed13684e-4e62-4573-a969-a57683d7b4ed-1029.txt">
+Telèfon 012 (cost segons operadora)
+https://atc.gencat.cat/oficines
+)0PEC83(
+10C_300_TEC
+Certificat positiu d’estar al corrent de deutes tributaris i no tributaris
+Dades del certificat
+Número del certificat Data d’emissió Codi CSV
+5985190 12/03/2026 2026DEU2697228DEWDZ1
+Data de la sol·licitud Finalitat
+12/03/2026 04 GENÈRICS TRIBUTARIS I NO TRIBUTARIS
+Dades de la persona sol·licitant
+NIF Cognoms i nom o raó social
+B62798210 MULTIVIA, NEGOCIADO Y DEFENSA ADMINISTRATIVA Y JURIDICA
+ESPAÑA, SL
+D’acord amb les dades que consten en aquesta Administració en la data d’emissió d’aquest certificat, la persona física
+o jurídica esmentada no té cap deute ni sanció de naturalesa tributària i no tributària amb l’Agència Tributària de
+Catalunya, sens perjudici de les obligacions que pugui contreure amb posterioritat a la data esmentada.
+Els deutes i/o sancions que estiguin fraccionats, ajornats o suspesos no s’inclouen en aquest certificat.
+El contingut, l’autenticitat i la validesa d’aquest certificat es pot comprovar a partir del codi segur de verificació (CSV)
+que consta a l’encapçalament d’aquest document, a través de la seu electrònica de l’Agència Tributària de Catalunya
+a https://atc.gencat.cat/csv.
+Quan la persona destinatària d’aquest certificat és una Administració pública, la comprovació és obligatòria segons el
+que disposa l’article 73.3 del Reial decret 1065/2007, de 27 de juliol, pel qual s’aprova el Reglament general de les
+actuacions i els procediments de gestió i inspecció tributària i de desplegament de les normes comunes dels
+procediments d’aplicació dels tributs.
+</file>
+
+<file path="atc/flows/__init__.py">
+"""Flow modules for this site."""
+
+from .login import run_login
+from .formulario import run_formulario
+from .documentos import run_documentos
+from .confirmacion import run_confirmacion
+
+__all__ = ["run_login", "run_formulario", "run_documentos", "run_confirmacion"]
+</file>
+
+<file path="atc/flows/confirmacion.py">
+from __future__ import annotations
+
+import json
+import logging
+import re
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from playwright.async_api import Page
+    from ..config import AtcConfig
+    from ..data_models import AtcTarget
+
+
+logger = logging.getLogger("xaloc_automation.atc")
+
+
+async def run_confirmacion(page: "Page", config: "AtcConfig", datos: "AtcTarget") -> "Page":
+    _ = (config, datos)
+    logger.info("atc.confirmacion START")
+    await page.wait_for_load_state("domcontentloaded")
+
+    view_button = page.get_by_role(
+        "button",
+        name=re.compile(r"Visualizar documento|Visualitza document", re.IGNORECASE),
+    ).first
+
+    async with page.expect_download() as dl_info:
+        await view_button.click()
+    download = await dl_info.value
+
+    downloads_dir = Path("actualizaciones/atc/downloads")
+    downloads_dir.mkdir(parents=True, exist_ok=True)
+    filename = download.suggested_filename or "atc_documento.pdf"
+    destination = downloads_dir / filename
+    await download.save_as(str(destination))
+    logger.info("atc.confirmacion download_saved=%s", destination)
+
+    if isinstance(datos.payload, dict):
+        datos.payload["atc_download_pdf_path"] = str(destination)
+
+    try:
+        import pdfplumber  # type: ignore
+
+        pages_text: list[str] = []
+        with pdfplumber.open(str(destination)) as pdf:
+            for p in pdf.pages:
+                pages_text.append((p.extract_text() or "").strip())
+        full_text = "\n\n".join(t for t in pages_text if t).strip()
+
+        txt_path = destination.with_suffix(".txt")
+        txt_path.write_text(full_text, encoding="utf-8")
+
+        meta = {
+            "pdf_path": str(destination),
+            "txt_path": str(txt_path),
+            "pages": len(pages_text),
+            "chars": len(full_text),
+        }
+        meta_path = destination.with_suffix(".json")
+        meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        if isinstance(datos.payload, dict):
+            datos.payload["atc_pdf_text_path"] = str(txt_path)
+            datos.payload["atc_pdf_meta_path"] = str(meta_path)
+            datos.payload["atc_pdf_text_preview"] = full_text[:500]
+
+        logger.info("atc.confirmacion pdfplumber_ok txt=%s meta=%s", txt_path, meta_path)
+    except Exception as exc:
+        logger.warning("atc.confirmacion pdfplumber_error=%s", exc)
+    return page
+</file>
+
+<file path="atc/flows/documentos.py">
+from __future__ import annotations
+
+import logging
+import re
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from playwright.async_api import Page
+    from ..config import AtcConfig
+    from ..data_models import AtcTarget
+
+
+logger = logging.getLogger("xaloc_automation.atc")
+
+
+async def run_documentos(page: "Page", config: "AtcConfig", datos: "AtcTarget") -> "Page":
+    _ = (config, datos)
+    logger.info("atc.documentos START")
+
+    await page.get_by_test_id("certificate-btn").click()
+    await page.locator("#MainContent_CertificatDeuteControl_dpdTipusCertificat").select_option("GEN02")
+
+    check_button = page.get_by_role(
+        "button",
+        name=re.compile(r"Comprobar|Comprova", re.IGNORECASE),
+    ).first
+    await check_button.click()
+
+    await page.wait_for_load_state("networkidle")
+    logger.info("atc.documentos done")
+    return page
+</file>
+
+<file path="atc/flows/formulario.py">
+from __future__ import annotations
+
+import logging
+import re
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from playwright.async_api import Page
+    from ..config import AtcConfig
+    from ..data_models import AtcTarget
+
+
+logger = logging.getLogger("xaloc_automation.atc")
+
+
+async def run_formulario(page: "Page", config: "AtcConfig", datos: "AtcTarget") -> "Page":
+    _ = (config, datos)
+
+    logger.info("atc.formulario START")
+    await page.wait_for_load_state("domcontentloaded")
+
+    start_link = page.get_by_role(
+        "link",
+        name=re.compile(r"Inicia el tr.*mit|Iniciar tr.*mit", re.IGNORECASE),
+    ).first
+
+    popup_page = None
+    try:
+        async with page.expect_popup(timeout=8000) as popup_info:
+            await start_link.click()
+        popup_page = await popup_info.value
+        logger.info("atc.formulario popup opened")
+    except Exception:
+        logger.info("atc.formulario popup not detected, fallback same tab")
+        await start_link.click()
+
+    active_page = popup_page or page
+    await active_page.wait_for_load_state("domcontentloaded")
+    await active_page.wait_for_load_state("networkidle")
+    logger.info("atc.formulario active url=%s", active_page.url)
+    return active_page
+</file>
+
+<file path="atc/flows/login.py">
+from __future__ import annotations
+
+import logging
+import re
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from playwright.async_api import Page
+    from ..config import AtcConfig
+    from ..data_models import AtcTarget
+
+
+logger = logging.getLogger("xaloc_automation.atc")
+
+
+async def run_login(page: "Page", config: "AtcConfig", datos: "AtcTarget") -> "Page":
+    _ = datos
+    logger.info("atc.login goto=%s", config.url_base)
+    page.set_default_timeout(config.default_timeout)
+    page.set_default_navigation_timeout(config.navigation_timeout)
+    await page.goto(config.url_base, wait_until="domcontentloaded")
+    await page.wait_for_load_state("networkidle")
+
+    # Cookie banner (codegen: "Acéptalas todas")
+    try:
+        await page.get_by_role(
+            "button", name=re.compile(r"Ac[ée]ptalas todas|Aceptar todas|Accepta-les totes", re.IGNORECASE)
+        ).first.click(timeout=5000)
+        logger.info("atc.login cookies accepted")
+    except Exception:
+        logger.info("atc.login cookies button not found")
+
+    logger.info("atc.login done")
+    return page
+</file>
+
+<file path="main_ajuntament_barcelona_payload_by_id.py">
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import logging
+from dataclasses import asdict
+from pathlib import Path
+from typing import Any
+
+from actualizaciones.ajuntament_barcelona.automation import AjuntamentBarcelonaAutomation
+from actualizaciones.ajuntament_barcelona.controller import AjuntamentBarcelonaController
+
+
+HARDCODED_NUMEROCLIENTE = 42249
+LOG_PATH = Path("actualizaciones/ajuntament_barcelona/ajuntament_barcelona.log")
+
+
+def _configure_logger() -> logging.Logger:
+    logger = logging.getLogger("xaloc_automation.ajuntament_barcelona")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+
+    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    has_file_handler = any(
+        isinstance(h, logging.FileHandler) and Path(getattr(h, "baseFilename", "")).resolve() == LOG_PATH.resolve()
+        for h in logger.handlers
+    )
+    if not has_file_handler:
+        formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+        fh = logging.FileHandler(LOG_PATH, encoding="utf-8")
+        fh.setFormatter(formatter)
+        logger.addHandler(fh)
+    return logger
+
+
+def build_payload(numero_cliente: int = HARDCODED_NUMEROCLIENTE) -> dict[str, Any]:
+    return {
+        "idRecurso": None,
+        "idExp": None,
+        "expediente": "",
+        "fase_procedimiento": "",
+        "sujeto_recurso": "",
+        "numclient": int(numero_cliente),
+        "nombre": "",
+        "apellido1": "",
+        "apellido2": "",
+        "nif": "",
+        "nifempresa": "",
+        "tramite_url": "https://seuelectronica.ajuntament.barcelona.cat/oficinavirtual/ca/tramit/20200001444",
+        "archivos": [],
+    }
+
+
+async def run_flow(payload: dict[str, Any], *, headless: bool) -> dict[str, Any]:
+    logger = logging.getLogger("xaloc_automation.ajuntament_barcelona")
+    controller = AjuntamentBarcelonaController()
+    mapped = controller.map_data(payload)
+    mapped["headless"] = bool(headless)
+    datos = controller.create_target(**mapped)
+    config = controller.create_config(headless=bool(headless))
+    config.navegador.perfil_path = Path("profiles/worker").absolute()
+    logger.info(
+        "ajuntament_barcelona.main run_flow START numclient=%s headless=%s",
+        payload.get("numclient"),
+        headless,
+    )
+
+    try:
+        async with AjuntamentBarcelonaAutomation(config) as bot:
+            screenshot = await bot.ejecutar_flujo_completo(datos)
+        payload_updates = {
+            "ajuntament_barcelona_download_pdf_path": datos.payload.get("ajuntament_barcelona_download_pdf_path"),
+            "ajuntament_barcelona_pdf_text_path": datos.payload.get("ajuntament_barcelona_pdf_text_path"),
+            "ajuntament_barcelona_pdf_meta_path": datos.payload.get("ajuntament_barcelona_pdf_meta_path"),
+            "ajuntament_barcelona_pdf_text_preview": datos.payload.get("ajuntament_barcelona_pdf_text_preview"),
+            "ajuntament_barcelona_multes_no_trobat_remeses_exists": datos.payload.get(
+                "ajuntament_barcelona_multes_no_trobat_remeses_exists"
+            ),
+        }
+        logger.info("ajuntament_barcelona.main run_flow END success=1 screenshot=%s", screenshot)
+        return {
+            "success": True,
+            "error": None,
+            "screenshot": screenshot,
+            "payload_updates": payload_updates,
+        }
+    except Exception as exc:
+        logger.exception("ajuntament_barcelona.main run_flow END success=0 error=%s", exc)
+        return {
+            "success": False,
+            "error": str(exc),
+            "screenshot": None,
+            "payload_updates": {},
+        }
+
+
+def main() -> None:
+    logger = _configure_logger()
+    parser = argparse.ArgumentParser(description="Standalone smoke test for ajuntament_barcelona.")
+    parser.add_argument(
+        "--numerocliente",
+        type=int,
+        default=HARDCODED_NUMEROCLIENTE,
+        help=f"Numero de cliente (default hardcodeado: {HARDCODED_NUMEROCLIENTE})",
+    )
+    parser.add_argument("--dump-only", action="store_true", help="Solo generar JSON de validacion")
+    parser.add_argument("--run-flow", action="store_true", help="Ejecutar flujo Playwright local")
+    parser.add_argument("--headless", action="store_true", help="Ejecutar navegador oculto")
+    args = parser.parse_args()
+    logger.info(
+        "ajuntament_barcelona.main START numerocliente=%s dump_only=%s run_flow=%s headless=%s",
+        args.numerocliente,
+        args.dump_only,
+        args.run_flow,
+        args.headless,
+    )
+
+    base_input: dict[str, Any] = {"numerocliente": int(args.numerocliente)}
+    payload = build_payload(args.numerocliente)
+
+    controller = AjuntamentBarcelonaController()
+    mapped = controller.map_data(payload)
+    target = controller.create_target(**mapped)
+
+    out = Path("tmp")
+    out.mkdir(parents=True, exist_ok=True)
+    raw_path = out / "ajuntament_barcelona_base_input_numclient_{}.json".format(args.numerocliente)
+    payload_path = out / "ajuntament_barcelona_payload_numclient_{}.json".format(args.numerocliente)
+    mapped_path = out / "ajuntament_barcelona_mapped_numclient_{}.json".format(args.numerocliente)
+    raw_path.write_text(json.dumps(base_input, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    payload_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    mapped_path.write_text(json.dumps(asdict(target), ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    print(f"[OK] base input: {raw_path}")
+    print(f"[OK] payload: {payload_path}")
+    print(f"[OK] mapped target: {mapped_path}")
+    logger.info("ajuntament_barcelona.main artifacts written payload=%s mapped=%s", payload_path, mapped_path)
+
+    if args.dump_only and not args.run_flow:
+        return
+
+    if args.run_flow:
+        result = asyncio.run(run_flow(payload, headless=bool(args.headless)))
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    logger.info("ajuntament_barcelona.main END")
+
+
+if __name__ == "__main__":
+    main()
+</file>
+
+<file path="main_atc_payload_by_id.py">
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import logging
+from dataclasses import asdict
+from pathlib import Path
+from typing import Any
+
+from actualizaciones.atc.automation import AtcAutomation
+from actualizaciones.atc.controller import AtcController
+
+
+HARDCODED_NUMEROCLIENTE = 42249
+LOG_PATH = Path("actualizaciones/atc/atc.log")
+
+
+def _configure_logger() -> logging.Logger:
+    logger = logging.getLogger("xaloc_automation.atc")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+
+    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    has_file_handler = any(
+        isinstance(h, logging.FileHandler) and Path(getattr(h, "baseFilename", "")).resolve() == LOG_PATH.resolve()
+        for h in logger.handlers
+    )
+    if not has_file_handler:
+        formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+        fh = logging.FileHandler(LOG_PATH, encoding="utf-8")
+        fh.setFormatter(formatter)
+        logger.addHandler(fh)
+    return logger
+
+
+def build_payload(numero_cliente: int = HARDCODED_NUMEROCLIENTE) -> dict[str, Any]:
+    return {
+        "idRecurso": None,
+        "idExp": None,
+        "expediente": "",
+        "fase_procedimiento": "",
+        "sujeto_recurso": "",
+        "numclient": int(numero_cliente),
+        "nombre": "",
+        "apellido1": "",
+        "apellido2": "",
+        "nif": "",
+        "nifempresa": "",
+        "tramite_url": "https://atc.gencat.cat/es/gestions/certificats/certificats-tributaris/",
+        "archivos": [],
+    }
+
+
+async def run_flow(payload: dict[str, Any], *, headless: bool) -> dict[str, Any]:
+    logger = logging.getLogger("xaloc_automation.atc")
+    controller = AtcController()
+    mapped = controller.map_data(payload)
+    mapped["headless"] = bool(headless)
+    datos = controller.create_target(**mapped)
+    config = controller.create_config(headless=bool(headless))
+    config.navegador.perfil_path = Path("profiles/worker").absolute()
+    logger.info("atc.main run_flow START numclient=%s headless=%s", payload.get("numclient"), headless)
+
+    try:
+        async with AtcAutomation(config) as bot:
+            screenshot = await bot.ejecutar_flujo_completo(datos)
+        payload_updates = {
+            "atc_download_pdf_path": datos.payload.get("atc_download_pdf_path"),
+            "atc_pdf_text_path": datos.payload.get("atc_pdf_text_path"),
+            "atc_pdf_meta_path": datos.payload.get("atc_pdf_meta_path"),
+            "atc_pdf_text_preview": datos.payload.get("atc_pdf_text_preview"),
+        }
+        logger.info("atc.main run_flow END success=1 screenshot=%s", screenshot)
+        return {
+            "success": True,
+            "error": None,
+            "screenshot": screenshot,
+            "payload_updates": payload_updates,
+        }
+    except Exception as exc:
+        logger.exception("atc.main run_flow END success=0 error=%s", exc)
+        return {
+            "success": False,
+            "error": str(exc),
+            "screenshot": None,
+            "payload_updates": {},
+        }
+
+
+def main() -> None:
+    logger = _configure_logger()
+    parser = argparse.ArgumentParser(description="Standalone smoke test for atc.")
+    parser.add_argument(
+        "--numerocliente",
+        type=int,
+        default=HARDCODED_NUMEROCLIENTE,
+        help=f"Numero de cliente (default hardcodeado: {HARDCODED_NUMEROCLIENTE})",
+    )
+    parser.add_argument("--dump-only", action="store_true", help="Solo generar JSON de validacion")
+    parser.add_argument("--run-flow", action="store_true", help="Ejecutar flujo Playwright local")
+    parser.add_argument("--headless", action="store_true", help="Ejecutar navegador oculto")
+    args = parser.parse_args()
+    logger.info(
+        "atc.main START numerocliente=%s dump_only=%s run_flow=%s headless=%s",
+        args.numerocliente,
+        args.dump_only,
+        args.run_flow,
+        args.headless,
+    )
+
+    base_input: dict[str, Any] = {"numerocliente": int(args.numerocliente)}
+    payload = build_payload(args.numerocliente)
+
+    controller = AtcController()
+    mapped = controller.map_data(payload)
+    target = controller.create_target(**mapped)
+
+    out = Path("tmp")
+    out.mkdir(parents=True, exist_ok=True)
+    raw_path = out / "atc_base_input_numclient_{}.json".format(args.numerocliente)
+    payload_path = out / "atc_payload_numclient_{}.json".format(args.numerocliente)
+    mapped_path = out / "atc_mapped_numclient_{}.json".format(args.numerocliente)
+    raw_path.write_text(json.dumps(base_input, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    payload_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    mapped_path.write_text(json.dumps(asdict(target), ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    print(f"[OK] base input: {raw_path}")
+    print(f"[OK] payload: {payload_path}")
+    print(f"[OK] mapped target: {mapped_path}")
+    logger.info("atc.main artifacts written payload=%s mapped=%s", payload_path, mapped_path)
+
+    if args.dump_only and not args.run_flow:
+        return
+
+    if args.run_flow:
+        result = asyncio.run(run_flow(payload, headless=bool(args.headless)))
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    logger.info("atc.main END")
+
+
+if __name__ == "__main__":
+    main()
+</file>
+
+</files>

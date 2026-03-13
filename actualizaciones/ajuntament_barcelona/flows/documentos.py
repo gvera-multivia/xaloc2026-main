@@ -30,7 +30,7 @@ async def _find_first_visible_input(page: "Page", selectors: list[str], attempts
 
 
 async def run_documentos(page: "Page", config: "AjuntamentBarcelonaConfig", datos: "AjuntamentBarcelonaTarget") -> "Page":
-    _ = (config, datos)
+    _ = datos
     logger.info("ajuntament_barcelona.documentos START")
 
     cert_btn = page.get_by_test_id("certificate-btn")

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import re
 from pathlib import Path
@@ -61,40 +60,6 @@ async def run_confirmacion(
 
     if isinstance(datos.payload, dict):
         datos.payload["ajuntament_barcelona_download_pdf_path"] = str(destination)
-
-    try:
-        import pdfplumber  # type: ignore
-
-        pages_text: list[str] = []
-        with pdfplumber.open(str(destination)) as pdf:
-            for p in pdf.pages:
-                pages_text.append((p.extract_text() or "").strip())
-        full_text = "\n\n".join(t for t in pages_text if t).strip()
-
-        txt_path = destination.with_suffix(".txt")
-        txt_path.write_text(full_text, encoding="utf-8")
-        meta = {
-            "pdf_path": str(destination),
-            "txt_path": str(txt_path),
-            "pages": len(pages_text),
-            "chars": len(full_text),
-        }
-        meta_path = destination.with_suffix(".json")
-        meta_path.write_text(
-            json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-
-        if isinstance(datos.payload, dict):
-            datos.payload["ajuntament_barcelona_pdf_text_path"] = str(txt_path)
-            datos.payload["ajuntament_barcelona_pdf_meta_path"] = str(meta_path)
-            datos.payload["ajuntament_barcelona_pdf_text_preview"] = full_text[:500]
-        logger.info(
-            "ajuntament_barcelona.confirmacion pdfplumber_ok txt=%s meta=%s",
-            txt_path,
-            meta_path,
-        )
-    except Exception as exc:
-        logger.warning("ajuntament_barcelona.confirmacion pdfplumber_error=%s", exc)
 
     logger.info("ajuntament_barcelona.confirmacion done")
     return page

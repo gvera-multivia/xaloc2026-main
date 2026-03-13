@@ -17,7 +17,15 @@ async def run_documentos(page: "Page", config: "AtcConfig", datos: "AtcTarget") 
     _ = (config, datos)
     logger.info("atc.documentos START")
 
-    await page.get_by_test_id("certificate-btn").click()
+    cert_btn = page.get_by_test_id("certificate-btn")
+    if await cert_btn.count():
+        logger.info("atc.documentos certificate-btn present, clicking")
+        await cert_btn.first.click()
+        await page.wait_for_load_state("domcontentloaded")
+        await page.wait_for_load_state("networkidle")
+    else:
+        logger.info("atc.documentos certificate-btn not present, assuming already authenticated")
+
     await page.locator("#MainContent_CertificatDeuteControl_dpdTipusCertificat").select_option("GEN02")
 
     check_button = page.get_by_role(
