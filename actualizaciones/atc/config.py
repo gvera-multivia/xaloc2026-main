@@ -22,4 +22,7 @@ class AtcConfig(BaseConfig):
     navigation_timeout: int = 60000
 
     def __post_init__(self) -> None:
-        self.navegador.canal = "chrome"
+        self.navegador.canal = "msedge"
+        self.navegador.perfil_path = Path(
+            r"C:\Users\Hector Manarguez\AppData\Local\Microsoft\Edge\User Data"
+        )

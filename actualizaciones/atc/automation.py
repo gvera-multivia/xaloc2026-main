@@ -25,8 +25,8 @@ class AtcAutomation(BaseAutomation):
             raise RuntimeError("Automation no inicializada (usar 'async with').")
 
         shot = self.config.dir_screenshots / "atc_standalone.png"
+        current_page = self.page
         try:
-            current_page = self.page
             self.logger.info(
                 "atc.flujo START numclient=%s expediente=%s",
                 datos.payload.get("numclient"),

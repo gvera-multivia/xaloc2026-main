@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+# Priorizar actualizaciones/core/ sobre el core/ raíz del proyecto.
+_ACTUALIZACIONES_DIR = Path(__file__).parent
+if str(_ACTUALIZACIONES_DIR) not in sys.path:
+    sys.path.insert(0, str(_ACTUALIZACIONES_DIR))
+
 import argparse
 import asyncio
 import json
 import logging
 from dataclasses import asdict
-from pathlib import Path
 from typing import Any
 
 from actualizaciones.ajuntament_barcelona.automation import AjuntamentBarcelonaAutomation
@@ -59,7 +66,6 @@ async def run_flow(payload: dict[str, Any], *, headless: bool) -> dict[str, Any]
     mapped["headless"] = bool(headless)
     datos = controller.create_target(**mapped)
     config = controller.create_config(headless=bool(headless))
-    config.navegador.perfil_path = Path("profiles/worker").absolute()
     logger.info(
         "ajuntament_barcelona.main run_flow START numclient=%s headless=%s",
         payload.get("numclient"),

@@ -52,6 +52,8 @@ class AjuntamentBarcelonaAutomation(BaseAutomation):
                     await self._reset_page_for_retry()
 
                 current_page = self.page
+                if current_page is None:
+                    raise RuntimeError("Automation no inicializada (usar 'async with').")
                 try:
                     self.logger.info(
                         "ajuntament_barcelona.flujo START intento=%s/%s numclient=%s expediente=%s",
