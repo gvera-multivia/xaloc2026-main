@@ -59,6 +59,10 @@ default_patterns = [
     "https://www.baseonline.cat/*",
     "https://valid.aoc.cat/*",
     "https://cert.valid.aoc.cat/*",
+    "https://autenticaciogicar5.extranet.gencat.cat/*",
+    "https://seu2.atc.gencat.cat/*",
+    "https://seu.atc.gencat.cat/*",
+    "https://atc.gencat.cat/*",
     "https://cas.madrid.es/*",
     "https://pasarela.clave.gob.es/*",
     "https://[*.]madrid.es/*",
@@ -66,9 +70,14 @@ default_patterns = [
     "https://cas.madrid.es:443/*",
     "https://pasarela.clave.gob.es:443/*",
     "https://cert.valid.aoc.cat:443/*",
+    "https://autenticaciogicar5.extranet.gencat.cat:443/*",
+    "https://seu2.atc.gencat.cat:443/*",
+    "https://seu.atc.gencat.cat:443/*",
+    "https://atc.gencat.cat:443/*",
     "https://palma.sedipualba.es/*",
     "https://identificacionssl.sedipualba.es/*",
     "https://aoberta.terrassa.cat/*",
+    "https://sede.valencia.es/*",
 ]
 
 def _parse_rules_from_bat(path: pathlib.Path):
@@ -163,6 +172,13 @@ PY
 }
 
 register_afirma_xdg_handler() {
+  # Mantener en sync el handler del contenedor con el del repo montado (/app),
+  # evitando drift entre /usr/local/bin y /app/infra/docker.
+  if [[ -f "/app/infra/docker/afirma-handler.sh" ]]; then
+    cp /app/infra/docker/afirma-handler.sh /usr/local/bin/afirma-handler.sh || true
+    chmod +x /usr/local/bin/afirma-handler.sh || true
+  fi
+
   local app_file="/usr/share/applications/xaloc-afirma-handler.desktop"
   if [[ ! -f "$app_file" ]]; then
     echo "[playwright-runner] Handler desktop no encontrado: $app_file"

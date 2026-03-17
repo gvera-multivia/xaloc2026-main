@@ -5,6 +5,8 @@ from .xaloc_girona import XalocAdapter
 from .ayunta_palma import AyuntaPalmaAdapter
 from .redsara import RedsaraAdapter
 from .terrassa import TerrassaAdapter
+from .valencia import ValenciaAdapter
+from .atc import AtcAdapter
 
 __all__ = [
     "SiteAdapter",
@@ -14,4 +16,6 @@ __all__ = [
     "AyuntaPalmaAdapter",
     "RedsaraAdapter",
     "TerrassaAdapter",
+    "ValenciaAdapter",
+    "AtcAdapter",
 ]

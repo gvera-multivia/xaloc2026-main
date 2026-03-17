@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -70,11 +71,43 @@ async def execute_via_runner_service(
     archivos_para_subir: list[Path],
 ) -> ProcessOutcome:
     base_urls = _build_runner_url_candidates()
+    payload_summary = {
+        "keys": len(payload or {}),
+        "idRecurso": payload.get("idRecurso"),
+        "external_resource_id": payload.get("external_resource_id"),
+        "expediente": payload.get("expediente") or payload.get("Expedient"),
+        "tramite_code": payload.get("tramite_code"),
+        "has_nested_payload_dict": isinstance(payload.get("payload"), dict),
+        "nested_payload_keys": len(payload.get("payload") or {}) if isinstance(payload.get("payload"), dict) else 0,
+    }
+    logger.info(
+        "Runner request summary site=%s protocol=%s summary=%s archivos=%s",
+        site_id,
+        protocol,
+        payload_summary,
+        len(archivos_para_subir),
+    )
+    archivo_blobs: list[dict[str, str]] = []
+    for src in archivos_para_subir:
+        src_path = Path(src)
+        if not src_path.exists():
+            raise FileNotFoundError(f"Archivo de entrada no existe antes de enviar al runner: {src_path}")
+        raw = src_path.read_bytes()
+        archivo_blobs.append(
+            {
+                "name": src_path.name,
+                "content_b64": base64.b64encode(raw).decode("ascii"),
+            }
+        )
+    if archivo_blobs:
+        logger.info("Runner payload con archivos embebidos: %s", len(archivo_blobs))
+
     request_payload = {
         "site_id": site_id,
         "protocol": protocol,
         "payload": payload,
         "archivos": [str(p) for p in archivos_para_subir],
+        "archivo_blobs": archivo_blobs,
     }
     timeout_seconds = int((os.getenv("PLAYWRIGHT_RUNNER_TIMEOUT_SECONDS") or "900").strip() or "900")
     timeout = aiohttp.ClientTimeout(total=timeout_seconds)

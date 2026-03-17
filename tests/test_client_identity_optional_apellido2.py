@@ -30,3 +30,24 @@ def test_client_folder_name_allows_missing_apellido2() -> None:
     )
     folder = get_client_folder_name(identity)
     assert folder == "JOAN PUJOL"
+
+
+def test_client_identity_uses_tipodecliente_company_with_nombrefiscal() -> None:
+    payload = {
+        "tipodecliente": 2,
+        "Nombrefiscal": "EDIFRED EMPORDANESA DISSENY E INSTAL LACIONS SL",
+    }
+    identity = client_identity_from_payload(payload)
+    assert identity.is_company is True
+    assert identity.empresa == "EDIFRED EMPORDANESA DISSENY E INSTAL LACIONS SL"
+
+
+def test_client_identity_falls_back_when_mandatario_juridica_missing_razon_social() -> None:
+    payload = {
+        "mandatario": {"tipo_persona": "JURIDICA", "razon_social": ""},
+        "cliente_tipo": 2,
+        "cliente_razon_social": "ACME SL",
+    }
+    identity = client_identity_from_payload(payload)
+    assert identity.is_company is True
+    assert identity.empresa == "ACME SL"

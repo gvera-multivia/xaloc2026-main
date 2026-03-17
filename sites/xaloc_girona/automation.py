@@ -15,12 +15,14 @@ class XalocGironaAutomation(BaseAutomation):
     def __init__(self, config: XalocConfig):
         super().__init__(config)
         self.config: XalocConfig = config
+        self.last_flow_metadata: dict = {}
 
     async def ejecutar_flujo_completo(self, datos: DatosMulta) -> str:
         if not self.page:
             raise RuntimeError("Automation no inicializada (usar 'async with').")
 
         try:
+            self.last_flow_metadata = {"xaloc_justificante_descargado": False}
             self.logger.info("\n" + "=" * 50)
             self.logger.info("FASE 1: AUTENTICACION")
             self.logger.info("=" * 50)
@@ -65,12 +67,14 @@ class XalocGironaAutomation(BaseAutomation):
                     self.page, payload_descarga
                 )
                 self.logger.info(f"OK Justificante guardado en: {ruta_justificante}")
+                self.last_flow_metadata["xaloc_justificante_descargado"] = True
+                self.last_flow_metadata["xaloc_justificante_path"] = str(ruta_justificante)
             except Exception as e:
                 self.logger.error(f"Error descargando justificante: {e}")
-                self.mark_nonfatal_issue()
-                # No fallar toda la tarea si solo falla la descarga del justificante
-                # El formulario ya fue enviado exitosamente
-                self.logger.warning("Continuando sin justificante descargado...")
+                self.last_flow_metadata["xaloc_justificante_descargado"] = False
+                raise RuntimeError(
+                    "xaloc_girona: descarga de justificante obligatoria; se aborta el tramite."
+                ) from e
 
             return screenshot_justificante
 

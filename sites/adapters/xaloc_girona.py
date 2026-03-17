@@ -121,6 +121,7 @@ class XalocAdapter(SiteAdapter):
         out["cliente_nif"] = out.get("cliente_nif", client_doc.get("nif"))
         out["nifempresa"] = out.get("nifempresa", client_doc.get("cif"))
         out["cif"] = out.get("cif", client_doc.get("cif"))
+        out["cliente_razon_social"] = out.get("cliente_razon_social", client_name.get("business"))
         out["Empresa"] = out.get("Empresa", client_name.get("business"))
         out["Nombrefiscal"] = out.get("Nombrefiscal", client_name.get("business"))
         out["cliente_nombre"] = out.get("cliente_nombre", client_name.get("first"))
@@ -132,7 +133,13 @@ class XalocAdapter(SiteAdapter):
 
     def _build_mandatario_data(self, row: dict) -> dict:
         cif_raw = row.get("cif") or row.get("nifempresa")
-        empresa_raw = row.get("Empresa") or row.get("Nombrefiscal")
+        empresa_raw = (
+            row.get("cliente_razon_social")
+            or row.get("Empresa")
+            or row.get("Nombrefiscal")
+            or row.get("Nombrejuridico")
+            or row.get("Nombrecomercial")
+        )
         
         tipo_persona = self._determinar_tipo_persona(row.get("cliente_tipo"), cif_raw, empresa_raw)
         mandatario: dict = {"tipo_persona": tipo_persona}
@@ -320,8 +327,20 @@ class XalocAdapter(SiteAdapter):
                 "expediente": expediente,  # Alias para el orquestador
                 "sujeto_recurso": sujeto_recurso,
                 "cif": self._clean_str(r.get("cif") or r.get("nifempresa")),
-                "empresa": self._clean_str(r.get("Empresa") or r.get("Nombrefiscal")),
-                "cliente_razon_social": self._clean_str(r.get("Nombrefiscal") or r.get("Empresa")),
+                "empresa": self._clean_str(
+                    r.get("cliente_razon_social")
+                    or r.get("Empresa")
+                    or r.get("Nombrefiscal")
+                    or r.get("Nombrejuridico")
+                    or r.get("Nombrecomercial")
+                ),
+                "cliente_razon_social": self._clean_str(
+                    r.get("cliente_razon_social")
+                    or r.get("Nombrefiscal")
+                    or r.get("Empresa")
+                    or r.get("Nombrejuridico")
+                    or r.get("Nombrecomercial")
+                ),
                 "cliente_nif": self._clean_str(r.get("cliente_nif")),
                 "cliente_nombre": self._clean_str(r.get("cliente_nombre")),
                 "cliente_apellido1": self._clean_str(r.get("cliente_apellido1")),

@@ -212,6 +212,85 @@ class PostgresHistoryRepository:
         finally:
             conn.close()
 
+    def list_top_users(self, *, limit: int = 500, day: Optional[str] = None) -> list[dict[str, Any]]:
+        conn = self._conn()
+        if conn is None:
+            return []
+        safe_limit = max(1, min(int(limit), 5000))
+        day_value = (day or "").strip() or None
+        try:
+            with conn.cursor() as cur:
+                where_sql = "WHERE status = 'success'"
+                params: list[Any] = []
+                if day_value:
+                    where_sql += " AND day = %s::date"
+                    params.append(day_value)
+                cur.execute(
+                    f"""
+                    SELECT
+                        UPPER(BTRIM(
+                            COALESCE(
+                                payload->>'UsuarioAsignado',
+                                payload->>'usuario',
+                                payload->>'username',
+                                payload->>'xvia_username',
+                                payload->>'user',
+                                ''
+                            )
+                        )) AS usuario_asignado,
+                        COUNT(*) AS total_recursos
+                    FROM realtime_task_results
+                    {where_sql}
+                      AND COALESCE(
+                            payload->>'UsuarioAsignado',
+                            payload->>'usuario',
+                            payload->>'username',
+                            payload->>'xvia_username',
+                            payload->>'user',
+                            ''
+                          ) <> ''
+                    GROUP BY 1
+                    ORDER BY total_recursos DESC, usuario_asignado ASC
+                    LIMIT %s
+                    """,
+                    (*params, safe_limit),
+                )
+                return [
+                    {
+                        "usuario_asignado": str(row[0] or "").strip(),
+                        "total_recursos": int(row[1] or 0),
+                    }
+                    for row in cur.fetchall()
+                    if row and row[0]
+                ]
+        except Exception as exc:
+            self.logger.warning("Error listando top usuarios en PG: %s", exc)
+            return []
+        finally:
+            conn.close()
+
+    def get_success_total(self, *, day: Optional[str] = None) -> int:
+        conn = self._conn()
+        if conn is None:
+            return 0
+        day_value = (day or "").strip() or None
+        try:
+            with conn.cursor() as cur:
+                if day_value:
+                    cur.execute(
+                        "SELECT COUNT(*) FROM realtime_task_results WHERE status='success' AND day = %s::date",
+                        (day_value,),
+                    )
+                else:
+                    cur.execute("SELECT COUNT(*) FROM realtime_task_results WHERE status='success'")
+                row = cur.fetchone()
+                return int(row[0] if row and row[0] is not None else 0)
+        except Exception as exc:
+            self.logger.warning("Error leyendo total success en PG: %s", exc)
+            return 0
+        finally:
+            conn.close()
+
 
 class SQLServerHistoryRepository:
     def __init__(
@@ -229,7 +308,11 @@ class SQLServerHistoryRepository:
     def _conn(self):
         if not self.conn_str or pyodbc is None:
             return None
-        return pyodbc.connect(self.conn_str)
+        try:
+            return pyodbc.connect(self.conn_str, autocommit=True)
+        except Exception as exc:
+            self.logger.warning("No se pudo conectar a SQL Server para historico: %s", exc)
+            return None
 
     @staticmethod
     def _date_expr() -> str:
@@ -366,6 +449,82 @@ class SQLServerHistoryRepository:
         except Exception as exc:
             self.logger.warning("Error en lectura de exitos (SQL Server): %s", exc)
             return {"items": [], "page": page, "page_size": page_size, "total": 0}
+        finally:
+            conn.close()
+
+    def list_top_users(self, *, limit: int = 500, day: Optional[str] = None) -> list[dict[str, Any]]:
+        conn = self._conn()
+        if conn is None:
+            return []
+        safe_limit = max(1, min(int(limit), 5000))
+        day_value = (day or "").strip() or None
+        try:
+            cur = conn.cursor()
+            day_sql = ""
+            params: list[Any] = []
+            if day_value:
+                day_sql = f" AND {self._date_expr()} = ?"
+                params.append(day_value)
+            cur.execute(
+                f"""
+                SELECT
+                    UPPER(LTRIM(RTRIM(rs.UsuarioAsignado))) AS UsuarioAsignado,
+                    COUNT(*) AS TotalRecursos
+                FROM Recursos.RecursosExp rs
+                WHERE rs.Estado = 2
+                  {day_sql}
+                  AND rs.UsuarioAsignado IS NOT NULL
+                  AND LTRIM(RTRIM(rs.UsuarioAsignado)) <> ''
+                GROUP BY UPPER(LTRIM(RTRIM(rs.UsuarioAsignado)))
+                ORDER BY TotalRecursos DESC, UsuarioAsignado ASC
+                OFFSET 0 ROWS FETCH NEXT ? ROWS ONLY
+                """,
+                (*params, safe_limit),
+            )
+            return [
+                {
+                    "usuario_asignado": str(row[0] or "").strip(),
+                    "total_recursos": int(row[1] or 0),
+                }
+                for row in cur.fetchall()
+                if row and row[0]
+            ]
+        except Exception as exc:
+            self.logger.warning("Error en lectura top usuarios (SQL Server): %s", exc)
+            return []
+        finally:
+            conn.close()
+
+    def get_success_total(self, *, day: Optional[str] = None) -> int:
+        conn = self._conn()
+        if conn is None:
+            return 0
+        day_value = (day or "").strip() or None
+        try:
+            cur = conn.cursor()
+            if day_value:
+                cur.execute(
+                    f"""
+                    SELECT COUNT(*)
+                    FROM Recursos.RecursosExp rs
+                    WHERE rs.Estado = 2
+                      AND {self._date_expr()} = ?
+                    """,
+                    (day_value,),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM Recursos.RecursosExp rs
+                    WHERE rs.Estado = 2
+                    """
+                )
+            row = cur.fetchone()
+            return int(row[0] if row and row[0] is not None else 0)
+        except Exception as exc:
+            self.logger.warning("Error leyendo total success en SQL Server: %s", exc)
+            return 0
         finally:
             conn.close()
 
@@ -532,8 +691,14 @@ class PostgresQueueRepository:
 
     def get_completion_marker(self, *, day: str) -> dict[str, Any]:
         conn = self._conn()
+        empty = {
+            "day": day, "completed_count": 0, "last_completed_at": None, "marker": "0|",
+            "success_count": 0, "last_success": None,
+        }
         if conn is None:
-            return {"day": day, "completed_count": 0, "last_completed_at": None, "marker": "0|"}
+            return empty
+        site_expr = self._site_expr()
+        resource_expr = self._resource_expr()
         try:
             with conn.cursor() as cur:
                 cur.execute(
@@ -551,15 +716,53 @@ class PostgresQueueRepository:
                 finished_count = int(row[0] if row and row[0] is not None else 0)
                 last_finished_at = row[1] if row else None
                 marker = f"{finished_count}|{last_finished_at.isoformat() if last_finished_at else ''}"
+
+                # Success-specific data for UI notifications
+                cur.execute(
+                    """
+                    SELECT COUNT(*) FROM jobs
+                    WHERE status IN ('completed', 'succeeded')
+                      AND TO_CHAR(COALESCE(finished_at, updated_at, created_at), 'YYYY-MM-DD') = %s
+                    """,
+                    (day,),
+                )
+                srow = cur.fetchone()
+                success_count = int(srow[0] if srow and srow[0] is not None else 0)
+
+                last_success = None
+                if success_count > 0:
+                    cur.execute(
+                        f"""
+                        SELECT {site_expr} AS site_id,
+                               {resource_expr} AS resource_id,
+                               COALESCE(finished_at, updated_at, created_at) AS finished_at
+                        FROM jobs
+                        WHERE status IN ('completed', 'succeeded')
+                          AND TO_CHAR(COALESCE(finished_at, updated_at, created_at), 'YYYY-MM-DD') = %s
+                        ORDER BY COALESCE(finished_at, updated_at, created_at) DESC
+                        LIMIT 1
+                        """,
+                        (day,),
+                    )
+                    lrow = cur.fetchone()
+                    if lrow:
+                        last_success = {
+                            "site_id": str(lrow[0] or ""),
+                            "resource_id": lrow[1],
+                            "finished_at": lrow[2].isoformat() if lrow[2] else None,
+                        }
+
                 return {
                     "day": day,
                     "completed_count": finished_count,
                     "last_completed_at": (last_finished_at.isoformat() if last_finished_at else None),
                     "marker": marker,
+                    "success_count": success_count,
+                    "last_success": last_success,
                 }
         except Exception as exc:
             self.logger.warning("Error obteniendo completion marker en PG: %s", exc)
-            return {"day": day, "completed_count": 0, "last_completed_at": None, "marker": "0|"}
+            return empty
         finally:
             conn.close()
 

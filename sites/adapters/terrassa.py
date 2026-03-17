@@ -39,6 +39,7 @@ class TerrassaAdapter(SiteAdapter):
         "##############",
         "G########",
         "V#########",
+        "VJ########",
         "PC#######",
         "RD########",
         "RD####P########",
@@ -228,6 +229,8 @@ class TerrassaAdapter(SiteAdapter):
         out["cliente_apellido1"] = out.get("cliente_apellido1", client_name.get("last1"))
         out["cliente_apellido2"] = out.get("cliente_apellido2", client_name.get("last2"))
         out["cliente_razon_social"] = out.get("cliente_razon_social", client_name.get("business"))
+        out["Empresa"] = out.get("Empresa", client_name.get("business"))
+        out["Nombrefiscal"] = out.get("Nombrefiscal", client_name.get("business"))
         out["cliente_domicilio"] = out.get("cliente_domicilio", client_address.get("street_name"))
         out["cliente_cp"] = out.get("cliente_cp", client_address.get("zip"))
         out["cliente_municipio"] = out.get("cliente_municipio", client_address.get("city"))
@@ -332,7 +335,14 @@ class TerrassaAdapter(SiteAdapter):
                 continue
 
             if is_company:
-                nombre = self._clean(r.get("cliente_razon_social") or r.get("SujetoRecurso"))
+                nombre = self._clean(
+                    r.get("cliente_razon_social")
+                    or r.get("Nombrefiscal")
+                    or r.get("Empresa")
+                    or r.get("Nombrejuridico")
+                    or r.get("Nombrecomercial")
+                    or r.get("SujetoRecurso")
+                )
                 apellido1 = ""
                 apellido2 = ""
             else:

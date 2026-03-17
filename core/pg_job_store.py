@@ -109,7 +109,10 @@ class PgJobStore:
                             dedup_key = EXCLUDED.dedup_key,
                             status = EXCLUDED.status,
                             payload_json = COALESCE(EXCLUDED.payload_json, jobs.payload_json),
-                            error_message = COALESCE(EXCLUDED.error_message, jobs.error_message),
+                            error_message = CASE
+                                WHEN EXCLUDED.status IN ('queued', 'processing', 'completed') THEN NULL
+                                ELSE COALESCE(EXCLUDED.error_message, jobs.error_message)
+                            END,
                             queued_at = COALESCE(EXCLUDED.queued_at, jobs.queued_at),
                             started_at = COALESCE(EXCLUDED.started_at, jobs.started_at),
                             finished_at = COALESCE(EXCLUDED.finished_at, jobs.finished_at),
@@ -179,7 +182,11 @@ class PgJobStore:
                         UPDATE jobs
                         SET status = %s,
                             result_json = CASE WHEN %s::jsonb IS NOT NULL THEN %s::jsonb ELSE result_json END,
-                            error_message = COALESCE(%s, error_message),
+                            error_message = CASE
+                                WHEN %s IN ('queued', 'processing', 'completed') THEN NULL
+                                WHEN %s::text IS NOT NULL THEN %s::text
+                                ELSE error_message
+                            END,
                             queued_at = CASE WHEN %s = 'queued' THEN %s::timestamptz ELSE queued_at END,
                             started_at = CASE WHEN %s THEN %s::timestamptz ELSE started_at END,
                             finished_at = CASE WHEN %s THEN %s::timestamptz ELSE finished_at END,
@@ -190,6 +197,8 @@ class PgJobStore:
                             str(state),
                             json.dumps(result_snapshot, ensure_ascii=False) if result_snapshot is not None else None,
                             json.dumps(result_snapshot, ensure_ascii=False) if result_snapshot is not None else None,
+                            str(state),
+                            error_message,
                             error_message,
                             str(state),
                             now,

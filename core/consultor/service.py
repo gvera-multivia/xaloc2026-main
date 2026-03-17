@@ -33,8 +33,22 @@ class ConsultorService:
         config: dict[str, Any],
         limit: int,
         include_canonical: bool = True,
+        retrieval_profile: str = "full",
     ) -> list[ResourceDomain]:
-        resources = self.repository.get_pending_resources(site_id=site_id, config=config, limit=limit)
+        try:
+            resources = self.repository.get_pending_resources(
+                site_id=site_id,
+                config=config,
+                limit=limit,
+                profile=retrieval_profile,
+            )
+        except TypeError:
+            # Compatibilidad con repositorios fake/legacy sin argumento profile.
+            resources = self.repository.get_pending_resources(
+                site_id=site_id,
+                config=config,
+                limit=limit,
+            )
         if not resources:
             return []
 
@@ -64,8 +78,9 @@ class ConsultorResourceRepositoryAdapter:
     expected by existing adapters (`resource_repo` argument).
     """
 
-    def __init__(self, consultor: ConsultorService):
+    def __init__(self, consultor: ConsultorService, *, retrieval_profile: str = "full"):
         self.consultor = consultor
+        self.retrieval_profile = str(retrieval_profile or "full").strip().lower() or "full"
 
     def get_pending_resources(self, *, site_id: str, config: dict[str, Any], limit: int) -> list[ResourceDomain]:
         return self.consultor.get_pending_resources(
@@ -73,4 +88,5 @@ class ConsultorResourceRepositoryAdapter:
             config=config,
             limit=limit,
             include_canonical=True,
+            retrieval_profile=self.retrieval_profile,
         )

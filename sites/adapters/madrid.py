@@ -128,6 +128,8 @@ class MadridAdapter(SiteAdapter):
         out["cliente_apellido1"] = out.get("cliente_apellido1", client_name.get("last1"))
         out["cliente_apellido2"] = out.get("cliente_apellido2", client_name.get("last2"))
         out["cliente_razon_social"] = out.get("cliente_razon_social", client_name.get("business"))
+        out["Empresa"] = out.get("Empresa", client_name.get("business"))
+        out["Nombrefiscal"] = out.get("Nombrefiscal", client_name.get("business"))
         out["cliente_email"] = out.get("cliente_email", client_contact.get("email"))
         out["cliente_tel1"] = out.get("cliente_tel1", client_contact.get("phone1"))
         out["cliente_tel2"] = out.get("cliente_tel2", client_contact.get("phone2"))
@@ -670,7 +672,13 @@ class MadridAdapter(SiteAdapter):
                 "notif_name": self._clean_str(r.get("cliente_nombre")).upper(),
                 "notif_surname1": self._clean_str(r.get("cliente_apellido1")).upper(),
                 "notif_surname2": self._clean_str(r.get("cliente_apellido2")).upper(),
-                "notif_razon_social": self._clean_str(r.get("cliente_razon_social")).upper(),
+                "notif_razon_social": self._clean_str(
+                    r.get("cliente_razon_social")
+                    or r.get("Nombrefiscal")
+                    or r.get("Empresa")
+                    or r.get("Nombrejuridico")
+                    or r.get("Nombrecomercial")
+                ).upper(),
                 "notif_pais": get_default_country_es_label(),
                 "notif_provincia": provincia_notif,
                 "notif_municipio": poblacion.upper(),

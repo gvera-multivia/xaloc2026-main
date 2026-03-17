@@ -68,6 +68,39 @@ def _bundle_files_if_needed(
             logging.warning("Compresion Ghostscript fallida para %s (%s): %s", src.name, profile, e)
         return None
 
+    def _compress_pdf_gs_aggressive(src: Path) -> Path | None:
+        """Fallback de ultimo recurso: baja la resolucion a 50 dpi (calidad muy baja)."""
+        gs = _find_gs()
+        if not gs:
+            return None
+        out = src.with_name(f"{src.stem}.lowquality{src.suffix}")
+        cmd = [
+            gs,
+            "-sDEVICE=pdfwrite",
+            "-dCompatibilityLevel=1.4",
+            "-dPDFSETTINGS=/screen",
+            "-dNOPAUSE",
+            "-dQUIET",
+            "-dBATCH",
+            "-dDownsampleColorImages=true",
+            "-dColorImageResolution=50",
+            "-dColorImageDownsampleThreshold=1.0",
+            "-dDownsampleGrayImages=true",
+            "-dGrayImageResolution=50",
+            "-dGrayImageDownsampleThreshold=1.0",
+            "-dDownsampleMonoImages=true",
+            "-dMonoImageResolution=100",
+            f"-sOutputFile={str(out)}",
+            str(src),
+        ]
+        try:
+            subprocess.run(cmd, check=True, capture_output=True)
+            if out.exists() and _is_pdf_file(out):
+                return out
+        except Exception as e:
+            logging.warning("Compresion agresiva Ghostscript fallida para %s: %s", src.name, e)
+        return None
+
     def _first_fit_partition(items: list[Path], *, max_bins: int, capacity_bytes: int) -> list[list[Path]] | None:
         bins: list[tuple[list[Path], int]] = []
         sorted_items = sorted(items, key=lambda p: _size(p), reverse=True)
@@ -113,10 +146,20 @@ def _bundle_files_if_needed(
             )
             prepared.append(compressed)
         else:
-            raise ValueError(
-                f"No se pudo reducir por debajo de 10MB el archivo {p.name} "
-                f"(tamano={_size(p)} bytes)."
-            )
+            aggressive = _compress_pdf_gs_aggressive(p)
+            if aggressive and _size(aggressive) <= BASE_MAX_UPLOAD_BYTES:
+                logging.warning(
+                    "PDF comprimido con calidad muy baja (fallback agresivo): %s (%s -> %s bytes)",
+                    p.name,
+                    _size(p),
+                    _size(aggressive),
+                )
+                prepared.append(aggressive)
+            else:
+                raise ValueError(
+                    f"No se pudo reducir por debajo de 10MB el archivo {p.name} "
+                    f"(tamano={_size(p)} bytes)."
+                )
 
     if len(prepared) <= max_archivos and all(_size(p) <= BASE_MAX_UPLOAD_BYTES for p in prepared):
         return prepared
@@ -174,9 +217,19 @@ def _bundle_files_if_needed(
             )
             normalized_outputs.append(compressed)
         else:
-            raise ValueError(
-                f"Bundle supera 10MB y no se pudo comprimir: {out.name} ({out_size} bytes)"
-            )
+            aggressive = _compress_pdf_gs_aggressive(out)
+            if aggressive and _size(aggressive) <= BASE_MAX_UPLOAD_BYTES:
+                logging.warning(
+                    "Bundle comprimido con calidad muy baja (fallback agresivo): %s (%s -> %s bytes)",
+                    out.name,
+                    out_size,
+                    _size(aggressive),
+                )
+                normalized_outputs.append(aggressive)
+            else:
+                raise ValueError(
+                    f"Bundle supera 10MB y no se pudo comprimir: {out.name} ({out_size} bytes)"
+                )
 
     logging.info(
         "Preparados %s adjuntos para BASE (max=%s, limite=%s bytes): %s",

@@ -44,6 +44,12 @@ def sanitize_filename_component(value: str) -> str:
 
 def call_with_supported_kwargs(fn, **kwargs):
     sig = inspect.signature(fn)
+    accepts_var_kwargs = any(
+        p.kind is inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+    )
+    if accepts_var_kwargs:
+        # Si el callable declara **kwargs, no filtrar claves.
+        return fn(**kwargs)
     supported = {}
     for k, v in kwargs.items():
         if k not in sig.parameters:

@@ -10,6 +10,9 @@ PROVINCE_ALIASES = {
     "coruna": "a coruna",
     "gerona": "girona",
     "lerida": "lleida",
+    "guipuzcoa": "gipuzkoa",
+    "guipuzcua": "gipuzkoa",
+    "gipuzcoa": "gipuzkoa",
     "vizcaya": "bizkaia",
     "vizkaya": "bizkaia",
     "san sebastian": "donostia / san sebastian",
@@ -23,6 +26,9 @@ CITY_ALIASES = {
     "palau solita i plegamas": "palau-solita i plegamans",
     "palau solita i plegamans": "palau-solita i plegamans",
     "palau-solita i plegamas": "palau-solita i plegamans",
+    "hospitalet del llobregat": "hospitalet de llobregat, l'",
+    "hospitalet de llobregat": "hospitalet de llobregat, l'",
+    "puerto de sagunto": "sagunto/sagunt",
 }
 
 # Patrones para variaciones frecuentes no cubiertas por alias exacto.
@@ -30,6 +36,7 @@ CITY_ALIASES = {
 CITY_ALIAS_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"^fornells de la se[vb]a$"), "fornells de la selva"),
     (re.compile(r"^palau[\s-]+solita\s+[iy]\s+plegama(?:s|ns)$"), "palau-solita i plegamans"),
+    (re.compile(r"^(puerto|port)[\s-]+de[\s-]+sagunto$"), "sagunto/sagunt"),
 ]
 
 
@@ -64,6 +71,16 @@ def normalize_city_alias(raw: str | None) -> str:
         candidate = f"{body}, {article}"
         if _normalize_py(body) == "franqueses del valles" and article.lower() == "les":
             candidate = "Franqueses del Valles, Les"
+    else:
+        # 2.b) Articulo apostrofado inicial: "L'Hospitalet ..." -> "Hospitalet ..., L'"
+        m = re.match(r"^\s*(?P<article>l['’])\s*(?P<body>.+?)\s*$", candidate, flags=re.IGNORECASE)
+        if m:
+            body = m.group("body").strip()
+            body_norm = _normalize_py(body)
+            if body_norm in {"hospitalet del llobregat", "hospitalet de llobregat"}:
+                candidate = "Hospitalet de Llobregat, L'"
+            else:
+                candidate = f"{body}, L'"
 
     candidate_norm = _normalize_py(candidate)
 
@@ -107,7 +124,7 @@ def _js_heuristic_core() -> str:
                 .normalize('NFD')
                 .replace(/[\\u0300-\\u036f]/g, '')
                 .toLowerCase()
-                .replace(/[,.;:()/_-]/g, ' ')
+                .replace(/[,'’.;:()/_-]/g, ' ')
                 .replace(/\\s+/g, ' ')
                 .trim()
             if (!value) return ''

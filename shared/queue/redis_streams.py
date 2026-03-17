@@ -81,10 +81,10 @@ class RedisStreamsClient:
         if not messages:
             return None
         message_id, fields = messages[0]
-        normalized = {str(k): str(v) for k, v in (fields or {}).items()}
+        normalized = {self._to_text(k): self._to_text(v) for k, v in (fields or {}).items()}
         return RedisStreamMessage(
-            stream=str(stream_name),
-            message_id=str(message_id),
+            stream=self._to_text(stream_name),
+            message_id=self._to_text(message_id),
             fields=normalized,
         )
 
@@ -126,10 +126,10 @@ class RedisStreamsClient:
             return None
 
         message_id, fields = messages[0]
-        normalized = {str(k): str(v) for k, v in (fields or {}).items()}
+        normalized = {self._to_text(k): self._to_text(v) for k, v in (fields or {}).items()}
         return RedisStreamMessage(
-            stream=str(stream),
-            message_id=str(message_id),
+            stream=self._to_text(stream),
+            message_id=self._to_text(message_id),
             fields=normalized,
         )
 
@@ -138,3 +138,12 @@ class RedisStreamsClient:
 
     async def delete(self, *, stream: str, message_id: str) -> int:
         return int(await self.redis.xdel(stream, message_id) or 0)
+
+    @staticmethod
+    def _to_text(value: Any) -> str:
+        if isinstance(value, bytes):
+            try:
+                return value.decode("utf-8", errors="replace")
+            except Exception:
+                return str(value)
+        return str(value)

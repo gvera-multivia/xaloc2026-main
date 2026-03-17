@@ -19,8 +19,7 @@ logger = logging.getLogger("brain")
 
 
 class BaseOnlineAdapter(SiteAdapter):
-    DEFAULT_REGEX_EXPEDIENTE = r"^(\d{5}-\d{4}[/\-]\d{4,5}-GIM|\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{6,7}|\d-\d{4}[/\-]\d{4,6}-(EXE|ECC))$"
-
+    DEFAULT_REGEX_EXPEDIENTE = r"^\s*(\d{5}-\d{4}[/\-]\d{4,5}-GIM|\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{6,7}|\d-\d{4}[/\-]\d{4,6}-(EXE|ECC))\s*$"
     _P1_SIGLAS = {
         "AG", "AL", "AP", "AR", "AU", "AV", "AY", "BJ", "BO", "BR", "CA", "CG", "CH", "CI", "CJ", "CL", "CM",
         "CN", "CO", "CP", "CR", "CS", "CT", "CU", "DE", "DP", "DS", "ED", "EM", "EN", "ER", "ES", "EX", "FC",
@@ -208,6 +207,8 @@ class BaseOnlineAdapter(SiteAdapter):
         out["cliente_apellido1"] = out.get("cliente_apellido1", client_name.get("last1"))
         out["cliente_apellido2"] = out.get("cliente_apellido2", client_name.get("last2"))
         out["cliente_razon_social"] = out.get("cliente_razon_social", client_name.get("business"))
+        out["Empresa"] = out.get("Empresa", client_name.get("business"))
+        out["Nombrefiscal"] = out.get("Nombrefiscal", client_name.get("business"))
         out["cliente_email"] = out.get("cliente_email", client_contact.get("email"))
         out["cliente_tel1"] = out.get("cliente_tel1", client_contact.get("phone1"))
         out["cliente_tel2"] = out.get("cliente_tel2", client_contact.get("phone2"))
@@ -514,7 +515,13 @@ class BaseOnlineAdapter(SiteAdapter):
                 "cliente_nombre": self._clean_str(r.get("cliente_nombre")),
                 "cliente_apellido1": self._clean_str(r.get("cliente_apellido1")),
                 "cliente_apellido2": self._clean_str(r.get("cliente_apellido2")),
-                "cliente_razon_social": self._clean_str(r.get("cliente_razon_social")),
+                "cliente_razon_social": self._clean_str(
+                    r.get("cliente_razon_social")
+                    or r.get("Nombrefiscal")
+                    or r.get("Empresa")
+                    or r.get("Nombrejuridico")
+                    or r.get("Nombrecomercial")
+                ),
                 **notif_data,
                 **exp_parts,
                 "num_butlleti": expediente_raw,

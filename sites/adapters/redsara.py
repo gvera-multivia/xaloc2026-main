@@ -13,6 +13,7 @@ JEFATURA_REGEX_LIST = [
     r"^\d{2}/\d{9}/\d$",
     r"^\d{12}$",
     r"^\d{11}$",
+    r"^\d{9}$",
     r"^\d{12}-$",
     r"^\d{10}$",
     r"^\d{2}-\d{9}-\d$",
@@ -126,6 +127,7 @@ class RedsaraAdapter(SiteAdapter):
                 r"^\d{4}SACG\d{6}$",
                 r"^I\d{15}$",
                 r"^\d{7}$",
+                r"^U\d{7}$",
             ],
         },
         {
@@ -164,11 +166,14 @@ class RedsaraAdapter(SiteAdapter):
                 "%ISLAS BALEARES, AGENCIA TRIBUTARIA MUNICIPAL%",
                 "%AGENCIA TRIBUTARIA MUNICIPAL DE ISLAS BALEARES%",
                 "%AGENCIA TRIBITARIA ISLAS BALEARES (ATIB)%",
+                "%AYUNTAMIENTO DE PALMA DE MALLORCA%",
+                "%AYUNTAMENT DE PALMA%",
             ],
             "destination_code": "A04013587",
             "regex_list": [
                 r"^\d{3}-\d{2}-\d{6}$",
                 r"^\d{7}MU\d{11}$",
+                r"^MU\d{8}$",
                 r"^\d{12}$",
                 r"^\d{3}-\d{2}-IG-\d{6}$",
                 r"^\d{2}/\d{6}$",
@@ -331,6 +336,8 @@ class RedsaraAdapter(SiteAdapter):
         out["cliente_apellido1"] = out.get("cliente_apellido1", client_name.get("last1"))
         out["cliente_apellido2"] = out.get("cliente_apellido2", client_name.get("last2"))
         out["cliente_razon_social"] = out.get("cliente_razon_social", client_name.get("business"))
+        out["Empresa"] = out.get("Empresa", client_name.get("business"))
+        out["Nombrefiscal"] = out.get("Nombrefiscal", client_name.get("business"))
         out["cliente_email"] = out.get("cliente_email", client_contact.get("email"))
         out["cliente_tel1"] = out.get("cliente_tel1", client_contact.get("phone1"))
         out["cliente_tel2"] = out.get("cliente_tel2", client_contact.get("phone2"))
@@ -534,7 +541,13 @@ class RedsaraAdapter(SiteAdapter):
                 nif = self._normalize_document_id(empresa_doc or cif_doc or nif_persona)
             rid = str(r.get("idRecurso") or "")
             interested_doc_type = "CIF" if is_company else (doc_type_bundle.get(rid) or self._detect_document_type(nif))
-            razon_social = self._clean_str(r.get("cliente_razon_social")).upper()
+            razon_social = self._clean_str(
+                r.get("cliente_razon_social")
+                or r.get("Nombrefiscal")
+                or r.get("Empresa")
+                or r.get("Nombrejuridico")
+                or r.get("Nombrecomercial")
+            ).upper()
             name = self._clean_str(r.get("SujetoRecurso") or r.get("cliente_nombre")).upper()
             surname1 = self._clean_str(r.get("cliente_apellido1")).upper()
             surname2 = self._clean_str(r.get("cliente_apellido2")).upper()
@@ -568,6 +581,8 @@ class RedsaraAdapter(SiteAdapter):
                 "user_phone": phone,
                 "user_email": email,
                 "interested_doc_type": interested_doc_type,
+                "empresa": razon_social,
+                "cliente_razon_social": razon_social,
                 "razon_social": razon_social,
                 "interested_razon_social": razon_social,
                 "destination_organism_code": self._clean_str(rule.get("destination_code")),

@@ -30,6 +30,7 @@ latest_file="${XALOC_AFIRMA_URI_LATEST:-/tmp/xaloc_afirma_uri.latest}"
 proxy_pid_file="${XALOC_AFIRMA_PROXY_PID:-/tmp/xaloc_afirma_proxy.pid}"
 proxy_ready_file="${XALOC_AFIRMA_PROXY_READY:-/tmp/xaloc_afirma_proxy.ready}"
 python_bin="${XALOC_PYTHON_BIN:-/opt/venv/bin/python3}"
+cert_path="${PLAYWRIGHT_CERT_PATH:-/data/certificates/certificate.pfx}"
 
 # Buscar autofirma_proxy.py en múltiples rutas candidatas.
 # El override explícito tiene prioridad; si no, se prueban las rutas conocidas.
@@ -46,6 +47,16 @@ _find_proxy_script() {
   return 1
 }
 proxy_script="$(_find_proxy_script || true)"
+
+_uri_lc="$(printf '%s' "$uri" | tr '[:upper:]' '[:lower:]')"
+_is_websocket_mode=0
+_is_sign_mode=0
+if [[ "$_uri_lc" == *"://websocket?"* ]] || [[ "$_uri_lc" == *"ports="* ]]; then
+  _is_websocket_mode=1
+fi
+if [[ "$_uri_lc" == *"://sign?"* ]] || [[ "$_uri_lc" == *"rtservlet="* ]]; then
+  _is_sign_mode=1
+fi
 
 # ── 1. Guardar URI (compatibilidad con código existente) ─────────────────────
 if [[ -n "$uri" ]]; then
@@ -67,7 +78,127 @@ if [[ -f "$proxy_pid_file" ]]; then
 fi
 rm -f "$proxy_ready_file"
 
-# ── 3. Verificar que el script proxy existe ───────────────────────────────────
+# ── 3. Enrutado por modo de URI ──────────────────────────────────────────────
+# websocket?ports=...  -> proxy WS (modo Redsara clásico)
+# sign?...rtservlet=... -> AutoFirma protocolo nativo (modo FIRe/Valencia)
+if [[ "$_is_sign_mode" -eq 1 && "$_is_websocket_mode" -eq 0 ]]; then
+  capture_only="${XALOC_AFIRMA_SIGN_CAPTURE_ONLY:-0}"
+  [[ -f /tmp/xaloc_afirma_sign_capture_only.flag ]] && capture_only=1
+  bridge_mode="${XALOC_AFIRMA_SIGN_BRIDGE_MODE:-1}"
+  bridge_fallback_native="${XALOC_AFIRMA_SIGN_BRIDGE_FALLBACK_NATIVE:-0}"
+  bridge_script="${XALOC_AFIRMA_SIGN_BRIDGE_SCRIPT:-/app/infra/docker/afirma_sign_bridge.py}"
+  bridge_timeout="${XALOC_AFIRMA_SIGN_BRIDGE_TIMEOUT_SEC:-90}"
+  # Forense de protocolo FIRe sign/rtservlet para poder emular get->sign->put sin GUI.
+  probe_enabled="${XALOC_AFIRMA_SIGN_PROBE_ACTIVE:-0}"
+  [[ -f /tmp/xaloc_afirma_sign_probe_active.flag ]] && probe_enabled=1
+  if [[ "${probe_enabled,,}" == "1" || "${probe_enabled,,}" == "true" || "${probe_enabled,,}" == "yes" || "${probe_enabled,,}" == "on" ]]; then
+    if [[ -x "$python_bin" || $(command -v python3 >/dev/null 2>&1; echo $?) -eq 0 ]]; then
+      probe_py="${XALOC_AFIRMA_SIGN_PROBE_SCRIPT:-/app/infra/docker/afirma_sign_probe.py}"
+      if [[ -f "$probe_py" ]]; then
+        if [[ ! -x "$python_bin" ]]; then
+          python_bin="python3"
+        fi
+        nohup "$python_bin" "$probe_py" "$uri" >> /tmp/xaloc_afirma_sign_probe.log 2>&1 &
+        echo "[afirma-handler] Probe sign ACTIVO (XALOC_AFIRMA_SIGN_PROBE_ACTIVE=1)."
+      fi
+    fi
+  else
+    echo "[afirma-handler] Probe sign desactivado para evitar consumir fileid de un solo uso."
+  fi
+
+  if [[ "${capture_only,,}" == "1" || "${capture_only,,}" == "true" || "${capture_only,,}" == "yes" || "${capture_only,,}" == "on" ]]; then
+    echo "[afirma-handler] CAPTURE_ONLY activo: no se lanzara AutoFirma nativo."
+    exit 0
+  fi
+
+  if [[ "${bridge_mode,,}" == "1" || "${bridge_mode,,}" == "true" || "${bridge_mode,,}" == "yes" || "${bridge_mode,,}" == "on" ]]; then
+    py_bin="$python_bin"
+    if [[ ! -x "$py_bin" ]]; then
+      py_bin="python3"
+    fi
+    if command -v "$py_bin" >/dev/null 2>&1 && [[ -f "$bridge_script" ]]; then
+      echo "[afirma-handler] Modo sign/rtservlet detectado. Ejecutando bridge programatico..."
+      if timeout "${bridge_timeout}s" "$py_bin" "$bridge_script" "$uri" >> /tmp/xaloc_afirma_sign_bridge.log 2>&1; then
+        echo "[afirma-handler] Bridge sign completado. No se lanza AutoFirma UI."
+        exit 0
+      else
+        rc=$?
+        echo "[afirma-handler] Bridge sign fallo (rc=$rc)."
+        if [[ "${bridge_fallback_native,,}" != "1" && "${bridge_fallback_native,,}" != "true" && "${bridge_fallback_native,,}" != "yes" && "${bridge_fallback_native,,}" != "on" ]]; then
+          echo "[afirma-handler] Fallback a AutoFirma nativo desactivado. Abortando para evitar UI."
+          exit 1
+        fi
+        echo "[afirma-handler] Fallback a AutoFirma nativo activado."
+      fi
+    else
+      echo "[afirma-handler] Bridge sign no disponible (python/script)."
+      if [[ "${bridge_fallback_native,,}" != "1" && "${bridge_fallback_native,,}" != "true" && "${bridge_fallback_native,,}" != "yes" && "${bridge_fallback_native,,}" != "on" ]]; then
+        echo "[afirma-handler] Fallback a AutoFirma nativo desactivado. Abortando para evitar UI."
+        exit 1
+      fi
+    fi
+  fi
+
+  if ! command -v autofirma >/dev/null 2>&1; then
+    echo "[afirma-handler] ERROR: URI sign detectada pero binario 'autofirma' no disponible."
+    exit 1
+  fi
+  launch_uri="$uri"
+  enrich_mode="${XALOC_AFIRMA_SIGN_URI_ENRICH_MODE:-auto}"
+  if [[ "${enrich_mode,,}" == "auto" || "${enrich_mode,,}" == "1" || "${enrich_mode,,}" == "true" || "${enrich_mode,,}" == "yes" || "${enrich_mode,,}" == "on" ]]; then
+    py_bin="$python_bin"
+    if [[ ! -x "$py_bin" ]]; then
+      py_bin="python3"
+    fi
+    if command -v "$py_bin" >/dev/null 2>&1; then
+      launch_uri="$("$py_bin" - "$uri" "$cert_path" <<'PY'
+import base64
+import sys
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+
+uri = (sys.argv[1] if len(sys.argv) > 1 else "").strip()
+cert_path = (sys.argv[2] if len(sys.argv) > 2 else "").strip()
+if not uri:
+    print(uri)
+    raise SystemExit(0)
+
+work = uri.replace("xalocafirma://", "afirma://")
+base = "http://x/" + work.split("://", 1)[1]
+u = urlparse(base)
+qs = parse_qs(u.query, keep_blank_values=True)
+
+def _set_if_missing(k: str, v: str) -> None:
+    if not qs.get(k):
+        qs[k] = [v]
+
+# Intentar reutilizar ultimo certificado sin reabrir selector.
+_set_if_missing("sticky", "true")
+_set_if_missing("resetsticky", "false")
+
+# Forzar almacen PKCS#12 local para evitar NSS dialog cuando sea posible.
+if cert_path:
+    _set_if_missing("keystore", "pkcs12")
+    _set_if_missing("ksb64", base64.b64encode(cert_path.encode("utf-8")).decode("ascii"))
+
+new_query = urlencode(qs, doseq=True)
+new_url = urlunparse((u.scheme, u.netloc, u.path, u.params, new_query, u.fragment))
+out = new_url.replace("http://x/", "afirma://", 1)
+print(out)
+PY
+      )"
+    fi
+  fi
+
+  echo "[afirma-handler] Modo sign/rtservlet detectado. Lanzando AutoFirma nativo..."
+  if [[ "$launch_uri" != "$uri" ]]; then
+    echo "[afirma-handler] URI enriquecida (sticky/keystore) para minimizar dialogos de certificado."
+  fi
+  nohup autofirma "$launch_uri" >> /tmp/xaloc_afirma_native.log 2>&1 &
+  af_pid=$!
+  echo "[afirma-handler] AutoFirma nativo lanzado PID=$af_pid."
+  exit 0
+fi
+
 if [[ -z "$proxy_script" ]]; then
   echo "[afirma-handler] Aviso: autofirma_proxy.py no encontrado en ninguna ruta candidata."
   echo "[afirma-handler] Funcionando en modo legado (solo URI guardada, sin proxy)."
@@ -85,8 +216,8 @@ if [[ ! -x "$python_bin" ]]; then
   python_bin="python3"
 fi
 
-# ── 4. Lanzar proxy en background ────────────────────────────────────────────
-echo "[afirma-handler] Lanzando autofirma_proxy.py para URI: ${uri:0:80}..."
+# ── 4. Lanzar proxy en background (modo websocket) ──────────────────────────
+echo "[afirma-handler] Modo websocket detectado. Lanzando autofirma_proxy.py para URI: ${uri:0:80}..."
 
 nohup "$python_bin" "$proxy_script" "$uri" \
   >> /tmp/xaloc_afirma_proxy.log 2>&1 &

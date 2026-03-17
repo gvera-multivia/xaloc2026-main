@@ -107,6 +107,10 @@ export const historyApi = {
         api.get<{ items: any[], total: number }>(`/history/successes?${day ? `day=${day}&` : ''}page=${page}&page_size=${pageSize}`),
     getDays: (source = 'all', page = 1, pageSize = 10) =>
         api.get<{ items: any[], total: number }>(`/history/days?source=${source}&page=${page}&page_size=${pageSize}`),
+    getTopUsers: (limit = 500, day?: string) =>
+        api.get<{ items: Array<{ usuario_asignado: string; total_recursos: number }>; total: number; limit: number; day?: string | null; morrigan_total?: number; morrigan_today_total?: number }>(
+            `/history/top-users?limit=${limit}${day ? `&day=${encodeURIComponent(day)}` : ''}`,
+        ),
     resolveClientFolder: (payload: any) =>
         api.post<{ path: string; exists: boolean; fase_procedimiento?: string | null; fase_folder?: string | null; ruta_cliente?: string }>(
             '/client-folder',

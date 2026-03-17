@@ -3,7 +3,7 @@ const { useState, useEffect, useMemo, useRef } = React;
 
 const API_BASE = '/api';
 const PAGE_SIZE_DEFAULT = 25;
-const KNOWN_SITES = ['madrid', 'xaloc_girona', 'base_online', 'ayunta_palma', 'terrassa', 'redsara'];
+const KNOWN_SITES = ['madrid', 'xaloc_girona', 'base_online', 'ayunta_palma', 'terrassa', 'redsara', 'valencia', 'atc'];
 const ROUTE_META = {
   '/': { label: 'Estado General' },
   '/control': { label: 'Panel de Control' },
@@ -159,7 +159,7 @@ function MonitorView({ selectedDay, sharedSearch, setWorkerOnline, setWorkerLabe
   const refresh = async () => {
     try {
       const [queueRes, incidentsRes, markerRes] = await Promise.all([
-        apiFetch(`/queue/current?day=${selectedDay}&page=1&page_size=14`),
+        apiFetch(`/queue/current?page=1&page_size=1000`),
         apiFetch(`/history/incidents?day=${selectedDay}&page=1&page_size=15`),
         apiFetch(`/queue/completion-marker?day=${selectedDay}`),
       ]);

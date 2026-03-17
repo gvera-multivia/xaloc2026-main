@@ -10,10 +10,12 @@ from sites.adapters.base import BaseOnlineAdapter
 from sites.adapters.madrid import MadridAdapter
 from sites.adapters.redsara import RedsaraAdapter
 from sites.adapters.terrassa import TerrassaAdapter
+from sites.adapters.valencia import ValenciaAdapter
 from sites.adapters.xaloc_girona import XalocAdapter
 import sites.adapters.base as base_mod
 import sites.adapters.redsara as redsara_mod
 import sites.adapters.terrassa as terrassa_mod
+import sites.adapters.valencia as valencia_mod
 import core.client_docs_service as client_docs_service_mod
 
 
@@ -305,5 +307,46 @@ def test_xaloc_girona_payload_parity_legacy_vs_consultor(monkeypatch) -> None:
         adapter=adapter,
         site_id="xaloc_girona",
         config={"query_organisme": "%XALOC%"},
+        row=row,
+    )
+
+
+def test_valencia_payload_parity_legacy_vs_consultor(monkeypatch) -> None:
+    adapter = ValenciaAdapter()
+    monkeypatch.setattr(valencia_mod, "get_required_client_documents", _fake_docs_builder)
+    monkeypatch.setattr(valencia_mod, "build_sqlserver_connection_string", lambda: "unused")
+
+    row = {
+        "idRecurso": 3501,
+        "idExp": 4501,
+        "Expedient": "MU 2025 81 10058239  2",
+        "Organisme": "AJUNTAMENT DE VALENCIA",
+        "TExp": 2,
+        "Estado": 0,
+        "numclient": 9501,
+        "SujetoRecurso": "JUAN PEREZ",
+        "FaseProcedimiento": "Denuncia",
+        "UsuarioAsignado": "",
+        "cliente_tipo": 1,
+        "cliente_nif": "12345678Z",
+        "cliente_nif_empresa": "",
+        "cliente_nombre": "JUAN",
+        "cliente_apellido1": "PEREZ",
+        "cliente_apellido2": "LOPEZ",
+        "cliente_razon_social": "",
+        "conduc_nom": "JUAN PEREZ",
+        "conduc_dni": "12345678Z",
+        "conduc_codpost": "46001",
+        "conduc_adr": "CALLE MAYOR 10",
+        "rs_matricula": "1234ABC",
+        "exp_matricula": "",
+        "pub_matricula": "",
+        "adjuntos": [{"id": 26, "filename": "valencia.pdf"}],
+    }
+
+    _assert_site_payload_parity(
+        adapter=adapter,
+        site_id="valencia",
+        config={},
         row=row,
     )

@@ -73,4 +73,6 @@ certificates/*
 .codex/*
 .claude-flow/*
 .swarm/*
-
+logs/*
+*.db
+tmp/*

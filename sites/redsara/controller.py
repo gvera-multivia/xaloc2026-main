@@ -246,6 +246,18 @@ def _normalize_city_for_redsara(raw: str | None) -> str:
         body_norm = " ".join(body_norm.split())
         if body_norm == "franqueses del valles" and article == "LES":
             candidate = "FRANQUESES DEL VALLES, LES"
+    else:
+        # 2.b) Articulo apostrofado: "L'Hospitalet ..." -> "HOSPITALET ..., L'"
+        m = re.match(r"^\s*(?P<article>l['’])\s*(?P<body>.+?)\s*$", candidate, flags=re.IGNORECASE)
+        if m:
+            body = m.group("body").strip()
+            body_norm = unicodedata.normalize("NFD", body.lower())
+            body_norm = "".join(ch for ch in body_norm if unicodedata.category(ch) != "Mn")
+            body_norm = " ".join(body_norm.split())
+            if body_norm in {"hospitalet del llobregat", "hospitalet de llobregat"}:
+                candidate = "HOSPITALET DE LLOBREGAT, L'"
+            else:
+                candidate = f"{body.upper()}, L'"
 
     return candidate
 

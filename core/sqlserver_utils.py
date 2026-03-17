@@ -1,7 +1,7 @@
 """
-Utilidades para conexión a SQL Server.
+Utilidades para conexion a SQL Server.
 
-Centraliza la construcción del connection string para evitar duplicación.
+Centraliza la construccion del connection string para evitar duplicacion.
 """
 
 import os
@@ -57,3 +57,4 @@ def build_sqlserver_connection_string() -> str:
         f"DRIVER={driver};SERVER={server};DATABASE={database};UID={username};PWD={password};"
         f"LoginTimeout={login_timeout}"
     )
+

@@ -24,13 +24,13 @@ from core.client_docs_service import requires_gesdoc_authorization
 from core.address_classifier import classify_addresses_batch_with_ai, classify_address_fallback
 from core.contact_defaults import get_default_contact_email
 from core.repositories import ResourceRepository
-from sites.adapters import MadridAdapter, XalocAdapter, BaseOnlineAdapter, AyuntaPalmaAdapter, RedsaraAdapter
+from sites.adapters import MadridAdapter, XalocAdapter, BaseOnlineAdapter, AyuntaPalmaAdapter, RedsaraAdapter, ValenciaAdapter, AtcAdapter
 from sites.adapters.site_adapter import SiteAdapter
 
 load_dotenv()
 
 SYNC_INTERVAL_SECONDS = int(os.getenv("BRAIN_SYNC_INTERVAL", 500))
-TICK_INTERVAL_SECONDS = int(os.getenv("BRAIN_TICK_SECONDS", 5))
+TICK_INTERVAL_SECONDS = int(os.getenv("BRAIN_TICK_SECONDS", 60))
 MAX_CLAIMS_PER_CYCLE = int(os.getenv("BRAIN_MAX_CLAIMS", 999999))
 ENABLED_SITES_CSV = os.getenv("BRAIN_ENABLED_SITES", "").strip()
 QUEUE_BACKEND = (os.getenv("QUEUE_BACKEND", "redis_streams") or "redis_streams").strip().lower()
@@ -68,7 +68,7 @@ SELECT
     c.Nombre AS cliente_nombre,
     c.Apellido1 AS cliente_apellido1,
     c.Apellido2 AS cliente_apellido2,
-    -- Campo matrÃ­cula desde expedientes
+    -- Campo matri­cula desde expedientes
     e.matricula
 FROM Recursos.RecursosExp rs
 INNER JOIN clientes c ON rs.numclient = c.numerocliente
@@ -148,6 +148,8 @@ class BrainOrchestrator:
             "base_online": BaseOnlineAdapter(),
             "ayunta_palma": AyuntaPalmaAdapter(),
             "redsara": RedsaraAdapter(),
+            "valencia": ValenciaAdapter(),
+            "atc": AtcAdapter(),
         }
 
     def _record_incident_once(
@@ -222,13 +224,13 @@ class BrainOrchestrator:
                 XVIA_PASSWORD,
                 login_url
             )
-            self.logger.info("âœ“ SesiÃ³n XVIA autenticada correctamente")
+            self.logger.info("âœ“ Sesión XVIA autenticada correctamente")
 
             self.authenticated_user = await self.get_authenticated_username()
             if self.authenticated_user:
-                self.logger.info(f"âœ“ Usuario autenticado: {self.authenticated_user}")
+                self.logger.info(f"“ Usuario autenticado: {self.authenticated_user}")
             else:
-                self.logger.warning("âš ï¸  No se pudo obtener el nombre del usuario autenticado")
+                self.logger.warning("No se pudo obtener el nombre del usuario autenticado")
 
         except Exception as e:
             await self.session.close()
@@ -547,7 +549,13 @@ class BrainOrchestrator:
                 return "PASAPORTE"
             return "NIF"
 
-        empresa = _clean_str(recurso.get("Empresa") or recurso.get("Nombrefiscal")).upper()
+        empresa = _clean_str(
+            recurso.get("Empresa")
+            or recurso.get("cliente_razon_social")
+            or recurso.get("Nombrefiscal")
+            or recurso.get("Nombrejuridico")
+            or recurso.get("Nombrecomercial")
+        ).upper()
         cif = _normalize_document_id(_clean_str(recurso.get("cif") or recurso.get("nifempresa")))
 
         if empresa or cif:

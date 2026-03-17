@@ -72,6 +72,24 @@ class PgAdminStore:
                 )
                 return cur.fetchone() is not None
 
+    def get_blocked_resource_ids(self, *, site_id: str, resource_ids: list[int]) -> set[int]:
+        ids = sorted({int(x) for x in (resource_ids or [])})
+        if not ids:
+            return set()
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT resource_id
+                    FROM blocked_resources
+                    WHERE site_id = %s
+                      AND resource_id = ANY(%s)
+                    """,
+                    (str(site_id), ids),
+                )
+                rows = cur.fetchall()
+        return {int(row[0]) for row in rows if row and row[0] is not None}
+
     def list_blocked_resources(self, *, site_id: str | None = None) -> list[dict[str, Any]]:
         with self._conn() as conn:
             with conn.cursor() as cur:

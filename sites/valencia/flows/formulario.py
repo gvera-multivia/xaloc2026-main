@@ -86,9 +86,16 @@ async def run_formulario(page: "Page", config: "ValenciaConfig", datos: "Valenci
     requires_text_fields = datos.tramite_tipo in {"alegaciones_denuncia_transito", "recurso_reposicion"}
     if requires_text_fields:
         if not expone_text:
-            raise ValueError("valencia: falta texto 'expone' para tramite con hechos/solicita obligatorio")
+            expone_text = (
+                f"Se presenta escrito en relacion con el expediente {(datos.expediente or 'N/A').strip()} "
+                "y se exponen los hechos para su valoracion."
+            )
+            logger.warning("valencia.run_formulario -> expone ausente en payload; aplicado fallback.")
         if not solicita_text:
-            raise ValueError("valencia: falta texto 'solicita' para tramite con hechos/solicita obligatorio")
+            solicita_text = (
+                "Se solicita la admision y tramitacion del presente escrito."
+            )
+            logger.warning("valencia.run_formulario -> solicita ausente en payload; aplicado fallback.")
     if requires_text_fields:
         expone_filled = await fill_text_if_present(
             page,

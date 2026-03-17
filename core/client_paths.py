@@ -33,14 +33,21 @@ def resolve_client_docs_base_path() -> str:
       carpetas locales como '\\\\SERVER-DOC\\...' dentro del workspace.
     """
     env_value = (os.getenv("CLIENT_DOCS_BASE_PATH") or "").strip()
+    env_windows = (os.getenv("CLIENT_DOCS_BASE_PATH_WINDOWS") or "").strip()
+    env_linux = (os.getenv("CLIENT_DOCS_BASE_PATH_LINUX") or "").strip()
     if env_value:
         if os.name != "nt" and env_value.startswith("\\\\"):
-            return DEFAULT_LINUX_CLIENT_DOCS_PATH
+            return env_linux or DEFAULT_LINUX_CLIENT_DOCS_PATH
+        if os.name == "nt":
+            env_lower = env_value.replace("\\", "/").lower()
+            # En Windows, evitar rutas Linux tipo /mnt/... heredadas de contenedor.
+            if env_lower.startswith("/mnt/") or env_lower.startswith("mnt/"):
+                return env_windows or DEFAULT_WINDOWS_CLIENT_DOCS_PATH
         return env_value
 
     if os.name != "nt":
-        return DEFAULT_LINUX_CLIENT_DOCS_PATH
-    return DEFAULT_WINDOWS_CLIENT_DOCS_PATH
+        return env_linux or DEFAULT_LINUX_CLIENT_DOCS_PATH
+    return env_windows or DEFAULT_WINDOWS_CLIENT_DOCS_PATH
 
 
 def strip_accents(text: str) -> str:

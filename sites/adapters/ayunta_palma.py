@@ -202,6 +202,8 @@ class AyuntaPalmaAdapter(SiteAdapter):
         out["cliente_apellido1"] = out.get("cliente_apellido1", client_name.get("last1"))
         out["cliente_apellido2"] = out.get("cliente_apellido2", client_name.get("last2"))
         out["cliente_razon_social"] = out.get("cliente_razon_social", client_name.get("business"))
+        out["Empresa"] = out.get("Empresa", client_name.get("business"))
+        out["Nombrefiscal"] = out.get("Nombrefiscal", client_name.get("business"))
 
         return out
 
@@ -295,7 +297,13 @@ class AyuntaPalmaAdapter(SiteAdapter):
             tipo_persona = "PersonaJuridica" if es_juridica else "PersonaFisica"
 
             nif_empresa = self._normalize_document_id(self._clean_str(r.get("cliente_nif_empresa")) or self._clean_str(r.get("cif")))
-            razon_social = self._clean_str(r.get("cliente_razon_social")) or sujeto
+            razon_social = self._clean_str(
+                r.get("cliente_razon_social")
+                or r.get("Nombrefiscal")
+                or r.get("Empresa")
+                or r.get("Nombrejuridico")
+                or r.get("Nombrecomercial")
+            ) or sujeto
             doc_fisica = self._normalize_document_id(self._clean_str(r.get("cliente_nif")))
 
             payload = {
@@ -315,7 +323,7 @@ class AyuntaPalmaAdapter(SiteAdapter):
                 "cliente_nombre": self._clean_str(r.get("cliente_nombre")),
                 "cliente_apellido1": self._clean_str(r.get("cliente_apellido1")),
                 "cliente_apellido2": self._clean_str(r.get("cliente_apellido2")),
-                "cliente_razon_social": self._clean_str(r.get("cliente_razon_social")),
+                "cliente_razon_social": razon_social,
                 "nif": doc_fisica or nif_empresa,
                 "name": sujeto,
                 "source": "brain_orchestrator",

@@ -757,6 +757,10 @@ class SQLiteDatabase:
                 fields.append("finished_at = ?")
                 params.append(datetime.now().isoformat())
 
+            if state in {"queued", "processing", "completed"} and error_message is None:
+                fields.append("error_message = NULL")
+                fields.append("error_code = NULL")
+
             if error_code is not None:
                 fields.append("error_code = ?")
                 params.append(error_code)

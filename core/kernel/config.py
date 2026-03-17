@@ -22,7 +22,7 @@ class XviaSettings(BaseSettings):
 
 class BrainSettings(BaseSettings):
     sync_interval: int = Field(default=500, alias="BRAIN_SYNC_INTERVAL")
-    tick_seconds: int = Field(default=5, alias="BRAIN_TICK_SECONDS")
+    tick_seconds: int = Field(default=60, alias="BRAIN_TICK_SECONDS")
     max_claims: int = Field(default=999999, alias="BRAIN_MAX_CLAIMS")
     target_queue_depth: int = Field(default=50, alias="BRAIN_TARGET_QUEUE_DEPTH")
     enabled_sites: str = Field(default="", alias="BRAIN_ENABLED_SITES")

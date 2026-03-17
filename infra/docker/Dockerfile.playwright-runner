@@ -11,7 +11,8 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       python3-venv unixodbc unixodbc-dev freetds-bin tdsodbc gcc g++ ca-certificates libnss3-tools \
       xvfb x11vnc openbox novnc websockify xterm curl \
-      openjdk-17-jre wget unzip xdg-utils desktop-file-utils xdotool && \
+      openjdk-17-jre wget unzip xdg-utils desktop-file-utils xdotool \
+      ghostscript && \
     rm -rf /var/lib/apt/lists/*
 
 # Install AutoFirma CLI for programmatic signing (Linux/Docker)

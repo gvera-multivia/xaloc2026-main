@@ -1,4 +1,5 @@
 import logging
+import os
 import re
 from typing import Optional
 import aiohttp
@@ -134,47 +135,69 @@ async def create_authenticated_session_in_place(
 # --- Gestión de Recursos ---
 
 COMPLETAR_URL = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos/Completado"
+TELEMATICOS_URL = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos"
+
+
+def _is_login_redirect(url: str) -> bool:
+    return "login" in str(url).lower()
+
+
+async def _reauth_xvia_session(session: aiohttp.ClientSession) -> bool:
+    email = (os.getenv("XVIA_EMAIL") or "").strip()
+    password = (os.getenv("XVIA_PASSWORD") or "").strip()
+    if not email or not password:
+        logger.error("Sesion XVIA expirada pero no hay credenciales (XVIA_EMAIL/XVIA_PASSWORD) para re-autenticar.")
+        return False
+    try:
+        await create_authenticated_session_in_place(session, email, password)
+        logger.info("Re-autenticacion XVIA exitosa.")
+        return True
+    except Exception as e:
+        logger.error("Re-autenticacion XVIA fallida: %s", e)
+        return False
+
 
 async def mark_resource_complete(
-    session: aiohttp.ClientSession, 
-    recurso: dict, 
+    session: aiohttp.ClientSession,
+    recurso: dict,
     dry_run: bool = False
 ) -> bool:
-    """
-    Marca un recurso como completado haciendo POST a /Completado.
-    
-    Args:
-        session: Sesión autenticada de aiohttp
-        recurso: Diccionario con los datos del recurso (debe incluir idRecurso, Expedient, SujetoRecurso)
-        dry_run: Si es True, solo simula la acción
-    
-    Returns:
-        True si se marcó correctamente, False en caso contrario
-    """
     id_recurso = recurso.get("idRecurso")
     expediente = recurso.get("Expedient") or recurso.get("expediente") or ""
     sujeto = recurso.get("SujetoRecurso") or recurso.get("sujeto_recurso") or ""
-    
+
     if not id_recurso:
         logger.error("No se puede marcar como completado: falta idRecurso")
         return False
-        
+
     if dry_run:
-        logger.info(f"[DRY-RUN] Marcado como completado simulado para idRecurso={id_recurso}")
+        logger.info("[DRY-RUN] Marcado como completado simulado para idRecurso=%s", id_recurso)
         return True
-    
+
     try:
-        # Obtener token CSRF de la página de recursos
-        async with session.get(
-            "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos"
-        ) as resp:
+        # Obtener token CSRF de la pagina de recursos
+        async with session.get(TELEMATICOS_URL) as resp:
+            final_url = str(resp.url)
             html = await resp.text()
-            csrf_token = extract_csrf_token(html)
-            if not csrf_token:
-                logger.error("No se pudo obtener el token CSRF para completar recurso")
+
+        # Detectar sesion expirada (redireccion a login)
+        if _is_login_redirect(final_url):
+            logger.warning("Sesion XVIA expirada al marcar recurso %s. Re-autenticando...", id_recurso)
+            if not await _reauth_xvia_session(session):
                 return False
-        
-        # Preparar datos del formulario según el HTML real
+            # Reintentar GET tras re-autenticacion
+            async with session.get(TELEMATICOS_URL) as resp:
+                final_url = str(resp.url)
+                html = await resp.text()
+            if _is_login_redirect(final_url):
+                logger.error("Sesion XVIA sigue expirada tras re-autenticacion. recurso=%s", id_recurso)
+                return False
+
+        csrf_token = extract_csrf_token(html)
+        if not csrf_token:
+            logger.error("No se pudo obtener el token CSRF para completar recurso %s", id_recurso)
+            return False
+
         form_data = {
             "_token": csrf_token,
             "recurso_id": str(id_recurso),
@@ -182,19 +205,22 @@ async def mark_resource_complete(
             "numero_exp_rec": expediente,
             "id": str(id_recurso)
         }
-        
-        logger.info(f"📤 Marcando recurso {id_recurso} ({expediente}) como completado en Xvia...")
-        
-        # Hacer POST
+
+        logger.info("Marcando recurso %s (%s) como completado en Xvia...", id_recurso, expediente)
+
         async with session.post(COMPLETAR_URL, data=form_data) as resp:
-            # Xvia suele redirigir (302) tras el éxito
+            post_final_url = str(resp.url)
+            # Si el POST redirige a login, la sesion no es valida
+            if _is_login_redirect(post_final_url):
+                logger.error("POST a /Completado redirigido a login. Sesion invalida para recurso %s.", id_recurso)
+                return False
             if resp.status in (200, 302, 303):
-                logger.info(f"✅ Recurso {id_recurso} marcado como completado con éxito")
+                logger.info("Recurso %s marcado como completado con exito", id_recurso)
                 return True
             else:
-                logger.error(f"❌ POST a /Completado falló con status {resp.status}")
+                logger.error("POST a /Completado fallo con status %s para recurso %s", resp.status, id_recurso)
                 return False
-        
+
     except Exception as e:
-        logger.error(f"❌ Error marcando recurso como completado: {e}")
+        logger.error("Error marcando recurso %s como completado: %s", id_recurso, e)
         return False

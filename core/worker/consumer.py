@@ -61,8 +61,8 @@ async def run_worker_loop():
     enforce_singleton = (os.getenv("WORKER_ENFORCE_SINGLETON") or "1").strip().lower() in {"1", "true", "yes", "on"}
 
     heartbeat_seconds = int_env("WORKER_HEARTBEAT_SECONDS", 5, minimum=1)
-    heartbeat_timeout_seconds = int_env("WORKER_HEARTBEAT_TIMEOUT_SECONDS", 90, minimum=5)
-    reconcile_interval_seconds = int_env("WORKER_RECONCILE_INTERVAL_SECONDS", 20, minimum=5)
+    heartbeat_timeout_seconds = int_env("WORKER_HEARTBEAT_TIMEOUT_SECONDS", 600, minimum=5)
+    reconcile_interval_seconds = int_env("WORKER_RECONCILE_INTERVAL_SECONDS", 60, minimum=5)
     reconcile_batch_size = int_env("WORKER_RECONCILE_BATCH_SIZE", 200, minimum=1)
 
     runtime_state: dict[str, Optional[str]] = {"current_job_id": None}
@@ -193,11 +193,21 @@ async def run_worker_loop():
             try:
                 if not db.is_process_enabled(process_name="worker"):
                     runtime_state["current_job_id"] = None
+                    runtime_status["value"] = "paused"
                     _push_runtime_state_now()
-                    try:
-                        await asyncio.wait_for(shutdown_event.wait(), timeout=2)
-                    except asyncio.TimeoutError:
-                        pass
+                    logger.info("Stop solicitado desde UI: worker pausado (sin tomar nuevos jobs). Esperando reactivacion...")
+                    # Quedarse vivo e inactivo — NO salir del proceso para evitar
+                    # que Docker restart: unless-stopped / autoheal reinicien el contenedor.
+                    while not shutdown_event.is_set():
+                        try:
+                            await asyncio.wait_for(shutdown_event.wait(), timeout=5)
+                        except asyncio.TimeoutError:
+                            pass
+                        if db.is_process_enabled(process_name="worker"):
+                            logger.info("Worker reactivado desde UI. Reanudando procesamiento.")
+                            runtime_status["value"] = "online"
+                            _push_runtime_state_now()
+                            break
                     continue
 
                 # Reservamos con algo de espera, pero checkeando shutdown
@@ -311,11 +321,39 @@ async def run_worker_loop():
                             job.resource_id,
                             outcome.error or "unknown_error",
                         )
+                        non_retry = str(outcome.error or "").strip().startswith("[NON_RETRY]")
                         if outcome.release_without_attempt:
-                            await queue_gateway.release(
-                                job,
-                                reason=outcome.error or "release_without_attempt",
-                            )
+                            if non_retry:
+                                if job.resource_id is not None:
+                                    deselected = await deselect_resource(auth_session, int(job.resource_id))
+                                    base_error = outcome.error or "non_retry"
+                                    db.block_resource(
+                                        site_id=job.site_id,
+                                        resource_id=int(job.resource_id),
+                                        reason=f"Non-retry validation failure. {base_error}",
+                                        source="worker_non_retry_validation",
+                                    )
+                                    realtime_store.record_task_failed_final(
+                                        site_id=job.site_id,
+                                        resource_id=job.resource_id,
+                                        job_id=job.job_id,
+                                        protocol=job.protocol,
+                                        payload=job.payload,
+                                        error_message=f"{base_error} {' Recurso liberado en XVIA.' if deselected else ' No se pudo liberar recurso en XVIA.'}",
+                                        started_at=started_at,
+                                        ended_at=ended_at,
+                                        extra={"xvia_deselected": bool(deselected), "non_retry": True},
+                                    )
+                                await queue_gateway.nack(
+                                    job,
+                                    error=outcome.error or "non_retry_validation",
+                                    retryable=False,
+                                )
+                            else:
+                                await queue_gateway.release(
+                                    job,
+                                    reason=outcome.error or "release_without_attempt",
+                                )
                             current_job_finalized = True
                             realtime_store.record_incident_once(
                                 site_id=job.site_id,

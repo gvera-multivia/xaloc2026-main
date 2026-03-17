@@ -107,6 +107,14 @@ services:
     depends_on:
       auth-rbac-service:
         condition: service_started
+    labels:
+      autoheal: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "ps -ef | grep -q '[u]vicorn services.dashboard_backend.app:app'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   api-gateway:
     build:
@@ -150,6 +158,14 @@ services:
     depends_on:
       dashboard-backend-service:
         condition: service_started
+    labels:
+      autoheal: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:8080/health', timeout=5)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
 
   brain-claim-service:
     build:
@@ -176,6 +192,14 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    labels:
+      autoheal: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "ps -ef | grep -q '[s]ervices.brain_claim.app'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   payload-validator-service:
     build:
@@ -203,6 +227,14 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    labels:
+      autoheal: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "ps -ef | grep -q '[s]ervices.payload_validator.app'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   batcher-dispatcher-service:
     build:
@@ -230,6 +262,14 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    labels:
+      autoheal: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "ps -ef | grep -q '[s]ervices.batcher_dispatcher.app'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   worker-orchestrator-service:
     build:
@@ -299,7 +339,7 @@ services:
       XALOC_CERT_AUTOSELECT_CLI_FALLBACK: "1"
       XALOC_CERT_FILTER_BY_CN: "0"
       PLAYWRIGHT_USE_CLIENT_CERTIFICATES: ${PLAYWRIGHT_USE_CLIENT_CERTIFICATES:-1}
-      PLAYWRIGHT_CLIENT_CERT_ORIGINS: ${PLAYWRIGHT_CLIENT_CERT_ORIGINS:-https://sede.madrid.es,https://servcla.madrid.es,https://servpub.madrid.es,https://www.xalocgirona.cat,https://seu.xalocgirona.cat,https://www.base.cat,https://www.baseonline.cat,https://valid.aoc.cat,https://cert.valid.aoc.cat,https://cas.madrid.es,https://pasarela.clave.gob.es,https://palma.sedipualba.es,https://identificacionssl.sedipualba.es,https://reg.redsara.es}
+      PLAYWRIGHT_CLIENT_CERT_ORIGINS: ${PLAYWRIGHT_CLIENT_CERT_ORIGINS:-https://sede.madrid.es,https://servcla.madrid.es,https://servpub.madrid.es,https://www.xalocgirona.cat,https://seu.xalocgirona.cat,https://www.base.cat,https://www.baseonline.cat,https://valid.aoc.cat,https://cert.valid.aoc.cat,https://autenticaciogicar5.extranet.gencat.cat,https://atc.gencat.cat,https://seu.atc.gencat.cat,https://seu2.atc.gencat.cat,https://cas.madrid.es,https://pasarela.clave.gob.es,https://palma.sedipualba.es,https://identificacionssl.sedipualba.es,https://reg.redsara.es,https://sede.valencia.es}
       PLAYWRIGHT_CERT_PATH: /data/certificates/certificate.pfx
       PLAYWRIGHT_PROFILE_DIR: /app/profiles/worker
       PLAYWRIGHT_NSS_DB_DIR: ${PLAYWRIGHT_NSS_DB_DIR:-/root/.pki/nssdb}
@@ -307,7 +347,7 @@ services:
       PLAYWRIGHT_CERT_REQUIRED: ${PLAYWRIGHT_CERT_REQUIRED:-1}
       PLAYWRIGHT_CERT_PASSWORD: ${PLAYWRIGHT_CERT_PASSWORD:-}
       XALOC_AUTOFIRMA_ORIGIN: ${XALOC_AUTOFIRMA_ORIGIN:-https://palma.sedipualba.es}
-      XALOC_AUTOFIRMA_ALLOWED_ORIGINS: ${XALOC_AUTOFIRMA_ALLOWED_ORIGINS:-https://palma.sedipualba.es,https://identificacionssl.sedipualba.es,https://reg.redsara.es,https://sede.redsara.es}
+      XALOC_AUTOFIRMA_ALLOWED_ORIGINS: ${XALOC_AUTOFIRMA_ALLOWED_ORIGINS:-https://palma.sedipualba.es,https://identificacionssl.sedipualba.es,https://reg.redsara.es,https://sede.redsara.es,https://sede.valencia.es}
       XALOC_AUTOFIRMA_PROTOCOLS: ${XALOC_AUTOFIRMA_PROTOCOLS:-afirma,xalocafirma}
       # El volumen ../../:/app monta el repo en /app, el script está en infra/docker/
       XALOC_AFIRMA_PROXY_SCRIPT: /app/infra/docker/autofirma_proxy.py
@@ -331,6 +371,14 @@ services:
       - "6080:6080"
       - "5900:5900"
       - "9222:9222"
+    labels:
+      autoheal: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:8111/health', timeout=5)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
 
   signing-service:
     build:
@@ -349,6 +397,28 @@ services:
       - ../../certificates:/data/certificates:ro
     ports:
       - "8112:8112"
+    labels:
+      autoheal: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:8112/docs', timeout=5)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  autoheal:
+    image: willfarrell/autoheal:latest
+    container_name: xaloc-autoheal
+    restart: unless-stopped
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+      AUTOHEAL_INTERVAL: 30
+      AUTOHEAL_START_PERIOD: 120
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      playwright-runner-service:
+        condition: service_started
 
   xaloc-proxy:
     image: caddy:alpine

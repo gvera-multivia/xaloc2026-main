@@ -5,6 +5,7 @@ import os
 import json
 import logging
 import sqlite3
+import re
 import zipfile
 from io import BytesIO
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -89,6 +90,8 @@ _frontend_process: asyncio.subprocess.Process | None = None
 _proxy_session: aiohttp.ClientSession | None = None
 _prev_loop_exception_handler = None
 _FRONTEND_LOG_PATH = Path("logs") / "frontend_out.log"
+_RUNNER_LOG_PATH = Path("logs") / "playwright_runner_out.log"
+_ISO_TS_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?)")
 _WS_ACTIVE_CONNECTIONS = 0
 _WS_DEBUG_STATS: dict[str, int] = {
     "accepted": 0,
@@ -271,6 +274,28 @@ def _tail_text_file(path: Path, lines: int) -> list[str]:
         return [ln.rstrip("\n") for ln in all_lines[-safe_lines:]]
     except Exception:
         return []
+
+
+def _line_sort_key(line: str, fallback_idx: int) -> tuple[str, int]:
+    match = _ISO_TS_RE.match(line.strip())
+    if not match:
+        return ("", fallback_idx)
+    return (match.group(1).replace(",", "."), fallback_idx)
+
+
+def _merge_tail_text_files(paths: list[Path], lines: int) -> list[str]:
+    safe_lines = min(max(int(lines), 1), 2000)
+    combined: list[tuple[int, str]] = []
+    idx = 0
+    for path in paths:
+        tail = _tail_text_file(path, safe_lines)
+        for ln in tail:
+            combined.append((idx, ln))
+            idx += 1
+    if not combined:
+        return []
+    combined.sort(key=lambda item: _line_sort_key(item[1], item[0]))
+    return [ln for _, ln in combined[-safe_lines:]]
 
 
 async def _wait_frontend_ready(timeout_seconds: float = 45.0) -> None:
@@ -768,6 +793,15 @@ async def api_history_successes(
     return service.list_history_successes(day=day, page=page, page_size=page_size, user=user)
 
 
+@app.get("/api/history/top-users")
+async def api_history_top_users(
+    limit: int = Query(500, ge=1, le=5000),
+    day: str | None = Query(None),
+    user: dict = Depends(require_user),
+) -> dict:
+    return service.list_history_top_users(limit=limit, day=day, user=user)
+
+
 @app.get("/api/queue/days")
 async def api_queue_days(
     page: int = Query(1, ge=1),
@@ -949,6 +983,7 @@ async def api_logs_process(
     _admin: dict = Depends(require_admin),
 ) -> dict:
     pname = str(process_name or "").strip().lower()
+    safe_lines = min(max(int(lines), 1), 2000)
     if pname == "frontend":
         status = "stopped"
         if _frontend_process and _frontend_process.returncode is None:
@@ -958,12 +993,20 @@ async def api_logs_process(
         return {
             "name": "frontend",
             "status": status,
-            "lines": min(max(int(lines), 1), 2000),
-            "stdout": _tail_text_file(_FRONTEND_LOG_PATH, lines),
+            "lines": safe_lines,
+            "stdout": _tail_text_file(_FRONTEND_LOG_PATH, safe_lines),
+            "stderr": [],
+        }
+    if pname == "worker":
+        return {
+            "name": "worker",
+            "status": process_manager.get_status("worker"),
+            "lines": safe_lines,
+            "stdout": _merge_tail_text_files([Path("logs") / "worker_out.log", _RUNNER_LOG_PATH], safe_lines),
             "stderr": [],
         }
     try:
-        return process_manager.get_logs(pname, lines=lines)
+        return process_manager.get_logs(pname, lines=safe_lines)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

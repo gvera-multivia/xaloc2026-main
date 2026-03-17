@@ -386,6 +386,116 @@ class DashboardService:
             user_candidates=user_candidates,
         )
 
+    def list_history_top_users(
+        self,
+        *,
+        limit: int = 500,
+        day: str | None = None,
+        user: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        safe_limit = max(1, min(int(limit), 5000))
+        day_value = (day or "").strip() or None
+        user_candidates = self._history_user_candidates(user)
+        if hasattr(self.success_history_repo, "list_top_users"):
+            items = self.success_history_repo.list_top_users(limit=safe_limit, day=day_value)
+        else:
+            items = []
+
+        # SQL Server fallback: if global query returns empty, rebuild ranking by
+        # aggregating each historical day (day queries are usually stable).
+        if (
+            not day_value
+            and not items
+            and isinstance(self.success_history_repo, SQLServerHistoryRepository)
+            and hasattr(self.success_history_repo, "list_days")
+        ):
+            try:
+                per_user_totals: dict[str, int] = {}
+                days = self.success_history_repo.list_days(source="success")
+                for d in days:
+                    day_items = self.success_history_repo.list_top_users(limit=5000, day=d)
+                    for row in day_items:
+                        user_name = str(row.get("usuario_asignado") or "").strip()
+                        if not user_name:
+                            continue
+                        per_user_totals[user_name] = per_user_totals.get(user_name, 0) + int(
+                            row.get("total_recursos") or 0
+                        )
+                items = [
+                    {"usuario_asignado": user_name, "total_recursos": total}
+                    for user_name, total in per_user_totals.items()
+                ]
+                items.sort(key=lambda r: (-int(r.get("total_recursos") or 0), str(r.get("usuario_asignado") or "")))
+                items = items[:safe_limit]
+            except Exception as exc:
+                self.logger.warning("Fallback de top global por dias fallo: %s", exc)
+
+        # MORRIGAN = total real mostrado en Historial (mismas reglas/filtros del listado de success).
+        morrigan_total = 0
+        try:
+            if day_value:
+                if isinstance(self.success_history_repo, SQLServerHistoryRepository):
+                    one_day = self.success_history_repo.list_successes(day=day_value, page=1, page_size=1)
+                else:
+                    one_day = self.success_history_repo.list_successes(
+                        day=day_value,
+                        page=1,
+                        page_size=1,
+                        user_candidates=user_candidates,
+                    )
+                morrigan_total = int(one_day.get("total") or 0)
+            else:
+                if isinstance(self.success_history_repo, SQLServerHistoryRepository):
+                    success_days = self.success_history_repo.list_days(source="success")
+                else:
+                    success_days = self.success_history_repo.list_days(
+                        source="success",
+                        user_candidates=user_candidates,
+                    )
+                for one_day in success_days:
+                    if isinstance(self.success_history_repo, SQLServerHistoryRepository):
+                        day_result = self.success_history_repo.list_successes(day=one_day, page=1, page_size=1)
+                    else:
+                        day_result = self.success_history_repo.list_successes(
+                            day=one_day,
+                            page=1,
+                            page_size=1,
+                            user_candidates=user_candidates,
+                        )
+                    morrigan_total += int(day_result.get("total") or 0)
+        except Exception as exc:
+            self.logger.warning("No se pudo calcular morrigan_total desde historial: %s", exc)
+            morrigan_total = 0
+
+        if morrigan_total <= 0 and items:
+            morrigan_total = int(sum(int(it.get("total_recursos") or 0) for it in items))
+
+        morrigan_today_total = 0
+        try:
+            today_value = utc_today_iso()
+            if isinstance(self.success_history_repo, SQLServerHistoryRepository):
+                today_result = self.success_history_repo.list_successes(day=today_value, page=1, page_size=1)
+            else:
+                today_result = self.success_history_repo.list_successes(
+                    day=today_value,
+                    page=1,
+                    page_size=1,
+                    user_candidates=user_candidates,
+                )
+            morrigan_today_total = int(today_result.get("total") or 0)
+        except Exception as exc:
+            self.logger.warning("No se pudo calcular morrigan_today_total desde historial: %s", exc)
+            morrigan_today_total = 0
+
+        return {
+            "items": items,
+            "total": len(items),
+            "limit": safe_limit,
+            "day": day_value,
+            "morrigan_total": morrigan_total,
+            "morrigan_today_total": morrigan_today_total,
+        }
+
     def list_queue_days(self, *, page: int, page_size: int) -> dict[str, Any]:
         days = self.queue_repo.list_days()
         return self._paginate(days, page, page_size)

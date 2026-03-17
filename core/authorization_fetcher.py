@@ -10,6 +10,7 @@ import glob
 import shutil
 import logging
 import pyodbc
+import re
 from pathlib import Path
 from typing import Optional, Literal, List
 from datetime import datetime
@@ -23,6 +24,20 @@ TMP_PDF_SEDES_PATH = Path(r"\\server-doc\tmp_pdf\SEDES")
 # Rutas base de documentación
 DOCS_BASE_PATH = Path(r"\\SERVER-DOC\Documentacion")
 DOCS_RECURSOS_BASE_PATH = Path(r"\\SERVER-DOC\Documentacion recursos")
+_AUTH_TS_RE = re.compile(r"(?:^|_)(\d{14})(?:_|$)")
+
+
+def _extract_authorization_timestamp(file_name: str) -> Optional[datetime]:
+    """
+    Extrae timestamp YYYYMMDDHHMMSS del nombre del archivo de autorización.
+    """
+    match = _AUTH_TS_RE.search(file_name)
+    if not match:
+        return None
+    try:
+        return datetime.strptime(match.group(1), "%Y%m%d%H%M%S")
+    except ValueError:
+        return None
 
 
 def get_client_info_from_db(numclient: int, conn_str: str) -> dict:
@@ -30,22 +45,20 @@ def get_client_info_from_db(numclient: int, conn_str: str) -> dict:
     Obtiene información completa del cliente desde SQL Server.
     """
     try:
-        conn = pyodbc.connect(conn_str)
-        cursor = conn.cursor()
-        # Usamos la tabla 'clientes' y la columna 'numerocliente' tal como se ve en el resto del proyecto
-        query = """
-            SELECT Nombrefiscal, Nombre, Apellido1, Apellido2 
-            FROM clientes 
-            WHERE numerocliente = ?
-        """
-        cursor.execute(query, (numclient,))
-        row = cursor.fetchone()
-        conn.close()
-        
-        if row:
-            columns = [c[0] for c in cursor.description]
-            return dict(zip(columns, row))
-        
+        with pyodbc.connect(conn_str, autocommit=True) as conn:
+            with conn.cursor() as cursor:
+                # Usamos la tabla 'clientes' y la columna 'numerocliente' tal como se ve en el resto del proyecto
+                query = """
+                    SELECT Nombrefiscal, Nombre, Apellido1, Apellido2 
+                    FROM clientes 
+                    WHERE numerocliente = ?
+                """
+                cursor.execute(query, (numclient,))
+                row = cursor.fetchone()
+                if row:
+                    columns = [c[0] for c in cursor.description]
+                    return dict(zip(columns, row))
+
         return {}
     except Exception as e:
         logger.error(f"Error consultando datos del cliente {numclient}: {e}")
@@ -76,7 +89,8 @@ def find_authorization_in_tmp(
     
     Busca archivos que coincidan con el patrón:
     - Particular: Autoriza_Particular_*_{numclient}.pdf en \\server-doc\tmp_pdf
-    - Empresa: Autoriza_Empresa_solo_*_{numclient}.pdf en \\server-doc\tmp_pdf\SEDES
+    - Empresa: Autoriza_Empresa_*_{numclient}.pdf y Autoriza_Empresa_solo_*_{numclient}.pdf
+      en \\server-doc\tmp_pdf\SEDES
     """
     patterns = []
     if client_type == "particular" or client_type is None:
@@ -84,8 +98,9 @@ def find_authorization_in_tmp(
     
     if client_type == "empresa" or client_type is None:
         patterns.append((TMP_PDF_SEDES_PATH, f"Autoriza_Empresa_solo_*_{numclient}.pdf"))
+        patterns.append((TMP_PDF_SEDES_PATH, f"Autoriza_Empresa_*_{numclient}.pdf"))
 
-    found_files = []
+    found_files: list[Path] = []
     for base_path, pattern in patterns:
         if not base_path.exists():
             logger.warning(f"Ruta temporal no accesible: {base_path}")
@@ -95,11 +110,20 @@ def find_authorization_in_tmp(
         if matches:
             found_files.extend(matches)
 
+    # Evitar duplicados cuando varios patrones capturan el mismo fichero.
+    found_files = list(dict.fromkeys(found_files))
+
     if not found_files:
         return None
 
-    # Si hay varios, devolver el más reciente por fecha de modificación
-    found_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+    # Si hay varios, devolver el más reciente por timestamp del nombre (YYYYMMDDHHMMSS).
+    # Fallback: fecha de modificación del fichero.
+    def _sort_key(file_path: Path) -> tuple:
+        ts = _extract_authorization_timestamp(file_path.stem)
+        mtime = file_path.stat().st_mtime
+        return (ts is not None, ts or datetime.min, mtime)
+
+    found_files.sort(key=_sort_key, reverse=True)
     if len(found_files) > 1:
         logger.warning(f"Múltiples autorizaciones encontradas para {numclient}, usando la más reciente")
     

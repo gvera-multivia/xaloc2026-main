@@ -27,6 +27,8 @@ def normalize_resource_row(*, site_id: str, row: dict[str, Any]) -> CanonicalRes
         "id": raw.get("idRecurso"),
         "exp_id": raw.get("idExp"),
         "expedient": _clean(raw.get("Expedient")),
+        "procedure": _clean(raw.get("Procedim")),
+        "publication_csv": _first_non_empty(raw.get("ExpedientePublicacion"), raw.get("pub_publicacion")),
         "organism": _clean(raw.get("Organisme")),
         "texp": raw.get("TExp"),
         "state": raw.get("Estado"),

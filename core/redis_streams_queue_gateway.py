@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import logging
 import os
@@ -26,6 +27,39 @@ def _to_int_like(value: Any) -> Optional[int]:
     except Exception:
         pass
     return None
+
+
+def _safe_json_dict(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, bytes):
+        try:
+            value = value.decode("utf-8", errors="replace")
+        except Exception:
+            value = str(value)
+    text = str(value).strip()
+    if not text:
+        return {}
+    if text.startswith("b'") and text.endswith("'"):
+        text = text[2:-1]
+    elif text.startswith('b"') and text.endswith('"'):
+        text = text[2:-1]
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+    # Compatibilidad defensiva con productores legacy que escriban repr(dict).
+    try:
+        parsed = ast.literal_eval(text)
+        if isinstance(parsed, dict):
+            return dict(parsed)
+    except Exception:
+        pass
+    return {}
 
 
 class RedisStreamsQueueGateway(QueueGateway):
@@ -159,11 +193,7 @@ class RedisStreamsQueueGateway(QueueGateway):
             site_id = str(fields.get("site_id") or "").strip()
             protocol = str(fields.get("protocol") or "").strip() or None
 
-            payload_raw = fields.get("payload") or "{}"
-            try:
-                payload = json.loads(payload_raw)
-            except Exception:
-                payload = {}
+            payload = _safe_json_dict(fields.get("payload"))
             payload["job_id"] = job_id
 
             resource_id = _to_int_like(fields.get("resource_id"))
@@ -171,6 +201,14 @@ class RedisStreamsQueueGateway(QueueGateway):
                 resource_id = _to_int_like(payload.get("idRecurso"))
             if resource_id is None:
                 resource_id = _to_int_like(payload.get("external_resource_id"))
+            if not payload or len(payload.keys()) <= 1:
+                self.logger.warning(
+                    "reserve detecto payload vacio/minimo: job_id=%s site_id=%s resource_id=%s payload_field_sample=%s",
+                    job_id,
+                    site_id,
+                    resource_id,
+                    str(fields.get("payload") or "")[:180],
+                )
             if resource_id is not None and payload.get("idRecurso") in (None, ""):
                 payload["idRecurso"] = resource_id
 

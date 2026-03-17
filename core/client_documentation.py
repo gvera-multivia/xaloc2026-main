@@ -23,6 +23,7 @@ from core.client_paths import (
     get_ruta_cliente_documentacion,
     resolve_client_docs_base_path,
 )
+from core.sqlserver_utils import build_sqlserver_connection_string
 
 logger = logging.getLogger(__name__)
 
@@ -45,30 +46,60 @@ def client_identity_from_payload(payload: dict) -> ClientIdentity:
     """Extrae la identidad del cliente del payload."""
     sujeto_recurso = ((payload.get("sujeto_recurso") or payload.get("SujetoRecurso") or payload.get("name") or "")).strip() or None
 
+    def _to_cliente_tipo(value: object) -> int | None:
+        try:
+            if value is None:
+                return None
+            return int(str(value).strip())
+        except Exception:
+            return None
+
+    cliente_tipo = _to_cliente_tipo(payload.get("cliente_tipo") or payload.get("tipodecliente"))
+
     mandatario = payload.get("mandatario") or {}
     if isinstance(mandatario, dict) and (mandatario.get("tipo_persona") or "").strip():
         tipo = str(mandatario.get("tipo_persona")).strip().upper()
         if tipo == "JURIDICA":
             empresa = (mandatario.get("razon_social") or "").strip()
-            if not empresa:
-                raise RequiredClientDocumentsError("Falta razón social para persona JURÍDICA.")
-            return ClientIdentity(is_company=True, sujeto_recurso=sujeto_recurso, empresa=empresa)
+            if empresa:
+                return ClientIdentity(is_company=True, sujeto_recurso=sujeto_recurso, empresa=empresa)
         if tipo == "FISICA":
             nombre = (mandatario.get("nombre") or "").strip()
             ap1 = (mandatario.get("apellido1") or "").strip()
             ap2 = (mandatario.get("apellido2") or "").strip()
-            if not (nombre and ap1):
-                raise RequiredClientDocumentsError("Faltan datos completos para persona FÍSICA.")
-            return ClientIdentity(is_company=False, sujeto_recurso=sujeto_recurso,
-                                  nombre=nombre, apellido1=ap1, apellido2=ap2 or "")
+            if nombre and ap1:
+                return ClientIdentity(is_company=False, sujeto_recurso=sujeto_recurso,
+                                      nombre=nombre, apellido1=ap1, apellido2=ap2 or "")
 
-    empresa = (payload.get("empresa") or payload.get("razon_social") or payload.get("notif_razon_social") or payload.get("cliente_razon_social") or "").strip()
-    if empresa:
-        return ClientIdentity(is_company=True, sujeto_recurso=sujeto_recurso, empresa=empresa)
+    empresa = (
+        payload.get("empresa")
+        or payload.get("razon_social")
+        or payload.get("notif_razon_social")
+        or payload.get("cliente_razon_social")
+        or payload.get("Nombrefiscal")
+        or payload.get("Nombrejuridico")
+        or payload.get("Nombrecomercial")
+        or ""
+    ).strip()
+
+    if cliente_tipo == 2:
+        if empresa:
+            return ClientIdentity(is_company=True, sujeto_recurso=sujeto_recurso, empresa=empresa)
+        raise RequiredClientDocumentsError("Falta razón social para persona JURÍDICA.")
 
     nombre = (payload.get("cliente_nombre") or payload.get("notif_name") or "").strip()
     ap1 = (payload.get("cliente_apellido1") or payload.get("apellido1") or payload.get("notif_surname1") or "").strip()
     ap2 = (payload.get("cliente_apellido2") or payload.get("apellido2") or payload.get("notif_surname2") or "").strip()
+
+    if empresa:
+        return ClientIdentity(is_company=True, sujeto_recurso=sujeto_recurso, empresa=empresa)
+
+    if cliente_tipo == 1:
+        if nombre and ap1:
+            return ClientIdentity(is_company=False, sujeto_recurso=sujeto_recurso,
+                                   nombre=nombre, apellido1=ap1, apellido2=ap2 or "")
+        raise RequiredClientDocumentsError("Faltan datos completos para persona FÍSICA.")
+
     if nombre and ap1:
         return ClientIdentity(is_company=False, sujeto_recurso=sujeto_recurso,
                                nombre=nombre, apellido1=ap1, apellido2=ap2 or "")
@@ -211,6 +242,30 @@ def _calculate_file_score(path: Path, categories_found: list[str]) -> int:
 
     return score
 
+
+def _normalize_aut_signature_name(path: Path) -> str:
+    """
+    Normaliza nombres de autorizaciones para detectar duplicados solo por fecha/lote.
+    Ej: Autoriza_Empresa_20241125141357_39699.pdf -> autoriza_empresa
+    """
+    stem = path.stem.lower()
+    stem = re.sub(r"_20\d{12}(?:[_-]\d+)?$", "", stem)
+    stem = re.sub(r"[-_\s]+", "_", stem).strip("_")
+    return stem or path.stem.lower()
+
+
+def _extract_aut_timestamp(path: Path) -> int:
+    """
+    Extrae timestamp embebido (YYYYMMDDHHMMSS) para priorizar AUT mas reciente.
+    """
+    m = re.search(r"(20\d{12})", path.stem)
+    if not m:
+        return 0
+    try:
+        return int(m.group(1))
+    except Exception:
+        return 0
+
 def select_required_client_documents(
     *,
     ruta_docu: Path,
@@ -272,6 +327,20 @@ def select_required_client_documents(
             missing.append(cat)
             continue
 
+        if cat == "AUT" and len(cands) > 1:
+            # Dedup de autorizaciones equivalentes (mismo nombre base, distinta fecha/lote).
+            grouped = defaultdict(list)
+            for c in cands:
+                grouped[_normalize_aut_signature_name(c["path"])].append(c)
+            deduped = []
+            for items in grouped.values():
+                items.sort(
+                    key=lambda x: (x["score"], _extract_aut_timestamp(x["path"])),
+                    reverse=True,
+                )
+                deduped.append(items[0])
+            cands = deduped
+
         cands.sort(key=lambda x: x["score"], reverse=True)
 
         if cat == "AUT" and len(cands) > 1:
@@ -324,7 +393,8 @@ async def build_required_client_documents_for_payload(
     gesdoc_user: Optional[str] = None,
     gesdoc_pwd: Optional[str] = None,
     sqlserver_conn_str: Optional[str] = None,
-    **kwargs
+    output_label: str | None = None,
+    **selection_kwargs
 ) -> list[Path]:
     """
     Construye la lista de documentos requeridos del cliente.
@@ -356,6 +426,8 @@ async def build_required_client_documents_for_payload(
         # No se puede determinar identidad sin revisar rutas -> no usar GESDOC a?n
         raise identity_error or RequiredClientDocumentsError("No se pudo inferir la identidad del cliente.")
     
+    resolved_output_label = str(output_label or payload.get("idRecurso", "client"))
+
     # Intentar seleccionar documentos
     base_path = resolve_client_docs_base_path()
     ruta = get_ruta_cliente_documentacion(client, base_path=base_path)
@@ -364,8 +436,8 @@ async def build_required_client_documents_for_payload(
         selected = select_required_client_documents(
             ruta_docu=ruta,
             is_company=client.is_company,
-            output_label=str(payload.get("idRecurso", "client")),
-            **kwargs,
+            output_label=resolved_output_label,
+            **selection_kwargs,
         )
         return selected.files_to_upload
     except RequiredClientDocumentsError as e:
@@ -400,8 +472,8 @@ async def build_required_client_documents_for_payload(
             selected = select_required_client_documents(
                 ruta_docu=ruta,
                 is_company=client.is_company,
-                output_label=str(payload.get("idRecurso", "client")),
-                **kwargs,
+                output_label=resolved_output_label,
+                **selection_kwargs,
             )
             return selected.files_to_upload
         else:
@@ -569,9 +641,28 @@ def check_requires_gesdoc(payload: dict, base_path: str | None = None) -> tuple[
     # 1. Intentar obtener identidad del cliente
     try:
         client = client_identity_from_payload(payload)
-    except RequiredClientDocumentsError as e:
-        # No se puede determinar identidad → requiere GESDOC
-        return (True, f"No se pudo inferir identidad del cliente: {e}")
+    except RequiredClientDocumentsError as payload_err:
+        client = None
+        numclient = payload.get("numclient")
+        try:
+            numclient_int = int(numclient) if numclient is not None else None
+        except Exception:
+            numclient_int = None
+
+        if numclient_int is not None:
+            try:
+                conn_str = build_sqlserver_connection_string()
+                client = client_identity_from_db(
+                    numclient_int,
+                    conn_str,
+                    sujeto_recurso=payload.get("sujeto_recurso") or payload.get("SujetoRecurso"),
+                )
+            except Exception:
+                client = None
+
+        if client is None:
+            # No se puede determinar identidad ni por payload ni por DB → requiere GESDOC
+            return (True, f"No se pudo inferir identidad del cliente: {payload_err}")
     
     # 2. Obtener ruta de documentación
     try:

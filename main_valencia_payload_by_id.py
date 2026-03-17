@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import pyodbc
+import sys
 
 from core.client_documentation import build_required_client_documents_for_payload
 from core.client_paths import ClientIdentity, get_ruta_cliente_documentacion
@@ -359,7 +360,7 @@ async def run_flow(payload: dict[str, Any]) -> dict[str, Any]:
     controller = ValenciaController()
     headless = os.getenv("XALOC_HEADLESS") == "1"
     config = controller.create_config(headless=headless)
-    config.navegador.perfil_path = Path("profiles/worker").absolute()
+    config.navegador.perfil_path = Path("profiles/valencia_worker").absolute()
 
     mapped = controller.map_data(payload)
     mapped["archivos"] = files
@@ -435,6 +436,8 @@ def main() -> None:
         fh = logging.FileHandler(log_path, encoding="utf-8")
         fh.setFormatter(formatter)
         logger.addHandler(fh)
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     logger.setLevel(logging.INFO)
     logger.propagate = False
 

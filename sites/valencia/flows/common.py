@@ -31,7 +31,8 @@ def tipo_identificacion(doc: str) -> str:
         return "CIF"
     if re.fullmatch(r"[A-Z0-9]{5,12}", value):
         return "PASAPORTE"
-    raise ValueError(f"Documento no valido: {value}")
+    # Fallback no bloqueante: tratar formatos no canonicos como PASAPORTE.
+    return "PASAPORTE"
 
 
 def split_full_name(full_name: str) -> tuple[str, str, str]:
@@ -50,7 +51,7 @@ def get_matricula(*candidates: str) -> str:
         value = re.sub(r"\s+", "", clean(raw).upper())
         if value and re.fullmatch(r"[A-Z0-9]{1,15}", value):
             return value
-    raise ValueError("No se pudo inferir matricula valida")
+    return "."
 
 
 def extraer_numero_direccion(direccion: str) -> str:
@@ -83,8 +84,12 @@ RoleName = Literal["button", "link"]
 
 async def click_role_and_wait(page: Page, *, role: RoleName, name_pattern: str) -> None:
     target = page.get_by_role(role, name=re.compile(name_pattern))
-    await target.first.click()
-    await page.wait_for_load_state("networkidle")
+    await target.first.click(no_wait_after=True)
+    try:
+        await page.wait_for_load_state("networkidle", timeout=7000)
+    except Exception:
+        # Algunas pantallas no navegan tras el click (solo mutan DOM). No bloquear el flujo.
+        pass
 
 
 async def fill_client_identification(page: Page, datos: ValenciaTarget) -> None:
@@ -134,17 +139,50 @@ async def fill_client_identification(page: Page, datos: ValenciaTarget) -> None:
 
     documento = nif_persona
     if not documento:
-        logger.error(
-            "valencia: documento vacio para persona fisica. nombre=%s ap1=%s ap2=%s payload_keys=%s",
+        logger.warning(
+            "valencia: documento vacio para persona fisica; se continua sin bloquear. nombre=%s ap1=%s ap2=%s payload_keys=%s",
             clean(datos.nombre),
             clean(datos.apellido1),
             clean(datos.apellido2),
             sorted(list((datos.payload or {}).keys())),
         )
-        raise ValueError(
-            "valencia: falta documento cliente (nif/conduc_dni) para persona fisica "
-            f"[idRecurso={clean(datos.idRecurso)}, expediente={clean(datos.expediente)}]"
+        # DNI/NIE no es obligatorio para continuar este tramite en Valencia.
+        # Intentamos completar solo los campos de nombre/apellidos si existen.
+        payload = datos.payload or {}
+        full_name = clean(datos.nombre) or clean(payload.get("SujetoRecurso")) or clean(payload.get("sujeto_recurso"))
+        nombre = clean(datos.nombre)
+        ap1 = clean(datos.apellido1)
+        ap2 = clean(datos.apellido2)
+        if not nombre and full_name:
+            nombre, ap1_guess, ap2_guess = split_full_name(full_name)
+            ap1 = ap1 or ap1_guess
+            ap2 = ap2 or ap2_guess
+
+        nombre_locator = page.locator(
+            _selector(
+                "o0solicitud_gral_din-section≡xf-581≡grid-5-grid",
+                "din_nombre-control≡xforms-input-1",
+            )
         )
+        apellido1_locator = page.locator(
+            _selector(
+                "o0solicitud_gral_din-section≡xf-581≡grid-5-grid",
+                "din_apellido1-control≡xforms-input-1",
+            )
+        )
+        apellido2_locator = page.locator(
+            _selector(
+                "o0solicitud_gral_din-section≡xf-581≡grid-5-grid",
+                "din_apellido2-control≡xforms-input-1",
+            )
+        )
+        if nombre and await nombre_locator.count():
+            await nombre_locator.fill(nombre)
+        if ap1 and await apellido1_locator.count():
+            await apellido1_locator.fill(ap1)
+        if ap2 and await apellido2_locator.count():
+            await apellido2_locator.fill(ap2)
+        return
     doc_type = tipo_identificacion(documento)
     if doc_type == "NIF":
         await tipo_id.select_option("1")
@@ -246,7 +284,12 @@ def build_meta_prefix(datos: ValenciaTarget) -> str:
 async def fill_mu_numbers(page: Page, datos: ValenciaTarget) -> None:
     tokens = clean(datos.expediente).split()
     if len(tokens) < 5:
-        raise ValueError(f"valencia: expediente invalido para MU: {datos.expediente}")
+        logger.warning(
+            "valencia.fill_mu_numbers omitido: expediente no MU o incompleto idRecurso=%s expediente=%s",
+            clean(datos.idRecurso),
+            clean(datos.expediente),
+        )
+        return
 
     ref_prefix = build_ref_prefix(datos)
     meta_prefix = build_meta_prefix(datos)

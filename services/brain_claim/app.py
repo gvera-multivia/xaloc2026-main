@@ -8,6 +8,7 @@ import re
 import signal
 import uuid
 import sys
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -23,7 +24,16 @@ from core.repositories import ResourceRepository
 from core.sqlserver_utils import build_sqlserver_connection_string
 from core.xvia_auth import create_authenticated_session_in_place
 from shared.queue import RedisStreamsClient
-from sites.adapters import MadridAdapter, XalocAdapter, BaseOnlineAdapter, AyuntaPalmaAdapter, RedsaraAdapter, TerrassaAdapter
+from sites.adapters import (
+    MadridAdapter,
+    XalocAdapter,
+    BaseOnlineAdapter,
+    AyuntaPalmaAdapter,
+    RedsaraAdapter,
+    TerrassaAdapter,
+    ValenciaAdapter,
+    AtcAdapter,
+)
 from sites.adapters.site_adapter import SiteAdapter
 from services.brain_claim.processable_validator import validate_candidate
 
@@ -76,7 +86,14 @@ class BrainClaimService:
         self.sqlserver_conn_str = build_sqlserver_connection_string()
         self.resource_repo = ResourceRepository(conn_str=self.sqlserver_conn_str, logger=logger)
         self.consultor = ConsultorService(conn_str=self.sqlserver_conn_str, logger=logger, repository=self.resource_repo)
-        self.consultor_repo = ConsultorResourceRepositoryAdapter(self.consultor)
+        self.consultor_repo = ConsultorResourceRepositoryAdapter(self.consultor, retrieval_profile="full")
+        self.consultor_repo_light = ConsultorResourceRepositoryAdapter(self.consultor, retrieval_profile="light")
+        # Sites que deben consultar perfil full en fetch inicial.
+        # Default conservador: all (prioriza calidad de datos frente a ahorro de query).
+        full_sites_env = (os.getenv("BRAIN_CLAIM_FULL_PAYLOAD_SITES") or "all").strip().lower()
+        self.full_payload_sites: set[str] = set()
+        if full_sites_env != "all":
+            self.full_payload_sites = {s.strip().lower() for s in full_sites_env.split(",") if s.strip()}
         self.realtime_store = build_realtime_store(logger=logger)
         self.redis = get_redis_client()
         if self.redis is None:
@@ -103,11 +120,19 @@ class BrainClaimService:
             "ayunta_palma": AyuntaPalmaAdapter(),
             "redsara": RedsaraAdapter(),
             "terrassa": TerrassaAdapter(),
+            "valencia": ValenciaAdapter(),
+            "atc": AtcAdapter(),
         }
+        if full_sites_env == "all":
+            self.full_payload_sites = set(self.adapters.keys())
+        logger.info("[brain-claim] full payload sites=%s", sorted(self.full_payload_sites))
         self.session: Optional[aiohttp.ClientSession] = None
         self.authenticated_user: Optional[str] = None
         self.asignar_url = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos/AsignarA"
         self._last_configured_sites_signature: Optional[str] = None
+        self._csrf_token: Optional[str] = None
+        self._csrf_token_fetched_at: float = 0.0
+        self._csrf_token_ttl_seconds = int((os.getenv("XVIA_CSRF_TTL_SECONDS") or "300").strip() or "300")
 
     @staticmethod
     def _site_claim_limit_from_config(config: dict[str, Any]) -> int | None:
@@ -119,6 +144,19 @@ class BrainClaimService:
         except Exception:
             return None
         return value if value > 0 else None
+
+    @staticmethod
+    def _parse_resource_id(value: Any) -> int | None:
+        try:
+            return int(value)
+        except Exception:
+            try:
+                rid_float = float(str(value).strip())
+                if not rid_float.is_integer():
+                    return None
+                return int(rid_float)
+            except Exception:
+                return None
 
     @staticmethod
     def _extract_csrf_token(html: str) -> Optional[str]:
@@ -176,23 +214,76 @@ class BrainClaimService:
         if self.session:
             await self.session.close()
             self.session = None
+        self._csrf_token = None
+        self._csrf_token_fetched_at = 0.0
+
+    async def _get_csrf_token(self, *, force_refresh: bool = False) -> Optional[str]:
+        if not self.session:
+            return None
+        now = time.monotonic()
+        if (
+            not force_refresh
+            and self._csrf_token
+            and (now - self._csrf_token_fetched_at) <= max(30, self._csrf_token_ttl_seconds)
+        ):
+            return self._csrf_token
+        try:
+            async with self.session.get(
+                "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos"
+            ) as resp:
+                html = await resp.text()
+                csrf_token = self._extract_csrf_token(html)
+                if not csrf_token:
+                    return None
+                self._csrf_token = csrf_token
+                self._csrf_token_fetched_at = now
+                return csrf_token
+        except Exception:
+            return None
+
+    def _hydrate_candidates_batch_for_payload(
+        self,
+        *,
+        site_id: str,
+        resource_ids: list[int],
+    ) -> dict[int, dict[str, Any]]:
+        ids = sorted({int(rid) for rid in (resource_ids or [])})
+        if not ids:
+            return {}
+        try:
+            items = self.resource_repo.get_resources_by_ids(site_id=site_id, resource_ids=ids)
+            hydrated: dict[int, dict[str, Any]] = {}
+            for item in items:
+                meta = dict(item.metadata or {})
+                rid = self._parse_resource_id(meta.get("idRecurso"))
+                if rid is None:
+                    continue
+                hydrated[rid] = meta
+            return hydrated
+        except Exception as exc:
+            logger.warning(
+                "[%s] fallo hidratando batch para payload (ids=%s): %s",
+                site_id,
+                len(ids),
+                exc,
+            )
+            return {}
 
     def verify_claim_in_db(self, id_recurso: int) -> bool:
         import pyodbc
 
         try:
-            conn = pyodbc.connect(self.sqlserver_conn_str)
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT Estado, UsuarioAsignado, FUsuarioCompletado
-                FROM Recursos.RecursosExp
-                WHERE idRecurso = ?
-                """,
-                (id_recurso,),
-            )
-            row = cursor.fetchone()
-            conn.close()
+            with pyodbc.connect(self.sqlserver_conn_str, autocommit=True) as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        SELECT Estado, UsuarioAsignado, FUsuarioCompletado
+                        FROM Recursos.RecursosExp
+                        WHERE idRecurso = ?
+                        """,
+                        (id_recurso,),
+                    )
+                    row = cursor.fetchone()
             if not row:
                 return False
             estado, usuario, f_usuario_completado = row
@@ -212,18 +303,17 @@ class BrainClaimService:
         import pyodbc
 
         try:
-            conn = pyodbc.connect(self.sqlserver_conn_str)
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT Estado, UsuarioAsignado, FUsuarioCompletado
-                FROM Recursos.RecursosExp
-                WHERE idRecurso = ?
-                """,
-                (id_recurso,),
-            )
-            row = cursor.fetchone()
-            conn.close()
+            with pyodbc.connect(self.sqlserver_conn_str, autocommit=True) as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        SELECT Estado, UsuarioAsignado, FUsuarioCompletado
+                        FROM Recursos.RecursosExp
+                        WHERE idRecurso = ?
+                        """,
+                        (id_recurso,),
+                    )
+                    row = cursor.fetchone()
             if not row:
                 return False
             estado, usuario, f_usuario_completado = row
@@ -244,16 +334,21 @@ class BrainClaimService:
         if not self.session:
             return False
         try:
-            async with self.session.get(
-                "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos"
-            ) as resp:
-                html = await resp.text()
-                csrf_token = self._extract_csrf_token(html)
-                if not csrf_token:
-                    return False
+            csrf_token = await self._get_csrf_token(force_refresh=False)
+            if not csrf_token:
+                return False
             form_data = {"_token": csrf_token, "id": str(id_recurso), "recursosSel": "0"}
             async with self.session.post(self.asignar_url, data=form_data) as resp:
-                return resp.status in (200, 302, 303)
+                if resp.status in (200, 302, 303):
+                    return True
+                if resp.status in (401, 403, 419):
+                    csrf_token = await self._get_csrf_token(force_refresh=True)
+                    if not csrf_token:
+                        return False
+                    form_data["_token"] = csrf_token
+                    async with self.session.post(self.asignar_url, data=form_data) as retry_resp:
+                        return retry_resp.status in (200, 302, 303)
+                return False
         except Exception:
             return False
 
@@ -409,24 +504,44 @@ class BrainClaimService:
                     authenticated_user=self.authenticated_user,
                     limit=min(remaining, site_limit) if site_limit is not None else remaining,
                     on_discard=_on_discard,
-                    resource_repo=self.consultor_repo,
+                    resource_repo=(self.consultor_repo if site_id in self.full_payload_sites else self.consultor_repo_light),
                 )
+                parsed_candidates: list[tuple[int, dict[str, Any]]] = []
                 for cand in candidates:
+                    rid = self._parse_resource_id(cand.get("idRecurso"))
+                    if rid is None:
+                        continue
+                    parsed_candidates.append((rid, cand))
+
+                candidate_ids = sorted({rid for rid, _ in parsed_candidates})
+                blocked_ids: set[int] = set()
+                paused_ids: set[int] = set()
+                active_job_ids: set[int] = set()
+                if candidate_ids:
+                    try:
+                        blocked_ids = self.admin_store.get_blocked_resource_ids(site_id=site_id, resource_ids=candidate_ids)
+                    except Exception as exc:
+                        logger.warning("[%s] fallo prefetch blocked ids: %s", site_id, exc)
+                    try:
+                        paused_ids = self.runtime_store.get_paused_resource_ids(site_id=site_id, resource_ids=candidate_ids)
+                    except Exception as exc:
+                        logger.warning("[%s] fallo prefetch paused ids: %s", site_id, exc)
+                    try:
+                        active_job_ids = self.runtime_store.get_active_job_resource_ids(site_id=site_id, resource_ids=candidate_ids)
+                    except Exception as exc:
+                        logger.warning("[%s] fallo prefetch active job ids: %s", site_id, exc)
+
+                hydration_prefetch_window = max(
+                    1,
+                    int((os.getenv("BRAIN_PAYLOAD_HYDRATE_PREFETCH_WINDOW") or "25").strip() or "25"),
+                )
+                hydrated_payload_cache: dict[int, dict[str, Any]] = {}
+
+                for idx, (rid, cand) in enumerate(parsed_candidates):
                     if remaining <= 0:
                         break
                     if site_limit is not None and site_claimed >= site_limit:
                         break
-                    rid_raw = cand.get("idRecurso")
-                    try:
-                        rid = int(rid_raw)
-                    except Exception:
-                        try:
-                            rid_float = float(str(rid_raw).strip())
-                            if not rid_float.is_integer():
-                                continue
-                            rid = int(rid_float)
-                        except Exception:
-                            continue
                     if not self.is_still_claimable_in_db(rid):
                         logger.info("[%s] descartado idRecurso=%s por no estar reclamable en SQL Server (revalidacion).", site_id, rid)
                         continue
@@ -435,6 +550,8 @@ class BrainClaimService:
                         candidate=cand,
                         runtime_store=self.runtime_store,
                         admin_store=self.admin_store,
+                        is_blocked=(rid in blocked_ids),
+                        is_resource_paused=(rid in paused_ids),
                     )
                     if not validation.processable:
                         error_code = str(validation.error_code or "NOT_PROCESSABLE")
@@ -443,12 +560,7 @@ class BrainClaimService:
                         stats["incidents_logged"] += 1
                         logger.info("[%s] idRecurso=%s no procesable: %s - %s", site_id, rid, error_code, reason)
                         continue
-                    if self.admin_store.is_resource_blocked(site_id=site_id, resource_id=rid):
-                        continue
-                    has_active_job = self.runtime_store.has_active_job_for_resource(
-                        site_id=site_id,
-                        resource_id=rid,
-                    )
+                    has_active_job = rid in active_job_ids
                     if has_active_job:
                         recovery = self.runtime_store.recover_stale_queued_job_for_resource(
                             site_id=site_id,
@@ -465,10 +577,8 @@ class BrainClaimService:
                                 recovery.get("age_seconds"),
                                 recovery.get("threshold_seconds"),
                             )
-                            has_active_job = self.runtime_store.has_active_job_for_resource(
-                                site_id=site_id,
-                                resource_id=rid,
-                            )
+                            active_job_ids.discard(rid)
+                            has_active_job = False
 
                     if has_active_job:
                         logger.info(
@@ -496,7 +606,26 @@ class BrainClaimService:
                         remaining -= 1
                         site_claimed += 1
 
-                        payloads = await adapter.build_payloads([cand], on_discard=_on_discard)
+                        if rid not in hydrated_payload_cache:
+                            window_ids: list[int] = []
+                            for future_rid, _future_cand in parsed_candidates[idx : idx + hydration_prefetch_window]:
+                                if future_rid not in hydrated_payload_cache:
+                                    window_ids.append(future_rid)
+                            hydrated_batch = self._hydrate_candidates_batch_for_payload(
+                                site_id=site_id,
+                                resource_ids=window_ids or [rid],
+                            )
+                            hydrated_payload_cache.update(hydrated_batch)
+
+                        candidate_for_payload = dict(cand or {})
+                        full_data = hydrated_payload_cache.get(rid)
+                        if full_data:
+                            # No pisar datos utiles del candidate con vacios durante hidratacion.
+                            for key, value in full_data.items():
+                                if value in (None, "", []):
+                                    continue
+                                candidate_for_payload[key] = value
+                        payloads = await adapter.build_payloads([candidate_for_payload], on_discard=_on_discard)
                         if not payloads:
                             logger.warning(
                                 "[%s] idRecurso=%s reclamado pero descartado por adapter.build_payloads (payload invalido).",

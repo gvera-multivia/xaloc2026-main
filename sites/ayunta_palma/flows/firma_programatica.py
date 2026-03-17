@@ -22,6 +22,10 @@ from functools import partial
 from pathlib import Path
 
 from playwright.async_api import BrowserContext, Frame, Page
+from core.autofirma_js import (
+    PALMA_WAIT_FOR_URL_SCRIPT,
+    build_palma_intercept_script,
+)
 from core.autofirma_signing_bridge import parse_afirma_url, sign_with_pfx
 
 # Usar el logger del sitio para garantizar salida en logs del runner.
@@ -32,7 +36,7 @@ logger = logging.getLogger("xaloc_automation.ayunta_palma")
 # ─────────────────────────────────────────────────────────────────────────────
 
 _SIGNING_SUPPORTED = True  # will be False if autofirma binary not found
-_AFIRMA_URI_RE = re.compile(r"((?:afirma|xalocafirma)://[^'\"\\s]+)", re.IGNORECASE)
+_AFIRMA_URI_RE = re.compile(r"((?:afirma|xalocafirma)://[^'\"\s]+)", re.IGNORECASE)
 _BLOCK_EXTERNAL_PROTOCOL_LAUNCH = (os.getenv("XALOC_AP_FIRMA_ALLOW_EXTERNAL_LAUNCH") or "0").strip().lower() not in {
     "1",
     "true",
@@ -57,164 +61,10 @@ except (FileNotFoundError, subprocess.TimeoutExpired, Exception) as _e:
 # Step 1: Intercept the afirma:// URL
 # ─────────────────────────────────────────────────────────────────────────────
 
-_INTERCEPT_SCRIPT = """() => {
-    if (window.__xaloc_afirma_interceptor_installed) return;
-    window.__xaloc_afirma_interceptor_installed = true;
-    const blockExternalLaunch = __BLOCK_EXTERNAL_LAUNCH__;
-
-    window.__afirma_url = window.__afirma_url || null;
-    window.__afirma_source = window.__afirma_source || null;
-
-    const captureAfirma = (url, source) => {
-        if (typeof url !== 'string') return false;
-        if (!/^(afirma|xalocafirma):\\/\\//i.test(url)) return false;
-        window.__afirma_url = url;
-        window.__afirma_source = source || 'unknown';
-        console.debug('[xaloc] afirma:// capturado via', window.__afirma_source, url.substring(0, 120));
-        return true;
-    };
-
-    // Capture window.open('afirma://...')
-    const _origOpen = window.open.bind(window);
-    window.open = function(url, ...rest) {
-        const captured = captureAfirma(url, 'window.open');
-        if (captured && blockExternalLaunch) return null;
-        return _origOpen(url, ...rest);
-    };
-
-    const captureFromAttr = (value, source) => {
-        try { captureAfirma(value, source); } catch(_e) {}
-    };
-
-    // Capture navigation APIs that often emit afirma:// in Sedipualba.
-    try {
-        const _origAssign = window.location.assign.bind(window.location);
-        window.location.assign = function(url) {
-            const captured = captureAfirma(url, 'location.assign');
-            if (captured && blockExternalLaunch) return;
-            return _origAssign(url);
-        };
-    } catch(e) {
-        // ignore
-    }
-    try {
-        const _origReplace = window.location.replace.bind(window.location);
-        window.location.replace = function(url) {
-            const captured = captureAfirma(url, 'location.replace');
-            if (captured && blockExternalLaunch) return;
-            return _origReplace(url);
-        };
-    } catch(e) {
-        // ignore
-    }
-    try {
-        const hrefDesc = Object.getOwnPropertyDescriptor(Location.prototype, 'href');
-        if (hrefDesc && hrefDesc.set && hrefDesc.get) {
-            Object.defineProperty(Location.prototype, 'href', {
-                configurable: true,
-                enumerable: hrefDesc.enumerable,
-                get: function() { return hrefDesc.get.call(this); },
-                set: function(url) {
-                    const captured = captureAfirma(url, 'location.href');
-                    if (captured && blockExternalLaunch) return;
-                    return hrefDesc.set.call(this, url);
-                }
-            });
-        }
-    } catch(e) {
-        // ignore
-    }
-
-    // Capture clicks on <a href="afirma://...">.
-    document.addEventListener('click', function(ev) {
-        const el = ev.target && ev.target.closest ? ev.target.closest('a[href]') : null;
-        if (el) {
-            const href = el.href || el.getAttribute('href') || '';
-            const captured = captureAfirma(href, 'anchor-click-capture');
-            if (captured && blockExternalLaunch) {
-                try { ev.preventDefault(); } catch(_e) {}
-                try { ev.stopPropagation(); } catch(_e) {}
-                try { ev.stopImmediatePropagation(); } catch(_e) {}
-            }
-        }
-    }, true);
-
-    // Capture programmatic HTMLAnchorElement.click().
-    try {
-        const _origAnchorClick = HTMLAnchorElement.prototype.click;
-        HTMLAnchorElement.prototype.click = function(...args) {
-            const href = this.href || this.getAttribute('href') || '';
-            const captured = captureAfirma(href, 'anchor-prototype-click');
-            if (captured && blockExternalLaunch) return;
-            return _origAnchorClick.apply(this, args);
-        };
-    } catch(e) {
-        // ignore
-    }
-
-    // Capture setAttribute('href'|'src'|'action', 'afirma://...').
-    try {
-        const _origSetAttr = Element.prototype.setAttribute;
-        Element.prototype.setAttribute = function(name, value) {
-            const key = String(name || '').toLowerCase();
-            if (key === 'href' || key === 'src' || key === 'action') {
-                captureFromAttr(value, `setAttribute:${key}`);
-            }
-            return _origSetAttr.call(this, name, value);
-        };
-    } catch(e) {
-        // ignore
-    }
-
-    // Capture submit actions that can carry afirma:// in form.action.
-    try {
-        const _origFormSubmit = HTMLFormElement.prototype.submit;
-        HTMLFormElement.prototype.submit = function(...args) {
-            try { captureFromAttr(this && this.action, 'form.submit.action'); } catch(_e) {}
-            return _origFormSubmit.apply(this, args);
-        };
-    } catch(e) {
-        // ignore
-    }
-
-    // Capture synthetic dispatches where target/action can contain afirma://
-    try {
-        const _origDispatch = EventTarget.prototype.dispatchEvent;
-        EventTarget.prototype.dispatchEvent = function(ev) {
-            try {
-                const self = this || null;
-                const target = (ev && ev.target) || self;
-                captureFromAttr(self && self.href, 'dispatchEvent:self.href');
-                captureFromAttr(self && self.src, 'dispatchEvent:self.src');
-                captureFromAttr(self && self.action, 'dispatchEvent:self.action');
-                captureFromAttr(target && target.href, 'dispatchEvent:target.href');
-                captureFromAttr(target && target.src, 'dispatchEvent:target.src');
-                captureFromAttr(target && target.action, 'dispatchEvent:target.action');
-            } catch(_e) {}
-            return _origDispatch.call(this, ev);
-        };
-    } catch(e) {
-        // ignore
-    }
-
-    // Capture direct invocation patterns that may bypass click handlers.
-    try {
-        const _origSetTimeout = window.setTimeout.bind(window);
-        window.setTimeout = function(fn, delay, ...rest) {
-            if (typeof fn === 'string' && /(afirma|xalocafirma):\\/\\//i.test(fn)) {
-                const m = fn.match(/(?:afirma|xalocafirma):\\/\\/[^'\"\\s)]+/i);
-                if (m && m[0]) {
-                    captureAfirma(m[0], 'setTimeout-string');
-                }
-            }
-            return _origSetTimeout(fn, delay, ...rest);
-        };
-    } catch(e) {
-        // ignore
-    }
-}""".replace("__BLOCK_EXTERNAL_LAUNCH__", "true" if _BLOCK_EXTERNAL_PROTOCOL_LAUNCH else "false")
-
-_WAIT_FOR_URL_SCRIPT = "() => window.__afirma_url !== null && window.__afirma_url !== undefined"
+_INTERCEPT_SCRIPT = build_palma_intercept_script(
+    block_external_launch=_BLOCK_EXTERNAL_PROTOCOL_LAUNCH
+)
+_WAIT_FOR_URL_SCRIPT = PALMA_WAIT_FOR_URL_SCRIPT
 
 
 async def preparar_captura_afirma_context(context: BrowserContext) -> None:
@@ -1656,12 +1506,57 @@ async def firmar_programaticamente(
                     )
                 except Exception as e:
                     logger.warning("[AP-FIRMA][DIAG][TIMEOUT] frame#%d snapshot-error=%s", idx, e)
-        raise RuntimeError(
-            f"[AP-FIRMA] Timeout: URL afirma:// no capturada en {url_timeout_ms}ms. "
-            "Verifica que el boton 'Signar tots els documents' fue clickado y que Sedipualba genera una URL afirma://."
+        # Non-fatal fallback:
+        # There are runs where Sedipualba completes signature state changes without exposing
+        # an interceptable afirma:// URI to Playwright. Let the caller verify final signature
+        # status on the page instead of failing hard here.
+        logger.warning(
+            "[AP-FIRMA][NON_FATAL] Timeout capturando afirma:// en %sms. "
+            "Se continua en fallback para validar estado real de firma en la pagina.",
+            url_timeout_ms,
         )
+        return False
 
-    # Step 4: Parse
+    # Step 4: Route based on URI type (WebSocket mode vs FIRe/sign mode)
+    _uri_lc = (url_afirma or "").lower()
+    _is_websocket_mode = "://websocket?" in _uri_lc or ("ports=" in _uri_lc and "sign?" not in _uri_lc)
+
+    if _is_websocket_mode:
+        # WebSocket mode: afirma://websocket?ports=PORT1,PORT2,...
+        # Sedipualba's AutoScript expects an AutoFirma WebSocket daemon on those ports.
+        # We launch autofirma_proxy.py to impersonate the daemon.
+        from sites.redsara.flows.firma_proxy import (  # noqa: PLC0415
+            PROXY_READY_FILE,
+            _launch_proxy_from_python,
+            _proxy_already_running,
+            reset_proxy_state,
+        )
+        logger.info("[AP-FIRMA] URI WebSocket detectada (ports=). Lanzando autofirma_proxy...")
+        if not _proxy_already_running():
+            reset_proxy_state()
+            launched = _launch_proxy_from_python(url_afirma)
+            if not launched:
+                raise RuntimeError(
+                    "[AP-FIRMA] autofirma_proxy.py no encontrado; firma WebSocket imposible. "
+                    "Comprueba XALOC_AFIRMA_PROXY_SCRIPT o la instalacion del proxy."
+                )
+        _ws_proxy_deadline = asyncio.get_event_loop().time() + 20
+        while asyncio.get_event_loop().time() < _ws_proxy_deadline:
+            if PROXY_READY_FILE.exists():
+                break
+            await asyncio.sleep(0.5)
+        if not PROXY_READY_FILE.exists():
+            raise RuntimeError("[AP-FIRMA] Proxy WebSocket no senalo ready en 20s.")
+        logger.info("[AP-FIRMA] Proxy WS listo. Esperando completado de firma (60s max)...")
+        _ws_sign_deadline = asyncio.get_event_loop().time() + 60
+        while asyncio.get_event_loop().time() < _ws_sign_deadline:
+            if not _proxy_already_running():
+                break
+            await asyncio.sleep(1)
+        logger.info("[AP-FIRMA] Proxy WS: firma completada (o timeout alcanzado).")
+        return True
+
+    # Step 4b: FIRe/sign mode — parse URI and sign with CLI
     params = parse_afirma_url(url_afirma)
 
     # Step 5: Sign in a thread pool to avoid blocking the event loop

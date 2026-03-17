@@ -20,17 +20,29 @@ import { sileo } from 'sileo';
 
 export default function MonitorPage() {
   const UI_REFRESH_MS = 1000;
-  const INCIDENT_MARKER_POLL_MS = 1000;
+  const INCIDENT_MARKER_POLL_MS = 3000;
   const LIVE_STREAM_GRACE_MS = 8000;
 
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [nowTs, setNowTs] = useState(Date.now());
   const [lastLiveSeenTs, setLastLiveSeenTs] = useState(0);
   const completionMarkerRef = useRef<string>('');
+  const successCountRef = useRef<number>(-1);
+  const monitorFailStreakRef = useRef<number>(0);
+  const incidentsFailStreakRef = useRef<number>(0);
   const [recovering, setRecovering] = useState(false);
+
+  const showTransientError = (message: string, ms = 5000) => {
+    setError(message);
+    if (errorTimerRef.current) {
+      clearTimeout(errorTimerRef.current);
+    }
+    errorTimerRef.current = setTimeout(() => setError(''), ms);
+  };
 
   const today = useMemo(() => new Date().toISOString().split('T')[0], []);
 
@@ -42,23 +54,43 @@ export default function MonitorPage() {
   const refreshIncidents = async () => {
     const incidentsRes = await historyApi.getIncidents(undefined, 1, 15);
     setIncidents(incidentsRes.items || []);
+    incidentsFailStreakRef.current = 0;
   };
 
   const refresh = async () => {
-    try {
-      const [markerRes] = await Promise.all([
-        queueApi.getCompletionMarker(today),
-        refreshQueue(),
-        refreshIncidents(),
-      ]);
-      completionMarkerRef.current = markerRes.marker || '';
-      setError('');
-    } catch (e) {
-      sileo.error({ title: 'Error de sincronización', description: 'No se pudo actualizar el monitor en vivo.' });
-      setError('No se pudo actualizar el monitor en vivo.');
-    } finally {
-      setLoading(false);
+    const [markerRes, queueRes, incidentsRes] = await Promise.allSettled([
+      queueApi.getCompletionMarker(today),
+      refreshQueue(),
+      refreshIncidents(),
+    ]);
+
+    if (markerRes.status === 'fulfilled') {
+      completionMarkerRef.current = markerRes.value.marker || '';
+      monitorFailStreakRef.current = 0;
+      // Seed success count on first load (no notification on initial load)
+      if (successCountRef.current < 0) {
+        successCountRef.current = Number((markerRes.value as any).success_count || 0);
+      }
     }
+
+    const hardFail = markerRes.status === 'rejected' || queueRes.status === 'rejected';
+    if (hardFail) {
+      monitorFailStreakRef.current += 1;
+      if (monitorFailStreakRef.current >= 3) {
+        sileo.error({ title: 'Error de sincronización', description: 'No se pudo actualizar el monitor en vivo.' });
+        showTransientError('No se pudo actualizar el monitor en vivo.');
+      }
+    } else if (incidentsRes.status === 'rejected') {
+      incidentsFailStreakRef.current += 1;
+      if (incidentsFailStreakRef.current >= 3) {
+        // Evitar banner permanente por ruido de polling de incidencias.
+        showTransientError('No se pudo actualizar el panel de incidencias.', 3000);
+      }
+    } else {
+      incidentsFailStreakRef.current = 0;
+      setError('');
+    }
+    setLoading(false);
   };
 
   const handleRecoverStuck = async () => {
@@ -87,21 +119,49 @@ export default function MonitorPage() {
     const interval = setInterval(async () => {
       try {
         await refreshQueue();
+        monitorFailStreakRef.current = 0;
       } catch (e) {
-        setError('No se pudo actualizar el monitor en vivo.');
+        monitorFailStreakRef.current += 1;
+        // Silencioso en polling; evitar banner permanente por ruido de red.
       }
     }, UI_REFRESH_MS);
 
     const markerPoll = setInterval(async () => {
       try {
-        const markerRes = await queueApi.getCompletionMarker(today);
+        const markerRes = await queueApi.getCompletionMarker(today) as any;
         const marker = markerRes.marker || '';
+        monitorFailStreakRef.current = 0;
         if (completionMarkerRef.current && completionMarkerRef.current !== marker) {
-          refreshIncidents().catch(() => setError('No se pudo actualizar el panel de incidencias.'));
+          refreshIncidents().catch(() => {
+            incidentsFailStreakRef.current += 1;
+          });
         }
         completionMarkerRef.current = marker;
+
+        // Detect new successful completions
+        const newSuccessCount = Number(markerRes.success_count || 0);
+        if (successCountRef.current >= 0 && newSuccessCount > successCountRef.current) {
+          const lastSuccess = markerRes.last_success;
+          const siteLabel = lastSuccess?.site_id?.replace(/_/g, ' ')?.toUpperCase() || '';
+          const resId = lastSuccess?.resource_id ?? '';
+          sileo.success({
+            title: 'Tramite completado',
+            description: siteLabel && resId
+              ? `${siteLabel} #${resId} completado y marcado en XVIA.`
+              : `${newSuccessCount - successCountRef.current} tramite(s) completado(s) correctamente.`,
+          });
+          if (typeof window !== 'undefined' && 'Notification' in window && window.Notification.permission === 'granted') {
+            new window.Notification('Tramite completado', {
+              body: siteLabel && resId
+                ? `${siteLabel} #${resId} completado y marcado en XVIA.`
+                : `${newSuccessCount - successCountRef.current} tramite(s) completado(s).`,
+              icon: '/favicon.ico',
+            });
+          }
+        }
+        successCountRef.current = newSuccessCount;
       } catch (e) {
-        setError('No se pudo actualizar el panel de incidencias.');
+        monitorFailStreakRef.current += 1;
       }
     }, INCIDENT_MARKER_POLL_MS);
 
@@ -110,6 +170,9 @@ export default function MonitorPage() {
       clearInterval(interval);
       clearInterval(markerPoll);
       clearInterval(clock);
+      if (errorTimerRef.current) {
+        clearTimeout(errorTimerRef.current);
+      }
     };
   }, [today]);
 
@@ -288,7 +351,7 @@ export default function MonitorPage() {
                   </p>
                 </div>
               ) : (
-                queue.slice(0, 14).map((item, idx) => (
+                queue.map((item, idx) => (
                   <QueueCard key={`${item.site_id}-${item.resource_id}`} item={item} index={idx} />
                 ))
               )}

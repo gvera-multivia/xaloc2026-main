@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { Search, Calendar, CheckCircle2, ChevronLeft, ChevronRight, Download, X } from 'lucide-react';
 import { historyApi } from '@/lib/api';
 import { clsx, type ClassValue } from 'clsx';
@@ -31,13 +32,16 @@ type FolderResolve = {
   ruta_cliente?: string;
 };
 
+const DAYS_PER_BLOCK = 35;
+
 export default function HistoryPage() {
   const [days, setDays] = useState<any[]>([]);
+  const [daysBlockPage, setDaysBlockPage] = useState(1);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [page, setPage] = useState(1);
+  const [totalItemsForDay, setTotalItemsForDay] = useState(0);
 
   const [selectedItem, setSelectedItem] = useState<HistoryItem | null>(null);
   const [folderInfo, setFolderInfo] = useState<FolderResolve | null>(null);
@@ -81,11 +85,22 @@ export default function HistoryPage() {
 
   const fetchDays = async () => {
     try {
-      const res = await historyApi.getDays('success', 1, 20);
-      const dayList = (res.items || []) as any[];
-      setDays(dayList);
-      if (dayList.length > 0 && !selectedDay) {
-        const first = typeof dayList[0] === 'string' ? dayList[0] : dayList[0].day;
+      const pageSize = 100;
+      let currentPage = 1;
+      let total = 0;
+      const allDays: any[] = [];
+
+      do {
+        const res = await historyApi.getDays('success', currentPage, pageSize);
+        const chunk = (res.items || []) as any[];
+        total = Number(res.total || 0);
+        allDays.push(...chunk);
+        currentPage += 1;
+      } while (allDays.length < total);
+
+      setDays(allDays);
+      if (allDays.length > 0 && !selectedDay) {
+        const first = typeof allDays[0] === 'string' ? allDays[0] : allDays[0].day;
         setSelectedDay(first);
       }
     } catch {
@@ -97,8 +112,19 @@ export default function HistoryPage() {
     if (!selectedDay) { setLoading(false); return; }
     setLoading(true);
     try {
-      const res = await historyApi.getSuccesses(selectedDay, page, 50);
-      setItems((res.items || []) as HistoryItem[]);
+      const pageSize = 500;
+      let currentPage = 1;
+      let total = 0;
+      const allItems: HistoryItem[] = [];
+      do {
+        const res = await historyApi.getSuccesses(selectedDay, currentPage, pageSize);
+        const chunk = (res.items || []) as HistoryItem[];
+        total = Number(res.total || 0);
+        allItems.push(...chunk);
+        currentPage += 1;
+      } while (allItems.length < total);
+      setItems(allItems);
+      setTotalItemsForDay(total || allItems.length);
     } catch {
       sileo.error({ title: 'Error al cargar historial', description: `No se pudo obtener el historial para el día ${selectedDay}.` });
     } finally {
@@ -130,7 +156,25 @@ export default function HistoryPage() {
   };
 
   useEffect(() => { void fetchDays(); }, []);
-  useEffect(() => { void fetchHistory(); }, [selectedDay, page]);
+  useEffect(() => { void fetchHistory(); }, [selectedDay]);
+
+  const totalDayBlocks = Math.max(1, Math.ceil(days.length / DAYS_PER_BLOCK));
+  const safeDayBlockPage = Math.min(daysBlockPage, totalDayBlocks);
+  const dayBlockStart = (safeDayBlockPage - 1) * DAYS_PER_BLOCK;
+  const visibleDays = days.slice(dayBlockStart, dayBlockStart + DAYS_PER_BLOCK);
+
+  useEffect(() => {
+    if (!selectedDay || days.length === 0) return;
+    const selectedIndex = days.findIndex((d: any) => {
+      const dayStr = typeof d === 'string' ? d : d.day;
+      return dayStr === selectedDay;
+    });
+    if (selectedIndex < 0) return;
+    const targetBlock = Math.floor(selectedIndex / DAYS_PER_BLOCK) + 1;
+    if (targetBlock !== daysBlockPage) {
+      setDaysBlockPage(targetBlock);
+    }
+  }, [selectedDay, days, daysBlockPage]);
 
   const filteredItems = items.filter((it) =>
     String(it.resource_id || '').toLowerCase().includes(search.toLowerCase()) ||
@@ -145,6 +189,20 @@ export default function HistoryPage() {
         <div>
           <h2 className="text-2xl font-black uppercase tracking-tight">Historial de Ejecución</h2>
           <p className="text-xs text-muted-foreground/60 uppercase tracking-widest mt-1">Registro de trámites completados.</p>
+          <div className="mt-3 flex items-center gap-2">
+            <Link
+              href="/history"
+              className="px-3 py-1.5 rounded-sm text-[10px] font-black uppercase tracking-[0.15em] border border-[rgba(108,77,255,0.35)] bg-[rgba(108,77,255,0.16)] text-foreground/90"
+            >
+              Historial
+            </Link>
+            <Link
+              href="/history/top"
+              className="px-3 py-1.5 rounded-sm text-[10px] font-black uppercase tracking-[0.15em] border border-border/70 bg-[rgba(17,19,26,0.55)] text-muted-foreground/80 hover:text-foreground hover:border-[rgba(108,77,255,0.22)] transition-all"
+            >
+              Ranking Usuarios
+            </Link>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button className="flex items-center gap-2 px-6 py-2 rounded-sm text-[9px] font-black uppercase tracking-[0.2em] bg-[rgba(17,19,26,0.65)] border border-border/70 text-foreground/80 hover:border-[rgba(108,77,255,0.22)] transition-all duration-300">
@@ -160,12 +218,12 @@ export default function HistoryPage() {
             <span className="text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground/70">Fechas</span>
           </div>
           <div className="morr-card rounded p-2 space-y-1">
-            {days.map((d: any) => {
+            {visibleDays.map((d: any) => {
               const dayStr = typeof d === 'string' ? d : d.day;
               return (
                 <button
                   key={dayStr}
-                  onClick={() => { setSelectedDay(dayStr); setPage(1); }}
+                  onClick={() => { setSelectedDay(dayStr); }}
                   className={cn(
                     'w-full flex items-center justify-between px-4 py-2.5 rounded-sm text-[11px] font-black uppercase tracking-[0.12em] transition-all duration-300 group',
                     selectedDay === dayStr
@@ -178,6 +236,27 @@ export default function HistoryPage() {
                 </button>
               );
             })}
+            <div className="pt-2 mt-2 border-t border-border/60 flex items-center justify-between gap-2">
+              <button
+                disabled={safeDayBlockPage <= 1}
+                onClick={() => setDaysBlockPage((prev) => Math.max(1, prev - 1))}
+                className="px-2.5 py-1.5 rounded-sm text-[10px] font-black uppercase tracking-[0.14em] border border-border/70 text-muted-foreground/70 disabled:opacity-30 hover:text-foreground hover:border-[rgba(108,77,255,0.22)] transition-all"
+              >
+                <ChevronLeft size={13} className="inline mr-1" />
+                Bloque
+              </button>
+              <span className="text-[10px] font-black uppercase tracking-[0.14em] text-muted-foreground/65">
+                {safeDayBlockPage}/{totalDayBlocks}
+              </span>
+              <button
+                disabled={safeDayBlockPage >= totalDayBlocks}
+                onClick={() => setDaysBlockPage((prev) => Math.min(totalDayBlocks, prev + 1))}
+                className="px-2.5 py-1.5 rounded-sm text-[10px] font-black uppercase tracking-[0.14em] border border-border/70 text-muted-foreground/70 disabled:opacity-30 hover:text-foreground hover:border-[rgba(108,77,255,0.22)] transition-all"
+              >
+                Bloque
+                <ChevronRight size={13} className="inline ml-1" />
+              </button>
+            </div>
           </div>
         </aside>
 
@@ -253,22 +332,9 @@ export default function HistoryPage() {
             </div>
 
             <div className="p-4 bg-[rgba(17,19,26,0.55)] border-t border-border/70 flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-[0.16em] text-muted-foreground/60">Viendo {filteredItems.length} de {items.length} registros</span>
-              <div className="flex gap-2">
-                <button
-                  disabled={page === 1}
-                  onClick={() => setPage(p => p - 1)}
-                  className="p-2 rounded-xl bg-[rgba(11,12,16,0.55)] border border-border/70 text-muted-foreground/70 hover:text-foreground disabled:opacity-30 transition-all hover:border-[rgba(108,77,255,0.22)]"
-                >
-                  <ChevronLeft size={16} />
-                </button>
-                <button
-                  onClick={() => setPage(p => p + 1)}
-                  className="p-2 rounded-xl bg-[rgba(11,12,16,0.55)] border border-border/70 text-muted-foreground/70 hover:text-foreground transition-all hover:border-[rgba(108,77,255,0.22)]"
-                >
-                  <ChevronRight size={16} />
-                </button>
-              </div>
+              <span className="text-[10px] font-black uppercase tracking-[0.16em] text-muted-foreground/60">
+                Viendo {filteredItems.length} de {items.length} registros (total día: {totalItemsForDay})
+              </span>
             </div>
           </div>
         </div>

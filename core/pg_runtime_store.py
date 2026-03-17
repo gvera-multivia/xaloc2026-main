@@ -204,6 +204,55 @@ class PgRuntimeStore:
                 )
                 return cur.fetchone() is not None
 
+    def get_active_job_resource_ids(self, *, site_id: str, resource_ids: list[int]) -> set[int]:
+        ids = sorted({int(x) for x in (resource_ids or [])})
+        if not ids:
+            return set()
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT DISTINCT COALESCE(
+                        CASE
+                            WHEN (payload_json->>'idRecurso') ~ '^[0-9]+$'
+                                THEN (payload_json->>'idRecurso')::bigint
+                            WHEN (payload_json->>'idRecurso') ~ '^[0-9]+\\.0+$'
+                                THEN ((payload_json->>'idRecurso')::numeric)::bigint
+                            ELSE NULL
+                        END,
+                        CASE
+                            WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+$'
+                                THEN split_part(dedup_key, ':', 2)::bigint
+                            WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+\\.0+$'
+                                THEN (split_part(dedup_key, ':', 2)::numeric)::bigint
+                            ELSE NULL
+                        END
+                    ) AS rid
+                    FROM jobs
+                    WHERE status IN ('queued', 'processing')
+                      AND COALESCE(payload_json->>'site_id', split_part(dedup_key, ':', 1), '') = %s
+                      AND COALESCE(
+                            CASE
+                                WHEN (payload_json->>'idRecurso') ~ '^[0-9]+$'
+                                    THEN (payload_json->>'idRecurso')::bigint
+                                WHEN (payload_json->>'idRecurso') ~ '^[0-9]+\\.0+$'
+                                    THEN ((payload_json->>'idRecurso')::numeric)::bigint
+                                ELSE NULL
+                            END,
+                            CASE
+                                WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+$'
+                                    THEN split_part(dedup_key, ':', 2)::bigint
+                                WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+\\.0+$'
+                                    THEN (split_part(dedup_key, ':', 2)::numeric)::bigint
+                                ELSE NULL
+                            END
+                      ) = ANY(%s)
+                    """,
+                    (str(site_id), ids),
+                )
+                rows = cur.fetchall()
+        return {int(row[0]) for row in rows if row and row[0] is not None}
+
     def recover_stale_queued_job_for_resource(
         self,
         *,
@@ -730,6 +779,25 @@ class PgRuntimeStore:
                     (str(site_id), int(resource_id)),
                 )
                 return cur.fetchone() is not None
+
+    def get_paused_resource_ids(self, *, site_id: str, resource_ids: list[int]) -> set[int]:
+        ids = sorted({int(x) for x in (resource_ids or [])})
+        if not ids:
+            return set()
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT resource_id
+                    FROM resource_processing_pauses
+                    WHERE site_id = %s
+                      AND resource_id = ANY(%s)
+                      AND (expires_at IS NULL OR expires_at > NOW())
+                    """,
+                    (str(site_id), ids),
+                )
+                rows = cur.fetchall()
+        return {int(row[0]) for row in rows if row and row[0] is not None}
 
     def list_site_processing_pauses(self, *, active_only: bool = True) -> list[dict[str, Any]]:
         where = "WHERE expires_at IS NULL OR expires_at > NOW()" if active_only else ""

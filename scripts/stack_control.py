@@ -79,13 +79,18 @@ def _is_bad_state(state: str) -> bool:
 def _is_ready(service: dict[str, Any]) -> bool:
     state = str(service.get("State") or "")
     status = str(service.get("Status") or "")
+    health = str(service.get("Health") or "").strip().lower()
     if not state:
         state = status
     s = state.strip().lower()
     if not s.startswith("running"):
         return False
+    if health == "unhealthy":
+        return False
+    if health in {"healthy", "starting", ""}:
+        return True
     if "health" in status.lower():
-        return "healthy" in status.lower()
+        return "healthy" in status.lower() or "starting" in status.lower()
     return True
 
 
@@ -96,7 +101,11 @@ def _summarize_services(services: list[dict[str, Any]]) -> str:
     for item in services:
         name = str(item.get("Service") or item.get("Name") or "?")
         state = str(item.get("State") or item.get("Status") or "?")
-        chunks.append(f"{name}={state}")
+        health = str(item.get("Health") or "").strip()
+        if health:
+            chunks.append(f"{name}={state}({health})")
+        else:
+            chunks.append(f"{name}={state}")
     return ", ".join(chunks)
 
 
@@ -108,7 +117,11 @@ def _wait_for_start(env_file: Path, compose_file: Path, timeout: int, interval: 
             print("[OK] Todos los servicios estan arriba y saludables.")
             print(f"[STATE] {_summarize_services(services)}")
             return 0
-        if any(_is_bad_state(str(s.get("State") or s.get("Status") or "")) for s in services):
+        if any(
+            _is_bad_state(str(s.get("State") or s.get("Status") or ""))
+            or str(s.get("Health") or "").strip().lower() == "unhealthy"
+            for s in services
+        ):
             print("[FAILED] Uno o mas servicios estan en estado fallido.")
             print(f"[STATE] {_summarize_services(services)}")
             return 2
@@ -173,14 +186,22 @@ def _run_compose_action(env_file: Path, compose_file: Path, action: str) -> None
         cmd = _compose_base_cmd(env_file, compose_file) + ["up", "-d"]
     elif action == "stop":
         cmd = _compose_base_cmd(env_file, compose_file) + ["down"]
+    elif action == "build":
+        cmd = _compose_base_cmd(env_file, compose_file) + ["build"]
     else:
         raise ValueError(f"Accion no soportada: {action}")
     print(f"[CMD] {' '.join(cmd)}")
+    if action == "build":
+        # Build streams lots of binary/UTF-8 output — run it directly to avoid encoding issues
+        rc = subprocess.call(cmd)
+        if rc != 0:
+            raise RuntimeError(f"docker compose build fallo con returncode={rc}")
+        return
     proc = _run_cmd(cmd)
-    if proc.stdout.strip():
+    if proc.stdout and proc.stdout.strip():
         print(proc.stdout.strip())
     if proc.returncode != 0:
-        if proc.stderr.strip():
+        if proc.stderr and proc.stderr.strip():
             print(proc.stderr.strip(), file=sys.stderr)
         raise RuntimeError(f"docker compose {action} fallo con returncode={proc.returncode}")
 
@@ -191,6 +212,7 @@ def main() -> int:
     mode.add_argument("--start", action="store_true", help="Levanta el stack y espera hasta estado listo.")
     mode.add_argument("--stop", action="store_true", help="Apaga el stack y espera hasta que no queden contenedores.")
     mode.add_argument("--restart", action="store_true", help="Reinicia el stack (down + up) y espera listo.")
+    mode.add_argument("--restart-rebuild", action="store_true", help="Reinicia el stack con rebuild (down + build + up) y espera listo.")
     parser.add_argument("--timeout", type=int, default=600, help="Timeout total en segundos (default: 600).")
     parser.add_argument("--interval", type=float, default=3.0, help="Intervalo de polling en segundos (default: 3).")
     parser.add_argument("--env-file", default=str(DEFAULT_ENV_FILE), help="Ruta a .env.")
@@ -238,6 +260,26 @@ def main() -> int:
         if args.stop:
             _run_compose_action(env_file, compose_file, "stop")
             return _wait_for_stop(env_file, compose_file, timeout=args.timeout, interval=args.interval)
+        if args.restart_rebuild:
+            # restart-rebuild: down + build + up
+            _run_compose_action(env_file, compose_file, "stop")
+            rc = _wait_for_stop(env_file, compose_file, timeout=args.timeout, interval=args.interval)
+            if rc != 0:
+                return rc
+            print("[BUILD] Rebuilding images...")
+            _run_compose_action(env_file, compose_file, "build")
+            _run_compose_action(env_file, compose_file, "start")
+            rc = _wait_for_start(env_file, compose_file, timeout=args.timeout, interval=args.interval)
+            if rc != 0:
+                return rc
+            if not args.skip_client_docs_check:
+                return _check_client_docs_mount(
+                    env_file,
+                    compose_file,
+                    service=args.client_docs_service,
+                    path=args.client_docs_path,
+                )
+            return 0
         # restart
         _run_compose_action(env_file, compose_file, "stop")
         rc = _wait_for_stop(env_file, compose_file, timeout=args.timeout, interval=args.interval)

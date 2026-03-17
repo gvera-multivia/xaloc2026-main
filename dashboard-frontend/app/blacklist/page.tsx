@@ -47,7 +47,7 @@ export default function BlacklistPage() {
     };
 
     useEffect(() => { fetchBlacklist(); }, []);
-    const knownSites = ['madrid', 'xaloc_girona', 'base_online', 'ayunta_palma'];
+    const knownSites = ['madrid', 'xaloc_girona', 'base_online', 'ayunta_palma', 'redsara', 'terrassa', 'valencia', 'atc'];
 
     // Action 1 & 2: Delete/Unblock (Functionally the same for now)
     const handleUnblock = async (siteId: string, resourceId: number) => {

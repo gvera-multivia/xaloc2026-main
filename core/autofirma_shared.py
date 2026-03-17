@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -55,7 +56,7 @@ AFIRMA_INTERCEPT_INIT_SCRIPT = """() => {
 def _extract_afirma_uri(text: str) -> str | None:
     if not text:
         return None
-    match = re.search(r"((?:afirma|xalocafirma)://[^'\"\\s]+)", text, re.IGNORECASE)
+    match = re.search(r"((?:afirma|xalocafirma)://[^'\"\s]+)", text, re.IGNORECASE)
     return match.group(1) if match else None
 
 
@@ -181,11 +182,36 @@ def reset_afirma_uri_capture_file() -> None:
         pass
 
 
+def _read_latest_uri_from_log(log_file: Path, *, min_mtime: float) -> str | None:
+    try:
+        if not log_file.exists():
+            return None
+        stat = log_file.stat()
+        if stat.st_mtime < min_mtime:
+            return None
+        content = log_file.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return None
+    lines = [ln.strip() for ln in content.splitlines() if ln.strip()]
+    for line in reversed(lines):
+        # Formato esperado: "<ts_iso>\t<uri>"
+        if "\t" in line:
+            _, candidate = line.split("\t", 1)
+        else:
+            candidate = line
+        uri = candidate.strip()
+        if uri and AFIRMA_URI_RE.match(uri):
+            return uri
+    return None
+
+
 async def wait_for_afirma_uri_trigger(timeout_ms: int = 15000) -> str | None:
     """
     Espera URI capturada por handler XDG (Docker/Linux).
     """
     latest = Path(os.getenv("XALOC_AFIRMA_URI_LATEST") or "/tmp/xaloc_afirma_uri.latest")
+    uri_log = Path(os.getenv("XALOC_AFIRMA_URI_LOG") or "/tmp/xaloc_afirma_uri.log")
+    started_at = time.time()
     waited = 0
     while waited < timeout_ms:
         try:
@@ -195,6 +221,11 @@ async def wait_for_afirma_uri_trigger(timeout_ms: int = 15000) -> str | None:
                     return uri
         except Exception:
             pass
+        # Fallback robusto: en algunos entornos el handler registra en .log
+        # antes de poder persistir .latest.
+        uri = _read_latest_uri_from_log(uri_log, min_mtime=started_at - 2.0)
+        if uri:
+            return uri
         await asyncio.sleep(0.25)
         waited += 250
     return None

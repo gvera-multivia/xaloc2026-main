@@ -1430,7 +1430,16 @@ async def subir_documentos(
                 logger.warning(
                     "[AP-DIAG] Firma programatica no disponible; intentando click en 'Signar tots els documents' directamente."
                 )
-                await _click_signar_tots_documents(page, config)
+                try:
+                    await _click_signar_tots_documents(page, config)
+                except Exception as click_err:
+                    # Non-fatal: in some runs the signature flow has already advanced,
+                    # and the button is no longer clickable/visible.
+                    logger.warning(
+                        "[AP-DIAG][NON_FATAL] No se pudo clickar 'Signar tots' en fallback: %s. "
+                        "Se continua con verificacion de estado de firma.",
+                        click_err,
+                    )
             if not xdg_task.done():
                 try:
                     await asyncio.wait_for(xdg_task, timeout=2)

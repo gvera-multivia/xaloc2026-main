@@ -33,38 +33,30 @@ class BaseAutomation:
     _shared_home_page: Optional[Page] = None
     _shared_lock: Optional[asyncio.Lock] = None
     _DEFAULT_CERT_PATTERNS: tuple[str, ...] = (
-        "https://sede.madrid.es/*",
-        "https://servcla.madrid.es/*",
-        "https://servpub.madrid.es/*",
-        "https://www.xalocgirona.cat/*",
-        "https://seu.xalocgirona.cat/*",
-        "https://www.base.cat/*",
-        "https://www.baseonline.cat/*",
-        "https://valid.aoc.cat/*",
-        "https://cert.valid.aoc.cat/*",
-        "https://cas.madrid.es/*",
-        "https://pasarela.clave.gob.es/*",
         "https://[*.]madrid.es/*",
+        "https://[*.]xalocgirona.cat/*",
+        "https://[*.]base.cat/*",
+        "https://[*.]baseonline.cat/*",
+        "https://[*.]aoc.cat/*",
+        "https://[*.]extranet.gencat.cat/*",
+        "https://[*.]atc.gencat.cat/*",
         "https://[*.]clave.gob.es/*",
-        "https://cas.madrid.es:443/*",
-        "https://pasarela.clave.gob.es:443/*",
-        "https://cert.valid.aoc.cat:443/*",
-        "https://palma.sedipualba.es/*",
-        "https://identificacionssl.sedipualba.es/*",
+        "https://[*.]sedipualba.es/*",
         "https://reg.redsara.es/*",
         "https://aoberta.terrassa.cat/*",
         "https://sede.valencia.es/*",
     )
     _DEFAULT_CLIENT_CERT_ORIGINS: tuple[str, ...] = (
         "https://sede.madrid.es",
-        "https://servcla.madrid.es",
-        "https://servpub.madrid.es",
         "https://www.xalocgirona.cat",
-        "https://seu.xalocgirona.cat",
         "https://www.base.cat",
         "https://www.baseonline.cat",
         "https://cert.valid.aoc.cat",
         "https://valid.aoc.cat",
+        "https://autenticaciogicar5.extranet.gencat.cat",
+        "https://seu2.atc.gencat.cat",
+        "https://seu.atc.gencat.cat",
+        "https://atc.gencat.cat",
         "https://cas.madrid.es",
         "https://pasarela.clave.gob.es",
         "https://palma.sedipualba.es",
@@ -116,6 +108,10 @@ class BaseAutomation:
         if self.config.navegador.headless:
             args = [a for a in args if a != "--start-maximized"]
             args.append("--window-size=1920,1080")
+        elif os.name == "nt":
+            for arg in ("--disable-session-crashed-bubble", "--hide-crash-restore-bubble"):
+                if arg not in args:
+                    args.append(arg)
 
         if self.config.auto_select_certificate:
             use_policy = (os.getenv("XALOC_CERT_AUTOSELECT_VIA_POLICY") or "1").strip().lower() in {
@@ -124,12 +120,21 @@ class BaseAutomation:
                 "yes",
                 "on",
             }
-            cli_fallback = (os.getenv("XALOC_CERT_AUTOSELECT_CLI_FALLBACK") or "1").strip().lower() in {
+            cli_fallback_default = "0" if os.name == "nt" else "1"
+            cli_fallback = (os.getenv("XALOC_CERT_AUTOSELECT_CLI_FALLBACK") or cli_fallback_default).strip().lower() in {
                 "1",
                 "true",
                 "yes",
                 "on",
             }
+            force_cli_on_windows = (os.getenv("XALOC_CERT_AUTOSELECT_FORCE_CLI_ON_WINDOWS") or "0").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+            if os.name == "nt" and use_policy and not force_cli_on_windows:
+                cli_fallback = False
             should_add_cli_arg = (not use_policy) or cli_fallback
             if should_add_cli_arg:
                 cert_rules_json = (os.getenv("XALOC_CERT_AUTOSELECT_RULES_JSON") or "").strip()
@@ -154,7 +159,13 @@ class BaseAutomation:
                     cert_cn = (self.config.navegador.certificado_cn or "").strip()
                     cert_filter = {"SUBJECT": {"CN": cert_cn}} if cert_cn else {}
                     pattern_from_env = (os.getenv("XALOC_CERT_AUTOSELECT_PATTERN") or "").strip()
-                    patterns = [pattern_from_env] if pattern_from_env else list(self._DEFAULT_CERT_PATTERNS)
+                    if pattern_from_env:
+                        patterns = [pattern_from_env]
+                    elif getattr(self.config, "auto_select_certificate_pattern", None) and self.config.auto_select_certificate_pattern != "*":
+                        patterns = [self.config.auto_select_certificate_pattern]
+                    else:
+                        patterns = list(self._DEFAULT_CERT_PATTERNS)
+
                     policy = json.dumps(
                         [{"pattern": p, "filter": cert_filter} for p in patterns],
                         ensure_ascii=False,
@@ -208,9 +219,12 @@ class BaseAutomation:
                 ]
             )
             if (os.getenv("XALOC_CHROMIUM_NETLOG") or "0").strip().lower() in {"1", "true", "yes", "on"}:
+                netlog_dir = Path("tmp")
+                netlog_dir.mkdir(parents=True, exist_ok=True)
+                netlog_path = str((netlog_dir / "chromium-netlog.json").absolute())
                 args.extend(
                     [
-                        "--log-net-log=/tmp/chromium-netlog.json",
+                        f"--log-net-log={netlog_path}",
                         "--net-log-capture-mode=IncludeSensitive",
                     ]
                 )
@@ -240,10 +254,12 @@ class BaseAutomation:
             return []
 
         origins_raw = (os.getenv("PLAYWRIGHT_CLIENT_CERT_ORIGINS") or "").strip()
+        raw_list = list(self._DEFAULT_CLIENT_CERT_ORIGINS)
         if origins_raw:
-            raw_list = [o.strip() for o in origins_raw.split(",") if o.strip()]
-        else:
-            raw_list = list(self._DEFAULT_CLIENT_CERT_ORIGINS)
+            # No reemplazar defaults: merge para no perder sedes criticas (p.ej. Valencia).
+            for origin in [o.strip() for o in origins_raw.split(",") if o.strip()]:
+                if origin not in raw_list:
+                    raw_list.append(origin)
 
         origins: list[str] = []
         for raw in raw_list:
@@ -274,8 +290,6 @@ class BaseAutomation:
         return certs
 
     def _prepare_protocol_preferences(self, user_data_dir: str) -> None:
-        if not self.config.autofirma_auto_open:
-            return
         try:
             pref_path = Path(user_data_dir) / "Default" / "Preferences"
             pref_path.parent.mkdir(parents=True, exist_ok=True)
@@ -294,14 +308,50 @@ class BaseAutomation:
             if not protocols:
                 protocols = [str(self.config.autofirma_protocol or "").strip() or "afirma"]
             for proto in protocols:
-                excluded[proto] = False
+                excluded[proto] = not self.config.autofirma_auto_open
 
             pairs = protocol_handler.get("allowed_origin_protocol_pairs")
             origins_raw = (os.getenv("XALOC_AUTOFIRMA_ALLOWED_ORIGINS") or "").strip()
-            origins = [o.strip() for o in origins_raw.split(",") if o.strip()]
-            if not origins:
-                origins = [str(self.config.autofirma_origin)]
+            origins = [str(self.config.autofirma_origin)]
+            for fallback_origin in self._DEFAULT_CLIENT_CERT_ORIGINS:
+                if fallback_origin not in origins:
+                    origins.append(fallback_origin)
+            if origins_raw:
+                for env_origin in [o.strip() for o in origins_raw.split(",") if o.strip()]:
+                    if env_origin not in origins:
+                        origins.append(env_origin)
             wanted_pairs = [{"protocol": proto, "origin": origin} for proto in protocols for origin in origins]
+
+            if not self.config.autofirma_auto_open:
+                if isinstance(pairs, list):
+                    protocol_handler["allowed_origin_protocol_pairs"] = [
+                        p for p in pairs
+                        if not (
+                            isinstance(p, dict)
+                            and str(p.get("protocol")) in protocols
+                            and str(p.get("origin")) in origins
+                        )
+                    ]
+                elif isinstance(pairs, dict):
+                    for origin in list(pairs.keys()):
+                        if origin not in origins:
+                            continue
+                        current = pairs.get(origin)
+                        if isinstance(current, list):
+                            pairs[origin] = [proto for proto in current if proto not in protocols]
+                            if not pairs[origin]:
+                                pairs.pop(origin, None)
+                        elif isinstance(current, str):
+                            if current in protocols:
+                                pairs.pop(origin, None)
+                else:
+                    protocol_handler["allowed_origin_protocol_pairs"] = []
+
+                pref_path.write_text(
+                    json.dumps(prefs, ensure_ascii=False, separators=(",", ":")),
+                    encoding="utf-8",
+                )
+                return
 
             # Chromium puede guardar esta clave como lista de objetos
             # o como diccionario {origin: [protocols]} segun version/perfil.
@@ -339,6 +389,134 @@ class BaseAutomation:
         except Exception as e:
             self.logger.warning("No se pudieron preparar preferencias de protocolo para AutoFirma: %s", e)
 
+    def _sanitize_managed_protocol_policies(self) -> None:
+        if self.config.autofirma_auto_open:
+            return
+
+        protocols_raw = (os.getenv("XALOC_AUTOFIRMA_PROTOCOLS") or "").strip()
+        protocols = [p.strip() for p in protocols_raw.split(",") if p.strip()]
+        if not protocols:
+            protocols = [str(self.config.autofirma_protocol or "").strip() or "afirma"]
+
+        origins_raw = (os.getenv("XALOC_AUTOFIRMA_ALLOWED_ORIGINS") or "").strip()
+        origins = [str(self.config.autofirma_origin or "").strip()]
+        if origins_raw:
+            for env_origin in [o.strip() for o in origins_raw.split(",") if o.strip()]:
+                if env_origin not in origins:
+                    origins.append(env_origin)
+        origins = [origin for origin in origins if origin]
+
+        policy_files = [
+            Path("/etc/chromium/policies/managed/xaloc-afirma-policy.json"),
+            Path("/etc/opt/chrome/policies/managed/xaloc-afirma-policy.json"),
+            Path("/etc/opt/chrome_for_testing/policies/managed/xaloc-afirma-policy.json"),
+            Path("/etc/opt/edge/policies/managed/xaloc-afirma-policy.json"),
+        ]
+
+        for policy_path in policy_files:
+            try:
+                if not policy_path.exists():
+                    continue
+                raw = json.loads(policy_path.read_text(encoding="utf-8"))
+                rules = raw.get("AutoLaunchProtocolsFromOrigins")
+                if not isinstance(rules, list):
+                    continue
+
+                changed = False
+                filtered_rules: list[dict] = []
+                for rule in rules:
+                    if not isinstance(rule, dict):
+                        filtered_rules.append(rule)
+                        continue
+                    protocol = str(rule.get("protocol") or "").strip()
+                    allowed_origins = rule.get("allowed_origins")
+                    if protocol not in protocols or not isinstance(allowed_origins, list):
+                        filtered_rules.append(rule)
+                        continue
+
+                    remaining_origins = [
+                        origin for origin in allowed_origins if str(origin).strip() not in origins
+                    ]
+                    if len(remaining_origins) != len(allowed_origins):
+                        changed = True
+                    if remaining_origins:
+                        new_rule = dict(rule)
+                        new_rule["allowed_origins"] = remaining_origins
+                        filtered_rules.append(new_rule)
+
+                if not changed:
+                    continue
+
+                raw["AutoLaunchProtocolsFromOrigins"] = filtered_rules
+                policy_path.write_text(
+                    json.dumps(raw, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                self.logger.info(
+                    "Policy gestionada de AutoFirma saneada para site=%s en %s",
+                    self.config.site_id,
+                    policy_path,
+                )
+            except Exception as e:
+                self.logger.warning(
+                    "No se pudo sanear policy gestionada de AutoFirma en %s: %s",
+                    policy_path,
+                    e,
+                )
+
+    def _sanitize_windows_profile_before_launch(self, user_data_dir: str) -> None:
+        if os.name != "nt":
+            return
+
+        profile_dir = Path(user_data_dir)
+        default_dir = profile_dir / "Default"
+        sessions_dir = default_dir / "Sessions"
+
+        try:
+            if sessions_dir.exists():
+                for entry in sessions_dir.iterdir():
+                    if entry.is_file() and entry.name.startswith(("Session_", "Tabs_")):
+                        try:
+                            entry.unlink()
+                        except Exception:
+                            pass
+        except Exception as e:
+            self.logger.warning("No se pudieron limpiar sesiones Chromium en %s: %s", sessions_dir, e)
+
+        def _rewrite_json(path: Path) -> None:
+            if not path.exists():
+                return
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                return
+
+            changed = False
+            profile_data = data.setdefault("profile", {})
+            if profile_data.get("exit_type") == "Crashed":
+                profile_data["exit_type"] = "Normal"
+                changed = True
+            if profile_data.get("exited_cleanly") is not True:
+                profile_data["exited_cleanly"] = True
+                changed = True
+
+            session_data = data.setdefault("session", {})
+            if session_data.get("restore_on_startup") == 1:
+                session_data["restore_on_startup"] = 5
+                changed = True
+
+            if changed:
+                path.write_text(
+                    json.dumps(data, ensure_ascii=False, separators=(",", ":")),
+                    encoding="utf-8",
+                )
+
+        for json_path in (default_dir / "Preferences", profile_dir / "Local State"):
+            try:
+                _rewrite_json(json_path)
+            except Exception as e:
+                self.logger.warning("No se pudo sanear perfil Chromium %s: %s", json_path, e)
+
     async def _launch_persistent_context_with_fallback(
         self,
         *,
@@ -359,20 +537,21 @@ class BaseAutomation:
             except Exception:
                 pass
 
-        def _build_ephemeral_profile_with_cert_db() -> str:
+        def _build_ephemeral_profile_with_cert_db(*, copy_existing_prefs: bool = True) -> str:
             src = Path(user_data_dir)
             tmp = Path(tempfile.mkdtemp(prefix="xaloc_profile_", dir=str(src.parent)))
-            # Mantener prefs mínimas si existen.
-            for name in ("Local State", "Preferences"):
-                for candidate in (src / name, src / "Default" / name):
-                    if not candidate.exists():
-                        continue
-                    dest = tmp / Path("Default") / name if candidate.parent.name == "Default" else tmp / name
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    try:
-                        shutil.copy2(candidate, dest)
-                    except Exception:
-                        pass
+            # Mantener prefs minimas solo cuando se solicita (locks, migraciones suaves).
+            if copy_existing_prefs:
+                for name in ("Local State", "Preferences"):
+                    for candidate in (src / name, src / "Default" / name):
+                        if not candidate.exists():
+                            continue
+                        dest = tmp / Path("Default") / name if candidate.parent.name == "Default" else tmp / name
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        try:
+                            shutil.copy2(candidate, dest)
+                        except Exception:
+                            pass
 
             # Importar certificado directamente en NSS del perfil temporal.
             cert_path = Path(os.getenv("PLAYWRIGHT_CERT_PATH") or "/data/certificates/certificate.pfx")
@@ -407,8 +586,13 @@ class BaseAutomation:
                         )
             except Exception as e:
                 self.logger.warning("No se pudo importar certificado en perfil temporal: %s", e)
+            self._prepare_protocol_preferences(str(tmp))
+            self._sanitize_windows_profile_before_launch(str(tmp))
             return str(tmp)
 
+        prefer_ephemeral_profile_on_windows = bool(
+            os.name == "nt" and getattr(self.config, "prefer_ephemeral_profile_on_windows", False)
+        )
         launch_kwargs = dict(
             user_data_dir=user_data_dir,
             channel=self.config.navegador.canal,
@@ -418,6 +602,10 @@ class BaseAutomation:
             accept_downloads=True,
             **viewport_kwargs,
         )
+        ephemeral_used = False
+        if prefer_ephemeral_profile_on_windows:
+            launch_kwargs["user_data_dir"] = _build_ephemeral_profile_with_cert_db(copy_existing_prefs=False)
+            ephemeral_used = True
         client_certs = self._build_client_certificates()
         if client_certs:
             launch_kwargs["client_certificates"] = client_certs
@@ -426,8 +614,8 @@ class BaseAutomation:
             _cleanup_chromium_singleton_lockfiles()
         cert_retry_done = False
         lock_retry_done = False
-        ephemeral_used = False
         crash_retry_done = False
+        crash_without_cli_autoselect_done = False
         channel_fallback_done = False
         display_fallback_done = False
         allow_headless_on_display_error = (
@@ -437,8 +625,10 @@ class BaseAutomation:
 
         while True:
             try:
+                self.logger.info("Intentando launch_persistent_context con: %s", json.dumps(launch_kwargs, default=str, separators=(",", ":")))
                 return await self.playwright.chromium.launch_persistent_context(**launch_kwargs)
             except Exception as exc:
+                self.logger.exception("Fallo en launch_persistent_context: %s", exc)
                 msg = str(exc).lower()
 
                 if (
@@ -474,7 +664,7 @@ class BaseAutomation:
                         continue
                     if not ephemeral_used:
                         self.logger.warning("Persisten locks del perfil. Fallback a perfil temporal clonado.")
-                        launch_kwargs["user_data_dir"] = _build_ephemeral_profile_with_cert_db()
+                        launch_kwargs["user_data_dir"] = _build_ephemeral_profile_with_cert_db(copy_existing_prefs=True)
                         ephemeral_used = True
                         lock_retry_done = False
                         continue
@@ -482,16 +672,31 @@ class BaseAutomation:
                 if (
                     not crash_retry_done
                     and "target page, context or browser has been closed" in msg
-                    and ("processsingleton" in msg or "singleton" in msg)
                 ):
+                    if not crash_without_cli_autoselect_done and os.name == "nt":
+                        filtered_args = [
+                            arg
+                            for arg in launch_kwargs.get("args", [])
+                            if not str(arg).startswith("--auto-select-certificate-for-urls=")
+                        ]
+                        if len(filtered_args) != len(launch_kwargs.get("args", [])):
+                            self.logger.warning(
+                                "Chromium se cerro durante launch_persistent_context en Windows. "
+                                "Reintentando sin --auto-select-certificate-for-urls para evitar limites de linea de comandos."
+                            )
+                            launch_kwargs["args"] = filtered_args
+                            crash_without_cli_autoselect_done = True
+                            await asyncio.sleep(0.2)
+                            continue
                     self.logger.warning(
-                        "Chromium se cerró durante launch con señal de ProcessSingleton. "
-                        "Limpiando locks y reintentando con perfil temporal."
+                        "Chromium se cerro durante launch_persistent_context. "
+                        "Reintentando con perfil temporal limpio para aislar corrupcion del perfil persistente."
                     )
                     _cleanup_chromium_singleton_lockfiles()
                     if not ephemeral_used:
-                        launch_kwargs["user_data_dir"] = _build_ephemeral_profile_with_cert_db()
+                        launch_kwargs["user_data_dir"] = _build_ephemeral_profile_with_cert_db(copy_existing_prefs=False)
                         ephemeral_used = True
+                    launch_kwargs.pop("client_certificates", None)
                     crash_retry_done = True
                     await asyncio.sleep(0.2)
                     continue
@@ -549,6 +754,8 @@ class BaseAutomation:
     async def _start_browser(self) -> None:
         user_data_dir = str(self.config.navegador.perfil_path.absolute())
         self._prepare_protocol_preferences(user_data_dir)
+        self._sanitize_managed_protocol_policies()
+        self._sanitize_windows_profile_before_launch(user_data_dir)
         args = self._build_browser_args()
 
         # Viewport: en headless, forzar 1920x1080; en headed, dejar que siga el tamaÃ±o de ventana.

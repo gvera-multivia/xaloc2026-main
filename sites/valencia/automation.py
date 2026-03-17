@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from dataclasses import asdict
 from pathlib import Path
 
@@ -35,8 +36,10 @@ class ValenciaAutomation(BaseAutomation):
 
             shot = self.config.dir_screenshots / "valencia_standalone.png"
             await self.page.screenshot(path=shot, full_page=True)
-            self.logger.info("valencia.automation DEBUG sleep=200s antes de cerrar navegador")
-            await asyncio.sleep(200)
+            sleep_seconds = int((os.getenv("VALENCIA_POST_RUN_SLEEP_SECONDS") or "0").strip() or "0")
+            if sleep_seconds > 0:
+                self.logger.info("valencia.automation DEBUG sleep=%ss antes de cerrar navegador", sleep_seconds)
+                await asyncio.sleep(sleep_seconds)
             self.logger.info("valencia.automation END screenshot=%s", shot)
             return str(Path(shot))
         except Exception:

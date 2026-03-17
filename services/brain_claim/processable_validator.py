@@ -88,6 +88,8 @@ def validate_candidate(
     candidate: dict[str, Any],
     runtime_store: Any,
     admin_store: Any,
+    is_blocked: bool | None = None,
+    is_resource_paused: bool | None = None,
 ) -> ValidationResult:
     rid_raw = _pick(candidate, "idRecurso", canonical_path="resource.id")
     try:
@@ -100,17 +102,21 @@ def validate_candidate(
     if not expediente:
         return ValidationResult(False, "REF_MISSING", "Falta referencia/expediente.")
 
-    try:
-        if admin_store.is_resource_blocked(site_id=site, resource_id=rid):
-            return ValidationResult(False, "RESOURCE_BLOCKED", "Recurso bloqueado por blacklist.")
-    except Exception:
-        pass
+    if is_blocked is None:
+        try:
+            is_blocked = bool(admin_store.is_resource_blocked(site_id=site, resource_id=rid))
+        except Exception:
+            is_blocked = False
+    if is_blocked:
+        return ValidationResult(False, "RESOURCE_BLOCKED", "Recurso bloqueado por blacklist.")
 
-    try:
-        if runtime_store.is_resource_processing_paused(site_id=site, resource_id=rid):
-            return ValidationResult(False, "RESOURCE_PAUSED", "Recurso pausado temporalmente.")
-    except Exception:
-        pass
+    if is_resource_paused is None:
+        try:
+            is_resource_paused = bool(runtime_store.is_resource_processing_paused(site_id=site, resource_id=rid))
+        except Exception:
+            is_resource_paused = False
+    if is_resource_paused:
+        return ValidationResult(False, "RESOURCE_PAUSED", "Recurso pausado temporalmente.")
 
     deadline_fields = (
         "fecha_limite",
