@@ -177,24 +177,19 @@ def _calculate_file_score(path: Path, categories_found: list[str]) -> int:
     score = 0
     name = path.name.lower()
     path_upper = str(path).upper()
-    ext = path.suffix.lower()
+    detected_type = _detect_file_type(path)
 
-    # Filtro base de extensión
-    if ext == ".pdf": 
+    # Priorizar el tipo real sobre la extensión para no aceptar "PDFs" falsos.
+    if detected_type == "pdf":
         score += 50
-    elif ext in [".jpg", ".jpeg", ".png"]: 
-        score += 20
-    else:
-        # Si no tiene extensión conocida, verificar el tipo real del archivo
-        detected_type = _detect_file_type(path)
-        if detected_type == "pdf":
-            score += 50  # Es un PDF sin extensión
+        if path.suffix.lower() != ".pdf":
             logger.debug(f"Archivo sin extensión detectado como PDF: {path.name}")
-        elif detected_type in ["jpg", "jpeg", "png"]:
-            score += 20  # Es una imagen sin extensión
+    elif detected_type in ["jpeg", "png"]:
+        score += 20
+        if path.suffix.lower() not in [".jpg", ".jpeg", ".png"]:
             logger.debug(f"Archivo sin extensión detectado como {detected_type}: {path.name}")
-        else:
-            return -1000  # Formato no reconocido
+    else:
+        return -1000  # Formato no reconocido o extensión engañosa.
 
     # 1. EL FACTOR DETERMINANTE: FIRMA (CF vs SF)
     # Buscamos patrones que indiquen si está firmado o no

@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+  <meta charset="UTF-8">
+  <title>Mock ORGT Exact - representacioPas3juridica</title>
+  <!-- jQuery (mismo que ORGT real) -->
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jquery-validation@1.19.5/dist/jquery.validate.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 900px; margin: 40px auto; padding: 20px; }
+    .form-group { margin: 15px 0; }
+    label { display: block; margin-bottom: 5px; font-weight: bold; }
+    .form-control { width: 100%; padding: 8px; border: 1px solid #ccc; font-size: 14px; box-sizing: border-box; }
+    input[type='button'] { padding: 6px 12px; background: #337ab7; color: white; border: none; cursor: pointer; font-size: 14px; }
+    input[type='submit'] { padding: 6px 12px; background: #5cb85c; color: white; border: none; cursor: pointer; font-size: 14px; }
+    #formFiles { border: 1px solid #ddd; padding: 15px; margin-top: 10px; }
+    table { width: 100%; border-collapse: collapse; }
+    td, th { border: 1px solid #ccc; padding: 6px 10px; font-size: 13px; }
+    #log { margin-top: 20px; padding: 10px; background: #1a1a1a; color: #0f0; font-family: monospace; font-size: 12px; white-space: pre-wrap; min-height: 100px; }
+    .TextUpload { /* class real del ORGT */ }
+    /* Cabecera falsa con campo buscar (igual que ORGT) */
+    #header { background: #004a99; padding: 10px; margin-bottom: 20px; }
+    #header input[type='text'] { padding: 5px; width: 200px; }
+  </style>
+</head>
+<body>
+
+  <!-- CABECERA FAKE con queryCercar (igual que el ORGT real) -->
+  <div id="header">
+    <span style="color:white; font-weight:bold;">ORGT Mock</span>
+    <input type="text" id="queryCercar" name="queryCercar" placeholder="Buscar" style="margin-left:20px;">
+    <input type="button" value="Cercar" style="margin-left:5px;">
+  </div>
+
+  <h2>Pas 3: Documentació acreditativa</h2>
+  <p>Simulació exacta de <code>/Home/representacioPas3juridica</code></p>
+
+  <!-- Campos readonly de identidad (como el ORGT real) -->
+  <div class="form-group">
+    <label>NIF Representat:</label>
+    <input type="text" id="identificadorInteressat" readonly class="form-control" value="B12345678">
+  </div>
+  <div class="form-group">
+    <label>Nom Representat:</label>
+    <input type="text" id="nomInteressat" readonly class="form-control" value="Empresa Test SL">
+  </div>
+
+  <!-- #formFiles — se reemplaza entero con AJAX igual que ORGT real -->
+  <div id="formFiles">
+    <div class="form-group">
+      <label for="ComentFile">Descripció:</label>
+      <input type="text" id="ComentFile" name="ComentFile" maxlength="99"
+             class="TextUpload form-control valid" placeholder="Descripció obligatoria">
+    </div>
+    <div class="form-group">
+      <label>Document:</label>
+      <!-- fakeBrowse: input[type='button'] exacto como ORGT real -->
+      <input type="button" id="fakeBrowse" value="Navega..." onclick="CridaUpload()">
+      <!-- file input OCULTO - display:none exacto -->
+      <input type="file" id="fileInput" name="fitxer" style="display:none" onchange="upload()">
+    </div>
+    <div>
+      <table id="uploadedTable" style="display:none">
+        <thead><tr><th>Nom fitxer</th><th>Mida</th><th>Accions</th></tr></thead>
+        <tbody id="uploadedTbody"></tbody>
+      </table>
+    </div>
+    <div class="form-group" style="margin-top:15px">
+      <input type="submit" id="btnContinuar" value="Continuar" onclick="return submitForm()">
+    </div>
+  </div>
+
+  <div id="log">LOG:\n</div>
+
+  <script>
+    function log(msg) {
+      document.getElementById('log').textContent += msg + '\n';
+    }
+
+    // CridaUpload() - exacto como ORGT real: jQuery trigger click en file input oculto
+    function CridaUpload() {
+      log('[CridaUpload] triggered');
+      $('input[type="file"]').trigger('click');
+    }
+
+    // upload() - AJAX simulado. Lee #ComentFile IGUAL que el ORGT real
+    function upload() {
+      var comment = $("#ComentFile").val();
+      var file = document.getElementById('fileInput').files[0];
+      log('[upload] ComentFile value = "' + comment + '"');
+      log('[upload] file = ' + (file ? file.name : 'NONE'));
+
+      if (!comment) {
+        log('[upload] ERROR: ComentFile vacío!');
+      }
+      if (!file) {
+        log('[upload] ERROR: No file selected');
+        return;
+      }
+
+      // Simular AJAX: reemplazar #formFiles entero (igual que ORGT UpdatePanel)
+      setTimeout(function() {
+        log('[upload AJAX] Reemplazando #formFiles...');
+        var newHtml = '<div class="form-group">' +
+          '<label for="ComentFile">Descripció:</label>' +
+          '<input type="text" id="ComentFile" name="ComentFile" maxlength="99" ' +
+          'class="TextUpload form-control valid" placeholder="Descripció obligatoria">' +
+          '</div>' +
+          '<div class="form-group"><label>Document:</label>' +
+          '<input type="button" id="fakeBrowse" value="Navega..." onclick="CridaUpload()">' +
+          '<input type="file" id="fileInput" name="fitxer" style="display:none" onchange="upload()">' +
+          '</div>' +
+          '<table id="uploadedTable"><thead><tr><th>Nom fitxer</th><th>Mida</th><th>Accions</th></tr></thead>' +
+          '<tbody id="uploadedTbody"><tr><td>' + file.name + '</td><td>' + Math.round(file.size/1024) + ' KB</td><td>Eliminar</td></tr></tbody>' +
+          '</table>' +
+          '<div class="form-group" style="margin-top:15px">' +
+          '<input type="submit" id="btnContinuar" value="Continuar" onclick="return submitForm()">' +
+          '</div>';
+        document.getElementById('formFiles').innerHTML = newHtml;
+        log('[upload AJAX] #formFiles reemplazado. Nuevo #ComentFile vacío.');
+        // Re-init jQuery validate en el nuevo DOM
+        $('#ComentFile').val('');
+      }, 800);
+    }
+
+    function submitForm() {
+      var comment = $("#ComentFile").val();
+      var rows = document.querySelectorAll('#uploadedTbody tr').length;
+      log('[submitForm] ComentFile="' + comment + '" uploadedRows=' + rows);
+      if (!comment) { log('[submitForm] ERROR: ComentFile vacío'); return false; }
+      if (rows === 0) { log('[submitForm] ERROR: Sin documentos'); return false; }
+      log('[submitForm] OK - avanzando...');
+      return false;
+    }
+
+    // jQuery Validate init (igual que ORGT)
+    $(document).ready(function() {
+      log('[ready] jQuery Validate inicializado');
+      // Simulamos que jQuery validate puede interferir con fill()
+      $('#ComentFile').on('keyup change input', function() {
+        log('[ComentFile event] value = "' + $(this).val() + '"');
+      });
+    });
+  </script>
+</body>
+</html>

@@ -226,6 +226,8 @@ def _analyze_upload_state(
     desc_expected = _norm_text(expected_desc)
     type_expected = _norm_text(expected_type)
     file_count = int(current_state.get("file_count") or 0)
+    desc_matches = bool(desc_expected) and (desc_now == desc_expected or desc_expected in desc_now or desc_now in desc_expected)
+    type_matches = bool(type_expected) and (type_now == type_expected or type_expected in type_now or type_now in type_expected)
 
     block_recycled = (
         not block_missing
@@ -241,8 +243,7 @@ def _analyze_upload_state(
         and not form_missing
         and not file_missing
         and file_count >= 1
-        and desc_now == desc_expected
-        and type_now == type_expected
+        and (desc_matches or type_matches or bool(desc_now))
     )
     structural_progress = has_fresh_block or block_missing or form_missing or file_missing or block_recycled
     confirmed = has_name_outside_block and (structural_progress or same_block_registered)

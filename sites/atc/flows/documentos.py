@@ -1116,6 +1116,7 @@ async def _run_rea_repos_docs(page: "Page", datos: "AtcTarget") -> "Page":
             [doc.fitxer for doc in existing_docs],
             id_recurso=getattr(datos, "idRecurso", None),
             output_dir=Path("tmp/atc_reposicio_bundle"),
+            strict=False,
         )
         existing_docs = [type(existing_docs[0])(fitxer=merged_pdf, tipus="Documentacio acreditativa si escau", descripcio=merged_pdf.stem)]
         bundled_upload = True

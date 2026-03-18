@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 
 import core.client_documentation as docs
+from core import pdf_bundle
 
 
 def test_build_required_client_documents_uses_single_output_label(monkeypatch) -> None:
@@ -59,3 +60,35 @@ def test_check_requires_gesdoc_falls_back_to_db_identity(monkeypatch, tmp_path: 
 
     assert requires is True
     assert "No se pudo inferir identidad del cliente" not in str(reason)
+
+
+def test_select_required_client_documents_ignores_fake_pdf_with_pdf_extension(tmp_path: Path) -> None:
+    def _make_pdf(path: Path) -> Path:
+        writer_cls = pdf_bundle._load_pdf_reader().__module__.split(".")[0]
+        if writer_cls == "pypdf":
+            from pypdf import PdfWriter  # type: ignore
+        else:
+            from PyPDF2 import PdfWriter  # type: ignore
+        writer = PdfWriter()
+        writer.add_blank_page(width=72, height=72)
+        with path.open("wb") as fh:
+            writer.write(fh)
+        return path
+
+    ruta = tmp_path / "DOCUMENTACION"
+    ruta.mkdir()
+    _make_pdf(ruta / "AUTO EMPRESA FIRMADA.pdf")
+    _make_pdf(ruta / "DNI EMPRESA.pdf")
+    _make_pdf(ruta / "CIF EMPRESA.pdf")
+    (ruta / "Escritura EMPRESA.pdf").write_bytes(b"rtfd\x00\x00\x00\x00")
+
+    selected = docs.select_required_client_documents(
+        ruta_docu=ruta,
+        is_company=True,
+        strict=True,
+        merge_if_multiple=False,
+    )
+
+    selected_names = {p.name for p in selected.files_to_upload}
+    assert "Escritura EMPRESA.pdf" not in selected_names
+    assert "ESCR" not in selected.covered_terms

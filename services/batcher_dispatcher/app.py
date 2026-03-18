@@ -8,6 +8,7 @@ import signal
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import date, datetime
 from typing import Any
 
 from dotenv import load_dotenv
@@ -75,6 +76,28 @@ class BatcherDispatcherService:
         except Exception:
             return text
 
+    @staticmethod
+    def _parse_fecpres(value: Any) -> date | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            return datetime.strptime(text, "%Y-%m-%d").date()
+        except Exception:
+            return None
+
+    @classmethod
+    def _pending_priority_key(cls, item: PendingValidated) -> tuple[int, date, int, float]:
+        payload = item.payload.get("normalized_payload") or {}
+        fecpres = cls._parse_fecpres(payload.get("fecpres"))
+        # 1) con fecpres valido primero, 2) fecha mas proxima primero.
+        # Si no hay fecpres, conserva prioridad declarada y orden de llegada.
+        if fecpres is not None:
+            return (0, fecpres, int(item.payload.get("priority") or 100), item.arrived_at)
+        return (1, date.max, int(item.payload.get("priority") or 100), item.arrived_at)
+
     async def _consume_once(self) -> bool:
         await self.streams.ensure_group(stream=self.validated_stream, group=self.group)
         msg = await self.streams.read_group(
@@ -109,92 +132,83 @@ class BatcherDispatcherService:
     async def _flush(self) -> None:
         if not self.pending:
             return
-        batch = self.pending
+        batch = sorted(self.pending, key=self._pending_priority_key)
         self.pending = []
         self.last_flush = time.monotonic()
-
-        # Grouping by organism + job_type + cert_profile + priority.
-        grouped: dict[str, list[PendingValidated]] = {}
         for item in batch:
+            msg = item.message
             p = item.payload
-            gk = f"{p['organism_id']}|{p['job_type']}|{p['cert_profile']}|{p['priority']}"
-            grouped.setdefault(gk, []).append(item)
-
-        for _, items in grouped.items():
-            for item in items:
-                msg = item.message
-                p = item.payload
-                draft_id = p["job_draft_id"]
-                try:
-                    if not draft_id:
-                        raise ValueError("validated sin job_draft_id")
-                    normalized_payload = p["normalized_payload"]
-                    dedup_key = p["dedup_key"] or self.store.build_dedup_key(
-                        organism_id=p["organism_id"],
-                        external_resource_id=str(normalized_payload.get("external_resource_id") or ""),
-                        job_type=p["job_type"],
-                    )
-                    upsert_result = self.store.upsert_job_from_draft(
-                        draft_id=draft_id,
-                        dedup_key=dedup_key,
-                        priority=int(p["priority"]),
-                        payload=normalized_payload,
-                    )
-                    job_id = str(upsert_result.get("job_id") or "").strip()
-                    if not job_id:
-                        raise ValueError("upsert_job_from_draft devolvio job_id vacio")
-                    if not bool(upsert_result.get("dispatch", True)):
-                        logger.info(
-                            "[batcher-dispatcher] skip dispatch dedup activo: job_id=%s dedup_key=%s status=%s",
-                            job_id,
-                            dedup_key,
-                            str(upsert_result.get("job_status") or "").strip() or "unknown",
-                        )
-                        await self.streams.ack(stream=self.validated_stream, group=self.group, message_id=msg.message_id)
-                        continue
-                    id_recurso = self._normalize_id_recurso(normalized_payload)
-                    if id_recurso is not None:
-                        normalized_payload["idRecurso"] = id_recurso
-                    job_payload = {
-                        "job_id": job_id,
-                        "attempt": int(normalized_payload.get("attempt") or 0),
-                        "max_attempts": int(normalized_payload.get("max_attempts") or 3),
-                        "execution_plan": {
-                            "organism_id": p["organism_id"],
-                            "job_type": p["job_type"],
-                            "cert_profile": p["cert_profile"],
-                            "steps": normalized_payload.get("steps") or [],
-                        },
-                        "artifacts_base_path": f"/data/artifacts/{job_id}",
-                        "trace_id": p["trace_id"],
-                        "site_id": p["organism_id"],
-                        "protocol": normalized_payload.get("protocol") or normalized_payload.get("job_type") or "",
-                        "payload": normalized_payload,
-                        "resource_id": id_recurso,
-                    }
-                    await self.streams.publish_json(
-                        stream=self.jobs_stream,
-                        payload=job_payload,
-                        maxlen=self.trim_maxlen,
+            draft_id = p["job_draft_id"]
+            try:
+                if not draft_id:
+                    raise ValueError("validated sin job_draft_id")
+                normalized_payload = p["normalized_payload"]
+                dedup_key = p["dedup_key"] or self.store.build_dedup_key(
+                    organism_id=p["organism_id"],
+                    external_resource_id=str(normalized_payload.get("external_resource_id") or ""),
+                    job_type=p["job_type"],
+                )
+                upsert_result = self.store.upsert_job_from_draft(
+                    draft_id=draft_id,
+                    dedup_key=dedup_key,
+                    priority=int(p["priority"]),
+                    payload=normalized_payload,
+                )
+                job_id = str(upsert_result.get("job_id") or "").strip()
+                if not job_id:
+                    raise ValueError("upsert_job_from_draft devolvio job_id vacio")
+                if not bool(upsert_result.get("dispatch", True)):
+                    logger.info(
+                        "[batcher-dispatcher] skip dispatch dedup activo: job_id=%s dedup_key=%s status=%s",
+                        job_id,
+                        dedup_key,
+                        str(upsert_result.get("job_status") or "").strip() or "unknown",
                     )
                     await self.streams.ack(stream=self.validated_stream, group=self.group, message_id=msg.message_id)
-                except Exception as exc:
-                    logger.exception("Error despachando validated %s: %s", msg.message_id, exc)
-                    if draft_id:
-                        try:
-                            self.store.mark_draft_error(draft_id=draft_id, error=str(exc))
-                        except Exception:
-                            pass
-                    await self.streams.publish_json(
-                        stream=self.dlq_validated,
-                        payload={
-                            "source_message_id": msg.message_id,
-                            "error": str(exc),
-                            "payload": p,
-                        },
-                        maxlen=int((os.getenv("DLQ_STREAM_MAXLEN") or "200000").strip() or "200000"),
-                    )
-                    await self.streams.ack(stream=self.validated_stream, group=self.group, message_id=msg.message_id)
+                    continue
+                id_recurso = self._normalize_id_recurso(normalized_payload)
+                if id_recurso is not None:
+                    normalized_payload["idRecurso"] = id_recurso
+                job_payload = {
+                    "job_id": job_id,
+                    "attempt": int(normalized_payload.get("attempt") or 0),
+                    "max_attempts": int(normalized_payload.get("max_attempts") or 3),
+                    "execution_plan": {
+                        "organism_id": p["organism_id"],
+                        "job_type": p["job_type"],
+                        "cert_profile": p["cert_profile"],
+                        "steps": normalized_payload.get("steps") or [],
+                    },
+                    "artifacts_base_path": f"/data/artifacts/{job_id}",
+                    "trace_id": p["trace_id"],
+                    "site_id": p["organism_id"],
+                    "protocol": normalized_payload.get("protocol") or normalized_payload.get("job_type") or "",
+                    "payload": normalized_payload,
+                    "resource_id": id_recurso,
+                }
+                await self.streams.publish_json(
+                    stream=self.jobs_stream,
+                    payload=job_payload,
+                    maxlen=self.trim_maxlen,
+                )
+                await self.streams.ack(stream=self.validated_stream, group=self.group, message_id=msg.message_id)
+            except Exception as exc:
+                logger.exception("Error despachando validated %s: %s", msg.message_id, exc)
+                if draft_id:
+                    try:
+                        self.store.mark_draft_error(draft_id=draft_id, error=str(exc))
+                    except Exception:
+                        pass
+                await self.streams.publish_json(
+                    stream=self.dlq_validated,
+                    payload={
+                        "source_message_id": msg.message_id,
+                        "error": str(exc),
+                        "payload": p,
+                    },
+                    maxlen=int((os.getenv("DLQ_STREAM_MAXLEN") or "200000").strip() or "200000"),
+                )
+                await self.streams.ack(stream=self.validated_stream, group=self.group, message_id=msg.message_id)
 
     async def run_forever(self) -> None:
         shutdown = asyncio.Event()

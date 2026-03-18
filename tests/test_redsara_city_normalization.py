@@ -21,5 +21,11 @@ def test_select_heuristic_alias_for_les_franqueses() -> None:
 
 def test_select_heuristic_alias_for_guipuzcoa_variants() -> None:
     assert normalize_province_alias("GUIPUZCOA") == "gipuzkoa"
-    assert normalize_province_alias("Guipúzcoa") == "gipuzkoa"
+    assert normalize_province_alias("Guipuzcoa") == "gipuzkoa"
     assert normalize_province_alias("GIPUZCOA") == "gipuzkoa"
+
+
+def test_select_heuristic_alias_for_balears_variants() -> None:
+    assert normalize_province_alias("MALLORCA") == "illes balears"
+    assert normalize_province_alias("Palma de Mallorca") == "illes balears"
+    assert normalize_province_alias("ISLAS BALEARES") == "illes balears"

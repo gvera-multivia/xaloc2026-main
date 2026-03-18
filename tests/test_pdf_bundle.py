@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from core import pdf_bundle
 
@@ -98,3 +99,38 @@ def test_bundle_documents_to_single_pdf_raises_when_output_page_count_is_incompl
             id_recurso=789,
             output_dir=tmp_path / "broken",
         )
+
+
+def test_bundle_documents_to_single_pdf_converts_supported_images_before_merge(tmp_path: Path) -> None:
+    pdf_path = _make_pdf(tmp_path / "recurso.pdf", pages=1)
+    image_path = tmp_path / "dni.png"
+    Image.new("RGB", (24, 24), color="white").save(image_path, format="PNG")
+
+    out = pdf_bundle.bundle_documents_to_single_pdf_for_palma(
+        [pdf_path, image_path],
+        id_recurso=321,
+        output_dir=tmp_path / "out",
+    )
+
+    manifest_path = out.with_suffix(f"{out.suffix}.manifest.json")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert out.exists()
+    assert manifest["bundle_page_count"] == 2
+    assert manifest["source_count"] == 2
+
+
+def test_bundle_documents_to_single_pdf_non_strict_ignores_invalid_fake_pdf(tmp_path: Path) -> None:
+    valid_pdf = _make_pdf(tmp_path / "recurso.pdf", pages=1)
+    fake_pdf = tmp_path / "Escritura EMPRESA.pdf"
+    fake_pdf.write_bytes(b"rtfd\x00\x00\x00\x00")
+
+    out = pdf_bundle.bundle_documents_to_single_pdf_for_palma(
+        [valid_pdf, fake_pdf],
+        id_recurso=654,
+        output_dir=tmp_path / "out",
+        strict=False,
+    )
+
+    assert out.exists()
+    assert out.name == "recurso.pdf"

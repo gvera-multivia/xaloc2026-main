@@ -24,7 +24,8 @@
     };
 
     const captureFromAttr = (value, source) => {
-        try { captureAfirma(value, source); } catch(_e) {}
+        try { return captureAfirma(value, source); } catch(_e) {}
+        return false;
     };
 
     // Capture navigation APIs that often emit afirma:// in Sedipualba.
@@ -99,7 +100,8 @@
         Element.prototype.setAttribute = function(name, value) {
             const key = String(name || '').toLowerCase();
             if (key === 'href' || key === 'src' || key === 'action') {
-                captureFromAttr(value, `setAttribute:${key}`);
+                const captured = captureFromAttr(value, `setAttribute:${key}`);
+                if (captured && blockExternalLaunch) return;
             }
             return _origSetAttr.call(this, name, value);
         };
@@ -111,8 +113,23 @@
     try {
         const _origFormSubmit = HTMLFormElement.prototype.submit;
         HTMLFormElement.prototype.submit = function(...args) {
-            try { captureFromAttr(this && this.action, 'form.submit.action'); } catch(_e) {}
+            let captured = false;
+            try { captured = captureFromAttr(this && this.action, 'form.submit.action'); } catch(_e) {}
+            if (captured && blockExternalLaunch) return;
             return _origFormSubmit.apply(this, args);
+        };
+    } catch(e) {
+        // ignore
+    }
+
+    // requestSubmit can trigger action navigation without calling submit() in some flows.
+    try {
+        const _origRequestSubmit = HTMLFormElement.prototype.requestSubmit;
+        HTMLFormElement.prototype.requestSubmit = function(...args) {
+            let captured = false;
+            try { captured = captureFromAttr(this && this.action, 'form.requestSubmit.action'); } catch(_e) {}
+            if (captured && blockExternalLaunch) return;
+            return _origRequestSubmit.apply(this, args);
         };
     } catch(e) {
         // ignore

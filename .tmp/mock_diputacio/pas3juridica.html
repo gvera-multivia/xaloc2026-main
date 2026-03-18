@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Mock - representacioPas3juridica</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; }
+    .form-group { margin: 15px 0; }
+    label { display: block; margin-bottom: 5px; font-weight: bold; }
+    input[type="text"] { width: 100%; padding: 8px; border: 1px solid #ccc; font-size: 14px; }
+    /* El botón de subida es un STYLED BUTTON que internamente clicka el input file oculto */
+    .btn { padding: 8px 16px; background: #337ab7; color: white; border: none; cursor: pointer; font-size: 14px; }
+    .btn-file { position: relative; overflow: hidden; }
+    .btn-file input[type="file"] {
+      position: absolute;
+      top: 0; right: 0;
+      min-width: 100%;
+      min-height: 100%;
+      font-size: 100px;
+      text-align: right;
+      filter: alpha(opacity=0);
+      opacity: 0;
+      outline: none;
+      cursor: inherit;
+      display: block; /* NO display:none — el truco de overflow:hidden */
+    }
+    .btn-success { background: #5cb85c; }
+    #fileName { margin-left: 10px; color: #555; }
+    #status { margin-top: 20px; padding: 10px; background: #f0f0f0; border: 1px solid #ccc; }
+  </style>
+</head>
+<body>
+  <h2>Pas 3: Documentació acreditativa</h2>
+  <p>Replicació de la pantalla <code>/Home/representacioPas3juridica</code></p>
+
+  <form id="mainForm" action="documentos.html" method="get">
+    <div class="form-group">
+      <label for="descripcio">Tipus de representació:</label>
+      <!-- CAMPO TEXTO: mismo patrón que en el sitio real -->
+      <input type="text" id="descripcio" name="descripcio" placeholder="Ej: Poder de representacion" maxlength="200">
+    </div>
+
+    <div class="form-group">
+      <label>Document acreditatiu:</label>
+      <!-- BOTÓN NAVEGA: span estilo botón que wrappea un input file -->
+      <span class="btn btn-file" id="navega-wrapper">
+        <span id="navega-text">Navega...</span>
+        <input type="file" id="inputDocFile" name="docFile" accept=".pdf,.doc,.docx">
+      </span>
+      <span id="fileName">Cap fitxer seleccionat</span>
+    </div>
+
+    <div class="form-group">
+      <button type="submit" class="btn btn-success" id="btnContinuar">Continuar</button>
+    </div>
+  </form>
+
+  <div id="status">
+    <strong>Estado del formulario:</strong>
+    <div id="statusText">Sin interacción</div>
+  </div>
+
+  <script>
+    const fileInput = document.getElementById('inputDocFile');
+    const fileNameSpan = document.getElementById('fileName');
+    const statusText = document.getElementById('statusText');
+
+    fileInput.addEventListener('change', function() {
+      if (this.files.length > 0) {
+        fileNameSpan.textContent = this.files[0].name;
+        statusText.textContent = 'Archivo seleccionado: ' + this.files[0].name;
+      }
+    });
+
+    document.getElementById('mainForm').addEventListener('submit', function(e) {
+      const texto = document.getElementById('descripcio').value.trim();
+      const archivo = fileInput.files.length > 0;
+
+      if (!texto || !archivo) {
+        e.preventDefault();
+        statusText.textContent = '❌ ERROR: Faltan campos. Texto: "' + texto + '", Archivo: ' + archivo;
+        return false;
+      }
+      statusText.textContent = '✅ OK: Texto="' + texto + '", Archivo="' + fileInput.files[0].name + '"';
+    });
+  </script>
+</body>
+</html>

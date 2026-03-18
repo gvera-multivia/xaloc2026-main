@@ -15,6 +15,8 @@ def test_resolve_rule_and_destination_code_barcelona() -> None:
 def test_validate_expediente_by_official_patterns() -> None:
     adapter = RedsaraAdapter()
     assert adapter.validate_expediente_for_organisme("AJUNTAMENT DE BARCELONA", "2026SACR0141800")
+    assert adapter.validate_expediente_for_organisme("AJUNTAMENT DE BARCELONA", "26F013176")
+    assert adapter.validate_expediente_for_organisme("AJUNTAMENT DE BARCELONA", "2025-1017739")
     assert adapter.validate_expediente_for_organisme(
         "SECTOR DE SEGURIDAD Y MOVILIDAD DEL AYUNTAMIENTO DE BARCELONA", "U8099161"
     )
@@ -22,6 +24,12 @@ def test_validate_expediente_by_official_patterns() -> None:
         "CENTRO DE TRATAMIENTO DE DENUNCIAS AUTOMATIZADAS DE LEON", "50-945-965.632-0"
     )
     assert adapter.validate_expediente_for_organisme("AYUNTAMIENTO DE PALMA DE MALLORCA", "MU 90046663")
+    assert adapter.validate_expediente_for_organisme(
+        "AGENCIA TRIBUTARIA MUNICIPAL DE ISLAS BALEARES", "25/088283-3"
+    )
+    assert adapter.validate_expediente_for_organisme(
+        "AGENCIA TRIBUTARIA MUNICIPAL DE ISLAS BALEARES", "23/044727-31"
+    )
     assert adapter.validate_expediente_for_organisme("AJUNTAMENT MIGJORN GRAN", "2025013916")
     assert adapter.validate_expediente_for_organisme("AYUNTAMIENTO DE MOSTOLES", "888249540")
     assert adapter.validate_expediente_for_organisme("JEFATURA PROVINCIAL DE TRÁFICO DE BARCELONA", "083313177")

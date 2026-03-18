@@ -18,6 +18,9 @@ PROVINCE_ALIASES = {
     "san sebastian": "donostia / san sebastian",
     "vitoria": "vitoria / gasteiz",
     "baleares": "illes balears",
+    "islas baleares": "illes balears",
+    "mallorca": "illes balears",
+    "palma de mallorca": "illes balears",
 }
 
 CITY_ALIASES = {

@@ -6,6 +6,8 @@ import re
 import subprocess
 from pathlib import Path
 
+from PIL import Image
+
 
 def _is_pdf_file(path: Path) -> bool:
     try:
@@ -13,6 +15,44 @@ def _is_pdf_file(path: Path) -> bool:
             return fh.read(4) == b"%PDF"
     except Exception:
         return False
+
+
+def _is_convertible_image_file(path: Path) -> bool:
+    try:
+        with path.open("rb") as fh:
+            header = fh.read(16)
+    except Exception:
+        return False
+    return header.startswith(b"\xff\xd8\xff") or header.startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def _convert_image_to_pdf(src: Path, *, output_dir: Path) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    out_path = output_dir / f"{src.stem}.converted.pdf"
+    with Image.open(src) as image:
+        if image.mode in {"RGBA", "P"}:
+            image = image.convert("RGB")
+        elif image.mode != "RGB":
+            image = image.convert("RGB")
+        image.save(out_path, format="PDF", resolution=100.0)
+    if not _is_pdf_file(out_path):
+        raise RuntimeError(f"No se pudo convertir la imagen a PDF: {src}")
+    return out_path
+
+
+def _normalize_merge_inputs(files: list[Path], *, output_dir: Path) -> tuple[list[Path], list[str]]:
+    normalized: list[Path] = []
+    unsupported: list[str] = []
+    converted_dir = output_dir / "_converted_inputs"
+    for path in files:
+        if _is_pdf_file(path):
+            normalized.append(path)
+            continue
+        if _is_convertible_image_file(path):
+            normalized.append(_convert_image_to_pdf(path, output_dir=converted_dir))
+            continue
+        unsupported.append(str(path))
+    return normalized, unsupported
 
 
 def _load_pdf_backend():
@@ -159,6 +199,7 @@ def bundle_documents_to_single_pdf_for_palma(
     *,
     id_recurso: int | str | None,
     output_dir: Path = Path("tmp/ayunta_palma"),
+    strict: bool = True,
 ) -> Path:
     """
     Fusiona todos los PDFs de entrada en un unico PDF.
@@ -174,14 +215,18 @@ def bundle_documents_to_single_pdf_for_palma(
     if missing:
         raise FileNotFoundError(f"Archivos no encontrados para fusionar: {', '.join(missing)}")
 
-    non_pdf = [str(p) for p in normalized if not _is_pdf_file(p)]
-    if non_pdf:
-        raise ValueError("Solo se pueden fusionar PDFs: " + ", ".join(non_pdf))
+    output_dir.mkdir(parents=True, exist_ok=True)
+    normalized, unsupported = _normalize_merge_inputs(normalized, output_dir=output_dir)
+    if unsupported and strict:
+        raise ValueError("Solo se pueden fusionar PDFs: " + ", ".join(unsupported))
+    if not normalized:
+        if unsupported:
+            raise ValueError("No hay PDFs validos para fusionar. Ignorados: " + ", ".join(unsupported))
+        raise ValueError("No hay archivos para fusionar.")
 
     if len(normalized) == 1:
         return normalized[0]
 
-    output_dir.mkdir(parents=True, exist_ok=True)
     rid = str(id_recurso or "unknown").strip()
     safe_rid = re.sub(r"[^A-Za-z0-9._-]+", "_", rid) or "unknown"
     out_path = output_dir / f"{safe_rid}_bundle.pdf"

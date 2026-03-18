@@ -1055,6 +1055,13 @@ async def firmar_programaticamente(
             url_timeout_ms = env_timeout
     except Exception:
         pass
+    # Margen adicional para capturas tardias justo despues del timeout principal.
+    try:
+        post_timeout_grace_ms = int((os.getenv("XALOC_AP_FIRMA_POST_TIMEOUT_GRACE_MS") or "").strip() or "2500")
+        if post_timeout_grace_ms < 0:
+            post_timeout_grace_ms = 0
+    except Exception:
+        post_timeout_grace_ms = 2500
 
     logger.info(
         "[AP-FIRMA] Modo captura protocolo externo: %s (XALOC_AP_FIRMA_ALLOW_EXTERNAL_LAUNCH=%s)",
@@ -1067,6 +1074,10 @@ async def firmar_programaticamente(
     net_events: list[dict] = []
     handler_latest_file = Path(os.getenv("XALOC_AFIRMA_URI_LATEST") or "/tmp/xaloc_afirma_uri.latest")
     handler_log_file = Path(os.getenv("XALOC_AFIRMA_URI_LOG") or "/tmp/xaloc_afirma_uri.log")
+    try:
+        handler_log_start_size = handler_log_file.stat().st_size if handler_log_file.exists() else 0
+    except Exception:
+        handler_log_start_size = 0
 
     def _extract_afirma_url(text: str) -> str | None:
         if not text:
@@ -1090,6 +1101,22 @@ async def firmar_programaticamente(
             if candidate and candidate.lower().startswith(("afirma://", "xalocafirma://")):
                 return candidate
         return None
+
+    def _read_handler_log_delta(max_chars: int = 12000) -> str:
+        try:
+            if not handler_log_file.exists():
+                return ""
+            current_size = handler_log_file.stat().st_size
+            start = handler_log_start_size if current_size >= handler_log_start_size else 0
+            with handler_log_file.open("r", encoding="utf-8", errors="ignore") as fh:
+                if start > 0:
+                    fh.seek(start)
+                chunk = fh.read()
+            if len(chunk) > max_chars:
+                chunk = chunk[-max_chars:]
+            return chunk
+        except Exception:
+            return ""
 
     def _attach_console_listener(p: Page) -> None:
         try:
@@ -1356,9 +1383,7 @@ async def firmar_programaticamente(
         if not url_afirma:
             try:
                 if handler_log_file.exists():
-                    tail = handler_log_file.read_text(encoding="utf-8", errors="ignore")
-                    if len(tail) > 12000:
-                        tail = tail[-12000:]
+                    tail = _read_handler_log_delta(max_chars=12000)
                     handler_uri = _extract_afirma_url(tail)
                     if handler_uri:
                         url_afirma = handler_uri
@@ -1445,6 +1470,58 @@ async def firmar_programaticamente(
             break
 
         await asyncio.sleep(0.15)
+
+    if not url_afirma:
+        # En algunos entornos el evento "external handler" llega pocos ms tras el timeout.
+        # Esperar un margen corto evita falsos timeouts y fallback innecesario.
+        if post_timeout_grace_ms > 0:
+            grace_deadline = loop.time() + (post_timeout_grace_ms / 1000)
+            logger.warning(
+                "[AP-FIRMA][DIAG] Timeout principal agotado sin URI. Esperando grace post-timeout=%sms...",
+                post_timeout_grace_ms,
+            )
+            while loop.time() < grace_deadline and not url_afirma:
+                if console_capture.get("url"):
+                    url_afirma = console_capture["url"]
+                    source_afirma = console_capture.get("source", "console.external-handler-late")
+                    break
+                try:
+                    if handler_latest_file.exists():
+                        handler_uri = handler_latest_file.read_text(encoding="utf-8", errors="ignore").strip()
+                        if _AFIRMA_URI_RE.match(handler_uri):
+                            url_afirma = handler_uri
+                            source_afirma = "xdg-handler-file-late"
+                            break
+                except Exception:
+                    pass
+                try:
+                    if handler_log_file.exists():
+                        tail = _read_handler_log_delta(max_chars=12000)
+                        handler_uri = _extract_afirma_url(tail)
+                        if handler_uri:
+                            url_afirma = handler_uri
+                            source_afirma = "xdg-handler-log-tail-late"
+                            break
+                except Exception:
+                    pass
+                for frame in list(frames_with_intercept):
+                    try:
+                        captured = await frame.evaluate("() => window.__afirma_url || null")
+                        if captured:
+                            url_afirma = captured
+                            source_afirma = "interceptor-late"
+                            break
+                    except Exception:
+                        continue
+                if url_afirma:
+                    break
+                await asyncio.sleep(0.1)
+            if url_afirma:
+                logger.info(
+                    "[AP-FIRMA][DIAG] URI afirma:// recuperada durante grace post-timeout source=%s chars=%d",
+                    source_afirma or "unknown",
+                    len(url_afirma),
+                )
 
     if not url_afirma:
         # Diagnostico extra de archivos del handler para aislar si el problema
