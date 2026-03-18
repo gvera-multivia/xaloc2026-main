@@ -235,12 +235,22 @@ def _analyze_upload_state(
         and desc_now != desc_expected
         and type_now != type_expected
     )
+    same_block_registered = (
+        has_name_outside_block
+        and not block_missing
+        and not form_missing
+        and not file_missing
+        and file_count >= 1
+        and desc_now == desc_expected
+        and type_now == type_expected
+    )
     structural_progress = has_fresh_block or block_missing or form_missing or file_missing or block_recycled
-    confirmed = has_name_outside_block and structural_progress
+    confirmed = has_name_outside_block and (structural_progress or same_block_registered)
 
     return {
         "confirmed": confirmed,
         "recycled_current_block": block_recycled,
+        "same_block_registered": same_block_registered,
         "has_name_outside_block": has_name_outside_block,
         "has_fresh_block": has_fresh_block,
         "visible_indices": visible_now,

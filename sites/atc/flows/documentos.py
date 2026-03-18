@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import re
+import unicodedata
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -17,7 +18,7 @@ DESC_MAX_LEN = 15
 REGISTRO_UPLOAD_GAP_MS = 1000
 ATC_DOC_SHORT_TIMEOUT_MS = 5000
 ATC_DOC_MEDIUM_TIMEOUT_MS = 15000
-ATC_DOC_LONG_TIMEOUT_MS = 30000
+ATC_DOC_LONG_TIMEOUT_MS = 90000
 ATC_DOC_NAV_TIMEOUT_MS = 45000
 
 
@@ -103,6 +104,7 @@ def _build_rea_repos_upload_plan(documentos: list["AtcDocumento"], *, protocol: 
 
 def _normalize_attachment_text(value: str) -> str:
     txt = str(value or "").strip().lower()
+    txt = "".join(ch for ch in unicodedata.normalize("NFD", txt) if unicodedata.category(ch) != "Mn")
     txt = re.sub(r"[\u00b7]+", "", txt)
     txt = re.sub(r"[^a-z0-9]+", " ", txt)
     return " ".join(txt.split())
@@ -116,6 +118,42 @@ def _is_reposicio_warning_button_text(value: str) -> bool:
         or text.startswith("si vull continuar")
         or text.startswith("sí vull continuar")
     )
+
+
+def _reposicio_checkbox_text_matches(label: str, target: str) -> bool:
+    label_norm = _normalize_attachment_text(label)
+    target_norm = _normalize_attachment_text(target)
+    if not label_norm or not target_norm:
+        return False
+    return label_norm == target_norm or target_norm in label_norm or label_norm in target_norm
+
+
+def _is_reposicio_fourth_option_target(target: str) -> bool:
+    target_norm = _normalize_attachment_text(target)
+    if not target_norm:
+        return False
+    fourth_option_patterns = (
+        "no se m ha notificat la provisio de constrenyiment",
+        "no se me ha notificado la provision de apremio",
+        "no se me ha notificado la providencia de apremio",
+        "no se me ha notificado",
+        "provision de constrenyiment",
+        "provision de apremio",
+        "providencia de apremio",
+    )
+    return any(pattern in target_norm for pattern in fourth_option_patterns)
+
+
+def _reposicio_checkbox_state_matches_target(state: dict, target: str) -> bool:
+    checked_labels = [str(label or "") for label in (state.get("checkedLabels") or [])]
+    checked_indexes = [int(idx) for idx in (state.get("checkedIndexes") or []) if str(idx).isdigit()]
+    if any(_reposicio_checkbox_text_matches(label, target) for label in checked_labels):
+        return True
+    if _is_reposicio_fourth_option_target(target) and 4 in checked_indexes:
+        return True
+    if len(checked_indexes) == 1 and len(checked_labels) <= 1:
+        return True
+    return False
 
 
 def _row_matches_expected_upload(row_text: str, *, desc: str, tipus: str) -> bool:
@@ -211,6 +249,33 @@ async def _wait_registro_attachment_slot(page: "Page", idx: int, expected_desc: 
             selected = False
     if not selected:
         raise RuntimeError(f"atc.documentos: no se pudo seleccionar tipo 'Otros' en selectAttach-{idx}.")
+
+
+async def _count_registro_attachment_slots(page: "Page") -> int:
+    try:
+        return int(
+            await page.evaluate(
+                """() => {
+                    const inputs = Array.from(document.querySelectorAll("input[id^='inputAttach']"));
+                    const selects = Array.from(document.querySelectorAll("select[id^='selectAttach-']"));
+                    return Math.max(inputs.length, selects.length);
+                }"""
+            )
+        )
+    except Exception:
+        return 0
+
+
+async def _wait_registro_slot_count(page: "Page", *, expected_count: int, timeout_ms: int = 30000) -> int:
+    waited = 0
+    last_count = 0
+    while waited <= timeout_ms:
+        last_count = await _count_registro_attachment_slots(page)
+        if last_count >= expected_count:
+            return last_count
+        await page.wait_for_timeout(1000)
+        waited += 1000
+    return last_count
 
 
 async def _collect_registro_attachment_issues(
@@ -456,6 +521,390 @@ async def _confirm_reposicio_warning_modal(page: "Page") -> None:
     )
 
 
+async def _collect_reposicio_motivo_state(page: "Page") -> dict:
+    try:
+        return await page.evaluate(
+            """() => {
+                const normalize = (value) =>
+                    String(value || "")
+                        .normalize("NFD")
+                        .replace(/[\\u0300-\\u036f]/g, "")
+                        .replace(/[^a-z0-9]+/gi, " ")
+                        .trim()
+                        .toLowerCase();
+                const isVisible = (el) => {
+                    if (!el) return false;
+                    const st = window.getComputedStyle(el);
+                    const rect = el.getBoundingClientRect();
+                    return !!st && st.display !== "none" && st.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+                };
+                const root = document.querySelector(".allegations-panel") || document;
+                const items = Array.from(root.querySelectorAll(".allegations-form"))
+                    .map((row, index) => {
+                        const input =
+                            row.querySelector("se-checkbox input.checkbox-input") ||
+                            row.querySelector("se-checkbox input[type='checkbox']") ||
+                            row.querySelector("input.checkbox-input") ||
+                            row.querySelector("input[type='checkbox']");
+                        const labelContainer =
+                            row.querySelector("label.checkbox-container") ||
+                            row.querySelector("label.container") ||
+                            row.querySelector(".checkbox-container") ||
+                            row.querySelector(".container");
+                        const label = normalize(
+                            input?.getAttribute("aria-label") ||
+                            row.querySelector(".checkbox-container-label")?.textContent ||
+                            labelContainer?.textContent ||
+                            row.textContent ||
+                            ""
+                        );
+                        return {
+                            index,
+                            label,
+                            checked: !!input?.checked || input?.getAttribute("aria-checked") === "true",
+                            visible: isVisible(row) || isVisible(input) || isVisible(labelContainer),
+                        };
+                    })
+                    .filter((item) => item.visible && item.label);
+                const bodyText = normalize(document.body?.innerText || "");
+                return {
+                    loading: bodyText.includes("carregant") || bodyText.includes("cargando") || bodyText.includes("loading"),
+                    visibleLabels: items.map((item) => item.label).slice(0, 12),
+                    checkedLabels: items.filter((item) => item.checked).map((item) => item.label).slice(0, 6),
+                    visibleIndexes: items.map((item) => Number(item.index) + 1).slice(0, 12),
+                    checkedIndexes: items.filter((item) => item.checked).map((item) => Number(item.index) + 1).slice(0, 6),
+                };
+            }"""
+        )
+    except Exception:
+        return {"loading": False, "visibleLabels": [], "checkedLabels": [], "visibleIndexes": [], "checkedIndexes": []}
+
+
+async def _force_click_reposicio_row(page: "Page", row_index: int) -> bool:
+    row = page.locator(".allegations-form").nth(row_index)
+    try:
+        if await row.count() <= 0:
+            return False
+    except Exception:
+        return False
+
+    clicked_any = False
+    input_by_id = None
+    try:
+        input_id = await row.locator("input.checkbox-input, input[type='checkbox']").first.evaluate(
+            "(el) => String(el.id || '').trim()"
+        )
+    except Exception:
+        input_id = ""
+    if input_id:
+        safe_id = input_id.replace("\\", "\\\\").replace('"', '\\"')
+        input_by_id = page.locator(f'#{safe_id}').first
+        try:
+            if await input_by_id.count() > 0:
+                for kwargs in ({}, {"force": True}):
+                    try:
+                        await input_by_id.click(timeout=ATC_DOC_SHORT_TIMEOUT_MS, **kwargs)
+                        clicked_any = True
+                    except Exception:
+                        continue
+                try:
+                    await input_by_id.evaluate(
+                        """(el) => {
+                            try { if (typeof el.focus === "function") el.focus(); } catch (_err) {}
+                            try { el.checked = true; } catch (_err) {}
+                            try { el.value = "true"; } catch (_err) {}
+                            try { el.setAttribute("aria-checked", "true"); } catch (_err) {}
+                            for (const [name, Ctor] of [
+                                ["pointerdown", PointerEvent],
+                                ["mousedown", MouseEvent],
+                                ["pointerup", PointerEvent],
+                                ["mouseup", MouseEvent],
+                                ["click", MouseEvent],
+                                ["input", Event],
+                                ["change", Event],
+                            ]) {
+                                try {
+                                    el.dispatchEvent(new Ctor(name, { bubbles: true, cancelable: true }));
+                                } catch (_err) {}
+                            }
+                            try { if (typeof el.click === "function") el.click(); } catch (_err) {}
+                        }"""
+                    )
+                    clicked_any = True
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    targets = [
+        "input.checkbox-input",
+        ".checkmark",
+        "label[for]",
+        ".checkbox-container-label",
+        ".checkbox-container",
+        "se-checkbox",
+    ]
+
+    for selector in targets:
+        locator = row.locator(selector).first
+        try:
+            if await locator.count() <= 0:
+                continue
+        except Exception:
+            continue
+        for kwargs in ({}, {"force": True}):
+            try:
+                await locator.click(timeout=ATC_DOC_SHORT_TIMEOUT_MS, **kwargs)
+                clicked_any = True
+            except Exception:
+                continue
+        try:
+            await locator.evaluate(
+                """(el) => {
+                    const fire = (name, Ctor) => {
+                        try {
+                            el.dispatchEvent(new Ctor(name, { bubbles: true, cancelable: true }));
+                        } catch (_err) {}
+                    };
+                    try { if (typeof el.focus === "function") el.focus(); } catch (_err) {}
+                    fire("pointerdown", PointerEvent);
+                    fire("mousedown", MouseEvent);
+                    fire("pointerup", PointerEvent);
+                    fire("mouseup", MouseEvent);
+                    fire("click", MouseEvent);
+                    fire("input", Event);
+                    fire("change", Event);
+                    try { if (typeof el.click === "function") el.click(); } catch (_err) {}
+                }"""
+            )
+            clicked_any = True
+        except Exception:
+            pass
+
+    try:
+        await row.evaluate(
+            """(el) => {
+                const input = el.querySelector("input.checkbox-input, input[type='checkbox']");
+                if (!input) return;
+                try { input.checked = true; } catch (_err) {}
+                try { input.value = "true"; } catch (_err) {}
+                try { input.setAttribute("aria-checked", "true"); } catch (_err) {}
+                input.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+                input.dispatchEvent(new Event("input", { bubbles: true }));
+                input.dispatchEvent(new Event("change", { bubbles: true }));
+            }"""
+        )
+        clicked_any = True
+    except Exception:
+        pass
+
+    if clicked_any:
+        await wait_after_action(page)
+    return clicked_any
+
+
+def _is_reposicio_altres_motius_target(target: str) -> bool:
+    target_norm = _normalize_attachment_text(target)
+    if not target_norm:
+        return False
+    return any(p in target_norm for p in ("altres motius", "otros motivos", "other reasons", "others"))
+
+
+async def _select_reposicio_motivo(page: "Page", motivo_text: str, *, timeout_ms: int = ATC_DOC_LONG_TIMEOUT_MS) -> None:
+    waited = 0
+    last_state: dict = {}
+    fallback_patterns = ["altres motius", "otros motivos", "other reasons"]
+    prefer_fourth_option = _is_reposicio_fourth_option_target(motivo_text)
+    is_altres_motius = _is_reposicio_altres_motius_target(motivo_text)
+    while waited <= timeout_ms:
+        clicked = False
+        if prefer_fourth_option:
+            clicked = await _force_click_reposicio_row(page, 3)
+        try:
+            clicked = bool(
+                await page.evaluate(
+                    """({ target, fallbackPatterns, preferFourthOption }) => {
+                        const normalize = (value) =>
+                            String(value || "")
+                                .normalize("NFD")
+                                .replace(/[\\u0300-\\u036f]/g, "")
+                                .replace(/[^a-z0-9]+/gi, " ")
+                                .trim()
+                                .toLowerCase();
+                        const isVisible = (el) => {
+                            if (!el) return false;
+                            const st = window.getComputedStyle(el);
+                            const rect = el.getBoundingClientRect();
+                            return !!st && st.display !== "none" && st.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+                        };
+                        const matches = (label, wanted) => !!label && !!wanted && (label === wanted || label.includes(wanted) || wanted.includes(label));
+                        const targetNorm = normalize(target);
+                        const fallback = (fallbackPatterns || []).map(normalize).filter(Boolean);
+                        const root = document.querySelector(".allegations-panel") || document;
+                        const items = Array.from(root.querySelectorAll(".allegations-form"))
+                            .map((row, index) => {
+                                const el =
+                                    row.querySelector("se-checkbox input.checkbox-input") ||
+                                    row.querySelector("se-checkbox input[type='checkbox']") ||
+                                    row.querySelector("input.checkbox-input") ||
+                                    row.querySelector("input[type='checkbox']");
+                                const inputId = String(el?.id || "").trim();
+                                const labelContainer =
+                                    row.querySelector("label.checkbox-container") ||
+                                    row.querySelector("label.container") ||
+                                    row.querySelector(".checkbox-container") ||
+                                    row.querySelector(".container");
+                                const labelNode =
+                                    (inputId && row.querySelector(`label[for="${inputId}"]`)) ||
+                                    row.querySelector(".checkbox-container-label");
+                                const checkmark = row.querySelector(".checkmark");
+                                const label = normalize(
+                                    el?.getAttribute("aria-label") ||
+                                    labelNode?.textContent ||
+                                    labelContainer?.textContent ||
+                                    row.textContent ||
+                                    ""
+                                );
+                                return {
+                                    index,
+                                    el,
+                                    inputId,
+                                    row,
+                                    labelContainer,
+                                    labelNode,
+                                    checkmark,
+                                    label,
+                                    visible: isVisible(row) || isVisible(el) || isVisible(labelContainer) || isVisible(checkmark),
+                                };
+                            })
+                            .filter((item) => item.visible && item.label && item.el);
+                        let targetItem = items.find((item) => matches(item.label, targetNorm));
+                        if (!targetItem && preferFourthOption && items.length >= 4) {
+                            targetItem = items[3];
+                        }
+                        if (!targetItem) {
+                            targetItem = items.find((item) => fallback.some((pattern) => matches(item.label, pattern)));
+                        }
+                        // Fallback ampliado: buscar sin exigir item.el (el checkbox puede tener estructura distinta).
+                        if (!targetItem) {
+                            const allRows = Array.from(root.querySelectorAll(".allegations-form"))
+                                .map((row, index) => {
+                                    const el =
+                                        row.querySelector("se-checkbox input.checkbox-input") ||
+                                        row.querySelector("se-checkbox input[type='checkbox']") ||
+                                        row.querySelector("input.checkbox-input") ||
+                                        row.querySelector("input[type='checkbox']");
+                                    const labelContainer =
+                                        row.querySelector("label.checkbox-container") ||
+                                        row.querySelector("label.container") ||
+                                        row.querySelector(".checkbox-container") ||
+                                        row.querySelector(".container");
+                                    const label = normalize(
+                                        el?.getAttribute("aria-label") ||
+                                        labelContainer?.textContent ||
+                                        row.textContent || ""
+                                    );
+                                    return { index, el, row, labelContainer, label };
+                                })
+                                .filter((item) => item.label);
+                            targetItem = allRows.find((item) => matches(item.label, targetNorm));
+                            if (!targetItem) {
+                                targetItem = allRows.find((item) => fallback.some((p) => matches(item.label, p)));
+                            }
+                            // Ultimo recurso: si el motivo contiene "altres" o "otros", usar la ultima fila visible.
+                            if (!targetItem && (targetNorm.includes("altres") || targetNorm.includes("otros") || targetNorm.includes("other"))) {
+                                targetItem = allRows[allRows.length - 1] || null;
+                            }
+                        }
+                        if (!targetItem) return false;
+                        const clickEverywhere = (node) => {
+                            if (!node) return false;
+                            try { node.scrollIntoView({ block: "center", inline: "center" }); } catch (_err) {}
+                            const events = [
+                                ["pointerdown", PointerEvent],
+                                ["mousedown", MouseEvent],
+                                ["pointerup", PointerEvent],
+                                ["mouseup", MouseEvent],
+                                ["click", MouseEvent],
+                                ["input", Event],
+                                ["change", Event],
+                            ];
+                            for (const [name, Ctor] of events) {
+                                try {
+                                    node.dispatchEvent(new Ctor(name, { bubbles: true, cancelable: true }));
+                                } catch (_err) {}
+                            }
+                            try {
+                                if (typeof node.focus === "function") node.focus();
+                            } catch (_err) {}
+                            try {
+                                if (typeof node.click === "function") node.click();
+                            } catch (_err) {}
+                            return true;
+                        };
+                        const extraLabel =
+                            (targetItem.inputId && targetItem.row.querySelector(`label[for="${targetItem.inputId}"]`)) ||
+                            null;
+                        const targets = [
+                            targetItem.el,
+                            targetItem.checkmark,
+                            targetItem.labelNode,
+                            extraLabel,
+                            targetItem.labelContainer,
+                            targetItem.row.querySelector?.("label.checkbox-container, label.container"),
+                            targetItem.row,
+                        ].filter(Boolean);
+                        for (const node of targets) clickEverywhere(node);
+                        if (targetItem.el) {
+                            if (!targetItem.el.checked && targetItem.inputId) {
+                                const rawInput = document.getElementById(targetItem.inputId);
+                                if (rawInput) clickEverywhere(rawInput);
+                            }
+                            try { targetItem.el.checked = true; } catch (_err) {}
+                            try { targetItem.el.value = "true"; } catch (_err) {}
+                            try { targetItem.el.setAttribute("aria-checked", "true"); } catch (_err) {}
+                            try { targetItem.el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); } catch (_err) {}
+                            try { targetItem.el.dispatchEvent(new Event("input", { bubbles: true })); } catch (_err) {}
+                            try { targetItem.el.dispatchEvent(new Event("change", { bubbles: true })); } catch (_err) {}
+                            return !!targetItem.el.checked || targetItem.el.getAttribute("aria-checked") === "true";
+                        }
+                        // sin el: el click sobre el row/label ya fue disparado, devolver true para indicar intento.
+                        return true;
+                    }""",
+                    {"target": motivo_text, "fallbackPatterns": fallback_patterns, "preferFourthOption": prefer_fourth_option},
+                )
+            )
+        except Exception:
+            if not clicked:
+                clicked = False
+
+        last_state = await _collect_reposicio_motivo_state(page)
+        if _reposicio_checkbox_state_matches_target(last_state, motivo_text):
+            return
+
+        if clicked:
+            await wait_after_action(page)
+            last_state = await _collect_reposicio_motivo_state(page)
+            if _reposicio_checkbox_state_matches_target(last_state, motivo_text):
+                return
+            if is_altres_motius:
+                # "Altres motius" pot ser invisible al col·lector d'estat (element ocult).
+                # Si hem clicat, esperem un poc mes i tornem a comprovar; si segueix sense
+                # confirmar-se, acceptem el click i continuem (millor que fallar 90 seg).
+                await page.wait_for_timeout(2000)
+                last_state = await _collect_reposicio_motivo_state(page)
+                if _reposicio_checkbox_state_matches_target(last_state, motivo_text):
+                    return
+                return  # confiar en el click — element invisible per al col·lector
+        await page.wait_for_timeout(1000)
+        waited += 1000
+
+    raise RuntimeError(
+        "atc.documentos: no se pudo marcar el checkbox del motivo de reposicion. "
+        f"motivo={motivo_text!r} debug={last_state}"
+    )
+
+
 async def _attach_rea_repos_doc(page: "Page", *, file_path: Path, tipus: str, descripcio: str) -> None:
     # Preferir el input oculto #se_upload_file_input (id estable) sobre el link por nombre
     file_input = page.locator("#se_upload_file_input").first
@@ -649,16 +1098,7 @@ async def _run_rea_repos_docs(page: "Page", datos: "AtcTarget") -> "Page":
         if not current_text:
             raise RuntimeError("atc.documentos: no se pudo escribir el texto de alegaciones.")
     else:
-        motivo = page.get_by_role("checkbox", name=re.compile(re.escape(datos.motivo_reposicion), re.IGNORECASE))
-        if await motivo.count():
-            await motivo.first.check()
-        else:
-            # CA: "Altres motius" / ES: "Otros motivos" / EN: "Other reasons"
-            fallback = page.get_by_role("checkbox", name=re.compile(
-                r"Altres motius|Otros motivos|Other reasons", re.IGNORECASE
-            ))
-            if await fallback.count():
-                await fallback.first.check()
+        await _select_reposicio_motivo(page, str(datos.motivo_reposicion or "").strip())
         # Confirmación en dos pasos del popup de advertencia.
         await _confirm_reposicio_warning_modal(page)
         await page.wait_for_timeout(1000)
@@ -741,7 +1181,8 @@ async def _run_rea_repos_docs(page: "Page", datos: "AtcTarget") -> "Page":
     return page
 
 
-async def _upload_registro_doc(page: "Page", *, file_path: Path) -> None:
+async def _upload_registro_doc(page: "Page", *, file_path: Path, expected_slot_count: int) -> None:
+    previous_slots = await _count_registro_attachment_slots(page)
     await robust_click(page, "#MainContent_TramitsGenericsControl_btnValidDocUpload")
 
     dialog = page.locator("dialog, [role='dialog'], .modal:visible").last
@@ -768,10 +1209,26 @@ async def _upload_registro_doc(page: "Page", *, file_path: Path) -> None:
     subir = page.get_by_role("button", name=re.compile(r"Subir|Upload", re.IGNORECASE)).last
     await subir.click()
     await wait_after_action(page)
+    await _wait_registro_slot_count(
+        page,
+        expected_count=max(previous_slots + 1, expected_slot_count),
+        timeout_ms=ATC_DOC_MEDIUM_TIMEOUT_MS,
+    )
     # ES: "Cerrar" / CA: "Tancar" / EN: "Close"
     cerrar = page.get_by_role("button", name=re.compile(r"Cerrar|Tancar|Close", re.IGNORECASE)).last
-    await cerrar.click()
-    await wait_after_action(page)
+    if await cerrar.count():
+        await cerrar.click()
+        await wait_after_action(page)
+    final_slots = await _wait_registro_slot_count(
+        page,
+        expected_count=max(previous_slots + 1, expected_slot_count),
+        timeout_ms=ATC_DOC_LONG_TIMEOUT_MS,
+    )
+    if final_slots < max(previous_slots + 1, expected_slot_count):
+        raise RuntimeError(
+            "atc.documentos: ATC no materializo el slot de adjunto esperado tras la subida. "
+            f"file={file_path.name} slots={final_slots} expected={max(previous_slots + 1, expected_slot_count)}"
+        )
 
 
 async def _repair_registro_attachment_fields(page: "Page", expected_descs: dict[int, str]) -> list[str]:
@@ -846,7 +1303,7 @@ async def _run_registro_docs(page: "Page", datos: "AtcTarget") -> "Page":
 
     expected_descs: dict[int, str] = {}
     for idx, file_path in enumerate(upload_files, start=1):
-        await _upload_registro_doc(page, file_path=file_path)
+        await _upload_registro_doc(page, file_path=file_path, expected_slot_count=idx)
         expected_descs[idx] = _short_desc(file_path.stem, fallback=f"Documento {idx}")
         try:
             await _wait_registro_attachment_slot(page, idx, expected_descs[idx])

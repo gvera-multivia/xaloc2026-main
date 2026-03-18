@@ -78,6 +78,29 @@ def test_analyze_upload_state_accepts_recycled_block_only_after_real_confirmatio
     assert analysis["confirmed"] is True
 
 
+def test_analyze_upload_state_accepts_same_block_when_name_is_already_registered_outside() -> None:
+    analysis = _analyze_upload_state(
+        before_state={"outside_mentions": 0},
+        current_state={
+            "outside_mentions": 1,
+            "visible_indices": [1],
+            "block_present": True,
+            "form_present": True,
+            "file_present": True,
+            "file_count": 1,
+            "desc_value": "AUTORIZACION 52595424J SF",
+            "selected_type": "Autorització",
+        },
+        upload_index=1,
+        used_indices={1},
+        expected_desc="AUTORIZACION 52595424J SF",
+        expected_type="Autorització",
+    )
+
+    assert analysis["same_block_registered"] is True
+    assert analysis["confirmed"] is True
+
+
 def test_submission_has_started_detects_no_activity() -> None:
     started = _submission_has_started(
         before_state={

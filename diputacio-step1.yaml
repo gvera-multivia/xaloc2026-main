@@ -1,0 +1,609 @@
+- generic [active] [ref=e1]:
+  - dialog "cookieconsent" [ref=e2]:
+    - generic [ref=e3]: Esta web utiliza cookies propias con el único fin de recordar el idioma de navegación. Tiene marcado como preferente el castellano en la configuración avanzada de su navegador.
+    - button "dismiss cookie message" [ref=e5] [cursor=pointer]: De acuerdo
+  - generic [ref=e6]:
+    - generic [ref=e8]:
+      - generic [ref=e12]:
+        - textbox "Buscar" [ref=e13]
+        - img [ref=e14] [cursor=pointer]
+      - combobox [ref=e18]:
+        - option "Català"
+        - option "Castellano" [selected]
+        - option "English"
+    - generic [ref=e19]:
+      - link [ref=e21] [cursor=pointer]:
+        - /url: /Home/Index
+        - img [ref=e22]
+      - generic [ref=e26]: Selección de municipio
+      - list [ref=e28]:
+        - listitem [ref=e29]:
+          - link "Carpetas" [ref=e30] [cursor=pointer]:
+            - /url: /Carpetes/Home/carpetes
+        - listitem [ref=e31]:
+          - link "Trámites y pagos" [ref=e32] [cursor=pointer]:
+            - /url: /TramitsPagaments/Home/tramits
+        - listitem [ref=e33]:
+          - link "Tributos y multas" [ref=e34] [cursor=pointer]:
+            - /url: /TributsMultes/Home/tributs
+        - listitem [ref=e35]:
+          - link "Información" [ref=e36] [cursor=pointer]:
+            - /url: /Informacio/Home/informacio
+        - listitem [ref=e37]:
+          - link "El ORGT" [ref=e38] [cursor=pointer]:
+            - /url: /LORGT/Home/LORGT
+  - generic [ref=e39]:
+    - heading "Ayuda" [level=2] [ref=e41]
+    - generic [ref=e42]:
+      - generic [ref=e43]:
+        - link "Inicio" [ref=e44] [cursor=pointer]:
+          - /url: /es
+        - text: ">"
+        - link "Formulario de ayuda":
+          - /url: "#"
+      - generic [ref=e47]:
+        - generic [ref=e48]:
+          - heading "Preguntas frecuentes" [level=1] [ref=e49]
+          - combobox [ref=e52]:
+            - option "Ayuda" [selected]
+            - option "Manuales de ayuda para los trámites"
+            - option "IAE Impuesto sobre actividades económicas"
+            - option "IBI Impuesto sobre Bienes Inmuebles"
+            - option "ICIO Impuesto sobre Construcciones, Instalaciones y Obras"
+            - option "IIVTNU Impuesto sobre el Incremento de Valor de los Terrenos de Naturaleza Urbana (plusvalía)"
+            - option "IVTM Impuesto sobre Vehículos de Tracción Mecánica"
+            - option "Multas de tráfico"
+            - option "Procedimiento recaudatorio"
+            - option "Tasas y precios públicos"
+        - generic [ref=e53]:
+          - text: "Identificación, representación i notificaciones:"
+          - list [ref=e54]:
+            - listitem [ref=e55]:
+              - link "¿Como puedo actuar en representación de otro interesado?" [ref=e56] [cursor=pointer]:
+                - /url: "#ancla1"
+            - listitem [ref=e57]:
+              - link "No consigo identificarme con mi certificado digital (DNI electrónico u otros identificadores) y no acabo el proceso de autenticación" [ref=e58] [cursor=pointer]:
+                - /url: "#ancla2"
+            - listitem [ref=e59]:
+              - link "He accedido al espacio de notificaciones electrónicas pero no encuentro la notificación que me ha enviado el ORGT" [ref=e60] [cursor=pointer]:
+                - /url: "#ancla3"
+            - listitem [ref=e61]:
+              - link "El sistema no me deja acceder a las notificaciones con contraseña de un solo uso" [ref=e62] [cursor=pointer]:
+                - /url: "#ancla4"
+            - listitem [ref=e63]:
+              - link "Intento acceder con Clave Pin o Clave Permanente y aparece un error" [ref=e64] [cursor=pointer]:
+                - /url: "#ancla5"
+            - listitem [ref=e65]:
+              - link "Intento acceder a la notificación y el sistema dice que no pertenece al destinatario" [ref=e66] [cursor=pointer]:
+                - /url: "#ancla7"
+            - listitem [ref=e67]:
+              - link "¿Por qué motivo recibo los avisos de notificaciones electrónicas de multas en dos correos electrónicos diferentes?" [ref=e68] [cursor=pointer]:
+                - /url: "#ancla16"
+            - listitem [ref=e69]:
+              - link "Quiero recibir los avisos de notificaciones electrónicas en más de un correo electrónico" [ref=e70] [cursor=pointer]:
+                - /url: "#ancla17"
+          - text: "El sitio web del ORGT:"
+          - list [ref=e71]:
+            - listitem [ref=e72]:
+              - link "Requisitos técnicos de acceso" [ref=e73] [cursor=pointer]:
+                - /url: "#ancla23"
+            - listitem [ref=e74]:
+              - link "No encuentro el trámite en la sede electrónica del ORGT" [ref=e75] [cursor=pointer]:
+                - /url: "#ancla6"
+            - listitem [ref=e76]:
+              - link "Manuales de ayuda para los trámites" [ref=e77] [cursor=pointer]:
+                - /url: "#ancla19"
+            - listitem [ref=e78]:
+              - link "El sistema da error o estoy en un punto del trámite y no sé como continuar (incidencias tecnológicas)" [ref=e79] [cursor=pointer]:
+                - /url: "#ancla9"
+            - listitem [ref=e80]:
+              - link "Intento pagar pero después de poner la tarjeta el sistema da error" [ref=e81] [cursor=pointer]:
+                - /url: "#ancla20"
+            - listitem [ref=e82]:
+              - link "He hecho un pago pero el recibo no aparece en la lista de \"Tributos pagados\" y no puedo obtener un justificante de pago" [ref=e83] [cursor=pointer]:
+                - /url: "#ancla21"
+            - listitem [ref=e84]:
+              - link "¿Como puedo abrir ficheros PDF?" [ref=e85] [cursor=pointer]:
+                - /url: "#ancla10"
+            - listitem [ref=e86]:
+              - link "Necesito reducir el tamaño de los documentos que quiero adjuntar en un trámite" [ref=e87] [cursor=pointer]:
+                - /url: "#ancla22"
+            - listitem [ref=e88]:
+              - link "Quiero entrar en la web del ORGT personalizada con la información de mi municipio" [ref=e89] [cursor=pointer]:
+                - /url: "#ancla11"
+          - text: "Canales de atención:"
+          - list [ref=e90]:
+            - listitem [ref=e91]:
+              - link "Necesito hacer un trámite o consulta por teléfono y el interesado es persona jurídica" [ref=e92] [cursor=pointer]:
+                - /url: "#ancla12"
+            - listitem [ref=e93]:
+              - link "Soy persona física y quiero hacer un trámite o consulta por teléfono (información tributaria)" [ref=e94] [cursor=pointer]:
+                - /url: "#ancla13"
+            - listitem [ref=e95]:
+              - link "Necesito atención presencial en alguna de las oficinas del ORGT" [ref=e96] [cursor=pointer]:
+                - /url: "#ancla14"
+            - listitem [ref=e97]:
+              - link "Quiero presentar una queja o sugerencia" [ref=e98] [cursor=pointer]:
+                - /url: "#ancla15"
+        - heading "¿Como puedo actuar en representación de otro interesado?" [level=2] [ref=e99]
+        - paragraph [ref=e100]:
+          - text: Si ha de actuar en representación de otro interesado o por autorización, primero se ha de identificar con su identificador o certificado digital (personal o de representante). Después el sistema le preguntará los datos del interesado y deberá adjuntar el documento que acredite la representación o autorización para el trámite. El
+          - link "documento de autorización" [ref=e101] [cursor=pointer]:
+            - /url: ./DescarregarPDF?NomFitxer=Imprès autorització (ESP).pdf
+          - text: se puede firmar digitalmente o bien en papel y escanearlo.
+        - link "Volver arriba" [ref=e102] [cursor=pointer]:
+          - /url: "#"
+          - text: Volver arriba
+          - img [ref=e103]
+        - separator [ref=e104]
+        - heading "No consigo identificarme con mi certificado digital (DNI electrónico u otros identificadores) y no acabo el proceso de autenticación" [level=2] [ref=e105]
+        - paragraph [ref=e106]:
+          - text: Consulte
+          - link "la ayuda del soporte de usuarios de la AOC." [ref=e107] [cursor=pointer]:
+            - /url: https://www.aoc.cat/knowledge-base/sistemes-didentificacio-digital
+          - text: Compruebe que su certificado funciona correctamente en
+          - link "la página de validación de la AOC." [ref=e108] [cursor=pointer]:
+            - /url: http://signasuite.aoc.cat/signasuite/validateCertificate
+          - text: Si el certificado funciona pero no consigue autenticarse, puede abrir una
+          - link "petición de ayuda en la AOC." [ref=e109] [cursor=pointer]:
+            - /url: https://www.aoc.cat/portal-suport/necessiteu-mes-ajuda
+          - text: En caso de persona física también puede obtener al momento un identificador IdCAT móvil gracias a su certificado digital en
+          - link "https://idcatmobil.seu.cat/" [ref=e110] [cursor=pointer]:
+            - /url: https://idcatmobil.seu.cat/
+          - text: (Alta con certificado digital). Entonces identifíquese con su nuevo IdCAT móvil.
+        - link "Volver arriba" [ref=e111] [cursor=pointer]:
+          - /url: "#"
+          - text: Volver arriba
+          - img [ref=e112]
+        - separator [ref=e113]
+        - heading "He accedido al espacio de notificaciones electrónicas pero no encuentro la notificación que me ha enviado el ORGT" [level=2] [ref=e114]
+        - paragraph [ref=e115]:
+          - text: Es posible que haya accedido a Enotum desde un enlace genérico de Google. Debe hacerlo con los enlaces que tiene en el correo de aviso o a través de la dirección
+          - link "http://orgt.cat/notificaciones" [ref=e116] [cursor=pointer]:
+            - /url: /TramitsPagaments/EnotifAlertes/alertesenotif
+          - text: que le llevará directamente al espacio de notificaciones del ORGT.
+        - paragraph [ref=e117]: "Si aun así no encuentra la notificación, hay diversas situaciones que ha de considerar:"
+        - paragraph [ref=e118]: Primero compruebe si en la parte superior de la pantalla aparece el mensaje “Tiene entradas sin abrir en otros organismos” y en este caso pulse el enlace y compruebe si se trata de notificaciones del ORGT.
+        - paragraph [ref=e119]: En segundo lugar, si ha entrado con un certificado digital de representante, localice en la parte superior los botones correspondientes a Particular y Empresa para poder buscar la notificación en las dos carpetas.
+        - paragraph [ref=e120]:
+          - text: En tercer lugar, si ha designado un representante para recibir sus comunicaciones electrónicas, tenga en cuenta que sólo se enviarán a su espacio de notificaciones. Dé de baja esta designación si desea acceder a futuras notificaciones con certificado digital de la persona jurídica o si éste representa también a otras personas, porque recibirá en su espacio de notificaciones las de todos sus representados sin distinción. Puede hacerlo en
+          - link "http://orgt.cat/notificaciones" [ref=e121] [cursor=pointer]:
+            - /url: /TramitsPagaments/EnotifAlertes/alertesenotif
+          - text: .
+        - paragraph [ref=e122]: Finalmente asegúrese de que en “Sistema de acceso” (menú de la izquierda) tiene marcado “Contraseña” aunque haya entrado con certificado digital. Si tiene marcado “Solo con certificado digital” puede ser que no se muestren todas sus notificaciones electrónicas.
+        - text: El Consorcio AOC ofrece esta
+        - link "ayuda sobre el portal Enotum" [ref=e123] [cursor=pointer]:
+          - /url: https://suport.aoc.cat/hc/es-es
+        - text: para la recogida de notificaciones y comunicaciones electrónicas.
+        - link "Volver arriba" [ref=e124] [cursor=pointer]:
+          - /url: "#"
+          - text: Volver arriba
+          - img [ref=e125]
+        - separator [ref=e126]
+        - heading "El sistema no me deja acceder a las notificaciones con contraseña de un solo uso" [level=2] [ref=e127]
+        - paragraph [ref=e128]: Compruebe si hay un símbolo de candado, lo que significa que debe acceder con certificado digital.
+        - paragraph [ref=e129]: Cuando una persona jurídica no ha comunicado medios de aviso al ORGT, verá todas sus notificaciones con este símbolo y solo podrá acceder con certificado digital. Puede comunicar los medios de aviso en la dirección http://orgt.cat/notificaciones
+        - link "Volver arriba" [ref=e130] [cursor=pointer]:
+          - /url: "#"
+          - text: Volver arriba
+          - img [ref=e131]
+        - separator [ref=e132]
+        - heading "Intento acceder con Clave Pin o Clave Permanente y aparece un error" [level=2] [ref=e133]
+        - paragraph [ref=e134]: "Si el mensaje indica que se requiere un registro presencial o certificado electrónico significa que obtuvo su identificador Clave de forma no presencial y no tiene el nivel requerido por los trámites del ORGT. Para aumentar el nivel tiene dos opciones:"
+        - list [ref=e135]:
+          - listitem [ref=e136]:
+            - text: Pedir cita en una oficina del Servicio Clave. La lista de oficinas se puede consultar en el buscador marcando la tipología "Clave" en el portal
+            - link "http://administracion.gob.es" [ref=e137] [cursor=pointer]:
+              - /url: http://administracion.gob.es
+          - listitem [ref=e138]:
+            - text: Hacer el trámite por Internet, si dispone de certificado digital, en la dirección
+            - link "http://clave.gob.es/clave_Home/registro/Modificacion-datos.html" [ref=e139] [cursor=pointer]:
+              - /url: http://clave.gob.es/clave_Home/registro/Modificacion-datos.html
+            - text: (Deberá escoger la opción de "Modificación de datos" y luego marcar "Obtener un nivel superior de seguridad en Cl@ve Asociado al registro presencial o telemático con certificado electrónico")
+        - paragraph
+        - link "Volver arriba" [ref=e140] [cursor=pointer]:
+          - /url: "#"
+          - text: Volver arriba
+          - img [ref=e141]
+        - separator [ref=e142]
+        - heading "Intento acceder a la notificación y el sistema dice que no pertenece al destinatario" [level=2] [ref=e143]
+        - paragraph [ref=e144]:
+          - text: Si ha recibido el aviso de la notificación por correo electrónico, compruebe si le ha llegado redirigida de otra dirección de correo electrónico en la que tiene activada una redirección. Le recomendamos que acceda con certificado digital. Si quiere entrar con palabra de paso de un solo uso, indique el correo electrónico que dio de alta para la recepción de los avisos. El Consorcio AOC ofrece esta
+          - link "ayuda sobre el portal Enotum" [ref=e145] [cursor=pointer]:
+            - /url: https://www.aoc.cat/portal-suport/enotum-ciutadania/idservei/enotum_ciutadania/
+          - text: para la recogida de notificaciones y comunicaciones electrónicas.
+        - link "Volver arriba" [ref=e146] [cursor=pointer]:
+          - /url: "#"
+          - text: Volver arriba
+          - img [ref=e147]
+        - separator [ref=e148]
+        - heading "¿Por qué motivo recibo los avisos de notificaciones electrónicas de multas en dos correos electrónicos diferentes?" [level=2] [ref=e149]
+        - paragraph [ref=e150]: Esto pasa cuando ha comunicado medios de aviso al ORGT para las notificaciones del procedimiento tributario y también está apuntado a la DEV para las notificaciones del procedimiento sancionador de multas, pero los medios de aviso son diferentes. Hay personas jurídicas que les interesa comunicar medios diferentes ya que tienen departamentos específicos para gestionar cada tema, pero si este no es su caso, le recomendamos que comunique los mismos medios tanto en la DGT (Dirección General de Tráfico) como en el ORGT.
+        - link "Volver arriba" [ref=e151] [cursor=pointer]:
+          - /url: "#"
+          - text: Volver arriba
+          - img [ref=e152]
+        - separator [ref=e153]
+        - heading "Quiero recibir los avisos de notificaciones electrónicas en más de un correo electrónico" [level=2] [ref=e154]
+        - paragraph [ref=e155]: Pregunte a su proveedor de correo electrónico cual es el mejor sistema en su caso. En general se opta por crear una lista de distribución que incluya las diferentes direcciones de correo donde quiere recibir los avisos.
+        - link "Volver arriba" [ref=e156] [cursor=pointer]:
+          - /url: "#"
+          - text: Volver arriba
+          - img [ref=e157]
+        - separator [ref=e158]
+        - heading "Requisitos técnicos de acceso" [level=2] [ref=e159]
+        - paragraph [ref=e160]: La sede electrónica del ORGT es una web responsive que puede ser accedida desde cualquier dispositivo, sistema operativo y navegador que soporte las tecnologías y estándares HTML5, CSS3 y ECMAScript 6 (Javascript ES6). Esto incluye tanto dispositivos móviles como de escritorio; sistemas operativos como Windows, Mac y Linux; y navegadores como Microsoft Edge, Mozilla Firefox, Safari y Google Chrome, entre otros. Se recomienda siempre actualizar a las últimas versiones que suministran los fabricantes.
+        - paragraph [ref=e161]: No se recomienda en absoluto el uso de Internet Explorer para acceder y navegar por la sede electrónica del ORGT. El navegador Internet Explorer fue descatalogado por Microsoft y quedó oficialmente sustituido por Microsoft Edge. Como está obsoleto, Internet Explorer ya no recibe actualizaciones, soporte, ni mantenimiento. Además, no soporta el estándar ES6 de Javascript, hecho que puede provocar errores o carencias de funcionalidades modernas en determinadas páginas, llegando incluso a imposibilitar la finalización de un trámite o la correcta visualización de una página.
+        - paragraph [ref=e162]: El acceso a la sede puede estar bloqueado para conexiones procedentes de determinados países o regiones, por motivos de seguridad.
+        - link "Volver arriba" [ref=e163] [cursor=pointer]:
+          - /url: "#"
+          - text: Volver arriba
+          - img [ref=e164]
+        - separator [ref=e165]
+        - heading "No encuentro el trámite en la sede electrónica del ORGT" [level=2] [ref=e166]
+        - paragraph [ref=e167]: "Le aconsejamos que pruebe estas direcciones directas:"
+        - table [ref=e169]:
+          - rowgroup [ref=e170]:
+            - row "Descripción Acceso directo" [ref=e171]:
+              - columnheader "Descripción" [ref=e172]
+              - columnheader "Acceso directo" [ref=e173]
+          - rowgroup [ref=e174]:
+            - row "Aportación de documentos y Respuesta a requerimientos http://orgt.cat/requerimiento" [ref=e175]:
+              - cell "Aportación de documentos y Respuesta a requerimientos" [ref=e176]
+              - cell "http://orgt.cat/requerimiento" [ref=e177]:
+                - link "http://orgt.cat/requerimiento" [ref=e178] [cursor=pointer]:
+                  - /url: /es/TramitsPagaments/AportacioDocuments/aportaciodocuments
+            - row "Apuntarse a la notificación electrónica http://orgt.cat/notificaciones" [ref=e179]:
+              - cell "Apuntarse a la notificación electrónica" [ref=e180]
+              - cell "http://orgt.cat/notificaciones" [ref=e181]:
+                - link "http://orgt.cat/notificaciones" [ref=e182] [cursor=pointer]:
+                  - /url: /es/TramitsPagaments/EnotifAlertes/alertesenotif
+            - row "Apuntarse al sistema de alertas http://orgt.cat/alertas" [ref=e183]:
+              - cell "Apuntarse al sistema de alertas" [ref=e184]
+              - cell "http://orgt.cat/alertas" [ref=e185]:
+                - link "http://orgt.cat/alertas" [ref=e186] [cursor=pointer]:
+                  - /url: /es/TramitsPagaments/EnotifAlertes/alertes
+            - row "Ayuda http://orgt.cat/ayuda" [ref=e187]:
+              - cell "Ayuda" [ref=e188]
+              - cell "http://orgt.cat/ayuda" [ref=e189]:
+                - link "http://orgt.cat/ayuda" [ref=e190] [cursor=pointer]:
+                  - /url: /es/Home/ajuda
+            - row "Buzón de recibos http://orgt.cat/recibo" [ref=e191]:
+              - cell "Buzón de recibos" [ref=e192]
+              - cell "http://orgt.cat/recibo" [ref=e193]:
+                - link "http://orgt.cat/recibo" [ref=e194] [cursor=pointer]:
+                  - /url: /es/TramitsPagaments/Bustiarebuts/bustiarebuts
+            - row "Canales de atención personalizada http://orgt.cat/canalesatencion" [ref=e195]:
+              - cell "Canales de atención personalizada" [ref=e196]
+              - cell "http://orgt.cat/canalesatencion" [ref=e197]:
+                - link "http://orgt.cat/canalesatencion" [ref=e198] [cursor=pointer]:
+                  - /url: /es/Informacio/CanalsAtencio/CanalsAtencio
+            - row "Carpeta ciudadana http://orgt.cat/carpetaciudadana" [ref=e199]:
+              - cell "Carpeta ciudadana" [ref=e200]
+              - cell "http://orgt.cat/carpetaciudadana" [ref=e201]:
+                - link "http://orgt.cat/carpetaciudadana" [ref=e202] [cursor=pointer]:
+                  - /url: /es/Carpetes/Home/ciutadana
+            - row "Consulta y modificación del domicilio fiscal y otros datos http://orgt.cat/consultadatos" [ref=e203]:
+              - cell "Consulta y modificación del domicilio fiscal y otros datos" [ref=e204]
+              - cell "http://orgt.cat/consultadatos" [ref=e205]:
+                - link "http://orgt.cat/consultadatos" [ref=e206] [cursor=pointer]:
+                  - /url: /es/TramitsPagaments/AdrecaNotifDadesBasiques/consmoddades
+            - row "Consultar el calendario fiscal http://orgt.cat/calendario" [ref=e207]:
+              - cell "Consultar el calendario fiscal" [ref=e208]
+              - cell "http://orgt.cat/calendario" [ref=e209]:
+                - link "http://orgt.cat/calendario" [ref=e210] [cursor=pointer]:
+                  - /url: /es/Informacio/calendari/calendari
+            - row "Consultar el detalle de los recibos domiciliados http://orgt.cat/ver-recibo" [ref=e211]:
+              - cell "Consultar el detalle de los recibos domiciliados" [ref=e212]
+              - cell "http://orgt.cat/ver-recibo" [ref=e213]:
+                - link "http://orgt.cat/ver-recibo" [ref=e214] [cursor=pointer]:
+                  - /url: /es/TramitsPagaments/ConsultaRebutsDom/consultavaldom?NouTramit=True
+            - row "Consultar la normativa http://orgt.cat/normas" [ref=e215]:
+              - cell "Consultar la normativa" [ref=e216]
+              - cell "http://orgt.cat/normas" [ref=e217]:
+                - link "http://orgt.cat/normas" [ref=e218] [cursor=pointer]:
+                  - /url: /es/Informacio/Home/normativa
+            - row "Datos de contacto http://orgt.cat/datoscontacto" [ref=e219]:
+              - cell "Datos de contacto" [ref=e220]
+              - cell "http://orgt.cat/datoscontacto" [ref=e221]:
+                - link "http://orgt.cat/datoscontacto" [ref=e222] [cursor=pointer]:
+                  - /url: /es/LORGT/DadesContacte/dadescontacte
+            - row "Descarga de impresos http://orgt.cat/formularios" [ref=e223]:
+              - cell "Descarga de impresos" [ref=e224]
+              - cell "http://orgt.cat/formularios" [ref=e225]:
+                - link "http://orgt.cat/formularios" [ref=e226] [cursor=pointer]:
+                  - /url: /es/TramitsPagaments/DescarregaImpresos/descimpresos
+            - row "Descargar documento para pagar IVTM o IBI http://orgt.cat/duplicado" [ref=e227]:
+              - cell "Descargar documento para pagar IVTM o IBI" [ref=e228]
+              - cell "http://orgt.cat/duplicado" [ref=e229]:
+                - link "http://orgt.cat/duplicado" [ref=e230] [cursor=pointer]:
+                  - /url: /es/TramitsPagaments/DescarregarDupPagTercer/pagtercerPre
+            - row "Domiciliar http://orgt.cat/domiciliaciones" [ref=e231]:
+              - cell "Domiciliar" [ref=e232]
+              - cell "http://orgt.cat/domiciliaciones" [ref=e233]:
+                - link "http://orgt.cat/domiciliaciones" [ref=e234] [cursor=pointer]:
+                  - /url: /es/TramitsPagaments/DomiciliacioRebuts/domiciliar
+            - row "Identificar el conductor de una multa http://orgt.cat/cambioconductor" [ref=e235]:
+              - cell "Identificar el conductor de una multa" [ref=e236]
+              - cell "http://orgt.cat/cambioconductor" [ref=e237]:
+                - link "http://orgt.cat/cambioconductor" [ref=e238] [cursor=pointer]:
+                  - /url: /es/TramitsPagaments/IdentificacioConductor/idconductor?NouTramit=True
+            - row "IIVTNU (Plusvalía) http://orgt.cat/incremento" [ref=e239]:
+              - cell "IIVTNU (Plusvalía)" [ref=e240]
+              - cell "http://orgt.cat/incremento" [ref=e241]:
+                - link "http://orgt.cat/incremento" [ref=e242] [cursor=pointer]:
+                  - /url: /es/TramitsPagaments/Plusvalues/Plusvalues
+            - row "Información al contribuyente http://orgt.cat/consultas" [ref=e243]:
+              - cell "Información al contribuyente" [ref=e244]
+              - cell "http://orgt.cat/consultas" [ref=e245]:
+                - link "http://orgt.cat/consultas" [ref=e246] [cursor=pointer]:
+                  - /url: /es/Informacio/Home/informacio
+            - row "Información sobre embargos http://orgt.cat/embargos" [ref=e247]:
+              - cell "Información sobre embargos" [ref=e248]
+              - cell "http://orgt.cat/embargos" [ref=e249]:
+                - link "http://orgt.cat/embargos" [ref=e250] [cursor=pointer]:
+                  - /url: /es/TramitsPagaments/EmbargsBancaris/infoembargs
+            - row "Información sobre multas http://orgt.cat/multas" [ref=e251]:
+              - cell "Información sobre multas" [ref=e252]
+              - cell "http://orgt.cat/multas" [ref=e253]:
+                - link "http://orgt.cat/multas" [ref=e254] [cursor=pointer]:
+                  - /url: /es/TributsMultes/MultesTransit/multes
+            - row "Multas pendientes de pagar http://orgt.cat/multaspendientes" [ref=e255]:
+              - cell "Multas pendientes de pagar" [ref=e256]
+              - cell "http://orgt.cat/multaspendientes" [ref=e257]:
+                - link "http://orgt.cat/multaspendientes" [ref=e258] [cursor=pointer]:
+                  - /url: /es/TramitsPagaments/MultesPendents/multespendents?NouTramit=True
+            - row "Pagar con el aviso de pago http://orgt.cat/pagos" [ref=e259]:
+              - cell "Pagar con el aviso de pago" [ref=e260]
+              - cell "http://orgt.cat/pagos" [ref=e261]:
+                - link "http://orgt.cat/pagos" [ref=e262] [cursor=pointer]:
+                  - /url: /es/TramitsPagaments/Pagar/Pagar
+            - row "Pagar multas sin el aviso de pago http://orgt.cat/pagarmultas" [ref=e263]:
+              - cell "Pagar multas sin el aviso de pago" [ref=e264]
+              - cell "http://orgt.cat/pagarmultas" [ref=e265]:
+                - link "http://orgt.cat/pagarmultas" [ref=e266] [cursor=pointer]:
+                  - /url: /es/TramitsPagaments/Dupdocmult/Dupdocmult
+            - row "Pagar tributos sin el aviso de pago http://orgt.cat/pagartributos" [ref=e267]:
+              - cell "Pagar tributos sin el aviso de pago" [ref=e268]
+              - cell "http://orgt.cat/pagartributos" [ref=e269]:
+                - link "http://orgt.cat/pagartributos" [ref=e270] [cursor=pointer]:
+                  - /url: /es/TramitsPagaments/DuplicatTributs/dupdoctrib
+            - row "Pedir cita previa http://orgt.cat/citas" [ref=e271]:
+              - cell "Pedir cita previa" [ref=e272]
+              - cell "http://orgt.cat/citas" [ref=e273]:
+                - link "http://orgt.cat/citas" [ref=e274] [cursor=pointer]:
+                  - /url: /es/TramitsPagaments/CitaPrevia/citapreviaDades?NouTramit=True
+            - row "Presentar una instancia http://orgt.cat/registro" [ref=e275]:
+              - cell "Presentar una instancia" [ref=e276]
+              - cell "http://orgt.cat/registro" [ref=e277]:
+                - link "http://orgt.cat/registro" [ref=e278] [cursor=pointer]:
+                  - /url: /es/Home/seltramit
+            - row "Quiero hacer una consulta por correo electrónico http://orgt.cat/atencionemail" [ref=e279]:
+              - cell "Quiero hacer una consulta por correo electrónico" [ref=e280]
+              - cell "http://orgt.cat/atencionemail" [ref=e281]:
+                - link "http://orgt.cat/atencionemail" [ref=e282] [cursor=pointer]:
+                  - /url: /es/TramitsPagaments/ATeleMail/ATeleMailP0?AtencioTelefonica=False&AtencioPerCorreu=True
+            - row "Quiero que me llamen http://orgt.cat/atenciontelefonica" [ref=e283]:
+              - cell "Quiero que me llamen" [ref=e284]
+              - cell "http://orgt.cat/atenciontelefonica" [ref=e285]:
+                - link "http://orgt.cat/atenciontelefonica" [ref=e286] [cursor=pointer]:
+                  - /url: /es/TramitsPagaments/ATeleMail/ATeleMailP0?AtencioTelefonica=True&AtencioPerCorreu=False
+            - row "Red de oficinas http://orgt.cat/oficinas" [ref=e287]:
+              - cell "Red de oficinas" [ref=e288]
+              - cell "http://orgt.cat/oficinas" [ref=e289]:
+                - link "http://orgt.cat/oficinas" [ref=e290] [cursor=pointer]:
+                  - /url: /es/LORGT/DadesContacte/dadescontacte
+            - row "Resolver dudas sobre tributos y multas http://orgt.cat/dudas" [ref=e291]:
+              - cell "Resolver dudas sobre tributos y multas" [ref=e292]
+              - cell "http://orgt.cat/dudas" [ref=e293]:
+                - link "http://orgt.cat/dudas" [ref=e294] [cursor=pointer]:
+                  - /url: /es/Informacio/ProcedimentRecaptatori/preguntesprecaptatori
+            - row "Solicitar un fraccionamiento http://orgt.cat/fraccionamiento" [ref=e295]:
+              - cell "Solicitar un fraccionamiento" [ref=e296]
+              - cell "http://orgt.cat/fraccionamiento" [ref=e297]:
+                - link "http://orgt.cat/fraccionamiento" [ref=e298] [cursor=pointer]:
+                  - /url: /es/TramitsPagaments/Ajornament/fraccionaments
+            - row "Trámites y pagos http://orgt.cat/gestiones" [ref=e299]:
+              - cell "Trámites y pagos" [ref=e300]
+              - cell "http://orgt.cat/gestiones" [ref=e301]:
+                - link "http://orgt.cat/gestiones" [ref=e302] [cursor=pointer]:
+                  - /url: /es/TramitsPagaments/Home/tramits
+            - row "Tributos pendientes de pagar http://orgt.cat/tributospendientes" [ref=e303]:
+              - cell "Tributos pendientes de pagar" [ref=e304]
+              - cell "http://orgt.cat/tributospendientes" [ref=e305]:
+                - link "http://orgt.cat/tributospendientes" [ref=e306] [cursor=pointer]:
+                  - /url: /es/TramitsPagaments/TributsPendents/inici?NouTramit=True
+            - row "Ver la fotografía de una multa http://orgt.cat/verfoto" [ref=e307]:
+              - cell "Ver la fotografía de una multa" [ref=e308]
+              - cell "http://orgt.cat/verfoto" [ref=e309]:
+                - link "http://orgt.cat/verfoto" [ref=e310] [cursor=pointer]:
+                  - /url: /es/TramitsPagaments/FotoMultes/fotomultes?NouTramit=True
+        - paragraph [ref=e311]:
+          - text: Consulte la lista completa de
+          - link "todos los trámites" [ref=e312] [cursor=pointer]:
+            - /url: /TramitsPagaments/Home/tramits
+        - link "Volver arriba" [ref=e313] [cursor=pointer]:
+          - /url: "#"
+          - text: Volver arriba
+          - img [ref=e314]
+        - separator [ref=e315]
+        - heading "Manuales de ayuda para los trámites" [level=2] [ref=e316]
+        - paragraph [ref=e317]:
+          - text: Puede
+          - link "consultar los manuales de ayuda" [ref=e318] [cursor=pointer]:
+            - /url: /es/Home/manuals
+          - text: si tiene dudas para acceder o realizar cualquier trámite de la Sede Electrónica del ORGT.
+        - link "Volver arriba" [ref=e319] [cursor=pointer]:
+          - /url: "#"
+          - text: Volver arriba
+          - img [ref=e320]
+        - separator [ref=e321]
+        - heading "El sistema da error o estoy en un punto del trámite y no sé como continuar (incidencias tecnológicas)" [level=2] [ref=e322]
+        - paragraph [ref=e323]:
+          - text: Compruebe los
+          - link "requisitos técnicos" [ref=e324] [cursor=pointer]:
+            - /url: ajuda?NouTramit=true#ancla23
+          - text: para acceder a esta sede electrónica.
+        - paragraph [ref=e325]:
+          - text: Si quiere que le ayudemos por teléfono, rellene el formulario
+          - link "Quiero que me llamen" [ref=e326] [cursor=pointer]:
+            - /url: /es/TramitsPagaments/ATeleMail/atelemailP0?AtencioTelefonica=True&AtencioPerCorreu=False
+          - text: Si lo prefiere, puede exponer el problema en el formulario
+          - link "Quiero respuesta por correo electrónico" [ref=e327] [cursor=pointer]:
+            - /url: /es/TramitsPagaments/ATeleMail/atelemailP0?AtencioTelefonica=False&AtencioPerCorreu=True
+          - text: .
+        - paragraph [ref=e328]:
+          - text: "Nota: El personal que atiende estas peticiones no tiene acceso a sus datos personales y, por lo tanto no se responderán ni tramitarán consultas tributarias relativas a sus deudas, ya que se han de efectuar por"
+          - link "registro electrónico." [ref=e329] [cursor=pointer]:
+            - /url: ../Home/seltramit?apartat=1
+        - link "Volver arriba" [ref=e330] [cursor=pointer]:
+          - /url: "#"
+          - text: Volver arriba
+          - img [ref=e331]
+        - separator [ref=e332]
+        - heading "Intento pagar pero después de poner la tarjeta el sistema da error" [level=2] [ref=e333]
+        - paragraph [ref=e334]:
+          - text: En primer lugar compruebe que su documento está vigente y está en plazo de pago. En caso contrario, puede descargar un nuevo documento para pagar en
+          - link "http://orgt.cat/pagos" [ref=e335] [cursor=pointer]:
+            - /url: /es/TramitsPagaments/Pagar/Pagar
+        - paragraph [ref=e336]: Si su tarjeta está vigente y no ha superado los límites de importes establecidos, reinicie su ordenador, o el teléfono móvil si está pagando desde el teléfono, y vuelva a intentar el pago en la web del ORGT.
+        - paragraph [ref=e337]: "Si no lo consigue, le pedimos que intente efectuar el pago en la web del prestador del servicio de la Caixa del ORGT, con la misma tarjeta con la que está teniendo dificultades:"
+        - paragraph [ref=e338]:
+          - link "https://www.caixabank.es/particular/pagos/impuestosrecibosmatriculas_es.html" [ref=e339] [cursor=pointer]:
+            - /url: https://www.caixabank.es/particular/pagos/impuestosrecibosmatriculas_es.html
+        - paragraph [ref=e340]: Si tampoco puede pagar, probablemente tenga alguna explicación relacionada con las características de su tarjeta. Los límites de gasto o los factores de seguridad que piden las entidades bancarias y que han estado modificados recientemente por la normativa.
+        - paragraph [ref=e341]:
+          - text: Si lo desea, nos puede informar del resultado rellenando el
+          - link "formulario de Ayuda" [ref=e342] [cursor=pointer]:
+            - /url: /es/Home/ajudaform
+          - text: indicando la referencia bancaria del pago pero nunca el número de la tarjeta bancaria.
+        - link "Volver arriba" [ref=e343] [cursor=pointer]:
+          - /url: "#"
+          - text: Volver arriba
+          - img [ref=e344]
+        - separator [ref=e345]
+        - heading "He hecho un pago pero el recibo no aparece en la lista de \"Tributos pagados\" y no puedo obtener un justificante de pago" [level=2] [ref=e346]
+        - paragraph [ref=e347]: Los pagos efectuados en entidades colaboradoras (por ventanilla o banca online) pueden tardar hasta 48 horas en aparecer en la página de Tributos Pagados o Multas Pagadas. Los pagos hechos por la misma web del ORGT aparecerán pagados al día siguiente de efectuado el pago con tarjeta.
+        - paragraph [ref=e348]: Una vez la deuda aparece como pagada, podrá obtener un justificante de pago.
+        - paragraph [ref=e349]:
+          - text: Si pasados estos plazos, su deuda aún figura pendiente, tiene que presentar un escrito de reclamación en
+          - link "http://orgt.cat/registro" [ref=e350] [cursor=pointer]:
+            - /url: /es/Home/seltramit
+        - link "Volver arriba" [ref=e351] [cursor=pointer]:
+          - /url: "#"
+          - text: Volver arriba
+          - img [ref=e352]
+        - separator [ref=e353]
+        - heading "¿Como puedo abrir ficheros PDF?" [level=2] [ref=e354]
+        - paragraph [ref=e355]:
+          - text: Si lo necesita puede
+          - link "descargar gratuitamente programas" [ref=e356] [cursor=pointer]:
+            - /url: ./descarregaprogrames
+          - text: para leer documentos word y pdf
+        - link "Volver arriba" [ref=e357] [cursor=pointer]:
+          - /url: "#"
+          - text: Volver arriba
+          - img [ref=e358]
+        - separator [ref=e359]
+        - heading "Necesito reducir el tamaño de los documentos que quiero adjuntar en un trámite" [level=2] [ref=e360]
+        - paragraph [ref=e361]: "Puede reducir el tamaño de un documento mediante alguna de las soluciones siguientes:"
+        - list [ref=e362]:
+          - listitem [ref=e363]: Si se trata de imágenes, abra el fichero desde cualquier editor y conviértalas a formato jpg con una resolución de 150 ppp.
+          - listitem [ref=e364]: Si se trata de documentos que ha escaneado, haga el escaneo nuevamente en blanco y negro y no en color o escala de grises.
+          - listitem [ref=e365]: No imprima documentos para escanearlos posteriormente. Es mejor convertirlos directamente a PDF, mediante la opción "Imprimir" de su editor de textos. En la versión 2010 de Word, esto también se puede hacer con la opción de "Guardar como".
+        - link "Volver arriba" [ref=e366] [cursor=pointer]:
+          - /url: "#"
+          - text: Volver arriba
+          - img [ref=e367]
+        - separator [ref=e368]
+        - heading "Quiero entrar en la web del ORGT personalizada con la información de mi municipio" [level=2] [ref=e369]
+        - paragraph [ref=e370]:
+          - text: Muchos contribuyentes tributan por más de un municipio, pero si desea guardar un enlace directo personalizado con el nombre del municipio donde tributa puede hacerlo añadiendo "?cdclie=nnn" a la dirección principal, donde nnn es el código de tres números de su municipio según
+          - link "codificación de la AEAT" [ref=e371] [cursor=pointer]:
+            - /url: ./ObrirPDF?NomFitxer=Llistat ajuntaments.pdf
+          - text: . Por ejemplo, para Abrera la versión en castellano sería
+          - link "https://orgt.diba.cat/es?cdclie=001" [ref=e372] [cursor=pointer]:
+            - /url: /Home?cdclie=001
+        - link "Volver arriba" [ref=e373] [cursor=pointer]:
+          - /url: "#"
+          - text: Volver arriba
+          - img [ref=e374]
+        - separator [ref=e375]
+        - heading "Necesito hacer un trámite o consulta por teléfono y el interesado es persona jurídica" [level=2] [ref=e376]
+        - paragraph [ref=e377]:
+          - text: La Ley 39/2015, de 1 de octubre, del procedimiento administrativo común de las administraciones públicas, establece el uso obligatorio de los medios electrónicos para todas las personas jurídicas en sus relaciones con la Administración. En esta sede encontrará todos
+          - link "los trámites" [ref=e378] [cursor=pointer]:
+            - /url: ../TramitsPagaments/Home/tramits
+          - text: que puede efectuar electrónicamente y podrá consultar mucha información sobre sus obligaciones tributarias con los ayuntamientos.
+        - paragraph [ref=e379]:
+          - text: Si necesita ayuda para hacer un trámite en la web, consulte la pregunta sobre
+          - link "incidencias tecnológicas" [ref=e380] [cursor=pointer]:
+            - /url: /es/Home/Ajuda?NouTramit=True#ancla9
+        - link "Volver arriba" [ref=e381] [cursor=pointer]:
+          - /url: "#"
+          - text: Volver arriba
+          - img [ref=e382]
+        - separator [ref=e383]
+        - heading "Soy persona física y quiero hacer un trámite o consulta por teléfono (información tributaria)" [level=2] [ref=e384]
+        - paragraph [ref=e385]:
+          - text: El ORGT ha diseñado todos
+          - link "los trámites" [ref=e386] [cursor=pointer]:
+            - /url: ../TramitsPagaments/Home/tramits
+          - text: para que le sean cómodos y rápidos de utilizar. Aun así, puede resolver algunos trámites por teléfono llamando al número 93 202 98 02 de lunes a viernes de 8:00 a 14:00 (lunes y miercoles de 15:00 a 17:00).
+        - paragraph [ref=e387]:
+          - text: Si necesita ayuda para hacer un trámite en la web, consulte la pregunta sobre
+          - link "incidencias tecnológicas" [ref=e388] [cursor=pointer]:
+            - /url: /es/Home/Ajuda?NouTramit=True#ancla9
+        - paragraph
+        - link "Volver arriba" [ref=e389] [cursor=pointer]:
+          - /url: "#"
+          - text: Volver arriba
+          - img [ref=e390]
+        - separator [ref=e391]
+        - heading "Necesito atención presencial en alguna de las oficinas del ORGT" [level=2] [ref=e392]
+        - paragraph [ref=e393]:
+          - text: Si necesita una atención presencial en alguna de las oficinas del ORGT, puede
+          - link "pedir cita previa" [ref=e394] [cursor=pointer]:
+            - /url: ../TramitsPagaments/CitaPrevia/citapreviaDades
+          - text: y así no tendrá que hacer cola. Cuando pida la cita previa, verá la lista de las oficinas donde podrá resolver su trámite en función del tema concreto a tratar. El sistema también verificará si puede hacer su gestión en la oficina del ORGT o, por el contrario, debe dirigirse al Ayuntamiento porque se trata de un procedimiento que no ha sido delegado en la Diputación de Barcelona.
+        - link "Volver arriba" [ref=e395] [cursor=pointer]:
+          - /url: "#"
+          - text: Volver arriba
+          - img [ref=e396]
+        - separator [ref=e397]
+        - heading "Quiero presentar una queja o sugerencia" [level=2] [ref=e398]
+        - paragraph [ref=e399]:
+          - text: Estas
+          - link "respuestas de ayuda" [ref=e400] [cursor=pointer]:
+            - /url: "#"
+          - text: le pueden ser útiles antes de redactar su queja o sugerencia. Para presentarla necesitará un identificador digital. Si dispone de tarjeta sanitaria individual del CatSalut, puede
+          - link "obtener al momento un identificador idCAT Mòbil" [ref=e401] [cursor=pointer]:
+            - /url: https://idcatmobil.seu.cat/?language=es
+          - text: .
+        - link "Volver arriba" [ref=e402] [cursor=pointer]:
+          - /url: "#"
+          - text: Volver arriba
+          - img [ref=e403]
+        - separator [ref=e404]
+    - separator [ref=e406]
+    - generic [ref=e408]:
+      - list [ref=e411]:
+        - listitem [ref=e412]:
+          - link "Accesibilidad" [ref=e413] [cursor=pointer]:
+            - /url: /Home/accessibilitat
+        - listitem [ref=e414]:
+          - link "Aviso legal y Protección de datos personales" [ref=e415] [cursor=pointer]:
+            - /url: /Home/avislegal
+      - list [ref=e418]:
+        - listitem [ref=e419]:
+          - link "Ayuda uso de la web" [ref=e420] [cursor=pointer]:
+            - /url: /Home/ajuda?NouTramit=true
+            - img [ref=e421]
+            - text: Ayuda uso de la web
+        - listitem [ref=e422]:
+          - link "Quejas y sugerencias" [ref=e423] [cursor=pointer]:
+            - /url: /TramitsPagaments/QueixesSuggeriments/presentqx?NouTramit=True
+      - link [ref=e426] [cursor=pointer]:
+        - /url: /Home/Index
+        - img [ref=e427]
+    - text:  

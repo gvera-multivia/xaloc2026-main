@@ -179,15 +179,19 @@ def _registro_expected_descs(datos: "AtcTarget") -> dict[int, str]:
 def _assert_registro_payload_preconditions(datos: "AtcTarget") -> int:
     payload = dict(getattr(datos, "payload", {}) or {})
     expected_count = int(payload.get("atc_expected_registro_attachment_count") or 0)
+    source_docs_count = int(payload.get("atc_source_docs_count") or 0)
+    bundled_upload = bool(payload.get("atc_bundled_upload"))
     has_resource = bool(payload.get("atc_has_recurso_doc"))
     has_authorization = bool(payload.get("atc_has_authorization_doc"))
-    if expected_count < 2 or not has_resource or not has_authorization:
+    has_minimum_uploaded_units = expected_count >= 1 if bundled_upload else expected_count >= 2
+    has_minimum_source_docs = source_docs_count >= 2 if source_docs_count else has_minimum_uploaded_units
+    if not has_minimum_uploaded_units or not has_minimum_source_docs or not has_resource or not has_authorization:
         missing_parts: list[str] = []
         if not has_resource:
             missing_parts.append("RECURSO")
         if not has_authorization:
             missing_parts.append("AUTORIZACION")
-        if expected_count < 2:
+        if not has_minimum_uploaded_units or not has_minimum_source_docs:
             missing_parts.append("MINIMO_2_ADJUNTOS")
         raise RuntimeError(
             "atc.confirmacion: no se valida ni firma un registro ATC sin adjuntos minimos completos. "

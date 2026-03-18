@@ -25,9 +25,16 @@ _POST_AUTH_READY_URL_MARKERS = (
     "/secured/recurs/identificacio",
 )
 
+_PUBLIC_REPOSICIO_URL_MARKERS = (
+    "/gestions/impugnacions/recurs/",
+    "/gestions/impugnacions/recurs/index.html",
+    "/gestions/impugnacions/recursos/",
+)
+
 ATC_LOGIN_SHORT_TIMEOUT_MS = 5000
 ATC_LOGIN_MEDIUM_TIMEOUT_MS = 15000
 ATC_LOGIN_LONG_TIMEOUT_MS = 30000
+ATC_LOGIN_ENTRY_TIMEOUT_MS = 30000
 ATC_LOGIN_AUTH_TIMEOUT_MS = 120000
 
 _CERT_BUTTON_SELECTOR = (
@@ -49,6 +56,11 @@ def _is_auth_url(url: str) -> bool:
 def _is_post_auth_ready_url(url: str) -> bool:
     current = (url or "").lower()
     return any(marker in current for marker in _POST_AUTH_READY_URL_MARKERS)
+
+
+def _is_reposicio_public_url(url: str) -> bool:
+    current = (url or "").lower()
+    return any(marker in current for marker in _PUBLIC_REPOSICIO_URL_MARKERS)
 
 
 async def _click_first_selector(page: "Page", selectors: list[str], *, timeout: int = ATC_LOGIN_MEDIUM_TIMEOUT_MS) -> bool:
@@ -157,8 +169,76 @@ async def _reposicio_start_link_available(page: "Page") -> bool:
     return False
 
 
+async def _force_click_reposicio_online_access(page: "Page") -> bool:
+    clicked = bool(
+        await page.evaluate(
+            """() => {
+                const norm = (s) => String(s || "")
+                    .normalize("NFD")
+                    .replace(/[\\u0300-\\u036f]/g, "")
+                    .replace(/\\s+/g, " ")
+                    .trim()
+                    .toLowerCase();
+                const isVisible = (el) => {
+                    if (!el) return false;
+                    const st = window.getComputedStyle(el);
+                    const rect = el.getBoundingClientRect();
+                    return !!st && st.display !== "none" && st.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+                };
+                const fire = (node) => {
+                    if (!node) return false;
+                    try { node.scrollIntoView({ block: "center", inline: "center" }); } catch (_err) {}
+                    for (const [name, Ctor] of [
+                        ["pointerdown", PointerEvent],
+                        ["mousedown", MouseEvent],
+                        ["pointerup", PointerEvent],
+                        ["mouseup", MouseEvent],
+                        ["click", MouseEvent],
+                    ]) {
+                        try {
+                            node.dispatchEvent(new Ctor(name, { bubbles: true, cancelable: true }));
+                        } catch (_err) {}
+                    }
+                    try { if (typeof node.click === "function") node.click(); } catch (_err) {}
+                    return true;
+                };
+                const nodes = Array.from(document.querySelectorAll("*")).filter(isVisible);
+                const matches = nodes.filter((el) => {
+                    const text = norm(el.textContent || "");
+                    return text === "per internet" || text === "por internet" || text === "online";
+                });
+                if (!matches.length) return false;
+                for (const labelNode of matches) {
+                    const targets = [
+                        labelNode.closest("[role='button']"),
+                        labelNode.closest("button"),
+                        labelNode.closest("a"),
+                        labelNode.closest(".p-panel-header"),
+                        labelNode,
+                        labelNode.closest("li"),
+                        labelNode.previousElementSibling,
+                        labelNode.parentElement,
+                    ].filter(Boolean);
+                    const seen = new Set();
+                    for (const target of targets) {
+                        if (seen.has(target)) continue;
+                        seen.add(target);
+                        if (fire(target)) return true;
+                    }
+                }
+                return false;
+            }"""
+        )
+    )
+    if clicked:
+        await wait_after_action(page)
+    return clicked
+
+
 async def _expand_reposicio_online_access(page: "Page", *, timeout: int = ATC_LOGIN_MEDIUM_TIMEOUT_MS) -> bool:
     if _is_auth_url(page.url or "") or _is_post_auth_ready_url(page.url or ""):
+        return True
+    if await _force_click_reposicio_online_access(page):
         return True
     if await _reposicio_start_link_available(page):
         return True
@@ -202,6 +282,58 @@ async def _expand_reposicio_online_access(page: "Page", *, timeout: int = ATC_LO
         if clicked:
             await wait_after_action(page)
 
+    if not clicked:
+        clicked = bool(
+            await page.evaluate(
+                """() => {
+                    const norm = (s) => String(s || "")
+                        .normalize("NFD")
+                        .replace(/[\\u0300-\\u036f]/g, "")
+                        .replace(/\\s+/g, " ")
+                        .trim()
+                        .toLowerCase();
+                    const isVisible = (el) => {
+                        if (!el) return false;
+                        const st = window.getComputedStyle(el);
+                        const r = el.getBoundingClientRect();
+                        return !!st && st.display !== "none" && st.visibility !== "hidden" && r.width > 0 && r.height > 0;
+                    };
+                    const all = Array.from(document.querySelectorAll("*")).filter(isVisible);
+                    const labelNode = all.find((el) => {
+                        const text = norm(el.textContent || "");
+                        return text === "per internet" || text === "por internet" || text === "online";
+                    });
+                    if (!labelNode) return false;
+
+                    const chain = [
+                        labelNode.closest("button"),
+                        labelNode.closest("a"),
+                        labelNode.closest("[role='button']"),
+                        labelNode.closest(".p-panel-header"),
+                        labelNode.closest(".p-toggleable-content"),
+                        labelNode.closest("li"),
+                        labelNode.closest("div"),
+                    ].filter(Boolean);
+
+                    for (const node of chain) {
+                        try {
+                            node.click();
+                            return true;
+                        } catch (_err) {}
+                    }
+
+                    const prev = labelNode.previousElementSibling;
+                    if (prev && typeof prev.click === "function") {
+                        prev.click();
+                        return true;
+                    }
+                    return false;
+                }"""
+            )
+        )
+        if clicked:
+            await wait_after_action(page)
+
     if _is_auth_url(page.url or "") or _is_post_auth_ready_url(page.url or ""):
         return True
     return clicked or await _reposicio_start_link_available(page)
@@ -237,7 +369,14 @@ async def _click_inicia_tramit_reposicio(page: "Page", *, timeout: int = 20000) 
                     .replace(/\\s+/g, " ")
                     .trim()
                     .toLowerCase();
-                const links = Array.from(document.querySelectorAll("a,button,[role='button']"));
+                const isVisible = (el) => {
+                    if (!el) return false;
+                    const st = window.getComputedStyle(el);
+                    const rect = el.getBoundingClientRect();
+                    return !!st && st.display !== "none" && st.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+                };
+                const links = Array.from(document.querySelectorAll("a,button,[role='button'],se-link,.se-link,.p-panel-header"))
+                    .filter(isVisible);
                 const target = links.find((el) => {
                     const t = norm(el.textContent);
                     const href = norm(el.getAttribute("href"));
@@ -246,10 +385,66 @@ async def _click_inicia_tramit_reposicio(page: "Page", *, timeout: int = 20000) 
                     return txtOk || hrefOk;
                 });
                 if (!target) return false;
-                target.click();
+                const clickable = target.closest("a,button,[role='button']") || target.querySelector?.("a,button,[role='button']") || target;
+                clickable.click();
                 return true;
             }"""
         )
+    )
+
+
+async def _wait_for_reposicio_entry(page: "Page", *, timeout_ms: int = ATC_LOGIN_ENTRY_TIMEOUT_MS) -> "Page":
+    deadline = time.monotonic() + (timeout_ms / 1000)
+    context = page.context
+    current = page
+    last_url = current.url or ""
+
+    while time.monotonic() < deadline:
+        current = await _pick_auth_page(context, current)
+        await _accept_cookies_if_present(current)
+        url = (current.url or "").lower()
+        if url:
+            last_url = current.url
+
+        if _is_auth_url(url) or _is_post_auth_ready_url(url):
+            return current
+
+        expanded_online_access = False
+        if _is_reposicio_public_url(url):
+            expanded_online_access = await _expand_reposicio_online_access(current, timeout=ATC_LOGIN_SHORT_TIMEOUT_MS)
+            current = await _pick_auth_page(context, current)
+            url = (current.url or "").lower()
+            if url:
+                last_url = current.url
+            if _is_auth_url(url) or _is_post_auth_ready_url(url):
+                return current
+
+        if await _reposicio_start_link_available(current):
+            try:
+                async with context.expect_page(timeout=4000) as pop:
+                    clicked = await _click_inicia_tramit_reposicio(current, timeout=ATC_LOGIN_SHORT_TIMEOUT_MS)
+                    if not clicked:
+                        await current.wait_for_timeout(500)
+                    else:
+                        current = await pop.value
+                        await current.wait_for_load_state("domcontentloaded")
+                        return current
+            except Exception:
+                clicked = await _click_inicia_tramit_reposicio(current, timeout=ATC_LOGIN_SHORT_TIMEOUT_MS)
+                if clicked:
+                    await current.wait_for_timeout(1500)
+        elif expanded_online_access:
+            await current.wait_for_timeout(1200)
+
+        try:
+            await current.wait_for_load_state("domcontentloaded", timeout=3000)
+        except Exception:
+            pass
+        await current.wait_for_timeout(750)
+
+    raise RuntimeError(
+        "atc.login: la landing publica de reposicion no avanzo al inicio del tramite. "
+        f"ultima_url={last_url}"
     )
 
 
@@ -591,29 +786,39 @@ async def _login_rea_or_repos(page: "Page", config: "AtcConfig", datos: "AtcTarg
             if not internet_ready and not await _reposicio_start_link_available(page):
                 raise RuntimeError("atc.login: no se encontro acceso 'Per internet' ni enlace de inicio del tramite.")
 
-        # "Recurs de reposiciÃ³. Inicia el trÃ mit" (puede abrir pestaña nueva)
+            # Esperar a que el acordeon termine de renderizar antes de buscar el enlace de inicio.
+            await page.wait_for_timeout(1500)
+
+        # "Recurs de reposicio. Inicia el tramit" navega en la MISMA pestanya (no abre nueva).
+        # Se intenta capturar nueva pestanya por compatibilidad, pero el timeout es corto (3s).
         context = page.context
         if _is_auth_url(page.url or "") or _is_post_auth_ready_url(page.url or ""):
             current = page
         else:
+            inicia_clicked = False
             try:
-                async with context.expect_page(timeout=20000) as pop:
-                    inicia_clicked = await _click_inicia_tramit_reposicio(page, timeout=20000)
+                async with context.expect_page(timeout=3000) as pop:
+                    inicia_clicked = await _click_inicia_tramit_reposicio(page, timeout=ATC_LOGIN_MEDIUM_TIMEOUT_MS)
                     if not inicia_clicked:
-                        raise RuntimeError("atc.login: no se encontro enlace 'Inicia el tràmit' para reposicio.")
+                        raise RuntimeError("atc.login: no se encontro enlace Inicia el tramit para reposicio.")
                 current = await pop.value
                 await current.wait_for_load_state("domcontentloaded")
             except Exception:
-                inicia_clicked = await _click_inicia_tramit_reposicio(page, timeout=20000)
+                # Navegacion en la misma pestanya (comportamiento habitual de ATC).
+                if not inicia_clicked:
+                    inicia_clicked = await _click_inicia_tramit_reposicio(page, timeout=ATC_LOGIN_MEDIUM_TIMEOUT_MS)
                 if not inicia_clicked:
                     if _is_auth_url(page.url or "") or _is_post_auth_ready_url(page.url or ""):
                         current = page
                     else:
-                        raise RuntimeError("atc.login: no se encontro enlace 'Inicia el tràmit' para reposicio.")
+                        raise RuntimeError("atc.login: no se encontro enlace Inicia el tramit para reposicio.")
                 else:
                     current = page
 
     await _accept_cookies_if_present(current)
+    if datos.protocol != "rea" and not _is_auth_url(current.url or "") and not _is_post_auth_ready_url(current.url or ""):
+        current = await _wait_for_reposicio_entry(current, timeout_ms=ATC_LOGIN_ENTRY_TIMEOUT_MS)
+        await _accept_cookies_if_present(current)
     if await _has_certificate_button(current):
         await _click_certificate_button(current)
 

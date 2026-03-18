@@ -60,3 +60,18 @@ def test_atc_confirmacion_rejects_missing_authorization_metadata() -> None:
 
     with pytest.raises(RuntimeError, match="AUTORIZACION"):
         _assert_registro_payload_preconditions(datos)
+
+
+def test_atc_confirmacion_accepts_single_bundle_when_source_docs_are_complete() -> None:
+    datos = AtcTarget(
+        protocol="registro_sin_csv",
+        payload={
+            "atc_expected_registro_attachment_count": 1,
+            "atc_source_docs_count": 7,
+            "atc_bundled_upload": True,
+            "atc_has_recurso_doc": True,
+            "atc_has_authorization_doc": True,
+        },
+    )
+
+    assert _assert_registro_payload_preconditions(datos) == 1

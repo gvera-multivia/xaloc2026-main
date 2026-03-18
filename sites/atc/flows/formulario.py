@@ -19,6 +19,7 @@ _THIRD_PERSON_RADIO_RE = re.compile(r"tercera\s+persona|third\s+person", re.IGNO
 ATC_FORM_SHORT_TIMEOUT_MS = 5000
 ATC_FORM_MEDIUM_TIMEOUT_MS = 15000
 ATC_FORM_NAV_TIMEOUT_MS = 45000
+ATC_FORM_VALIDATE_SETTLE_TIMEOUT_MS = 120000
 
 
 def _matches_third_person_label(value: str) -> bool:
@@ -41,6 +42,38 @@ def _is_third_person_selected(debug_state: dict | None) -> bool:
                 return True
         except Exception:
             continue
+    return False
+
+
+def _is_identification_dom_ready(debug_state: dict | None) -> bool:
+    state = debug_state or {}
+    if bool(state.get("hasThirdNif")) and bool(state.get("hasThirdName")):
+        return True
+    if bool(state.get("loading")):
+        return False
+    try:
+        return int(state.get("radioCount") or 0) >= 2
+    except Exception:
+        return False
+
+
+def _is_post_validate_ui_ready(debug_state: dict | None) -> bool:
+    state = debug_state or {}
+    if bool(state.get("loading")):
+        return False
+    return bool(state.get("hasCheckbox"))
+
+
+def _is_csv_result_ready(debug_state: dict | None) -> bool:
+    state = debug_state or {}
+    if bool(state.get("loading")):
+        return False
+    if bool(state.get("hasCsvRejectedModal")):
+        return True
+    if bool(state.get("continueEnabled")):
+        return True
+    if bool(state.get("singleSelectableCheckbox")):
+        return True
     return False
 
 
@@ -103,9 +136,254 @@ async def _collect_identification_debug_state(page: "Page") -> dict:
                 allLabels: described.map((item) => item.label),
                 hasThirdNif: !!document.querySelector("#thirdPresenterNif"),
                 hasThirdName: !!document.querySelector("#thirdPresenterName"),
+                loading: normalize(document.body?.innerText || "").includes("carregant")
+                    || normalize(document.body?.innerText || "").includes("cargando")
+                    || normalize(document.body?.innerText || "").includes("loading"),
             };
         }"""
     )
+
+
+async def _wait_identification_dom_ready(page: "Page", *, timeout_ms: int = 45000) -> dict:
+    waited = 0
+    last_state: dict = {}
+    while waited <= timeout_ms:
+        try:
+            last_state = await _collect_identification_debug_state(page)
+        except Exception:
+            last_state = {}
+        if _is_identification_dom_ready(last_state):
+            return last_state
+        await page.wait_for_timeout(500)
+        waited += 500
+    return last_state
+
+
+async def _collect_post_validate_state(page: "Page") -> dict:
+    try:
+        return await page.evaluate(
+            """() => {
+                const normalize = (value) =>
+                    String(value || "")
+                        .normalize("NFD")
+                        .replace(/[\\u0300-\\u036f]/g, "")
+                        .replace(/\\s+/g, " ")
+                        .trim()
+                        .toLowerCase();
+                const isVisible = (el) => {
+                    if (!el) return false;
+                    const st = window.getComputedStyle(el);
+                    const rect = el.getBoundingClientRect();
+                    return !!st && st.display !== "none" && st.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+                };
+                const checkboxSelectors = [
+                    "#checkbox-declaracio-responsable_checkbox-input",
+                    "input#checkbox-declaracio-responsable_checkbox-input.checkbox-input",
+                    "input[id^='checkbox-declaracio-responsable']",
+                ];
+                const checkbox = checkboxSelectors
+                    .map((selector) => document.querySelector(selector))
+                    .find(Boolean);
+                const continueButton = Array.from(document.querySelectorAll("button, [role='button']"))
+                    .find((el) => isVisible(el) && /continuar|continue/.test(normalize(el.textContent || el.getAttribute("aria-label") || "")));
+                const validateButton = Array.from(document.querySelectorAll("button, [role='button']"))
+                    .find((el) => isVisible(el) && /validant|validando|validating|validat|validado|validated/.test(normalize(el.textContent || el.getAttribute("aria-label") || "")));
+                const bodyText = normalize(document.body?.innerText || "");
+                return {
+                    loading: bodyText.includes("carregant") || bodyText.includes("cargando") || bodyText.includes("loading"),
+                    hasCheckbox: !!checkbox,
+                    checkboxVisible: isVisible(checkbox),
+                    continueDisabled: continueButton ? !!continueButton.disabled || continueButton.getAttribute("aria-disabled") === "true" : null,
+                    validateText: normalize(validateButton?.textContent || validateButton?.getAttribute("aria-label") || ""),
+                };
+            }"""
+        )
+    except Exception:
+        return {"loading": False, "hasCheckbox": False, "checkboxVisible": False, "continueDisabled": None}
+
+
+async def _wait_post_validate_ui_ready(page: "Page", *, timeout_ms: int = ATC_FORM_VALIDATE_SETTLE_TIMEOUT_MS) -> dict:
+    waited = 0
+    last_state: dict = {}
+    while waited <= timeout_ms:
+        last_state = await _collect_post_validate_state(page)
+        if _is_post_validate_ui_ready(last_state):
+            return last_state
+        await page.wait_for_timeout(1000)
+        waited += 1000
+    return last_state
+
+
+async def _collect_csv_result_state(page: "Page") -> dict:
+    try:
+        return await page.evaluate(
+            """() => {
+                const normalize = (value) =>
+                    String(value || "")
+                        .normalize("NFD")
+                        .replace(/[\\u0300-\\u036f]/g, "")
+                        .replace(/\\s+/g, " ")
+                        .trim()
+                        .toLowerCase();
+                const isVisible = (el) => {
+                    if (!el) return false;
+                    const st = window.getComputedStyle(el);
+                    const rect = el.getBoundingClientRect();
+                    return !!st && st.display !== "none" && st.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+                };
+                const bodyText = normalize(document.body?.innerText || "");
+                const continueButton = Array.from(document.querySelectorAll("button, [role='button']"))
+                    .find((el) => isVisible(el) && /continuar|continue/.test(normalize(el.textContent || el.getAttribute("aria-label") || "")));
+                const checkboxes = Array.from(document.querySelectorAll("input[type='checkbox']"))
+                    .filter((el) => {
+                        if (!isVisible(el)) return false;
+                        if (el.closest("dialog, [role='dialog'], app-modal-info, .cc_dialog, .cookie-consent-preferences-overlay")) return false;
+                        const id = normalize(el.id || "");
+                        const name = normalize(el.name || "");
+                        const label = normalize(
+                            el.getAttribute("aria-label") ||
+                            el.closest("label")?.textContent ||
+                            el.parentElement?.textContent ||
+                            ""
+                        );
+                        if (id.includes("declaracio-responsable") || name.includes("declaracio-responsable")) return false;
+                        if (label.includes("declaro sota la meva") || label.includes("declaro bajo mi") || label.includes("i declare")) return false;
+                        return true;
+                    });
+                const csvRejected = !!Array.from(document.querySelectorAll("app-modal-info, dialog, [role='dialog']")).find((modal) => {
+                    if (!isVisible(modal)) return false;
+                    const txt = normalize(modal.textContent || "");
+                    const hasCsvErrorBlock = !!modal.querySelector("app-csv-error");
+                    return txt.includes("no identifiquem el csv")
+                        || txt.includes("aquest acte no es pot afegir")
+                        || txt.includes("no identificamos el csv")
+                        || txt.includes("csv que heu indicat")
+                        || txt.includes("csv que ha indicado")
+                        || txt.includes("el csv no es correcte")
+                        || txt.includes("csv no es correcto")
+                        || txt.includes("aquest acte no es pot recorrer")
+                        || txt.includes("este acto no se puede recurrir")
+                        || (hasCsvErrorBlock && txt.includes("csv"));
+                });
+                return {
+                    loading: bodyText.includes("carregant") || bodyText.includes("cargando") || bodyText.includes("loading"),
+                    hasCsvRejectedModal: csvRejected,
+                    continuePresent: !!continueButton,
+                    continueEnabled: !!continueButton && !continueButton.disabled && continueButton.getAttribute("aria-disabled") !== "true",
+                    visibleCheckboxCount: checkboxes.length,
+                    checkedCheckboxCount: checkboxes.filter((el) => !!el.checked).length,
+                    singleSelectableCheckbox: checkboxes.length === 1,
+                };
+            }"""
+        )
+    except Exception:
+        return {
+            "loading": False,
+            "hasCsvRejectedModal": False,
+            "continuePresent": False,
+            "continueEnabled": False,
+            "visibleCheckboxCount": 0,
+            "checkedCheckboxCount": 0,
+            "singleSelectableCheckbox": False,
+        }
+
+
+async def _wait_csv_result_ready(page: "Page", *, timeout_ms: int = ATC_FORM_NAV_TIMEOUT_MS) -> dict:
+    waited = 0
+    last_state: dict = {}
+    while waited <= timeout_ms:
+        last_state = await _collect_csv_result_state(page)
+        if _is_csv_result_ready(last_state):
+            return last_state
+        await page.wait_for_timeout(1000)
+        waited += 1000
+    return last_state
+
+
+async def _check_csv_result_checkbox_if_needed(page: "Page") -> dict:
+    selectors = [
+        "input[type='checkbox']:visible",
+        "[role='checkbox']:visible",
+    ]
+    for selector in selectors:
+        try:
+            checked = bool(
+                await page.evaluate(
+                    """(selector) => {
+                        const normalize = (value) =>
+                            String(value || "")
+                                .normalize("NFD")
+                                .replace(/[\\u0300-\\u036f]/g, "")
+                                .replace(/\\s+/g, " ")
+                                .trim()
+                                .toLowerCase();
+                        const isVisible = (el) => {
+                            if (!el) return false;
+                            const st = window.getComputedStyle(el);
+                            const rect = el.getBoundingClientRect();
+                            return !!st && st.display !== "none" && st.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+                        };
+                        const nodes = Array.from(document.querySelectorAll(selector)).filter((el) => {
+                            if (!isVisible(el)) return false;
+                            if (el.closest("dialog, [role='dialog'], app-modal-info, .cc_dialog, .cookie-consent-preferences-overlay")) return false;
+                            const id = normalize(el.id || "");
+                            const name = normalize(el.name || "");
+                            const label = normalize(
+                                el.getAttribute("aria-label") ||
+                                el.closest("label")?.textContent ||
+                                el.parentElement?.textContent ||
+                                ""
+                            );
+                            if (id.includes("declaracio-responsable") || name.includes("declaracio-responsable")) return false;
+                            if (label.includes("declaro sota la meva") || label.includes("declaro bajo mi") || label.includes("i declare")) return false;
+                            return true;
+                        });
+                        if (nodes.length !== 1) return false;
+                        const target = nodes[0];
+                        if (target.checked === true || target.getAttribute("aria-checked") === "true") return true;
+                        if (typeof target.click === "function") target.click();
+                        try { target.checked = true; } catch (_) {}
+                        target.setAttribute("aria-checked", "true");
+                        target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+                        target.dispatchEvent(new Event("input", { bubbles: true }));
+                        target.dispatchEvent(new Event("change", { bubbles: true }));
+                        return target.checked === true || target.getAttribute("aria-checked") === "true";
+                    }""",
+                    selector,
+                )
+            )
+            if checked:
+                await wait_after_action(page)
+                return await _collect_csv_result_state(page)
+        except Exception:
+            continue
+    return await _collect_csv_result_state(page)
+
+
+async def _wait_for_first_ready_locator(
+    page: "Page",
+    candidates: list,
+    *,
+    timeout_ms: int,
+    poll_ms: int = 500,
+) -> object | None:
+    waited = 0
+    while waited <= timeout_ms:
+        for locator in candidates:
+            try:
+                if await locator.count() <= 0:
+                    continue
+                first = locator.first
+                try:
+                    if await first.is_visible():
+                        return first
+                except Exception:
+                    return first
+            except Exception:
+                continue
+        await page.wait_for_timeout(poll_ms)
+        waited += poll_ms
+    return None
 
 
 async def _force_select_third_person_radio(page: "Page") -> None:
@@ -181,12 +459,15 @@ async def _force_select_third_person_radio(page: "Page") -> None:
 
 
 async def _click_button(page: "Page", patterns: list[str], *, timeout: int = 12000) -> None:
-    for pattern in patterns:
-        btn = page.get_by_role("button", name=re.compile(pattern, re.IGNORECASE))
-        if await btn.count():
-            await btn.first.click(timeout=timeout)
-            await wait_after_action(page)
-            return
+    candidates = [
+        page.get_by_role("button", name=re.compile(pattern, re.IGNORECASE))
+        for pattern in patterns
+    ]
+    button = await _wait_for_first_ready_locator(page, candidates, timeout_ms=timeout)
+    if button is not None:
+        await button.click(timeout=timeout)
+        await wait_after_action(page)
+        return
     raise RuntimeError(f"atc.formulario: no se encontro boton esperado ({patterns}).")
 
 
@@ -199,16 +480,22 @@ async def _fill_csv(page: "Page", csv_acto: str) -> None:
         page.locator("[aria-label='CSV input']"),                                  # recurs: aria-label
         page.get_by_role("textbox", name=re.compile(r"CSV input", re.IGNORECASE)),
     ]
-    for locator in candidates:
-        if await locator.count():
-            await locator.first.fill(csv_acto)
-            await wait_after_action(page)
-            return
+    target = await _wait_for_first_ready_locator(page, candidates, timeout_ms=ATC_FORM_MEDIUM_TIMEOUT_MS)
+    if target is not None:
+        await target.fill(csv_acto)
+        await wait_after_action(page)
+        return
     raise RuntimeError("atc.formulario: no se encontro campo CSV.")
 
 
 async def _identificar_representado(page: "Page", datos: "AtcTarget") -> None:
     await page.wait_for_url("**/identificacio**", timeout=ATC_FORM_NAV_TIMEOUT_MS)
+    debug_state = await _wait_identification_dom_ready(page, timeout_ms=ATC_FORM_NAV_TIMEOUT_MS)
+    if not _is_identification_dom_ready(debug_state):
+        raise RuntimeError(
+            "atc.formulario: la pagina de identificacion no termino de cargar antes de buscar tercera persona. "
+            f"debug={debug_state}"
+        )
     radio_by_role = page.get_by_role("radio", name=_THIRD_PERSON_RADIO_RE)
     radio_click_targets = [
         "se-radio#radio-2",
@@ -222,7 +509,7 @@ async def _identificar_representado(page: "Page", datos: "AtcTarget") -> None:
         "se-radio:nth-of-type(2) .radio-icon-container",
         "se-radio:nth-of-type(2) ng-icon[tabindex='0']",
     ]
-    debug_state: dict | None = None
+    debug_state = debug_state or None
     for _ in range(8):
         try:
             if await radio_by_role.count():
@@ -253,18 +540,11 @@ async def _identificar_representado(page: "Page", datos: "AtcTarget") -> None:
             break
         await page.wait_for_timeout(350)
 
-    third_nif = page.locator("#thirdPresenterNif").first
-    third_name = page.locator("#thirdPresenterName").first
-    fields_ready = False
-    for _ in range(24):
-        try:
-            if await third_nif.count() and await third_name.count():
-                if await third_nif.is_visible() and await third_name.is_visible():
-                    fields_ready = True
-                    break
-        except Exception:
-            pass
-        await page.wait_for_timeout(500)
+    third_nif = page.locator("#thirdPresenterNif")
+    third_name = page.locator("#thirdPresenterName")
+    third_nif_ready = await _wait_for_first_ready_locator(page, [third_nif], timeout_ms=ATC_FORM_MEDIUM_TIMEOUT_MS)
+    third_name_ready = await _wait_for_first_ready_locator(page, [third_name], timeout_ms=ATC_FORM_MEDIUM_TIMEOUT_MS)
+    fields_ready = third_nif_ready is not None and third_name_ready is not None
     if not fields_ready:
         debug_state = await _collect_identification_debug_state(page)
         raise RuntimeError(f"atc.formulario: no se activaron campos de tercera persona. debug={debug_state}")
@@ -284,29 +564,27 @@ async def _identificar_representado(page: "Page", datos: "AtcTarget") -> None:
         await page.wait_for_load_state("networkidle", timeout=8000)
     except Exception:
         pass
+    post_validate_state = await _wait_post_validate_ui_ready(page, timeout_ms=ATC_FORM_VALIDATE_SETTLE_TIMEOUT_MS)
+    if not _is_post_validate_ui_ready(post_validate_state):
+        raise RuntimeError(
+            "atc.formulario: la validacion del NIF no termino de estabilizar antes de marcar la declaracion responsable. "
+            f"debug={post_validate_state}"
+        )
     # CA: "Validat" / ES: "Validado" / EN: "Validated"
     validado = page.get_by_role("button", name=re.compile(r"Validat|Validado|Validated", re.IGNORECASE))
     if await validado.count():
         await validado.first.wait_for(state="visible", timeout=ATC_FORM_MEDIUM_TIMEOUT_MS)
     # Declaracion responsable: priorizar id estable de input.
+    checkbox_candidates = [
+        page.locator("#checkbox-declaracio-responsable_checkbox-input"),
+        page.locator("input#checkbox-declaracio-responsable_checkbox-input.checkbox-input"),
+        page.locator("input[id^='checkbox-declaracio-responsable']"),
+        page.get_by_role("checkbox", name=re.compile(r"Declaro sota la meva|Declaro bajo mi|I declare", re.IGNORECASE)),
+    ]
     checked_ok = False
     for _ in range(24):
-        checkbox = None
-        for selector in [
-            "#checkbox-declaracio-responsable_checkbox-input",
-            "input#checkbox-declaracio-responsable_checkbox-input.checkbox-input",
-            "input[id^='checkbox-declaracio-responsable']",
-        ]:
-            loc = page.locator(selector).first
-            if await loc.count():
-                checkbox = loc
-                break
-        if checkbox is None:
-            checkbox = page.get_by_role("checkbox", name=re.compile(
-                r"Declaro sota la meva|Declaro bajo mi|I declare", re.IGNORECASE
-            )).first
-
-        if await checkbox.count():
+        checkbox = await _wait_for_first_ready_locator(page, checkbox_candidates, timeout_ms=ATC_FORM_SHORT_TIMEOUT_MS)
+        if checkbox is not None:
             try:
                 if not await checkbox.is_checked():
                     await checkbox.check(timeout=ATC_FORM_SHORT_TIMEOUT_MS)
@@ -331,7 +609,11 @@ async def _identificar_representado(page: "Page", datos: "AtcTarget") -> None:
         await page.wait_for_timeout(500)
 
     if not checked_ok:
-        raise RuntimeError("atc.formulario: no se pudo marcar la declaracion responsable tras Validar.")
+        post_validate_state = await _collect_post_validate_state(page)
+        raise RuntimeError(
+            "atc.formulario: no se pudo marcar la declaracion responsable tras Validar. "
+            f"debug={post_validate_state}"
+        )
     # CA/ES: "Continuar" / EN: "Continue"
     await _click_button(page, [r"Continuar", r"Continue"])
     await page.wait_for_url("**/actes-impugnables**", timeout=ATC_FORM_NAV_TIMEOUT_MS)
@@ -441,6 +723,21 @@ async def _search_csv_and_continue(page: "Page", datos: "AtcTarget") -> None:
             if await modal_error.count():
                 await modal_error.first.click(timeout=ATC_FORM_SHORT_TIMEOUT_MS)
         raise AtcCsvRejectedError(f"atc.formulario: CSV rechazado por ATC ({datos.csv_acto}).")
+
+    csv_state = await _wait_csv_result_ready(page, timeout_ms=ATC_FORM_NAV_TIMEOUT_MS)
+    if (
+        not csv_state.get("hasCsvRejectedModal")
+        and not csv_state.get("continueEnabled")
+        and csv_state.get("singleSelectableCheckbox")
+    ):
+        csv_state = await _check_csv_result_checkbox_if_needed(page)
+        csv_state = await _wait_csv_result_ready(page, timeout_ms=ATC_FORM_MEDIUM_TIMEOUT_MS)
+
+    if not csv_state.get("hasCsvRejectedModal") and not csv_state.get("continueEnabled"):
+        raise RuntimeError(
+            "atc.formulario: el resultado del CSV no quedo listo para continuar. "
+            f"debug={csv_state}"
+        )
 
     if datos.protocol == "rea":
         dialog = page.locator("dialog, [role='dialog']").first
