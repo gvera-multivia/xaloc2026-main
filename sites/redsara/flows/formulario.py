@@ -22,7 +22,6 @@ from core.autofirma_shared import (
 from core.address_defaults import get_default_country_es_ascii
 from core.client_documentation import client_identity_from_payload
 from core.client_paths import get_ruta_recursos_telematicos, resolve_client_docs_base_path
-from core.pdf_bundle import bundle_documents_to_single_pdf_for_palma
 from core.worker_execution.utils import extract_expediente_number, sanitize_filename_component
 from sites.redsara.config import RedsaraConfig
 from sites.redsara.data_models import RedsaraTarget
@@ -36,10 +35,6 @@ from sites.redsara.flows.select_heuristic import (
 )
 
 FIELD_SETTLE_DELAY_MS = 180
-REDSARA_MAX_ATTACHMENTS = int((os.getenv("REDSARA_MAX_ATTACHMENTS") or "5").strip())
-REDSARA_MAX_UPLOAD_BYTES = int((os.getenv("REDSARA_MAX_UPLOAD_BYTES") or str(9 * 1024 * 1024)).strip())
-REDSARA_UPLOAD_SAFETY_BYTES = int((os.getenv("REDSARA_UPLOAD_SAFETY_BYTES") or str(256 * 1024)).strip())
-REDSARA_PARTITION_TARGET_BYTES = max(1, REDSARA_MAX_UPLOAD_BYTES - REDSARA_UPLOAD_SAFETY_BYTES)
 REDSARA_STREET_TYPE_SELECT_IDS = {"represented.streetType", "streetType"}
 REDSARA_STREET_TYPE_OPTIONS = [
     "Alameda",
@@ -255,247 +250,12 @@ async def _upload_files(page: Page, config: RedsaraConfig, archivos: list[str | 
             paths.append(p)
     if not paths:
         raise RuntimeError("REDSARA: no hay archivos reales para adjuntar en paso 3.")
-    paths = _bundle_files_if_needed_redsara(paths, max_archivos=REDSARA_MAX_ATTACHMENTS)
     file_input = page.locator(config.selectors.attachments_input).first
     await file_input.wait_for(state="attached", timeout=15000)
     await file_input.set_input_files([str(p) for p in paths])
     expected_names = [p.name for p in paths]
     await _wait_until_uploaded_files_visible(page, expected_names=expected_names, timeout_ms=60000)
     print(f"[REDSARA] Adjuntos subidos: {len(paths)} archivo(s).")
-
-
-def _is_pdf_file(path: Path) -> bool:
-    try:
-        with path.open("rb") as fh:
-            return fh.read(4) == b"%PDF"
-    except Exception:
-        return False
-
-
-def _size(path: Path) -> int:
-    try:
-        return int(path.stat().st_size)
-    except Exception:
-        return 0
-
-
-def _find_gs() -> str | None:
-    for exe in ("gs", "gswin64c", "gswin32c"):
-        found = shutil.which(exe)
-        if found:
-            return found
-    return None
-
-
-def _compress_pdf_gs(src: Path, *, profile: str = "/ebook") -> Path | None:
-    gs = _find_gs()
-    if not gs:
-        return None
-    out = src.with_name(f"{src.stem}.compressed{src.suffix}")
-    cmd = [
-        gs,
-        "-sDEVICE=pdfwrite",
-        "-dCompatibilityLevel=1.4",
-        f"-dPDFSETTINGS={profile}",
-        "-dNOPAUSE",
-        "-dQUIET",
-        "-dBATCH",
-        f"-sOutputFile={str(out)}",
-        str(src),
-    ]
-    try:
-        subprocess.run(cmd, check=True, capture_output=True)
-        if out.exists() and _is_pdf_file(out):
-            return out
-    except Exception:
-        return None
-    return None
-
-
-def _split_pdf_to_size(src: Path, *, max_bytes: int, output_dir: Path) -> list[Path] | None:
-    """
-    Divide un PDF en varias partes por paginas para que cada una quede <= max_bytes.
-    Devuelve None si no es posible (p.ej. una sola pagina ya supera el limite).
-    """
-    try:
-        from pypdf import PdfReader, PdfWriter  # type: ignore
-    except Exception:
-        return None
-
-    try:
-        reader = PdfReader(str(src))
-        total_pages = len(reader.pages)
-    except Exception:
-        return None
-
-    if total_pages <= 1:
-        return None
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "_", src.stem) or "documento"
-    tmp_path = output_dir / f"{safe_stem}.probe.pdf"
-
-    chunks: list[tuple[int, int]] = []
-    start = 0
-    while start < total_pages:
-        best_end = -1
-        for end in range(start + 1, total_pages + 1):
-            writer = PdfWriter()
-            for idx in range(start, end):
-                writer.add_page(reader.pages[idx])
-            with tmp_path.open("wb") as fh:
-                writer.write(fh)
-            if _size(tmp_path) <= max_bytes:
-                best_end = end
-                continue
-            break
-        if best_end <= start:
-            try:
-                tmp_path.unlink(missing_ok=True)
-            except Exception:
-                pass
-            return None
-        chunks.append((start, best_end))
-        start = best_end
-
-    parts: list[Path] = []
-    for part_idx, (p_start, p_end) in enumerate(chunks, start=1):
-        out_path = output_dir / f"{safe_stem}.part{part_idx:02d}.pdf"
-        writer = PdfWriter()
-        for idx in range(p_start, p_end):
-            writer.add_page(reader.pages[idx])
-        with out_path.open("wb") as fh:
-            writer.write(fh)
-        if _size(out_path) > max_bytes or not _is_pdf_file(out_path):
-            return None
-        parts.append(out_path)
-
-    try:
-        tmp_path.unlink(missing_ok=True)
-    except Exception:
-        pass
-    return parts
-
-
-def _first_fit_partition(items: list[Path], *, max_bins: int, capacity_bytes: int) -> list[list[Path]] | None:
-    bins: list[tuple[list[Path], int]] = []
-    sorted_items = sorted(items, key=lambda p: _size(p), reverse=True)
-    for item in sorted_items:
-        item_size = _size(item)
-        if item_size > REDSARA_MAX_UPLOAD_BYTES:
-            return None
-        placed = False
-        for idx, (bucket, used) in enumerate(bins):
-            if used + item_size <= capacity_bytes:
-                bucket.append(item)
-                bins[idx] = (bucket, used + item_size)
-                placed = True
-                break
-        if placed:
-            continue
-        if len(bins) >= max_bins:
-            return None
-        bins.append(([item], item_size))
-    return [bucket for bucket, _ in bins]
-
-
-def _bundle_files_if_needed_redsara(
-    archivos: list[Path],
-    *,
-    max_archivos: int,
-    output_dir: Path = Path("tmp/redsara/bundles"),
-) -> list[Path]:
-    normalized = [Path(p) for p in archivos if p]
-    if not normalized:
-        return []
-
-    split_dir = Path("tmp/redsara/splits")
-    prepared: list[Path] = []
-    for p in normalized:
-        if _size(p) <= REDSARA_MAX_UPLOAD_BYTES:
-            prepared.append(p)
-            continue
-        if not _is_pdf_file(p):
-            raise ValueError(
-                f"REDSARA: archivo supera {REDSARA_MAX_UPLOAD_BYTES} bytes y no es PDF: {p.name}"
-            )
-        compressed = _compress_pdf_gs(p, profile="/ebook") or _compress_pdf_gs(p, profile="/screen")
-        if compressed and _size(compressed) <= REDSARA_MAX_UPLOAD_BYTES:
-            prepared.append(compressed)
-        else:
-            split_parts = _split_pdf_to_size(
-                p,
-                max_bytes=REDSARA_MAX_UPLOAD_BYTES,
-                output_dir=split_dir,
-            )
-            if split_parts:
-                print(
-                    "[REDSARA] PDF dividido por tamano: "
-                    f"{p.name} ({_size(p)} bytes) -> {len(split_parts)} parte(s)."
-                )
-                prepared.extend(split_parts)
-            else:
-                raise ValueError(
-                    f"REDSARA: no se pudo reducir ni dividir por debajo del limite el archivo {p.name} ({_size(p)} bytes)."
-                )
-
-    if len(prepared) <= max_archivos and all(_size(p) <= REDSARA_MAX_UPLOAD_BYTES for p in prepared):
-        return prepared
-
-    non_pdf = [str(p.name) for p in prepared if not _is_pdf_file(p)]
-    if non_pdf:
-        raise ValueError(
-            f"REDSARA: hay {len(prepared)} adjuntos (> {max_archivos}) y no se puede fusionar porque hay no-PDF: {', '.join(non_pdf)}"
-        )
-
-    partitions = _first_fit_partition(
-        prepared,
-        max_bins=max_archivos,
-        capacity_bytes=REDSARA_PARTITION_TARGET_BYTES,
-    )
-    if partitions is None:
-        partitions = _first_fit_partition(
-            prepared,
-            max_bins=max_archivos,
-            capacity_bytes=REDSARA_MAX_UPLOAD_BYTES,
-        )
-    if partitions is None:
-        raise ValueError(
-            f"REDSARA: no se puede repartir {len(prepared)} documentos en {max_archivos} adjuntos cumpliendo limite por archivo."
-        )
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    outputs: list[Path] = []
-    for idx, group in enumerate(partitions, start=1):
-        if len(group) == 1:
-            outputs.append(group[0])
-            continue
-        out_path = bundle_documents_to_single_pdf_for_palma(
-            group,
-            id_recurso=f"redsara_part_{idx}",
-            output_dir=output_dir,
-        )
-        outputs.append(out_path)
-
-    normalized_outputs: list[Path] = []
-    for out in outputs:
-        out_size = _size(out)
-        if out_size <= REDSARA_MAX_UPLOAD_BYTES:
-            normalized_outputs.append(out)
-            continue
-        compressed = _compress_pdf_gs(out, profile="/ebook") or _compress_pdf_gs(out, profile="/screen")
-        if compressed and _size(compressed) <= REDSARA_MAX_UPLOAD_BYTES:
-            normalized_outputs.append(compressed)
-        else:
-            raise ValueError(
-                f"REDSARA: bundle supera limite y no se pudo comprimir: {out.name} ({out_size} bytes)"
-            )
-
-    print(
-        "[REDSARA] Bundle adjuntos aplicado: "
-        f"{len(normalized)} -> {len(normalized_outputs)} (max={max_archivos}, limit={REDSARA_MAX_UPLOAD_BYTES}B)"
-    )
-    return normalized_outputs
 
 
 async def _wait_until_uploaded_files_visible(page: Page, *, expected_names: list[str], timeout_ms: int = 60000) -> None:

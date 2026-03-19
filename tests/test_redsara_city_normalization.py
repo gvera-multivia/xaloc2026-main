@@ -29,3 +29,11 @@ def test_select_heuristic_alias_for_balears_variants() -> None:
     assert normalize_province_alias("MALLORCA") == "illes balears"
     assert normalize_province_alias("Palma de Mallorca") == "illes balears"
     assert normalize_province_alias("ISLAS BALEARES") == "illes balears"
+
+
+def test_select_heuristic_alias_for_san_andres_de_la_barca() -> None:
+    assert normalize_city_alias("SAN ANDRES DE LA BARCA") == "sant andreu de la barca"
+
+
+def test_select_heuristic_alias_for_puerto_de_sagunto() -> None:
+    assert normalize_city_alias("PUERTO DE SAGUNTO") == "sagunto/sagunt"

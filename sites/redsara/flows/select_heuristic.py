@@ -32,6 +32,7 @@ CITY_ALIASES = {
     "hospitalet del llobregat": "hospitalet de llobregat, l'",
     "hospitalet de llobregat": "hospitalet de llobregat, l'",
     "puerto de sagunto": "sagunto/sagunt",
+    "san andres de la barca": "sant andreu de la barca",
 }
 
 # Patrones para variaciones frecuentes no cubiertas por alias exacto.
@@ -40,6 +41,7 @@ CITY_ALIAS_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"^fornells de la se[vb]a$"), "fornells de la selva"),
     (re.compile(r"^palau[\s-]+solita\s+[iy]\s+plegama(?:s|ns)$"), "palau-solita i plegamans"),
     (re.compile(r"^(puerto|port)[\s-]+de[\s-]+sagunto$"), "sagunto/sagunt"),
+    (re.compile(r"^san[\s-]+andres[\s-]+de[\s-]+la[\s-]+barca$"), "sant andreu de la barca"),
 ]
 
 

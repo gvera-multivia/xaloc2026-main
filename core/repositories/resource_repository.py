@@ -23,6 +23,7 @@ class ResourceRepository:
         "ayunta_palma",
         "redsara",
         "terrassa",
+        "diputacio_bcn",
         "valencia",
         "atc",
     }

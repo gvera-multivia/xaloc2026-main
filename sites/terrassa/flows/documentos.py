@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
+from ._page_eval import evaluate_with_nav_retry
+
 if TYPE_CHECKING:
     from playwright.async_api import Page
     from ..config import TerrassaConfig
@@ -20,7 +22,8 @@ def _norm_text(value: object) -> str:
 
 
 async def _visible_upload_indices(page: "Page") -> list[int]:
-    indices = await page.evaluate(
+    indices = await evaluate_with_nav_retry(
+        page,
         """() => {
             const out = [];
             const nodes = Array.from(document.querySelectorAll("input[id^='fileUpload']"));
@@ -67,6 +70,14 @@ async def _resolve_upload_index(
         await page.wait_for_timeout(step_ms)
         waited += step_ms
 
+    # Terrassa no siempre pinta un bloque nuevo tras confirmar una subida.
+    # Si tras agotar la espera sigue habiendo bloques visibles, reutilizamos
+    # uno de ellos en vez de abortar el lote completo.
+    if last_visible:
+        if preferred_index in last_visible:
+            return preferred_index
+        return min(last_visible)
+
     raise RuntimeError(
         f"terrassa-docs: no hay bloques de subida libres para doc index={preferred_index}. "
         f"bloques_visibles={last_visible} bloques_ya_usados={sorted(used_indices)}"
@@ -74,7 +85,8 @@ async def _resolve_upload_index(
 
 
 async def _snapshot_upload_state(page: "Page", *, upload_index: int, file_name: str) -> dict[str, object]:
-    state = await page.evaluate(
+    state = await evaluate_with_nav_retry(
+        page,
         """({ uploadIndex, fileName }) => {
             const norm = (txt) => String(txt || "").replace(/\\s+/g, " ").trim().toLowerCase();
             const filename = norm(fileName);
@@ -182,7 +194,8 @@ def _submission_has_started(*, before_state: dict[str, object], current_state: d
 
 
 async def _prime_upload_form_fields(page: "Page", *, upload_index: int) -> None:
-    await page.evaluate(
+    await evaluate_with_nav_retry(
+        page,
         """({ uploadIndex }) => {
             const form = document.getElementById(`fitxers${uploadIndex}`);
             if (!form) return;
@@ -301,7 +314,8 @@ async def _wait_until_upload_committed(
 async def _dispatch_legacy_upload_submit(page: "Page", *, upload_index: int) -> bool:
     try:
         return bool(
-            await page.evaluate(
+            await evaluate_with_nav_retry(
+                page,
                 """({ uploadIndex }) => {
                     const form = document.getElementById(`fitxers${uploadIndex}`);
                     const fileInput = document.getElementById(`fileUpload${uploadIndex}`);
@@ -339,7 +353,8 @@ async def _dispatch_legacy_upload_submit(page: "Page", *, upload_index: int) -> 
 async def _dispatch_direct_form_submit(page: "Page", *, upload_index: int) -> bool:
     try:
         return bool(
-            await page.evaluate(
+            await evaluate_with_nav_retry(
+                page,
                 """({ uploadIndex }) => {
                     const form = document.getElementById(`fitxers${uploadIndex}`);
                     const fileInput = document.getElementById(`fileUpload${uploadIndex}`);

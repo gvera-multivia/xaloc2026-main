@@ -91,11 +91,11 @@ async def execute_browser_flow(
 
         datos = call_with_supported_kwargs(controller.create_target, **mapped_data)
         if site_id == "diputacio_bcn":
-            raw_close_sleep = (os.getenv("XALOC_CLOSE_SLEEP_SECONDS") or "999").strip() or "999"
+            raw_close_sleep = (os.getenv("XALOC_CLOSE_SLEEP_SECONDS") or "0").strip() or "0"
             try:
                 close_grace_sleep_seconds = int(raw_close_sleep)
             except ValueError:
-                close_grace_sleep_seconds = 999
+                close_grace_sleep_seconds = 0
         elif site_id == "ayunta_palma":
             # Palma puede quedar en estado intermedio si se reutiliza ventana/contexto.
             # Forzamos cierre completo al terminar cada recurso.

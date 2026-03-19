@@ -183,7 +183,7 @@ class _FakePage:
 @pytest.mark.asyncio
 async def test_resolve_upload_index_raises_if_only_used_blocks_remain(monkeypatch) -> None:
     async def _only_used_blocks(_page):
-        return [1]
+        return []
 
     monkeypatch.setattr("sites.terrassa.flows.documentos._visible_upload_indices", _only_used_blocks)
 
@@ -194,3 +194,37 @@ async def test_resolve_upload_index_raises_if_only_used_blocks_remain(monkeypatc
             used_indices={1},
             timeout_ms=600,
         )
+
+
+@pytest.mark.asyncio
+async def test_resolve_upload_index_reuses_visible_block_after_timeout(monkeypatch) -> None:
+    async def _only_used_blocks(_page):
+        return [1]
+
+    monkeypatch.setattr("sites.terrassa.flows.documentos._visible_upload_indices", _only_used_blocks)
+
+    upload_index = await _resolve_upload_index(
+        _FakePage(),
+        preferred_index=2,
+        used_indices={0, 1},
+        timeout_ms=600,
+    )
+
+    assert upload_index == 1
+
+
+@pytest.mark.asyncio
+async def test_resolve_upload_index_prefers_requested_visible_block_when_reusing(monkeypatch) -> None:
+    async def _preferred_visible(_page):
+        return [1, 2]
+
+    monkeypatch.setattr("sites.terrassa.flows.documentos._visible_upload_indices", _preferred_visible)
+
+    upload_index = await _resolve_upload_index(
+        _FakePage(),
+        preferred_index=2,
+        used_indices={1, 2},
+        timeout_ms=600,
+    )
+
+    assert upload_index == 2

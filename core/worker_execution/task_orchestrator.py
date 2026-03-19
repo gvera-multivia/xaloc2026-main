@@ -15,6 +15,7 @@ from core.client_documentation import RequiredClientDocumentsError
 from core.client_docs_service import get_required_client_documents
 from core.contact_defaults import get_default_contact_email
 from core.pdf_bundle import bundle_documents_to_single_pdf_for_palma
+from core.redsara_upload_planner import PreparedUploadPlan, prepare_redsara_upload_plan
 from core.sqlserver_utils import build_sqlserver_connection_string
 from core.validation.validators import normalize_plate_with_fallback
 from core.xvia_auth import mark_resource_complete
@@ -58,6 +59,47 @@ def _resolve_valencia_matricula(payload: dict) -> str:
     payload["matricula"] = "."
     payload["plate_number"] = "."
     return "."
+
+
+def _pick_diputacio_doc_acreditativa(client_docs: list[Path], merged_docs: list[Path]) -> Path | None:
+    if not client_docs:
+        return merged_docs[0] if merged_docs else None
+    for doc in client_docs:
+        if "AUT" in Path(doc).name.upper():
+            return doc
+    return client_docs[0]
+
+
+def _pick_diputacio_doc_tramite(xvia_docs: list[Path], merged_docs: list[Path]) -> Path | None:
+    if not xvia_docs:
+        return merged_docs[0] if merged_docs else None
+    for doc in xvia_docs:
+        if "RECURSO EXP -" in Path(doc).name.upper():
+            return doc
+    return xvia_docs[0]
+
+
+def _prepare_diputacio_payload_documents(payload: dict, archivos_para_subir: list[Path]) -> None:
+    merged_docs = [Path(p) for p in (archivos_para_subir or []) if p]
+    if not merged_docs:
+        return
+
+    client_docs: list[Path] = []
+    xvia_docs: list[Path] = []
+    for doc in merged_docs:
+        doc_str = str(doc)
+        if doc_str.startswith("\\\\") or "SERVER-DOC" in doc_str.upper():
+            client_docs.append(doc)
+        else:
+            xvia_docs.append(doc)
+
+    doc_acreditativa = _pick_diputacio_doc_acreditativa(client_docs, merged_docs)
+    doc_tramite = _pick_diputacio_doc_tramite(xvia_docs, merged_docs)
+
+    if doc_acreditativa and payload.get("doc_acreditativa") in (None, "", []):
+        payload["doc_acreditativa"] = str(doc_acreditativa)
+    if doc_tramite and payload.get("doc_tramite") in (None, "", []):
+        payload["doc_tramite"] = str(doc_tramite)
 
 
 def _payload_has_identity_fields(payload: dict) -> bool:
@@ -349,6 +391,116 @@ async def _append_required_client_docs(
     return archivos_para_subir
 
 
+def _execute_site_flow_fn():
+    return execute_via_runner_service if use_remote_playwright_runner() else execute_browser_flow
+
+
+def _build_redsara_followup_subject(*, base_subject: object, registry_uuid: str, batch_index: int) -> str:
+    subject = str(base_subject or "").strip() or "Documentacion complementaria"
+    return f"{subject} [ANEXO {batch_index}/2 REG {registry_uuid}]"
+
+
+def _build_redsara_followup_solicit(*, base_solicit: object, registry_uuid: str, batch_index: int) -> str:
+    body = str(base_solicit or "").strip()
+    suffix = (
+        f" Se aporta documentacion complementaria correspondiente al registro previo con UUID {registry_uuid}. "
+        f"Este envio corresponde al lote {batch_index}/2."
+    )
+    return f"{body}{suffix}".strip()
+
+
+async def _execute_redsara_upload_plan(
+    *,
+    protocol: Optional[str],
+    payload: dict,
+    upload_plan: PreparedUploadPlan,
+) -> ProcessOutcome:
+    execute_flow = _execute_site_flow_fn()
+    aggregate_updates: dict = {
+        "redsara_upload_plan": upload_plan.to_payload_dict(),
+        "redsara_total_batches": len(upload_plan.batches),
+        "redsara_followup_registry_used": bool(upload_plan.followup_registry_used),
+        "redsara_compression_manifest_paths": list(upload_plan.manifest_paths),
+        "redsara_registry_uuids": [],
+        "redsara_justificante_paths": [],
+    }
+
+    first_registry_uuid = ""
+    last_outcome = ProcessOutcome(success=False, error="REDSARA: no se llego a ejecutar ningun lote.")
+    for batch in upload_plan.batches:
+        payload["archivos"] = list(batch.file_paths)
+        payload["redsara_batch_index"] = batch.batch_index
+        payload["redsara_total_batches"] = len(upload_plan.batches)
+        payload["redsara_followup_registry_used"] = bool(upload_plan.followup_registry_used)
+        payload["redsara_compression_manifest_paths"] = list(upload_plan.manifest_paths)
+        payload["redsara_upload_plan"] = upload_plan.to_payload_dict()
+        if batch.batch_index > 1 and batch.followup_registry_reference_required:
+            if not first_registry_uuid:
+                return ProcessOutcome(
+                    success=False,
+                    error="REDSARA: lote complementario sin UUID del primer registro.",
+                    payload_updates=aggregate_updates,
+                )
+            payload["subject"] = _build_redsara_followup_subject(
+                base_subject=payload.get("subject") or payload.get("asunto"),
+                registry_uuid=first_registry_uuid,
+                batch_index=batch.batch_index,
+            )
+            payload["asunto"] = payload["subject"]
+            payload["solicit"] = _build_redsara_followup_solicit(
+                base_solicit=payload.get("solicit") or payload.get("solicita"),
+                registry_uuid=first_registry_uuid,
+                batch_index=batch.batch_index,
+            )
+            payload["solicita"] = payload["solicit"]
+
+        last_outcome = await execute_flow(
+            site_id="redsara",
+            protocol=protocol,
+            payload=payload,
+            archivos_para_subir=[Path(path) for path in batch.file_paths],
+        )
+        if last_outcome.payload_updates:
+            payload.update(last_outcome.payload_updates)
+            aggregate_updates.update(last_outcome.payload_updates)
+
+        registry_uuid = str(payload.get("redsara_registry_uuid") or aggregate_updates.get("redsara_registry_uuid") or "").strip()
+        if registry_uuid:
+            registry_uuids = list(aggregate_updates.get("redsara_registry_uuids") or [])
+            if registry_uuid not in registry_uuids:
+                registry_uuids.append(registry_uuid)
+            aggregate_updates["redsara_registry_uuids"] = registry_uuids
+            if not first_registry_uuid:
+                first_registry_uuid = registry_uuid
+
+        receipt_path = str(
+            payload.get("redsara_justificante_client_path")
+            or payload.get("redsara_justificante_artifact_path")
+            or ""
+        ).strip()
+        if receipt_path:
+            receipt_paths = list(aggregate_updates.get("redsara_justificante_paths") or [])
+            if receipt_path not in receipt_paths:
+                receipt_paths.append(receipt_path)
+            aggregate_updates["redsara_justificante_paths"] = receipt_paths
+
+        if not last_outcome.success:
+            return ProcessOutcome(
+                success=False,
+                error=last_outcome.error,
+                screenshot=last_outcome.screenshot,
+                release_without_attempt=last_outcome.release_without_attempt,
+                payload_updates=aggregate_updates,
+            )
+
+    payload.update(aggregate_updates)
+    return ProcessOutcome(
+        success=True,
+        screenshot=last_outcome.screenshot,
+        payload_updates=aggregate_updates,
+    )
+
+
 async def process_task(
     task_id: Optional[int],
     site_id: str,
@@ -414,6 +566,8 @@ async def process_task(
             site_id=site_id,
         )
         payload["archivos"] = [str(p) for p in archivos_para_subir if p]
+        if str(site_id or "").strip().lower() == "diputacio_bcn":
+            _prepare_diputacio_payload_documents(payload, archivos_para_subir)
 
         if site_id == "ayunta_palma":
             pdf_unico = bundle_documents_to_single_pdf_for_palma(
@@ -423,7 +577,21 @@ async def process_task(
             archivos_para_subir = [pdf_unico]
             payload["archivos"] = [str(pdf_unico)]
 
-        if use_remote_playwright_runner():
+        if site_id == "redsara":
+            upload_plan = prepare_redsara_upload_plan(
+                archivos_para_subir,
+                id_recurso=payload.get("idRecurso") or payload.get("external_resource_id"),
+            )
+            payload["redsara_upload_plan"] = upload_plan.to_payload_dict()
+            payload["redsara_total_batches"] = len(upload_plan.batches)
+            payload["redsara_followup_registry_used"] = bool(upload_plan.followup_registry_used)
+            payload["redsara_compression_manifest_paths"] = list(upload_plan.manifest_paths)
+            outcome = await _execute_redsara_upload_plan(
+                protocol=protocol,
+                payload=payload,
+                upload_plan=upload_plan,
+            )
+        elif use_remote_playwright_runner():
             outcome = await execute_via_runner_service(
                 site_id=site_id,
                 protocol=protocol,

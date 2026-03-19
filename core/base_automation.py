@@ -593,15 +593,17 @@ class BaseAutomation:
         prefer_ephemeral_profile_on_windows = bool(
             os.name == "nt" and getattr(self.config, "prefer_ephemeral_profile_on_windows", False)
         )
+        channel = self.config.navegador.canal or None
         launch_kwargs = dict(
             user_data_dir=user_data_dir,
-            channel=self.config.navegador.canal,
             headless=self.config.navegador.headless,
             args=args,
             ignore_https_errors=True,
             accept_downloads=True,
             **viewport_kwargs,
         )
+        if channel:
+            launch_kwargs["channel"] = channel
         ephemeral_used = False
         if prefer_ephemeral_profile_on_windows:
             launch_kwargs["user_data_dir"] = _build_ephemeral_profile_with_cert_db(copy_existing_prefs=False)

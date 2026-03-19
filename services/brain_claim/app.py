@@ -33,6 +33,7 @@ from sites.adapters import (
     TerrassaAdapter,
     ValenciaAdapter,
     AtcAdapter,
+    DiputacioBcnAdapter,
 )
 from sites.adapters.site_adapter import SiteAdapter
 from services.brain_claim.processable_validator import validate_candidate
@@ -122,6 +123,7 @@ class BrainClaimService:
             "terrassa": TerrassaAdapter(),
             "valencia": ValenciaAdapter(),
             "atc": AtcAdapter(),
+            "diputacio_bcn": DiputacioBcnAdapter(),
         }
         if full_sites_env == "all":
             self.full_payload_sites = set(self.adapters.keys())

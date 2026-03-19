@@ -231,25 +231,63 @@ async def _collect_csv_result_state(page: "Page") -> dict:
                     const rect = el.getBoundingClientRect();
                     return !!st && st.display !== "none" && st.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
                 };
+                const collectSelectableRows = () => {
+                    const seen = new Set();
+                    const rawNodes = Array.from(
+                        document.querySelectorAll("input[type='checkbox'], [role='checkbox'], se-checkbox")
+                    );
+                    const items = [];
+                    for (const node of rawNodes) {
+                        if (!node) continue;
+                        if (node.closest("dialog, [role='dialog'], app-modal-info, .cc_dialog, .cookie-consent-preferences-overlay")) continue;
+                        const input =
+                            (node.matches?.("input[type='checkbox']") ? node : null) ||
+                            node.querySelector?.("input.checkbox-input, input[type='checkbox']") ||
+                            node.closest?.("label, se-checkbox, .checkbox-container, .container, .allegations-form, tr, li, .card, .result-card, .search-result")
+                                ?.querySelector?.("input.checkbox-input, input[type='checkbox']") ||
+                            null;
+                        const host =
+                            node.closest?.("label, se-checkbox, .checkbox-container, .container, .allegations-form, tr, li, .card, .result-card, .search-result")
+                            || node.parentElement
+                            || node;
+                        const inputId = String(input?.id || "").trim();
+                        const labelNode =
+                            (inputId ? document.querySelector(`label[for="${inputId}"]`) : null) ||
+                            host?.querySelector?.(".checkbox-container-label, label, .container, .checkbox-container") ||
+                            null;
+                        const label = normalize(
+                            input?.getAttribute?.("aria-label")
+                            || node.getAttribute?.("aria-label")
+                            || labelNode?.textContent
+                            || host?.textContent
+                            || ""
+                        );
+                        const id = normalize(input?.id || "");
+                        const name = normalize(input?.name || "");
+                        if (id.includes("declaracio-responsable") || name.includes("declaracio-responsable")) continue;
+                        if (
+                            label.includes("declaro sota la meva")
+                            || label.includes("declaro bajo mi")
+                            || label.includes("i declare")
+                        ) continue;
+                        const visible = isVisible(host) || isVisible(node) || isVisible(labelNode) || isVisible(input);
+                        if (!visible) continue;
+                        const key = inputId || String(host?.id || "") || label;
+                        if (!key || seen.has(key)) continue;
+                        seen.add(key);
+                        const checked =
+                            !!input?.checked ||
+                            input?.getAttribute?.("aria-checked") === "true" ||
+                            node.getAttribute?.("aria-checked") === "true" ||
+                            host?.getAttribute?.("aria-checked") === "true";
+                        items.push({ key, label, checked });
+                    }
+                    return items;
+                };
                 const bodyText = normalize(document.body?.innerText || "");
                 const continueButton = Array.from(document.querySelectorAll("button, [role='button']"))
                     .find((el) => isVisible(el) && /continuar|continue/.test(normalize(el.textContent || el.getAttribute("aria-label") || "")));
-                const checkboxes = Array.from(document.querySelectorAll("input[type='checkbox']"))
-                    .filter((el) => {
-                        if (!isVisible(el)) return false;
-                        if (el.closest("dialog, [role='dialog'], app-modal-info, .cc_dialog, .cookie-consent-preferences-overlay")) return false;
-                        const id = normalize(el.id || "");
-                        const name = normalize(el.name || "");
-                        const label = normalize(
-                            el.getAttribute("aria-label") ||
-                            el.closest("label")?.textContent ||
-                            el.parentElement?.textContent ||
-                            ""
-                        );
-                        if (id.includes("declaracio-responsable") || name.includes("declaracio-responsable")) return false;
-                        if (label.includes("declaro sota la meva") || label.includes("declaro bajo mi") || label.includes("i declare")) return false;
-                        return true;
-                    });
+                const selectableRows = collectSelectableRows();
                 const csvRejected = !!Array.from(document.querySelectorAll("app-modal-info, dialog, [role='dialog']")).find((modal) => {
                     if (!isVisible(modal)) return false;
                     const txt = normalize(modal.textContent || "");
@@ -270,9 +308,9 @@ async def _collect_csv_result_state(page: "Page") -> dict:
                     hasCsvRejectedModal: csvRejected,
                     continuePresent: !!continueButton,
                     continueEnabled: !!continueButton && !continueButton.disabled && continueButton.getAttribute("aria-disabled") !== "true",
-                    visibleCheckboxCount: checkboxes.length,
-                    checkedCheckboxCount: checkboxes.filter((el) => !!el.checked).length,
-                    singleSelectableCheckbox: checkboxes.length === 1,
+                    visibleCheckboxCount: selectableRows.length,
+                    checkedCheckboxCount: selectableRows.filter((el) => !!el.checked).length,
+                    singleSelectableCheckbox: selectableRows.length === 1,
                 };
             }"""
         )
@@ -301,62 +339,114 @@ async def _wait_csv_result_ready(page: "Page", *, timeout_ms: int = ATC_FORM_NAV
 
 
 async def _check_csv_result_checkbox_if_needed(page: "Page") -> dict:
-    selectors = [
-        "input[type='checkbox']:visible",
-        "[role='checkbox']:visible",
-    ]
-    for selector in selectors:
-        try:
-            checked = bool(
-                await page.evaluate(
-                    """(selector) => {
-                        const normalize = (value) =>
-                            String(value || "")
-                                .normalize("NFD")
-                                .replace(/[\\u0300-\\u036f]/g, "")
-                                .replace(/\\s+/g, " ")
-                                .trim()
-                                .toLowerCase();
-                        const isVisible = (el) => {
-                            if (!el) return false;
-                            const st = window.getComputedStyle(el);
-                            const rect = el.getBoundingClientRect();
-                            return !!st && st.display !== "none" && st.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
-                        };
-                        const nodes = Array.from(document.querySelectorAll(selector)).filter((el) => {
-                            if (!isVisible(el)) return false;
-                            if (el.closest("dialog, [role='dialog'], app-modal-info, .cc_dialog, .cookie-consent-preferences-overlay")) return false;
-                            const id = normalize(el.id || "");
-                            const name = normalize(el.name || "");
-                            const label = normalize(
-                                el.getAttribute("aria-label") ||
-                                el.closest("label")?.textContent ||
-                                el.parentElement?.textContent ||
-                                ""
-                            );
-                            if (id.includes("declaracio-responsable") || name.includes("declaracio-responsable")) return false;
-                            if (label.includes("declaro sota la meva") || label.includes("declaro bajo mi") || label.includes("i declare")) return false;
-                            return true;
-                        });
-                        if (nodes.length !== 1) return false;
-                        const target = nodes[0];
-                        if (target.checked === true || target.getAttribute("aria-checked") === "true") return true;
-                        if (typeof target.click === "function") target.click();
-                        try { target.checked = true; } catch (_) {}
-                        target.setAttribute("aria-checked", "true");
-                        target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-                        target.dispatchEvent(new Event("input", { bubbles: true }));
-                        target.dispatchEvent(new Event("change", { bubbles: true }));
-                        return target.checked === true || target.getAttribute("aria-checked") === "true";
-                    }""",
-                    selector,
-                )
+    try:
+        checked = bool(
+            await page.evaluate(
+                """() => {
+                    const normalize = (value) =>
+                        String(value || "")
+                            .normalize("NFD")
+                            .replace(/[\\u0300-\\u036f]/g, "")
+                            .replace(/\\s+/g, " ")
+                            .trim()
+                            .toLowerCase();
+                    const isVisible = (el) => {
+                        if (!el) return false;
+                        const st = window.getComputedStyle(el);
+                        const rect = el.getBoundingClientRect();
+                        return !!st && st.display !== "none" && st.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+                    };
+                    const clickNode = (el) => {
+                        if (!el) return;
+                        try { el.scrollIntoView({ block: "center", inline: "center" }); } catch (_err) {}
+                        for (const [name, Ctor] of [
+                            ["pointerdown", PointerEvent],
+                            ["mousedown", MouseEvent],
+                            ["pointerup", PointerEvent],
+                            ["mouseup", MouseEvent],
+                            ["click", MouseEvent],
+                            ["input", Event],
+                            ["change", Event],
+                        ]) {
+                            try {
+                                el.dispatchEvent(new Ctor(name, { bubbles: true, cancelable: true }));
+                            } catch (_err) {}
+                        }
+                        try { if (typeof el.click === "function") el.click(); } catch (_err) {}
+                    };
+                    const seen = new Set();
+                    const rawNodes = Array.from(document.querySelectorAll("input[type='checkbox'], [role='checkbox'], se-checkbox"));
+                    const items = [];
+                    for (const node of rawNodes) {
+                        if (!node) continue;
+                        if (node.closest("dialog, [role='dialog'], app-modal-info, .cc_dialog, .cookie-consent-preferences-overlay")) continue;
+                        const input =
+                            (node.matches?.("input[type='checkbox']") ? node : null) ||
+                            node.querySelector?.("input.checkbox-input, input[type='checkbox']") ||
+                            node.closest?.("label, se-checkbox, .checkbox-container, .container, .allegations-form, tr, li, .card, .result-card, .search-result")
+                                ?.querySelector?.("input.checkbox-input, input[type='checkbox']") ||
+                            null;
+                        const host =
+                            node.closest?.("label, se-checkbox, .checkbox-container, .container, .allegations-form, tr, li, .card, .result-card, .search-result")
+                            || node.parentElement
+                            || node;
+                        const inputId = String(input?.id || "").trim();
+                        const labelNode =
+                            (inputId ? document.querySelector(`label[for="${inputId}"]`) : null) ||
+                            host?.querySelector?.(".checkbox-container-label, label, .container, .checkbox-container") ||
+                            null;
+                        const label = normalize(
+                            input?.getAttribute?.("aria-label")
+                            || node.getAttribute?.("aria-label")
+                            || labelNode?.textContent
+                            || host?.textContent
+                            || ""
+                        );
+                        const id = normalize(input?.id || "");
+                        const name = normalize(input?.name || "");
+                        if (id.includes("declaracio-responsable") || name.includes("declaracio-responsable")) continue;
+                        if (
+                            label.includes("declaro sota la meva")
+                            || label.includes("declaro bajo mi")
+                            || label.includes("i declare")
+                        ) continue;
+                        const visible = isVisible(host) || isVisible(node) || isVisible(labelNode) || isVisible(input);
+                        if (!visible) continue;
+                        const key = inputId || String(host?.id || "") || label;
+                        if (!key || seen.has(key)) continue;
+                        seen.add(key);
+                        const checked =
+                            !!input?.checked ||
+                            input?.getAttribute?.("aria-checked") === "true" ||
+                            node.getAttribute?.("aria-checked") === "true" ||
+                            host?.getAttribute?.("aria-checked") === "true";
+                        items.push({ input, node, host, labelNode, checked });
+                    }
+                    if (items.length !== 1) return false;
+                    const target = items[0];
+                    if (target.checked) return true;
+                    for (const node of [target.input, target.labelNode, target.node, target.host]) {
+                        clickNode(node);
+                    }
+                    if (target.input) {
+                        try { target.input.checked = true; } catch (_err) {}
+                        try { target.input.setAttribute("aria-checked", "true"); } catch (_err) {}
+                        clickNode(target.input);
+                    }
+                    try { target.node?.setAttribute?.("aria-checked", "true"); } catch (_err) {}
+                    try { target.host?.setAttribute?.("aria-checked", "true"); } catch (_err) {}
+                    return !!target.input?.checked
+                        || target.input?.getAttribute?.("aria-checked") === "true"
+                        || target.node?.getAttribute?.("aria-checked") === "true"
+                        || target.host?.getAttribute?.("aria-checked") === "true";
+                }"""
             )
-            if checked:
-                await wait_after_action(page)
-                return await _collect_csv_result_state(page)
-        except Exception:
-            continue
+        )
+        if checked:
+            await wait_after_action(page)
+            return await _collect_csv_result_state(page)
+    except Exception:
+        pass
     return await _collect_csv_result_state(page)
 
 

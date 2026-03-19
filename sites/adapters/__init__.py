@@ -7,6 +7,7 @@ from .redsara import RedsaraAdapter
 from .terrassa import TerrassaAdapter
 from .valencia import ValenciaAdapter
 from .atc import AtcAdapter
+from .diputacio_bcn import DiputacioBcnAdapter
 
 __all__ = [
     "SiteAdapter",
@@ -18,4 +19,5 @@ __all__ = [
     "TerrassaAdapter",
     "ValenciaAdapter",
     "AtcAdapter",
+    "DiputacioBcnAdapter",
 ]

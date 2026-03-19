@@ -24,6 +24,7 @@ from core.justificantes_storage import (
     resolve_receipt_dir_for_client,
     save_receipt_from_tmp,
 )
+from ._page_eval import evaluate_with_nav_retry
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +112,7 @@ async def _fetch_pdf_from_url(page: "Page", url: str) -> Path:
         });
     }
     """
-    b64 = await page.evaluate(js, url)
+    b64 = await evaluate_with_nav_retry(page, js, url)
     pdf_bytes = base64.b64decode(b64)
     tmp_path = Path("tmp") / f"terrassa_receipt_{datetime.now():%Y%m%d_%H%M%S}.pdf"
     tmp_path.parent.mkdir(parents=True, exist_ok=True)
