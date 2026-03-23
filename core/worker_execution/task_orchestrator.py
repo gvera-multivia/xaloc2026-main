@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import traceback
 import unicodedata
@@ -15,14 +16,23 @@ from core.client_documentation import RequiredClientDocumentsError
 from core.client_docs_service import get_required_client_documents
 from core.contact_defaults import get_default_contact_email
 from core.pdf_bundle import bundle_documents_to_single_pdf_for_palma
+from core.redsara_registry_reference import (
+    build_followup_reference,
+    build_redsara_receipt_filename,
+    parse_regage_from_receipt_pdf,
+    persist_redsara_receipt_with_dedupe,
+    resolve_redsara_receipt_dir,
+)
 from core.redsara_upload_planner import PreparedUploadPlan, prepare_redsara_upload_plan
 from core.sqlserver_utils import build_sqlserver_connection_string
 from core.validation.validators import normalize_plate_with_fallback
 from core.xvia_auth import mark_resource_complete
+from sites.diputacio_bcn.municipio_codes import resolve_codmuni
 from .browser_executor import execute_browser_flow
 from .document_fetcher import download_document_and_attachments
 from .models import ProcessOutcome
 from .runner_client import execute_via_runner_service, use_remote_playwright_runner
+from .utils import extract_expediente_number, sanitize_filename_component
 
 logger = logging.getLogger("worker.task_orchestrator")
 TMP_ROOT = Path("tmp")
@@ -290,6 +300,89 @@ def _normalize_site_minimum_payload(site_id: str, payload: dict) -> None:
         _set_if_empty("motivos", motivos)
 
 
+def _normalize_diputacio_municipio_text(value: object) -> str:
+    txt = str(value or "").strip()
+    if not txt:
+        return ""
+    txt = txt.upper()
+    txt = "".join(ch for ch in unicodedata.normalize("NFD", txt) if unicodedata.category(ch) != "Mn")
+    txt = re.sub(r"\s+", " ", txt).strip()
+    return txt
+
+
+def _extract_municipio_from_organisme_for_diputacio(organisme: object) -> str:
+    norm = _normalize_diputacio_municipio_text(organisme)
+    if not norm:
+        return ""
+    has_orgt = "ORGT" in norm or "GESTION TRIBUTA" in norm or "GESTIO TRIBUTA" in norm
+    has_diba = "DIPUTAC" in norm or "DIBA" in norm
+    has_bcn_hint = "BARCELONA" in norm or "OFICINA DE MULTES" in norm
+    if has_orgt and has_diba and has_bcn_hint:
+        return ""
+
+    patterns = (
+        r"\b(?:AJUNTAMENT|AYUNTAMENT|AYUNTAMIENTO|AYTO\.?)\s+(?:DE|DEL|DE LA|DE LES|DE LOS|DE LAS)\s+(.+)",
+        r"\b(?:AJUNTAMENT|AYUNTAMENT|AYUNTAMIENTO|AYTO\.?)\s+(.+)",
+    )
+    for pattern in patterns:
+        m = re.search(pattern, norm)
+        if not m:
+            continue
+        candidate = re.split(r"\s+-\s+|\s+\|\s+|;|,", m.group(1), maxsplit=1)[0]
+        candidate = re.sub(r"\s+", " ", candidate).strip(" -'")
+        if candidate:
+            return candidate
+    return ""
+
+
+def _ensure_diputacio_codmuni(payload: dict) -> Optional[str]:
+    raw_code = str(
+        payload.get("codmuni")
+        or payload.get("municipio_code")
+        or payload.get("municipio_codigo")
+        or ""
+    ).strip()
+    if raw_code:
+        digits = re.sub(r"\D+", "", raw_code)
+        if len(digits) == 5 and digits.startswith("08"):
+            digits = digits[-3:]
+        if len(digits) == 3:
+            payload["codmuni"] = digits
+            return None
+
+    municipio_candidates = [
+        payload.get("municipio"),
+        payload.get("cliente_municipio"),
+        payload.get("MunicipioPoblacion"),
+        payload.get("poblacion"),
+        payload.get("conduc_pobl"),
+    ]
+    municipio_value = ""
+    for candidate in municipio_candidates:
+        txt = str(candidate or "").strip()
+        if txt:
+            municipio_value = txt
+            break
+
+    if not municipio_value:
+        municipio_value = _extract_municipio_from_organisme_for_diputacio(
+            payload.get("organismo") or payload.get("Organisme")
+        )
+
+    if municipio_value:
+        payload.setdefault("municipio", municipio_value)
+        code = resolve_codmuni(municipio_value)
+        if code:
+            payload["codmuni"] = code
+            return None
+
+    return (
+        "diputacio_bcn: falta 'codmuni' y no se pudo resolver desde municipio/cliente/organismo "
+        f"(municipio={payload.get('municipio')!r}, cliente_municipio={payload.get('cliente_municipio')!r}, "
+        f"organismo={payload.get('organismo') or payload.get('Organisme')!r})"
+    )
+
+
 def _validate_valencia_preconditions(payload: dict) -> Optional[str]:
     def _pick(*keys: str) -> str:
         for key in keys:
@@ -395,20 +488,6 @@ def _execute_site_flow_fn():
     return execute_via_runner_service if use_remote_playwright_runner() else execute_browser_flow
 
 
-def _build_redsara_followup_subject(*, base_subject: object, registry_uuid: str, batch_index: int) -> str:
-    subject = str(base_subject or "").strip() or "Documentacion complementaria"
-    return f"{subject} [ANEXO {batch_index}/2 REG {registry_uuid}]"
-
-
-def _build_redsara_followup_solicit(*, base_solicit: object, registry_uuid: str, batch_index: int) -> str:
-    body = str(base_solicit or "").strip()
-    suffix = (
-        f" Se aporta documentacion complementaria correspondiente al registro previo con UUID {registry_uuid}. "
-        f"Este envio corresponde al lote {batch_index}/2."
-    )
-    return f"{body}{suffix}".strip()
-
-
 async def _execute_redsara_upload_plan(
     *,
     protocol: Optional[str],
@@ -416,43 +495,63 @@ async def _execute_redsara_upload_plan(
     upload_plan: PreparedUploadPlan,
 ) -> ProcessOutcome:
     execute_flow = _execute_site_flow_fn()
+    total_batches = len(upload_plan.batches)
+    base_subject = str(payload.get("subject") or payload.get("asunto") or "").strip()
+    base_solicit = str(payload.get("solicit") or payload.get("solicita") or "").strip()
+    expediente = extract_expediente_number(payload)
+    safe_expediente = sanitize_filename_component(expediente)
+    previous_registry_number: str | None = None
+
     aggregate_updates: dict = {
         "redsara_upload_plan": upload_plan.to_payload_dict(),
-        "redsara_total_batches": len(upload_plan.batches),
-        "redsara_followup_registry_used": bool(upload_plan.followup_registry_used),
+        "redsara_total_batches": total_batches,
         "redsara_compression_manifest_paths": list(upload_plan.manifest_paths),
         "redsara_registry_uuids": [],
+        "redsara_registry_numbers": [],
         "redsara_justificante_paths": [],
+        "redsara_followup_registry_used": total_batches > 1,
+        "redsara_followup_chain_mode": "regage" if total_batches > 1 else None,
     }
 
-    first_registry_uuid = ""
     last_outcome = ProcessOutcome(success=False, error="REDSARA: no se llego a ejecutar ningun lote.")
     for batch in upload_plan.batches:
+        batch_index = int(batch.batch_index)
+        if batch_index > 1:
+            reference_text, reference_mode = build_followup_reference(
+                previous_registry_number=previous_registry_number,
+                expediente=safe_expediente,
+            )
+            if reference_mode != "regage":
+                aggregate_updates["redsara_followup_chain_mode"] = "expediente_fallback"
+            followup_prefix = f"Esta entrega hace referencia a una entrega anterior con {reference_text}."
+            subject_text = f"{followup_prefix} {base_subject}".strip()
+            solicit_text = (
+                f"{base_solicit} {followup_prefix} "
+                f"Se adjuntan los archivos que no pudieron adjuntarse con anterioridad. "
+                f"Este envio corresponde al lote {batch_index}/{total_batches}."
+            ).strip()
+            payload["subject"] = subject_text
+            payload["solicit"] = solicit_text
+            if "asunto" in payload:
+                payload["asunto"] = subject_text
+            if "solicita" in payload:
+                payload["solicita"] = solicit_text
+        else:
+            if base_subject:
+                payload["subject"] = base_subject
+                if "asunto" in payload:
+                    payload["asunto"] = base_subject
+            if base_solicit:
+                payload["solicit"] = base_solicit
+                if "solicita" in payload:
+                    payload["solicita"] = base_solicit
+
         payload["archivos"] = list(batch.file_paths)
-        payload["redsara_batch_index"] = batch.batch_index
-        payload["redsara_total_batches"] = len(upload_plan.batches)
-        payload["redsara_followup_registry_used"] = bool(upload_plan.followup_registry_used)
+        payload["redsara_batch_index"] = batch_index
+        payload["redsara_total_batches"] = total_batches
         payload["redsara_compression_manifest_paths"] = list(upload_plan.manifest_paths)
         payload["redsara_upload_plan"] = upload_plan.to_payload_dict()
-        if batch.batch_index > 1 and batch.followup_registry_reference_required:
-            if not first_registry_uuid:
-                return ProcessOutcome(
-                    success=False,
-                    error="REDSARA: lote complementario sin UUID del primer registro.",
-                    payload_updates=aggregate_updates,
-                )
-            payload["subject"] = _build_redsara_followup_subject(
-                base_subject=payload.get("subject") or payload.get("asunto"),
-                registry_uuid=first_registry_uuid,
-                batch_index=batch.batch_index,
-            )
-            payload["asunto"] = payload["subject"]
-            payload["solicit"] = _build_redsara_followup_solicit(
-                base_solicit=payload.get("solicit") or payload.get("solicita"),
-                registry_uuid=first_registry_uuid,
-                batch_index=batch.batch_index,
-            )
-            payload["solicita"] = payload["solicit"]
+        payload["redsara_orchestrator_receipt_mode"] = True
 
         last_outcome = await execute_flow(
             site_id="redsara",
@@ -470,14 +569,51 @@ async def _execute_redsara_upload_plan(
             if registry_uuid not in registry_uuids:
                 registry_uuids.append(registry_uuid)
             aggregate_updates["redsara_registry_uuids"] = registry_uuids
-            if not first_registry_uuid:
-                first_registry_uuid = registry_uuid
 
-        receipt_path = str(
-            payload.get("redsara_justificante_client_path")
-            or payload.get("redsara_justificante_artifact_path")
+        artifact_path = str(
+            payload.get("redsara_justificante_artifact_path")
+            or aggregate_updates.get("redsara_justificante_artifact_path")
             or ""
         ).strip()
+        provisional_client_path = str(
+            payload.get("redsara_justificante_client_path")
+            or aggregate_updates.get("redsara_justificante_client_path")
+            or ""
+        ).strip()
+        source_receipt_path = artifact_path or provisional_client_path
+
+        registry_number = None
+        source_receipt_obj = Path(source_receipt_path) if source_receipt_path else None
+        if source_receipt_obj and source_receipt_obj.exists():
+            registry_number = parse_regage_from_receipt_pdf(source_receipt_obj)
+            if registry_number:
+                registry_numbers = list(aggregate_updates.get("redsara_registry_numbers") or [])
+                if registry_number not in registry_numbers:
+                    registry_numbers.append(registry_number)
+                aggregate_updates["redsara_registry_numbers"] = registry_numbers
+                payload["redsara_registry_number"] = registry_number
+                previous_registry_number = registry_number
+
+            client_dir = resolve_redsara_receipt_dir(payload)
+            if client_dir is not None:
+                reg_ref = registry_number or f"SIN-REG-{safe_expediente}"
+                receipt_name = build_redsara_receipt_filename(
+                    expediente=safe_expediente,
+                    reg_ref=reg_ref,
+                    batch_index=batch_index,
+                    total_batches=total_batches,
+                )
+                saved_path = persist_redsara_receipt_with_dedupe(
+                    source_path=source_receipt_obj,
+                    destination_dir=client_dir,
+                    filename=receipt_name,
+                )
+                if saved_path is not None:
+                    source_receipt_path = str(saved_path)
+                    payload["redsara_justificante_client_path"] = source_receipt_path
+                    aggregate_updates["redsara_justificante_client_path"] = source_receipt_path
+
+        receipt_path = str(source_receipt_path or "").strip()
         if receipt_path:
             receipt_paths = list(aggregate_updates.get("redsara_justificante_paths") or [])
             if receipt_path not in receipt_paths:
@@ -551,6 +687,14 @@ async def process_task(
         _flatten_embedded_payload(payload)
         _backfill_identity_from_sqlserver(payload)
         _normalize_site_minimum_payload(site_id, payload)
+        if str(site_id or "").strip().lower() == "diputacio_bcn":
+            dipu_error = _ensure_diputacio_codmuni(payload)
+            if dipu_error:
+                return ProcessOutcome(
+                    success=False,
+                    error=f"[NON_RETRY] {dipu_error}",
+                    release_without_attempt=True,
+                )
         if str(site_id or "").strip().lower() == "valencia":
             validation_error = _validate_valencia_preconditions(payload)
             if validation_error:
@@ -584,7 +728,6 @@ async def process_task(
             )
             payload["redsara_upload_plan"] = upload_plan.to_payload_dict()
             payload["redsara_total_batches"] = len(upload_plan.batches)
-            payload["redsara_followup_registry_used"] = bool(upload_plan.followup_registry_used)
             payload["redsara_compression_manifest_paths"] = list(upload_plan.manifest_paths)
             outcome = await _execute_redsara_upload_plan(
                 protocol=protocol,
@@ -626,6 +769,16 @@ async def process_task(
                 return ProcessOutcome(
                     success=False,
                     error="xaloc_girona: tramite enviado pero justificante no descargado; cierre no confirmado",
+                )
+            diputacio_justificante_ok = bool(payload.get("diputacio_justificante_descargado", False))
+            if site_id == "diputacio_bcn" and not diputacio_justificante_ok:
+                logger.critical(
+                    "CRITICAL_DIPUTACIO_BCN: tramite sin PDF de justificante. idRecurso=%s",
+                    payload.get("idRecurso"),
+                )
+                return ProcessOutcome(
+                    success=False,
+                    error="diputacio_bcn: tramite enviado pero justificante no descargado; cierre no confirmado",
                 )
             if site_id == "base_online" and not payload.get("base_justificante_descargado"):
                 logger.warning("BASE finalizado sin justificante descargado; no se marca completado en XVIA.")

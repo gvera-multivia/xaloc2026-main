@@ -9,7 +9,7 @@
 # Verificar resultado:  edge://policy  o  chrome://policy  (buscar AutoSelectCertificateForUrls)
 
 param(
-    [string]$CN = "35059210B MARIA TERESA MORENTE (R: B62798210)"
+    [string]$CN = "00819709N JORGE PADILLA (R: B56684046)"
 )
 
 $patrones = @(

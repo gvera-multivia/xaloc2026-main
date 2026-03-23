@@ -821,6 +821,14 @@ class BrainOrchestrator:
                             per_site["duplicates"] += 1
                         remaining_claim_budget -= 1
                         site_claims_done += 1
+                        try:
+                            self.realtime_store.clear_incident(
+                                site_id=site_id,
+                                resource_id=rid,
+                                incident_type="SITE_RULE_DISCARDED",
+                            )
+                        except Exception:
+                            pass
                     else:
                         stats["errors"] += 1
                         per_site["errors"] += 1

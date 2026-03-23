@@ -33,6 +33,8 @@ CITY_ALIASES = {
     "hospitalet de llobregat": "hospitalet de llobregat, l'",
     "puerto de sagunto": "sagunto/sagunt",
     "san andres de la barca": "sant andreu de la barca",
+    "ibiza": "eivissa",
+    "eivissa": "eivissa",
 }
 
 # Patrones para variaciones frecuentes no cubiertas por alias exacto.

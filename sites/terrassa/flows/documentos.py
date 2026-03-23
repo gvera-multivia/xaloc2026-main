@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 import re
+import unicodedata
 from typing import TYPE_CHECKING
 
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
@@ -18,7 +19,12 @@ logger = logging.getLogger("xaloc_automation.terrassa")
 
 
 def _norm_text(value: object) -> str:
-    return re.sub(r"\s+", " ", str(value or "").strip()).lower()
+    text = str(value or "").strip().lower()
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = text.replace("?", " ")
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
 
 
 async def _visible_upload_indices(page: "Page") -> list[int]:
@@ -239,8 +245,8 @@ def _analyze_upload_state(
     desc_expected = _norm_text(expected_desc)
     type_expected = _norm_text(expected_type)
     file_count = int(current_state.get("file_count") or 0)
-    desc_matches = bool(desc_expected) and (desc_now == desc_expected or desc_expected in desc_now or desc_now in desc_expected)
-    type_matches = bool(type_expected) and (type_now == type_expected or type_expected in type_now or type_now in type_expected)
+    desc_matches = (not desc_expected) or (desc_now == desc_expected or desc_expected in desc_now or desc_now in desc_expected)
+    type_strict_matches = (not type_expected) or (type_now == type_expected)
 
     block_recycled = (
         not block_missing
@@ -250,21 +256,28 @@ def _analyze_upload_state(
         and desc_now != desc_expected
         and type_now != type_expected
     )
-    same_block_registered = (
+    same_block_soft_candidate = (
         has_name_outside_block
+        and not has_fresh_block
         and not block_missing
         and not form_missing
         and not file_missing
-        and file_count >= 1
-        and (desc_matches or type_matches or bool(desc_now))
+        and file_count > 0
+        and desc_matches
+        and type_strict_matches
     )
+    # Regla estricta anti-sobrescritura:
+    # no confirmamos si el input de fichero sigue cargado en el mismo bloque.
+    # Si "confirmamos" con file_count>=1, el siguiente documento puede pisar el anterior.
+    same_block_registered = False
     structural_progress = has_fresh_block or block_missing or form_missing or file_missing or block_recycled
-    confirmed = has_name_outside_block and (structural_progress or same_block_registered)
+    confirmed = has_name_outside_block and structural_progress
 
     return {
         "confirmed": confirmed,
         "recycled_current_block": block_recycled,
         "same_block_registered": same_block_registered,
+        "same_block_soft_candidate": same_block_soft_candidate,
         "has_name_outside_block": has_name_outside_block,
         "has_fresh_block": has_fresh_block,
         "visible_indices": visible_now,
@@ -288,6 +301,7 @@ async def _wait_until_upload_committed(
 ) -> dict[str, object]:
     waited = 0
     step_ms = 500
+    soft_candidate_hits = 0
     last_analysis: dict[str, object] = {}
 
     while waited <= timeout_ms:
@@ -302,12 +316,24 @@ async def _wait_until_upload_committed(
         )
         if bool(last_analysis.get("confirmed")):
             return last_analysis
+        if bool(last_analysis.get("same_block_soft_candidate")):
+            soft_candidate_hits += 1
+            if soft_candidate_hits >= 3:
+                return {
+                    **last_analysis,
+                    "confirmed": True,
+                    "same_block_registered": True,
+                    "soft_confirmed": True,
+                    "soft_hits": soft_candidate_hits,
+                }
+        else:
+            soft_candidate_hits = 0
         await page.wait_for_timeout(step_ms)
         waited += step_ms
 
     raise RuntimeError(
         "terrassa-docs: no se pudo confirmar la subida del fichero "
-        f"{file_name} en el bloque {upload_index}. estado={last_analysis}"
+        f"{file_name} en el bloque {upload_index}. estado={last_analysis} soft_hits={soft_candidate_hits}"
     )
 
 
@@ -457,7 +483,7 @@ async def run_documentos(page: "Page", config: "TerrassaConfig", datos: "Terrass
         if not file_path.exists():
             raise FileNotFoundError(str(file_path))
 
-        descripcio = str(doc.get("descripcio") or "Documento").strip()[:79]
+        descripcio = str(doc.get("descripcio") or "Documento").strip()[:16]
         tipus = str(doc.get("tipus") or "Al-legacio").strip()
 
         block_timeout = min(int(config.timeouts.subida_archivo), 12000)
@@ -598,6 +624,6 @@ async def run_documentos(page: "Page", config: "TerrassaConfig", datos: "Terrass
             )
 
         if index < (total_docs - 1):
-            await page.wait_for_timeout(1500)
+            await page.wait_for_timeout(2000)
 
     return page

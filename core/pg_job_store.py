@@ -113,9 +113,19 @@ class PgJobStore:
                                 WHEN EXCLUDED.status IN ('queued', 'processing', 'completed') THEN NULL
                                 ELSE COALESCE(EXCLUDED.error_message, jobs.error_message)
                             END,
-                            queued_at = COALESCE(EXCLUDED.queued_at, jobs.queued_at),
-                            started_at = COALESCE(EXCLUDED.started_at, jobs.started_at),
-                            finished_at = COALESCE(EXCLUDED.finished_at, jobs.finished_at),
+                            queued_at = CASE
+                                WHEN EXCLUDED.status = 'queued' THEN EXCLUDED.queued_at
+                                ELSE jobs.queued_at
+                            END,
+                            started_at = CASE
+                                WHEN EXCLUDED.status = 'queued' THEN NULL
+                                WHEN EXCLUDED.status = 'processing' THEN COALESCE(EXCLUDED.started_at, jobs.started_at)
+                                ELSE jobs.started_at
+                            END,
+                            finished_at = CASE
+                                WHEN EXCLUDED.status IN ('queued', 'processing') THEN NULL
+                                ELSE COALESCE(EXCLUDED.finished_at, jobs.finished_at)
+                            END,
                             updated_at = EXCLUDED.updated_at
                         """,
                         (
@@ -188,8 +198,16 @@ class PgJobStore:
                                 ELSE error_message
                             END,
                             queued_at = CASE WHEN %s = 'queued' THEN %s::timestamptz ELSE queued_at END,
-                            started_at = CASE WHEN %s THEN %s::timestamptz ELSE started_at END,
-                            finished_at = CASE WHEN %s THEN %s::timestamptz ELSE finished_at END,
+                            started_at = CASE
+                                WHEN %s = 'queued' THEN NULL
+                                WHEN %s THEN %s::timestamptz
+                                ELSE started_at
+                            END,
+                            finished_at = CASE
+                                WHEN %s IN ('queued', 'processing') THEN NULL
+                                WHEN %s THEN %s::timestamptz
+                                ELSE finished_at
+                            END,
                             updated_at = %s::timestamptz
                         WHERE job_id = %s
                         """,
@@ -202,8 +220,10 @@ class PgJobStore:
                             error_message,
                             str(state),
                             now,
+                            str(state),
                             bool(started),
                             now,
+                            str(state),
                             bool(finished),
                             now,
                             now,

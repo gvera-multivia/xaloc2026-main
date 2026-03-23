@@ -17,7 +17,8 @@ class AyuntaPalmaAdapter(SiteAdapter):
     ADJUNTO_URL_TEMPLATE = (
         "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf-adjuntos/{id}"
     )
-    DEFAULT_REGEX_EXPEDIENTE = r"^([A-Z]{2}\s?)?\d{7,8}$"
+    DEFAULT_REGEX_EXPEDIENTE = r"^([A-Z]{2}\s?)?\d{7,8}[A-Z]?$"
+    LEGACY_REGEX_EXPEDIENTE = r"^([A-Z]{2}\s?)?\d{7,8}$"
     ORGANISME_ALIASES: tuple[str, str] = (
         "%AYUNTAMENT DE PALMA%",
         "%AYUNTAMIENTO DE MALLORCA%",
@@ -27,6 +28,13 @@ class AyuntaPalmaAdapter(SiteAdapter):
         super().__init__(site_id="ayunta_palma", priority=3)
         self._regex_cache: dict[str, re.Pattern[str]] = {}
         self._regex_fallback = re.compile(self.DEFAULT_REGEX_EXPEDIENTE)
+
+    @classmethod
+    def _upgrade_legacy_regex_expediente(cls, pattern: str) -> str:
+        normalized = cls._clean_str(pattern)
+        if normalized == cls.LEGACY_REGEX_EXPEDIENTE:
+            return cls.DEFAULT_REGEX_EXPEDIENTE
+        return normalized
 
     @staticmethod
     def _clean_str(v: Any) -> str:
@@ -221,7 +229,14 @@ class AyuntaPalmaAdapter(SiteAdapter):
             raise RuntimeError("[ayunta_palma] fetch_candidates requires injected resource_repo (consultor/repository).")
         cfg = dict(config or {})
         cfg["query_organisme"] = self._merge_query_organisme(cfg.get("query_organisme"))
-        regex_pattern = self._clean_str(config.get("regex_expediente")) or self.DEFAULT_REGEX_EXPEDIENTE
+        configured_regex = self._clean_str(config.get("regex_expediente")) or self.DEFAULT_REGEX_EXPEDIENTE
+        regex_pattern = self._upgrade_legacy_regex_expediente(configured_regex) or self.DEFAULT_REGEX_EXPEDIENTE
+        if configured_regex and configured_regex != regex_pattern:
+            logger.info(
+                "[ayunta_palma] regex_expediente legacy detectado; usando patron ampliado. configured=%r upgraded=%r",
+                configured_regex,
+                regex_pattern,
+            )
         regex = self._regex_cache.get(regex_pattern)
         if regex is None:
             try:

@@ -363,6 +363,55 @@ class DashboardService:
         day_value = (day or "").strip() or utc_today_iso()
         return self.incidents_history_repo.list_incidents(day=day_value, page=page, page_size=page_size)
 
+    def list_pending_incidents(self, *, page: int, page_size: int) -> dict[str, Any]:
+        day_value = utc_today_iso()
+        res = self.incidents_history_repo.list_incidents(
+            day=day_value,
+            page=page,
+            page_size=page_size,
+            statuses=["NEW", "REVIEWED"],
+        )
+        items = res.get("items") or []
+        conn_str = getattr(self, "sqlserver_conn_str", None)
+        if not conn_str:
+            try:
+                conn_str = build_sqlserver_connection_string()
+            except Exception:
+                pass
+
+        if not items or not conn_str:
+            return res
+
+        try:
+            rids = []
+            for it in items:
+                rid = it.get("resource_id")
+                if rid is not None:
+                    try:
+                        rids.append(int(rid))
+                    except (ValueError, TypeError):
+                        pass
+
+            if rids:
+                from core.repositories.resource_repository import ResourceRepository
+                repo = ResourceRepository(conn_str=conn_str, logger=self.logger)
+                # Fetch only basics to get numclient
+                resources = repo.get_resources_by_ids(site_id="all", resource_ids=rids)
+                client_map = {r.resource_id: r.numclient for r in resources}
+                for it in items:
+                    rid = it.get("resource_id")
+                    if rid is not None:
+                        try:
+                            val = client_map.get(int(rid))
+                            if val:
+                                it["numclient"] = val
+                        except (ValueError, TypeError):
+                            pass
+        except Exception as exc:
+            self.logger.warning("Error enriqueciendo incidencias con numclient: %s", exc)
+
+        return res
+
     def list_history_successes(
         self,
         *,

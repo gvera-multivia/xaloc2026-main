@@ -231,9 +231,9 @@ class MadridAdapter(SiteAdapter):
                                 "Expedient": recurso.get("Expedient"),
                                 "tipo_incidencia": "SITE_RULE_DISCARDED",
                                 "motivo": (
-                                    "Madrid: trÃ¡mite no reclamable por regla de sede (fase negra: "
+                                    "Madrid:trámites no reclamable por regla de sede (fase negra: "
                                     f"{self._clean_str(recurso.get('FaseProcedimiento'))}). "
-                                    "Revisar si el trÃ¡mite estÃ¡ mal formado o si debe tratarse manualmente."
+                                    "Revisar si eltrámites estÃ¡ mal formado o si debe tratarse manualmente."
                                 ),
                             }
                         )

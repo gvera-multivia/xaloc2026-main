@@ -35,7 +35,7 @@ class MadridAutomation(BaseAutomation):
         - FASE 4: Firma y verificaciÃ³n de documento
         
         Args:
-            datos: Datos del trÃ¡mite (MadridTarget)
+            datos: Datos deltrámites (MadridTarget)
             
         Returns:
             str: Ruta al screenshot final

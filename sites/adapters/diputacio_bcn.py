@@ -13,6 +13,7 @@ import pyodbc
 from core.contact_defaults import get_default_contact_email, get_default_contact_mobile
 from core.validation.validators import normalize_plate_with_fallback
 from sites.diputacio_bcn.texts import resolve_phase_texts
+from sites.diputacio_bcn.municipio_codes import resolve_codmuni
 
 from .site_adapter import SiteAdapter
 
@@ -26,7 +27,11 @@ class DiputacioBcnAdapter(SiteAdapter):
         "&concepteTramit=NO&codiError=WEB00011&parametre=V&keyModel=modelIDCONDUCTOR"
     )
     EXCLUDED_ORGANISMES = {"AJUNTAMENT DE MANRESA", "AJUNTAMENT DE RIPOLLET"}
-    BLOCKED_PHASE_TOKENS = ("APREMIO", "EMBARGO", "IDENTIFIC")
+    BLOCKED_PHASE_TOKENS = ("IDENTIFIC",)
+    EXTRA_QUERY_ORGANISMES = (
+        "%ORGANISME DE GESTI%TRIBUT%ORGT%DIPUTACI%BARCELONA%",
+        "%ORGANISMO DE GESTION TRIBUT%ORGT%DIPUTACION DE BARCELONA%",
+    )
     ADJUNTO_URL_TEMPLATE = (
         "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf-adjuntos/{id}"
     )
@@ -50,6 +55,14 @@ class DiputacioBcnAdapter(SiteAdapter):
         return " ".join(txt.split())
 
     @classmethod
+    def _norm_membership_key(cls, value: Any) -> str:
+        norm = cls._norm(value)
+        if not norm:
+            return ""
+        norm = re.sub(r"[^A-Z0-9]+", " ", norm)
+        return " ".join(norm.split())
+
+    @classmethod
     def _normalize_document(cls, value: Any) -> str:
         doc = cls._clean(value).upper()
         if doc.startswith("ES") and len(doc) > 2:
@@ -69,6 +82,7 @@ class DiputacioBcnAdapter(SiteAdapter):
         attachments = canonical.get("attachments") or []
         client_doc = client.get("document") or {}
         client_name = client.get("name") or {}
+        client_address = client.get("address") or {}
         plate = vehicle.get("plate") or {}
 
         out["idRecurso"] = out.get("idRecurso", resource.get("id"))
@@ -88,6 +102,11 @@ class DiputacioBcnAdapter(SiteAdapter):
         out["Apellido1"] = out.get("Apellido1", client_name.get("last1"))
         out["Apellido2"] = out.get("Apellido2", client_name.get("last2"))
         out["Nombrefiscal"] = out.get("Nombrefiscal", client_name.get("business"))
+        out["cliente_municipio"] = out.get("cliente_municipio", client_address.get("city"))
+        out["MunicipioPoblacion"] = out.get("MunicipioPoblacion", client_address.get("city"))
+        out["poblacion"] = out.get("poblacion", client_address.get("city"))
+        out["municipio"] = out.get("municipio", client_address.get("city"))
+        out["conduc_pobl"] = out.get("conduc_pobl", client_address.get("city"))
         out["matricula"] = out.get("matricula", plate.get("value"))
         out["rs_matricula"] = out.get("rs_matricula", plate.get("value") if plate.get("source") == "rs_matricula" else None)
         out["exp_matricula"] = out.get("exp_matricula", plate.get("value") if plate.get("source") == "exp_matricula" else None)
@@ -100,6 +119,7 @@ class DiputacioBcnAdapter(SiteAdapter):
             return self._allowed_organismes_cache
 
         out: set[str] = set()
+        excluded = {self._norm_membership_key(v) for v in self.EXCLUDED_ORGANISMES}
         with pyodbc.connect(conn_str, autocommit=True) as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -112,8 +132,8 @@ class DiputacioBcnAdapter(SiteAdapter):
                 )
                 rows = cur.fetchall()
                 for row in rows:
-                    value = self._norm(row[0] if row else "")
-                    if not value or value in self.EXCLUDED_ORGANISMES:
+                    value = self._norm_membership_key(row[0] if row else "")
+                    if not value or value in excluded:
                         continue
                     out.add(value)
         self._allowed_organismes_cache = out
@@ -135,7 +155,7 @@ class DiputacioBcnAdapter(SiteAdapter):
                     """
                 )
                 for row in cur.fetchall():
-                    organisme = self._norm(row[0] if row else "")
+                    organisme = self._norm_membership_key(row[0] if row else "")
                     url = self._clean(row[1] if row else "")
                     if not organisme or not url:
                         continue
@@ -144,15 +164,68 @@ class DiputacioBcnAdapter(SiteAdapter):
         return out
 
     @classmethod
+    def _merge_query_organisme(cls, configured: Any) -> str:
+        configured_txt = cls._clean(configured)
+        parts = [p.strip() for p in configured_txt.split("|") if p and p.strip()] if configured_txt else []
+        seen = {p.upper() for p in parts}
+        for extra in cls.EXTRA_QUERY_ORGANISMES:
+            token = str(extra or "").strip()
+            if not token:
+                continue
+            key = token.upper()
+            if key in seen:
+                continue
+            parts.append(token)
+            seen.add(key)
+        return "|".join(parts)
+
+    @classmethod
     def _has_direct_non_orgt_route(
         cls,
         organisme: str,
         organisme_urls: dict[str, set[str]],
     ) -> bool:
-        urls = organisme_urls.get(cls._norm(organisme)) or set()
+        urls = organisme_urls.get(cls._norm_membership_key(organisme)) or set()
         if not urls:
             return False
         return any(str(url).strip() != cls.ORGT_IDENTIFICACIO_URL for url in urls)
+
+    @classmethod
+    def _extract_explicit_organismes_from_query(cls, configured: Any) -> set[str]:
+        txt = cls._clean(configured)
+        if not txt:
+            return set()
+
+        excluded = {cls._norm_membership_key(v) for v in cls.EXCLUDED_ORGANISMES}
+        out: set[str] = set()
+        for raw_part in txt.split("|"):
+            token = str(raw_part or "").strip()
+            if not token:
+                continue
+            # Mantener solo patrones exactos con wildcard opcional al inicio/fin.
+            # Evitamos patrones con wildcard interno para no abrir un allowlist demasiado amplio.
+            inner = token.strip("%").strip()
+            if not inner:
+                continue
+            if "%" in inner or "_" in inner:
+                continue
+            norm = cls._norm_membership_key(inner)
+            if not norm or norm in excluded:
+                continue
+            out.add(norm)
+        return out
+
+    @classmethod
+    def _is_orgt_diba_alias(cls, organisme: Any) -> bool:
+        norm = cls._norm(organisme)
+        if not norm:
+            return False
+        # Match robusto para variaciones de acentos/codificacion y textos
+        # incompletos detectados en XVIA/SQL.
+        has_orgt = "ORGT" in norm or "GESTION TRIBUTA" in norm or "GESTIO TRIBUTA" in norm
+        has_diba = "DIPUTAC" in norm or "DIBA" in norm
+        has_bcn_hint = "BARCELONA" in norm or "OFICINA DE MULTES" in norm
+        return bool(has_orgt and has_diba and has_bcn_hint)
 
     @classmethod
     def _is_blocked_phase(cls, fase: Any) -> bool:
@@ -174,6 +247,9 @@ class DiputacioBcnAdapter(SiteAdapter):
         norm = cls._norm(organisme)
         if not norm:
             return ""
+        if cls._is_orgt_diba_alias(norm):
+            # ORGT Diputacio es un ente agregador, no un municipio concreto.
+            return ""
         patterns = (
             r"\b(?:AJUNTAMENT|AYUNTAMENT|AYUNTAMIENTO|AYTO\.?)\s+(?:DE|DEL|DE LA|DE LES|DE LOS|DE LAS)\s+(.+)",
             r"\b(?:AJUNTAMENT|AYUNTAMENT|AYUNTAMIENTO|AYTO\.?)\s+(.+)",
@@ -187,6 +263,15 @@ class DiputacioBcnAdapter(SiteAdapter):
             if candidate:
                 return candidate
         return ""
+
+    @classmethod
+    def _resolve_municipio_for_payload(cls, item: dict[str, Any]) -> str:
+        # Prioridad al domicilio del cliente (municipio real del representado).
+        for key in ("cliente_municipio", "MunicipioPoblacion", "poblacion", "municipio", "conduc_pobl"):
+            value = cls._clean(item.get(key))
+            if value:
+                return value
+        return cls._extract_municipio_from_organisme(item.get("Organisme"))
 
     def fetch_candidates(
         self,
@@ -204,8 +289,10 @@ class DiputacioBcnAdapter(SiteAdapter):
         cfg = dict(config or {})
         if not str(cfg.get("query_organisme") or "").strip():
             cfg["query_organisme"] = "%AJUNTAMENT%|%AYUNTAMIENTO%|%ORGT%|%DIPUTACIO DE BARCELONA%"
+        cfg["query_organisme"] = self._merge_query_organisme(cfg.get("query_organisme"))
+        configured_organismes = self._extract_explicit_organismes_from_query(cfg.get("query_organisme"))
         resources = resource_repo.get_pending_resources(site_id=self.site_id, config=cfg, limit=limit)
-        allowed_organismes = self._load_allowed_organismes(conn_str)
+        allowed_organismes = self._load_allowed_organismes(conn_str) | configured_organismes
         organisme_urls = self._load_organisme_urls(conn_str)
 
         out: list[dict] = []
@@ -215,26 +302,28 @@ class DiputacioBcnAdapter(SiteAdapter):
 
             item = self._materialize_from_canonical_if_present(dict(resource.metadata or {}))
             rid = item.get("idRecurso")
-            organisme = self._norm(item.get("Organisme"))
+            organisme = self._norm_membership_key(item.get("Organisme"))
             fase = self._clean(item.get("FaseProcedimiento"))
             expediente = self._clean(item.get("Expedient"))
 
             if organisme not in allowed_organismes:
-                # Algunos organismos entran por la query amplia (%AJUNTAMENT%|%AYUNTAMIENTO%)
-                # pero tienen sede directa propia y no deben generar incidencia de ORGT.
-                if self._has_direct_non_orgt_route(organisme, organisme_urls):
+                is_alias = self._is_orgt_diba_alias(organisme)
+                if not is_alias:
+                    # Algunos organismos entran por la query amplia (%AJUNTAMENT%|%AYUNTAMIENTO%)
+                    # pero tienen sede directa propia y no deben generar incidencia de ORGT.
+                    if self._has_direct_non_orgt_route(organisme, organisme_urls):
+                        continue
+                    if on_discard:
+                        on_discard(
+                            {
+                                "site_id": self.site_id,
+                                "idRecurso": rid,
+                                "Expedient": expediente,
+                                "tipo_incidencia": "SITE_RULE_DISCARDED",
+                                "motivo": f"Organismo fuera del catalogo ORGT soportado: {self._clean(item.get('Organisme'))}",
+                            }
+                        )
                     continue
-                if on_discard:
-                    on_discard(
-                        {
-                            "site_id": self.site_id,
-                            "idRecurso": rid,
-                            "Expedient": expediente,
-                            "tipo_incidencia": "SITE_RULE_DISCARDED",
-                            "motivo": f"Organismo fuera del catalogo ORGT soportado: {self._clean(item.get('Organisme'))}",
-                        }
-                    )
-                continue
 
             if self._is_blocked_phase(fase):
                 if on_discard:
@@ -297,6 +386,23 @@ class DiputacioBcnAdapter(SiteAdapter):
                 expediente=expediente,
                 sujeto_recurso=sujeto,
             )
+            municipio_value = self._resolve_municipio_for_payload(item)
+            codmuni = resolve_codmuni(municipio_value)
+            if not codmuni:
+                if on_discard:
+                    on_discard(
+                        {
+                            "site_id": self.site_id,
+                            "idRecurso": item.get("idRecurso"),
+                            "Expedient": expediente,
+                            "tipo_incidencia": "SITE_RULE_DISCARDED",
+                            "motivo": (
+                                "No se pudo resolver codmuni de Diputacio BCN "
+                                f"(municipio={municipio_value!r}, organismo={self._clean(item.get('Organisme'))!r})"
+                            ),
+                        }
+                    )
+                continue
 
             payloads.append(
                 {
@@ -308,7 +414,8 @@ class DiputacioBcnAdapter(SiteAdapter):
                     "exp_sancionador": expediente,
                     "fase_procedimiento": fase,
                     "matricula": self._resolve_plate(item),
-                    "municipio": self._extract_municipio_from_organisme(item.get("Organisme")),
+                    "municipio": municipio_value,
+                    "codmuni": codmuni,
                     "organismo": self._clean(item.get("Organisme")),
                     "tipo_representado": "juridica" if is_company else "fisica",
                     "tipodecliente": tipodecliente,

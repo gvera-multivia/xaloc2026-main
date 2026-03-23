@@ -288,11 +288,9 @@ class BrainClaimService:
                     row = cursor.fetchone()
             if not row:
                 return False
-            estado, usuario, f_usuario_completado = row
+            estado, usuario, _f_usuario_completado = row
             usuario_db = str(usuario or "").strip()
             expected = str(self.authenticated_user or "").strip()
-            if f_usuario_completado is not None and str(f_usuario_completado).strip():
-                return False
             return bool(estado == 1 and usuario_db == expected)
         except Exception:
             return False
@@ -318,10 +316,9 @@ class BrainClaimService:
                     row = cursor.fetchone()
             if not row:
                 return False
-            estado, usuario, f_usuario_completado = row
-            # Nunca reclamar completados.
-            if f_usuario_completado is not None and str(f_usuario_completado).strip():
-                return False
+            estado, usuario, _f_usuario_completado = row
+            # En SQL hay casos reabiertos con FUsuarioCompletado historico pero Estado=0.
+            # La fuente de verdad para claim es Estado/UsuarioAsignado.
             # Reclamable nuevo.
             if int(estado or 0) == 0:
                 return True
@@ -659,6 +656,14 @@ class BrainClaimService:
                             )
                             stats["published_candidates"] += 1
                             keep_claim_slot = True
+                            try:
+                                self.realtime_store.clear_incident(
+                                    site_id=site_id,
+                                    resource_id=rid_payload_int,
+                                    incident_type="SITE_RULE_DISCARDED",
+                                )
+                            except Exception:
+                                pass
                     finally:
                         if not keep_claim_slot:
                             await self._release_claim_slot(site_id=site_id, resource_id=rid)

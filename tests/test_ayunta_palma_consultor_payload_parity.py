@@ -130,3 +130,34 @@ def test_ayunta_palma_build_payload_uses_tipodecliente_legacy_key() -> None:
     assert payloads[0]["tipo_persona"] == "PersonaJuridica"
     assert payloads[0]["nif_empresa"] == "B12345678"
     assert payloads[0]["razon_social"] == "EMPRESA TEST SL"
+
+
+def test_ayunta_palma_fetch_candidates_accepts_expediente_with_suffix_letter_on_legacy_regex() -> None:
+    adapter = AyuntaPalmaAdapter()
+    row = {
+        "idRecurso": 103051,
+        "idExp": 5001,
+        "Expedient": "1428510R",
+        "Organisme": "AYUNTAMIENTO DE PALMA DE MALLORCA",
+        "TExp": 2,
+        "Estado": 0,
+        "numclient": 12345,
+        "SujetoRecurso": "CLIENTE TEST",
+        "FaseProcedimiento": "Alegaciones",
+        "UsuarioAsignado": "",
+    }
+    legacy_repo = _LegacyRepo([row])
+    discarded: list[dict] = []
+
+    candidates = adapter.fetch_candidates(
+        config={"regex_expediente": AyuntaPalmaAdapter.LEGACY_REGEX_EXPEDIENTE},
+        conn_str="unused",
+        authenticated_user=None,
+        limit=10,
+        resource_repo=legacy_repo,
+        on_discard=lambda item: discarded.append(item),
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0]["Expedient"] == "1428510R"
+    assert discarded == []

@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from sites.terrassa.flows.documentos import _analyze_upload_state, _resolve_upload_index, _submission_has_started
+from sites.terrassa.flows.documentos import (
+    _analyze_upload_state,
+    _resolve_upload_index,
+    _submission_has_started,
+    _wait_until_upload_committed,
+)
 
 
 def test_analyze_upload_state_requires_name_recorded_outside_active_block() -> None:
@@ -78,7 +83,7 @@ def test_analyze_upload_state_accepts_recycled_block_only_after_real_confirmatio
     assert analysis["confirmed"] is True
 
 
-def test_analyze_upload_state_accepts_same_block_when_name_is_already_registered_outside() -> None:
+def test_analyze_upload_state_does_not_confirm_same_block_if_file_input_still_loaded() -> None:
     analysis = _analyze_upload_state(
         before_state={"outside_mentions": 0},
         current_state={
@@ -89,19 +94,20 @@ def test_analyze_upload_state_accepts_same_block_when_name_is_already_registered
             "file_present": True,
             "file_count": 1,
             "desc_value": "AUTORIZACION 52595424J SF",
-            "selected_type": "Autorització",
+            "selected_type": "Autoritzacio",
         },
         upload_index=1,
         used_indices={1},
         expected_desc="AUTORIZACION 52595424J SF",
-        expected_type="Autorització",
+        expected_type="Autoritzacio",
     )
 
-    assert analysis["same_block_registered"] is True
-    assert analysis["confirmed"] is True
+    assert analysis["same_block_registered"] is False
+    assert analysis["same_block_soft_candidate"] is True
+    assert analysis["confirmed"] is False
 
 
-def test_analyze_upload_state_accepts_same_block_when_type_label_differs_but_name_is_registered() -> None:
+def test_analyze_upload_state_does_not_confirm_same_block_if_type_differs_and_input_still_loaded() -> None:
     analysis = _analyze_upload_state(
         before_state={"outside_mentions": 0},
         current_state={
@@ -112,7 +118,7 @@ def test_analyze_upload_state_accepts_same_block_when_type_label_differs_but_nam
             "file_present": True,
             "file_count": 1,
             "desc_value": "AUTORIZACION B55475057 SF",
-            "selected_type": "Autorització",
+            "selected_type": "Autoritzacio",
         },
         upload_index=1,
         used_indices={1},
@@ -121,8 +127,9 @@ def test_analyze_upload_state_accepts_same_block_when_type_label_differs_but_nam
     )
 
     assert analysis["has_name_outside_block"] is True
-    assert analysis["same_block_registered"] is True
-    assert analysis["confirmed"] is True
+    assert analysis["same_block_registered"] is False
+    assert analysis["same_block_soft_candidate"] is False
+    assert analysis["confirmed"] is False
 
 
 def test_submission_has_started_detects_no_activity() -> None:
@@ -178,6 +185,40 @@ def test_submission_has_started_detects_iframe_or_dom_progress() -> None:
 class _FakePage:
     async def wait_for_timeout(self, _ms: int) -> None:
         return None
+
+
+@pytest.mark.asyncio
+async def test_wait_until_upload_committed_accepts_stable_same_block_soft_candidate(monkeypatch) -> None:
+    async def _soft_candidate_state(_page, *, upload_index: int, file_name: str):
+        assert upload_index == 1
+        assert file_name == "autorizacion.pdf"
+        return {
+            "outside_mentions": 1,
+            "visible_indices": [1],
+            "block_present": True,
+            "form_present": True,
+            "file_present": True,
+            "file_count": 1,
+            "desc_value": "AUTORIZACION MULTIVIA",
+            "selected_type": "Autoritzacio",
+        }
+
+    monkeypatch.setattr("sites.terrassa.flows.documentos._snapshot_upload_state", _soft_candidate_state)
+
+    analysis = await _wait_until_upload_committed(
+        _FakePage(),
+        before_state={"outside_mentions": 0},
+        upload_index=1,
+        file_name="autorizacion.pdf",
+        used_indices={1},
+        expected_desc="AUTORIZACION MULTIVIA",
+        expected_type="Autoritzacio",
+        timeout_ms=2500,
+    )
+
+    assert analysis["confirmed"] is True
+    assert analysis["same_block_registered"] is True
+    assert analysis["soft_confirmed"] is True
 
 
 @pytest.mark.asyncio

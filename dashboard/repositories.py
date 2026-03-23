@@ -92,17 +92,38 @@ class PostgresHistoryRepository:
         finally:
             conn.close()
 
-    def list_incidents(self, *, day: str, page: int, page_size: int) -> dict[str, Any]:
+    def list_incidents(
+        self,
+        *,
+        day: str,
+        page: int,
+        page_size: int,
+        statuses: Optional[list[str]] = None,
+    ) -> dict[str, Any]:
         conn = self._conn()
         if conn is None:
             return {"items": [], "page": page, "page_size": page_size, "total": 0}
         offset = max(0, (page - 1) * page_size)
+        normalized_statuses = [
+            str(s or "").strip().upper()
+            for s in (statuses or [])
+            if str(s or "").strip()
+        ]
+        normalized_statuses = [s for s in normalized_statuses if s in {"NEW", "REVIEWED", "RESOLVED"}]
+        status_filter_sql = ""
+        status_filter_params: list[Any] = []
+        if normalized_statuses:
+            status_filter_sql = " AND status = ANY(%s)"
+            status_filter_params.append(normalized_statuses)
         try:
             with conn.cursor() as cur:
-                cur.execute("SELECT COUNT(*) FROM realtime_incidents WHERE day = %s::date", (day,))
+                cur.execute(
+                    f"SELECT COUNT(*) FROM realtime_incidents WHERE day = %s::date{status_filter_sql}",
+                    (day, *status_filter_params),
+                )
                 total = int(cur.fetchone()[0] or 0)
                 cur.execute(
-                    """
+                    f"""
                     SELECT site_id,
                            COALESCE(
                              resource_id,
@@ -112,14 +133,15 @@ class PostgresHistoryRepository:
                                ELSE NULL
                              END
                            ) AS resource_id,
-                           expediente, incident_type, reason,
+                           expediente, incident_type, reason, status,
                            day::text, started_at, ended_at, payload
                     FROM realtime_incidents
                     WHERE day = %s::date
+                      {status_filter_sql}
                     ORDER BY started_at DESC
                     LIMIT %s OFFSET %s
                     """,
-                    (day, page_size, offset),
+                    (day, *status_filter_params, page_size, offset),
                 )
                 rows = cur.fetchall()
                 items = [
@@ -129,10 +151,11 @@ class PostgresHistoryRepository:
                         "expediente": row[2],
                         "incident_type": row[3],
                         "reason": row[4],
-                        "day": row[5],
-                        "started_at": row[6].isoformat() if row[6] else None,
-                        "ended_at": row[7].isoformat() if row[7] else None,
-                        "payload": row[8],
+                        "status": row[5],
+                        "day": row[6],
+                        "started_at": row[7].isoformat() if row[7] else None,
+                        "ended_at": row[8].isoformat() if row[8] else None,
+                        "payload": row[9],
                     }
                     for row in rows
                 ]

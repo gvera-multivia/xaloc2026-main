@@ -193,6 +193,40 @@ def test_base_online_payload_parity_legacy_vs_consultor(monkeypatch) -> None:
     )
 
 
+def test_base_online_fetch_candidates_accepts_no_gim_with_legacy_regex() -> None:
+    adapter = BaseOnlineAdapter()
+    legacy_regex_without_plain_branch = (
+        r"^(\d{5}-\d{4}[/\-]\d{1,5}-GIM|\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{7}|\d-\d{4}[/\-]\d{4,6}-(EXE|ECC))$"
+    )
+    row = {
+        "idRecurso": 103275,
+        "idExp": 5001,
+        "Expedient": "43038-2026/2710",
+        "Organisme": "BASE GESTION INGRESOS",
+        "TExp": 2,
+        "Estado": 0,
+        "numclient": 12345,
+        "SujetoRecurso": "CLIENTE TEST",
+        "FaseProcedimiento": "Alegaciones",
+        "UsuarioAsignado": "",
+    }
+    legacy_repo = _LegacyRepo([row])
+    discarded: list[dict[str, Any]] = []
+
+    candidates = adapter.fetch_candidates(
+        config={"regex_expediente": legacy_regex_without_plain_branch},
+        conn_str="unused",
+        authenticated_user=None,
+        limit=10,
+        resource_repo=legacy_repo,
+        on_discard=lambda item: discarded.append(item),
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0]["Expedient"] == "43038-2026/2710"
+    assert discarded == []
+
+
 def test_redsara_payload_parity_legacy_vs_consultor(monkeypatch) -> None:
     adapter = RedsaraAdapter()
     monkeypatch.setattr(redsara_mod, "get_required_client_documents", _fake_docs_builder)

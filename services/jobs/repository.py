@@ -106,8 +106,16 @@ class JobsRepository:
                         error_message = CASE WHEN %s IS NOT NULL THEN %s ELSE error_message END,
                         result_json = CASE WHEN %s::jsonb IS NOT NULL THEN %s::jsonb ELSE result_json END,
                         queued_at = CASE WHEN %s = 'queued' THEN %s::timestamptz ELSE queued_at END,
-                        started_at = CASE WHEN %s = 'in_progress' THEN %s::timestamptz ELSE started_at END,
-                        finished_at = CASE WHEN %s IN ('succeeded','failed','dead_letter','cancelled') THEN %s::timestamptz ELSE finished_at END,
+                        started_at = CASE
+                            WHEN %s = 'queued' THEN NULL
+                            WHEN %s = 'in_progress' THEN %s::timestamptz
+                            ELSE started_at
+                        END,
+                        finished_at = CASE
+                            WHEN %s IN ('queued','in_progress') THEN NULL
+                            WHEN %s IN ('succeeded','failed','dead_letter','cancelled') THEN %s::timestamptz
+                            ELSE finished_at
+                        END,
                         updated_at = %s::timestamptz
                     WHERE job_id = %s
                     RETURNING id, job_id, dedup_key, status, priority, payload_json, result_json,
@@ -122,7 +130,9 @@ class JobsRepository:
                         str(status),
                         now,
                         str(status),
+                        str(status),
                         now,
+                        str(status),
                         str(status),
                         now,
                         now,

@@ -19,7 +19,12 @@ logger = logging.getLogger("brain")
 
 
 class BaseOnlineAdapter(SiteAdapter):
-    DEFAULT_REGEX_EXPEDIENTE = r"^\s*(\d{5}-\d{4}[/\-]\d{4,5}-GIM|\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{6,7}|\d-\d{4}[/\-]\d{4,6}-(EXE|ECC))\s*$"
+    DEFAULT_REGEX_EXPEDIENTE = r"^\s*(\d{5}-\d{4}[/\-]\d{4,5}-GIM|\d{5}-\d{4}/\d{1,5}|\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{6,7}|\d-\d{4}[/\-]\d{4,6}-(EXE|ECC))\s*$"
+    _LEGACY_REGEX_EXPEDIENTE_VARIANTS: tuple[str, ...] = (
+        r"^(\d{5}-\d{4}[/\-]\d{1,5}-GIM|\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{7}|\d-\d{4}[/\-]\d{4,6}-(EXE|ECC))$",
+        r"^(\d{5}-\d{4}[/\-]\d{1,5}-GIM|\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{6,7}|\d-\d{4}[/\-]\d{4,6}-(EXE|ECC))$",
+        r"^\s*(\d{5}-\d{4}[/\-]\d{1,5}-GIM|\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{7}|\d-\d{4}[/\-]\d{4,6}-(EXE|ECC))\s*$",
+    )
     _P1_SIGLAS = {
         "AG", "AL", "AP", "AR", "AU", "AV", "AY", "BJ", "BO", "BR", "CA", "CG", "CH", "CI", "CJ", "CL", "CM",
         "CN", "CO", "CP", "CR", "CS", "CT", "CU", "DE", "DP", "DS", "ED", "EM", "EN", "ER", "ES", "EX", "FC",
@@ -69,6 +74,13 @@ class BaseOnlineAdapter(SiteAdapter):
     @staticmethod
     def _clean_str(v: Any) -> str:
         return str(v).strip() if v is not None else ""
+
+    @classmethod
+    def _upgrade_legacy_regex_expediente(cls, pattern: str) -> str:
+        normalized = cls._clean_str(pattern)
+        if normalized in cls._LEGACY_REGEX_EXPEDIENTE_VARIANTS:
+            return cls.DEFAULT_REGEX_EXPEDIENTE
+        return normalized
 
     @staticmethod
     def _normalize_text(text: Any) -> str:
@@ -158,6 +170,8 @@ class BaseOnlineAdapter(SiteAdapter):
     def _valida_expediente_base(cls, expediente: str) -> bool:
         exp = cls._clean_str(expediente).upper()
         if re.match(r"^\d{5}-\d{4}[/\-]\d{4,5}-GIM$", exp):
+            return True
+        if re.match(r"^\d{5}-\d{4}/\d{1,5}$", exp):
             return True
         if re.match(r"^\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{7}$", exp):
             return True
@@ -310,7 +324,14 @@ class BaseOnlineAdapter(SiteAdapter):
     ) -> list[dict]:
         if resource_repo is None:
             raise RuntimeError("[base_online] fetch_candidates requires injected resource_repo (consultor/repository).")
-        regex_pattern = self._clean_str(config.get("regex_expediente")) or self.DEFAULT_REGEX_EXPEDIENTE
+        configured_regex = self._clean_str(config.get("regex_expediente")) or self.DEFAULT_REGEX_EXPEDIENTE
+        regex_pattern = self._upgrade_legacy_regex_expediente(configured_regex) or self.DEFAULT_REGEX_EXPEDIENTE
+        if configured_regex and configured_regex != regex_pattern:
+            logger.info(
+                "[base_online] regex_expediente legacy detectado; usando patron ampliado. configured=%r upgraded=%r",
+                configured_regex,
+                regex_pattern,
+            )
         regex = self._regex_expediente_cache.get(regex_pattern)
         if regex is None:
             try:

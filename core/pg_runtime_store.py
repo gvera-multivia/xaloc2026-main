@@ -591,6 +591,7 @@ class PgRuntimeStore:
                         SET status = 'queued',
                             queued_at = NOW(),
                             started_at = NULL,
+                            finished_at = NULL,
                             updated_at = NOW(),
                             error_message = %s
                         WHERE id = %s

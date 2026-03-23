@@ -378,7 +378,7 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
     7. Click "Continuar" post-autenticaciÃ³n
     8. Seleccionar "Tramitar nueva solicitud"
     9. Seleccionar "Persona o Entidad interesada" + Continuar
-    10. Condicional: Click "Nuevo trÃ¡mite" si existe
+    10. Condicional: Click "Nuevotrámites" si existe
     11. Verificar llegada al formulario
     
     Args:
@@ -645,12 +645,12 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
             logger.info(f"  a Navegado a: {page.url}")
     
     # ========================================================================
-    # PASO 10: Condicional - Manejar "Nuevo trÃ¡mite" si existe
+    # PASO 10: Condicional - Manejar "Nuevotrámites" si existe
     # ========================================================================
     logger.info("PASO 10: Verificando si existe trAmite a medias...")
     
     try:
-        # Intentar encontrar el botÃ³n "Nuevo trÃ¡mite" (timeout corto)
+        # Intentar encontrar el botÃ³n "Nuevotrámites" (timeout corto)
         await page.wait_for_selector(
             config.selectors_navegacion.boton_nuevo_tramite_condicional,
             state="visible",

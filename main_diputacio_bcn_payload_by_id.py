@@ -21,6 +21,7 @@ from core.worker_execution.browser_executor import execute_browser_flow
 from core.worker_execution.document_fetcher import download_document_and_attachments
 from core.xvia_auth import create_authenticated_session
 from sites.diputacio_bcn.controller import DiputacioBcnController
+from sites.diputacio_bcn.municipio_codes import resolve_codmuni
 from sites.diputacio_bcn.texts import resolve_phase_texts
 
 HARDCODED_CLIENT_DOCS_BASE_PATH = r"\\SERVER-DOC\clientes"
@@ -279,7 +280,9 @@ def build_payload_from_row(row: dict[str, Any]) -> dict[str, Any]:
     ).strip()
     organisme_db = _clean(row.get("Organisme") or row.get("organisme") or row.get("Organismo"))
     municipio_organisme = _extract_municipio_from_organisme(organisme_db)
-    municipio_db = municipio_organisme or _clean(row.get("MunicipioPoblacion") or row.get("poblacion") or row.get("municipio"))
+    municipio_db = _clean(row.get("MunicipioPoblacion") or row.get("poblacion") or row.get("municipio")) or municipio_organisme
+    municipio_payload = (os.getenv("DIPUTACIO_BCN_MUNICIPIO") or municipio_db or "").strip()
+    codmuni_payload = resolve_codmuni((os.getenv("DIPUTACIO_BCN_CODMUNI") or "").strip() or municipio_payload)
     matricula = _resolve_matricula_from_row(row)
     fase_procedimiento = _clean(row.get("FaseProcedimiento") or row.get("fase_procedimiento"))
     asunto, expone, solicita = resolve_phase_texts(
@@ -297,7 +300,8 @@ def build_payload_from_row(row: dict[str, Any]) -> dict[str, Any]:
         "exp_sancionador": (os.getenv("DIPUTACIO_BCN_EXP_SANCIONADOR") or expediente).strip(),
         "fase_procedimiento": fase_procedimiento,
         "matricula": matricula,
-        "municipio": (os.getenv("DIPUTACIO_BCN_MUNICIPIO") or municipio_db or "").strip(),
+        "municipio": municipio_payload,
+        "codmuni": codmuni_payload,
         "organismo": organisme_db,
         "tipo_representado": "juridica" if is_company else "fisica",
         "tipodecliente": tipodecliente,
@@ -448,8 +452,10 @@ async def run_flow(payload: dict[str, Any]) -> dict[str, Any]:
         # Evita perfiles persistentes corruptos (tu log muestra --restore-last-session/--restart).
         os.environ["XALOC_EPHEMERAL_PROFILE"] = "1"
         os.environ["XALOC_DISABLE_KEEP_BROWSER_OPEN"] = "1"
-        # Mantener sesion abierta para inspeccion manual.
-        os.environ["XALOC_CLOSE_SLEEP_SECONDS"] = "999"
+        # Smoke por defecto con cierre rapido; si se quiere inspeccion manual,
+        # exportar XALOC_SMOKE_CLOSE_SLEEP_SECONDS (p.ej. 120).
+        smoke_close_sleep = (os.getenv("XALOC_SMOKE_CLOSE_SLEEP_SECONDS") or "0").strip() or "0"
+        os.environ["XALOC_CLOSE_SLEEP_SECONDS"] = smoke_close_sleep
         outcome = await execute_browser_flow(
             site_id="diputacio_bcn",
             protocol=None,

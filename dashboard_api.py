@@ -711,6 +711,35 @@ async def api_release_incident(id: str, user: dict = Depends(require_user)):
         return {"status": "unlocked", "message": "Was not locked"}
     return {"status": "unlocked", "incident_id": id}
 
+
+@app.delete("/api/incidents/{site_id}/{resource_id}")
+async def api_resolve_incident(
+    site_id: str,
+    resource_id: int,
+    incident_type: str | None = Query(None),
+    _user: dict = Depends(require_user),
+) -> dict:
+    deleted = service.runtime_store.clear_incident(
+        site_id=site_id,
+        resource_id=resource_id,
+        incident_type=incident_type or None,
+    )
+    return {"status": "resolved", "site_id": site_id, "resource_id": resource_id, "deleted": deleted}
+
+
+@app.delete("/api/incidents/bulk")
+async def api_resolve_incidents_bulk(
+    site_id: str = Query(...),
+    incident_type: str = Query(...),
+    _user: dict = Depends(require_user),
+) -> dict:
+    deleted = service.runtime_store.clear_incidents_bulk(
+        site_id=site_id,
+        incident_type=incident_type,
+    )
+    return {"status": "resolved", "site_id": site_id, "incident_type": incident_type, "deleted": deleted}
+
+
 # ==========================================================================
 # EXISTING ROUTES
 # ==========================================================================
@@ -741,8 +770,7 @@ async def api_incidents_pending(
     page_size: int = Query(200, ge=1, le=1000),
     _user: dict = Depends(require_user),
 ) -> dict:
-    # For now, return incidents from today as "pending" list
-    result = service.list_history_incidents(day=None, page=page, page_size=page_size)
+    result = service.list_pending_incidents(page=page, page_size=page_size)
     items = list(result.get("items") or [])
 
     def _resolve_incident_resource(item: dict[str, Any]) -> Optional[int]:

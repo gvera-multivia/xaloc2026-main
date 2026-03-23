@@ -161,6 +161,9 @@ class NullRealtimeStore:
     ) -> int:
         return 0
 
+    def clear_incidents_bulk(self, *, site_id: str, incident_type: str) -> int:
+        return 0
+
 
 @dataclass
 class PostgresConfig:
@@ -584,6 +587,25 @@ class PostgresRealtimeStore:
                             """,
                             (site, int(resource_id)),
                         )
+                deleted = int(cur.rowcount or 0)
+            conn.commit()
+        return deleted
+
+    def clear_incidents_bulk(self, *, site_id: str, incident_type: str) -> int:
+        site = str(site_id or "").strip()
+        itype = str(incident_type or "").strip()
+        if not site or not itype:
+            return 0
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    DELETE FROM realtime_incidents
+                    WHERE site_id = %s
+                      AND incident_type = %s
+                    """,
+                    (site, itype),
+                )
                 deleted = int(cur.rowcount or 0)
             conn.commit()
         return deleted
@@ -1014,6 +1036,24 @@ class SqliteRealtimeStore:
                         """,
                         (site, int(resource_id)),
                     )
+            deleted = int(cur.rowcount or 0)
+            conn.commit()
+            return deleted
+
+    def clear_incidents_bulk(self, *, site_id: str, incident_type: str) -> int:
+        site = str(site_id or "").strip()
+        itype = str(incident_type or "").strip()
+        if not site or not itype:
+            return 0
+        with self._conn() as conn:
+            cur = conn.execute(
+                """
+                DELETE FROM realtime_incidents
+                WHERE site_id = ?
+                  AND incident_type = ?
+                """,
+                (site, itype),
+            )
             deleted = int(cur.rowcount or 0)
             conn.commit()
             return deleted

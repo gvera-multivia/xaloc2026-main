@@ -243,12 +243,97 @@ async def _uploaded_doc_names(page: "Page") -> list[str]:
     return [str(x) for x in (names or [])]
 
 
+async def _wait_until_expected_documents_present(
+    page: "Page",
+    *,
+    expected_docs: list[str],
+    timeout_ms: int = 30000,
+    poll_ms: int = 1000,
+) -> list[str]:
+    expected_names = [_basename(doc) for doc in expected_docs]
+    deadline = time.monotonic() + (timeout_ms / 1000.0)
+    last_names: list[str] = []
+
+    while time.monotonic() < deadline:
+        names = await _uploaded_doc_names(page)
+        last_names = [str(name or "").strip().lower() for name in names]
+        missing = [exp for exp in expected_names if not any(exp in current for current in last_names)]
+        if not missing and len(last_names) >= len(expected_names):
+            return last_names
+        await page.wait_for_timeout(poll_ms)
+
+    missing = [exp for exp in expected_names if not any(exp in current for current in last_names)]
+    raise RuntimeError(
+        "No constan todos los documentos esperados en la tabla de adjuntos antes de continuar. "
+        f"missing={missing} uploaded={last_names} expected={expected_names}"
+    )
+
+
+async def _ensure_checked(page: "Page", locator, *, label: str) -> None:
+    await locator.wait_for(state="visible", timeout=15000)
+    await page.wait_for_timeout(3000)
+
+    for attempt in range(1, 5):
+        try:
+            if await locator.is_checked():
+                return
+        except Exception:
+            pass
+
+        try:
+            await locator.check(force=True, timeout=4000)
+        except Exception as exc:
+            logger.warning("Diputacio BCN docs: %s check intento=%s fallo=%s", label, attempt, exc)
+
+        try:
+            if await locator.is_checked():
+                return
+        except Exception:
+            pass
+
+        try:
+            await locator.click(force=True, timeout=3000)
+        except Exception:
+            pass
+
+        try:
+            if await locator.is_checked():
+                return
+        except Exception:
+            pass
+
+        try:
+            await locator.evaluate(
+                """(el) => {
+                    if (!el) return false;
+                    el.checked = true;
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                    el.dispatchEvent(new Event('click', { bubbles: true }));
+                    return !!el.checked;
+                }"""
+            )
+        except Exception:
+            pass
+
+        try:
+            if await locator.is_checked():
+                return
+        except Exception:
+            pass
+
+        await page.wait_for_timeout(700)
+
+    raise RuntimeError(f"Diputacio BCN docs: no se pudo marcar checkbox '{label}' tras reintentos.")
+
+
 async def _upload_single_document(page: "Page", doc_path: str) -> None:
     browse = page.locator("#fakeBrowse").first
     if await browse.count() == 0:
         raise RuntimeError("No se encuentra el boton de subida '#fakeBrowse' en la pantalla de documentos.")
     await browse.wait_for(state="visible", timeout=30000)
     expected = Path(doc_path).name.strip().lower()
+    baseline_rows = await _uploaded_rows_count(page)
     logger.info("Diputacio BCN docs: iniciando seleccion de fichero path='%s' expected='%s'", doc_path, expected)
 
     file_inputs = page.locator("input[type='file']")
@@ -258,12 +343,6 @@ async def _upload_single_document(page: "Page", doc_path: str) -> None:
         current_input = file_inputs.nth(idx)
         try:
             await current_input.set_input_files(doc_path)
-            await current_input.evaluate(
-                """(el) => {
-                    el.dispatchEvent(new Event("input", { bubbles: true }));
-                    el.dispatchEvent(new Event("change", { bubbles: true }));
-                }"""
-            )
         except Exception:
             logger.warning("Diputacio BCN docs: set_input_files fallo input_idx=%s path='%s'", idx, doc_path, exc_info=True)
             continue
@@ -283,6 +362,35 @@ async def _upload_single_document(page: "Page", doc_path: str) -> None:
             selected_value,
             selected_norm,
         )
+        # En esta sede, al asignar el input a veces se dispara upload inmediato y
+        # el value vuelve a vacio; si ya crecio la tabla no intentamos otro input.
+        try:
+            await page.wait_for_function(
+                """(minRows) => {
+                    const rows = Array.from(document.querySelectorAll("table tr, .document-row, .file-row, [class*='upload'] tr"));
+                    const uploadedRows = rows.filter((tr) => {
+                        const tds = tr.querySelectorAll("td");
+                        if (!tds || tds.length < 2) return false;
+                        const docName = (tds[0]?.textContent || "").trim();
+                        const size = (tds[1]?.textContent || "").trim();
+                        if (!docName || !size) return false;
+                        if (docName.toLowerCase() === "documento" && size.toLowerCase() === "tamaño") return false;
+                        return true;
+                    });
+                    return uploadedRows.length > minRows;
+                }""",
+                arg=int(baseline_rows),
+                timeout=1800,
+            )
+            logger.info(
+                "Diputacio BCN docs: upload detectado tras set_input_files input_idx=%s (rows>%s), no se reintenta otro input",
+                idx,
+                baseline_rows,
+            )
+            return
+        except Exception:
+            pass
+
         if expected and expected in selected_norm:
             logger.info("Diputacio BCN docs: fichero seleccionado via set_input_files input_idx=%s", idx)
             return
@@ -356,6 +464,17 @@ async def _wait_row_increment_or_fail(page: "Page", expected_rows: int, expected
             f"doc_esperado='{Path(expected_doc_path).name}' rows={names}"
         ) from exc
 
+    # Ventana corta para detectar duplicado inmediato (misma subida con 2 altas).
+    await page.wait_for_timeout(1200)
+    current_rows = await _uploaded_rows_count(page)
+    if current_rows != expected_rows:
+        names = await _uploaded_doc_names(page)
+        raise RuntimeError(
+            "Incremento de filas no exacto tras upload (posible duplicado). "
+            f"esperadas={expected_rows} actuales={current_rows} "
+            f"doc_esperado='{Path(expected_doc_path).name}' rows={names}"
+        )
+
     # Validación semántica: el último nombre debería corresponder al archivo recién subido.
     names = await _uploaded_doc_names(page)
     if not names:
@@ -394,7 +513,8 @@ async def _upload_documents_block(page: "Page", docs: list[str]) -> tuple[int, s
             per_file_comment,
             len(last_comment),
         )
-        await page.wait_for_timeout(150)
+        # Ritmo conservador para evitar carreras con validaciones front.
+        await page.wait_for_timeout(2000)
         logger.info("Diputacio BCN docs: subiendo '%s'", doc_path)
         await _upload_single_document(page, doc_path)
         await page.wait_for_function(
@@ -406,6 +526,7 @@ async def _upload_documents_block(page: "Page", docs: list[str]) -> tuple[int, s
         await _wait_row_increment_or_fail(page, expected_rows, doc_path)
         previous_rows = expected_rows
         logger.info("Diputacio BCN docs: upload confirmado doc='%s' total_rows=%s", doc_path, previous_rows)
+        await page.wait_for_timeout(2000)
     return previous_rows, last_comment
 
 
@@ -568,11 +689,27 @@ async def run_documentos(page: "Page", config: "DiputacioBcnConfig", datos: "Dip
         len(upload_docs),
         upload_state.get("errors"),
     )
-    if uploaded_rows < len(upload_docs):
+    if uploaded_rows != len(upload_docs):
         raise RuntimeError(
-            f"No se han subido todos los documentos esperados ({uploaded_rows}/{len(upload_docs)}). "
+            f"Numero de adjuntos inesperado ({uploaded_rows}/{len(upload_docs)}). "
             f"errores={upload_state.get('errors')}"
         )
+    await page.wait_for_function(
+        "() => !window.jQuery || window.jQuery.active === 0",
+        timeout=20000,
+    )
+    await page.wait_for_timeout(2000)
+    confirmed_docs = await _wait_until_expected_documents_present(
+        page,
+        expected_docs=upload_docs,
+        timeout_ms=30000,
+        poll_ms=1000,
+    )
+    logger.info(
+        "Diputacio BCN docs: verificacion final de adjuntos OK docs_en_tabla=%s expected=%s",
+        confirmed_docs,
+        [_basename(doc) for doc in upload_docs],
+    )
 
     try:
         await page.screenshot(
@@ -598,6 +735,7 @@ async def run_documentos(page: "Page", config: "DiputacioBcnConfig", datos: "Dip
         if await radio.count() > 0:
             try:
                 if await radio.is_visible():
+                    await page.wait_for_timeout(3000)
                     await radio.check(force=True)
             except Exception:
                 pass
@@ -648,8 +786,7 @@ async def run_documentos(page: "Page", config: "DiputacioBcnConfig", datos: "Dip
     await page.wait_for_url("**/Home/correuElectronic**", timeout=25000)
 
     lopd = page.locator("#LOPD").first
-    await lopd.wait_for(state="visible", timeout=15000)
-    await lopd.check(force=True)
+    await _ensure_checked(page, lopd, label="LOPD")
 
     await page.locator("input.btn.btn-info[name='accio'][value='Acceder al trámite']").first.click()
     return _pick_latest_open_page(page)

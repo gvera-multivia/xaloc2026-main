@@ -99,8 +99,9 @@ def _build_prompt_sistema() -> str:
     REGLAS:
     1. Si recibes 'CL' o 'C/', mapealo a 'CALLE'. Si recibes 'AV' a 'AVENIDA', etc.
     2. En 'puerta', si el valor es 'NAVE 8', pon solo '8'.
-    3. NO elimines la letra Ñ de los nombres de calle (ej. NUÑEZ no debe ser NUNEZ).
-    4. JSON puro, sin comentarios.
+    3. Si el número de la puerta viene con doble numero como 80-82 quedate solo con el primero y elimina el guion y el segundo numero, quedando solo '80'.
+    4. NO elimines la letra Ñ de los nombres de calle (ej. NUÑEZ no debe ser NUNEZ).
+    5. JSON puro, sin comentarios.
     """
 
 async def classify_address_with_ai(

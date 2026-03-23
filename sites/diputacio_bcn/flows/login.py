@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import logging
 import re
 from typing import TYPE_CHECKING
+
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
     from ..config import DiputacioBcnConfig
     from ..data_models import DiputacioBcnTarget
+
+logger = logging.getLogger("sites.diputacio_bcn.login")
 
 
 def _pick_latest_open_page(page: "Page") -> "Page":
@@ -47,5 +52,11 @@ async def run_login(page: "Page", config: "DiputacioBcnConfig", datos: "Diputaci
         trigger = page.get_by_text(re.compile(r"Acced(er|ir)", re.IGNORECASE), exact=False).first
         await trigger.wait_for(state="visible", timeout=config.default_timeout)
         await trigger.click()
-    await page.wait_for_load_state("networkidle")
+    try:
+        await page.wait_for_load_state("networkidle", timeout=15000)
+    except PlaywrightTimeoutError:
+        logger.warning(
+            "diputacio_bcn login: networkidle no alcanzado en 15s; continuamos con domcontentloaded."
+        )
+        await page.wait_for_load_state("domcontentloaded", timeout=5000)
     return _pick_latest_open_page(page)

@@ -634,6 +634,8 @@ def _resolve_client_justificante_path(data: RedsaraTarget, file_name: str) -> Pa
     payload = dict(data.payload or {})
     if not payload:
         return None
+    if bool(payload.get("redsara_orchestrator_receipt_mode")):
+        return None
     try:
         client = client_identity_from_payload(payload)
         client_dir = get_ruta_recursos_telematicos(

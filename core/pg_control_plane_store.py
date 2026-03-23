@@ -235,6 +235,10 @@ class PgControlPlaneStore:
                         priority = EXCLUDED.priority,
                         payload_json = EXCLUDED.payload_json,
                         queued_at = EXCLUDED.queued_at,
+                        started_at = NULL,
+                        finished_at = NULL,
+                        error_message = NULL,
+                        result_json = NULL,
                         updated_at = EXCLUDED.updated_at
                     """,
                     (
