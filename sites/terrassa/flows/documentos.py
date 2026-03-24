@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 import re
@@ -55,6 +56,99 @@ async def _visible_upload_indices(page: "Page") -> list[int]:
     return [int(x) for x in (indices or [])]
 
 
+async def _try_click_add_upload_block(page: "Page") -> bool:
+    """
+    Intenta forzar la aparición de un nuevo bloque de upload pulsando el botón
+    de adjuntar/añadir documento. Terrassa a veces muestra un popup aleatorio
+    que no hace nada; si aparece un dialog JS, se acepta automáticamente.
+    """
+    try:
+        dialog_task_ref: dict[str, asyncio.Task | None] = {"task": None}
+
+        def _on_dialog(dialog):
+            async def _accept_dialog():
+                try:
+                    await dialog.accept()
+                except Exception:
+                    pass
+
+            dialog_task_ref["task"] = asyncio.create_task(_accept_dialog())
+
+        page.once("dialog", _on_dialog)
+    except Exception:
+        dialog_task_ref = {"task": None}
+
+    try:
+        clicked = await evaluate_with_nav_retry(
+            page,
+            """() => {
+                const norm = (v) => String(v || "")
+                    .normalize("NFD")
+                    .replace(/[\\u0300-\\u036f]/g, "")
+                    .toLowerCase()
+                    .replace(/[^a-z0-9]+/g, " ")
+                    .trim();
+                const isVisible = (el) => {
+                    if (!el) return false;
+                    const s = window.getComputedStyle(el);
+                    const r = el.getBoundingClientRect();
+                    return !!s && s.display !== "none" && s.visibility !== "hidden" && r.width > 0 && r.height > 0;
+                };
+                const isEnabled = (el) => !el.disabled && el.getAttribute("aria-disabled") !== "true";
+
+                const preferredSelectors = [
+                    "button[onclick*='Fitxer']",
+                    "button[onclick*='fitxer']",
+                    "button[onclick*='upload']",
+                    "a[onclick*='Fitxer']",
+                    "a[onclick*='fitxer']",
+                    "a[onclick*='upload']",
+                    ".se-button",
+                    "button",
+                    "a[role='button']",
+                    "a",
+                ];
+                const preferredTokens = [
+                    "adjuntar",
+                    "afegir",
+                    "anadir",
+                    "añadir",
+                    "add",
+                    "nou document",
+                    "nuevo documento",
+                    "document adjunt",
+                ];
+
+                for (const sel of preferredSelectors) {
+                    const nodes = Array.from(document.querySelectorAll(sel));
+                    for (const el of nodes) {
+                        if (!isVisible(el) || !isEnabled(el)) continue;
+                        const txt = norm(el.textContent || el.getAttribute("aria-label") || el.getAttribute("title") || "");
+                        const onclick = norm(el.getAttribute("onclick") || "");
+                        const looksLikeAdd =
+                            preferredTokens.some((t) => txt.includes(norm(t))) ||
+                            onclick.includes("fitxer") ||
+                            onclick.includes("upload");
+                        if (!looksLikeAdd) continue;
+                        el.click();
+                        return true;
+                    }
+                }
+                return false;
+            }""",
+        )
+        return bool(clicked)
+    except Exception:
+        return False
+    finally:
+        try:
+            task = dialog_task_ref.get("task")
+            if task is not None:
+                await asyncio.wait_for(task, timeout=0.3)
+        except Exception:
+            pass
+
+
 async def _resolve_upload_index(
     page: "Page",
     *,
@@ -65,6 +159,8 @@ async def _resolve_upload_index(
     waited = 0
     step_ms = 500
     last_visible: list[int] = []
+    nudge_interval_ms = 1000
+    next_nudge_at = 0
     while waited <= timeout_ms:
         visible = await _visible_upload_indices(page)
         last_visible = visible
@@ -73,18 +169,58 @@ async def _resolve_upload_index(
             return preferred_index
         if free:
             return min(free)
+        if waited >= next_nudge_at:
+            nudged = await _try_click_add_upload_block(page)
+            if nudged:
+                logger.info(
+                    "[terrassa-docs] sin bloque libre (waited=%sms); pulsado boton adjuntar para abrir nuevo bloque. "
+                    "visible=%s used=%s",
+                    waited,
+                    visible,
+                    sorted(used_indices),
+                )
+            next_nudge_at = waited + nudge_interval_ms
         await page.wait_for_timeout(step_ms)
         waited += step_ms
 
-    # Regla anti-sobrescritura: nunca reutilizar un bloque ya marcado como usado.
-    # Si no hay bloque libre, forzamos error para reintento externo y evitamos
-    # pisar un documento previamente cargado.
+    # Modo resistente: si hay bloques visibles pero todos estan marcados como usados,
+    # reutilizamos uno visible para evitar bloqueo total del flujo.
+    # Este comportamiento cubre pantallas donde Terrassa no abre bloques nuevos
+    # aunque el upload previo ya este efectivamente persistido.
     if last_visible:
         free_last_visible = [idx for idx in last_visible if idx not in used_indices]
         if preferred_index in free_last_visible:
             return preferred_index
         if free_last_visible:
             return min(free_last_visible)
+        if preferred_index in last_visible:
+            logger.warning(
+                "[terrassa-docs] sin bloques libres tras timeout; reusando preferred visible index=%s. "
+                "visible=%s used=%s",
+                preferred_index,
+                last_visible,
+                sorted(used_indices),
+            )
+            return preferred_index
+        fallback_idx = min(last_visible)
+        logger.warning(
+            "[terrassa-docs] sin bloques libres tras timeout; reusando visible index=%s. "
+            "visible=%s used=%s",
+            fallback_idx,
+            last_visible,
+            sorted(used_indices),
+        )
+        return fallback_idx
+
+    # Último intento anti-aleatorio: re-pulsar adjuntar y re-evaluar visibles.
+    nudged_last = await _try_click_add_upload_block(page)
+    if nudged_last:
+        await page.wait_for_timeout(500)
+        final_visible = await _visible_upload_indices(page)
+        if final_visible:
+            if preferred_index in final_visible:
+                return preferred_index
+            return min(final_visible)
 
     raise RuntimeError(
         f"terrassa-docs: no hay bloques de subida libres para doc index={preferred_index}. "
@@ -303,6 +439,8 @@ async def _wait_until_upload_committed(
 ) -> dict[str, object]:
     waited = 0
     step_ms = 500
+    soft_candidate_hits = 0
+    soft_confirm_after_hits = 4
     last_analysis: dict[str, object] = {}
 
     while waited <= timeout_ms:
@@ -317,6 +455,22 @@ async def _wait_until_upload_committed(
         )
         if bool(last_analysis.get("confirmed")):
             return last_analysis
+        # Confirmacion blanda controlada:
+        # Terrassa, a veces, deja el mismo bloque visible con file_count>0
+        # aunque el upload haya quedado registrado. Exigimos varios ciclos
+        # consecutivos en ese estado para minimizar falsos positivos.
+        if bool(last_analysis.get("same_block_soft_candidate")):
+            soft_candidate_hits += 1
+            if soft_candidate_hits >= soft_confirm_after_hits:
+                return {
+                    **last_analysis,
+                    "confirmed": True,
+                    "same_block_registered": True,
+                    "soft_confirmed": True,
+                    "soft_hits": soft_candidate_hits,
+                }
+        else:
+            soft_candidate_hits = 0
         await page.wait_for_timeout(step_ms)
         waited += step_ms
 
@@ -596,7 +750,7 @@ async def run_documentos(page: "Page", config: "TerrassaConfig", datos: "Terrass
             expected_type=tipus,
             timeout_ms=min(int(config.timeouts.subida_archivo), 30000),
         )
-        if bool(confirmation.get("recycled_current_block")):
+        if bool(confirmation.get("recycled_current_block")) or bool(confirmation.get("same_block_registered")):
             used_upload_indices.discard(upload_index)
             logger.info(
                 "[terrassa-docs] upload confirmado y bloque reciclado para reuse index=%s file=%s",

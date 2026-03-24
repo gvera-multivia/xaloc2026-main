@@ -459,7 +459,26 @@ class BrainClaimService:
             return
 
     async def run_tick(self) -> dict[str, Any]:
-        stats = {"claimed": 0, "published_candidates": 0, "incidents_logged": 0, "errors": 0}
+        stats = {
+            "claimed": 0,
+            "published_candidates": 0,
+            "incidents_logged": 0,
+            "errors": 0,
+            "cleanup": {
+                "deleted_queue": 0,
+                "deleted_blacklist": 0,
+                "deleted_pending_auth": 0,
+                "deleted_incidents": 0,
+                "deleted_total": 0,
+            },
+        }
+        try:
+            cleanup = self.runtime_store.purge_completed_resources_from_operational_tables()
+            stats["cleanup"] = cleanup
+            if int(cleanup.get("deleted_total") or 0) > 0:
+                logger.info("[brain-claim] cleanup completados en tick: %s", cleanup)
+        except Exception as exc:
+            logger.warning("[brain-claim] fallo en cleanup de completados: %s", exc)
         configs = {cfg["site_id"]: cfg for cfg in self.get_active_configs()}
         configured_sites = sorted(configs.keys())
         configured_sig = "|".join(configured_sites)

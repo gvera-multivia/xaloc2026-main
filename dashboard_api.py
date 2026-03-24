@@ -811,6 +811,13 @@ async def api_incidents_pending(
     result = service.list_pending_incidents(page=page, page_size=page_size)
     items = list(result.get("items") or [])
 
+    def _incident_row_id(item: dict[str, Any], rid: Optional[int]) -> str:
+        site = str(item.get("site_id") or "").strip()
+        rid_part = str(rid) if rid is not None else "none"
+        incident_type = str(item.get("incident_type") or "").strip().upper() or "UNKNOWN"
+        expediente = str(item.get("expediente") or "").strip().upper() or "none"
+        return f"{site}:{rid_part}:{incident_type}:{expediente}"
+
     def _resolve_incident_resource(item: dict[str, Any]) -> Optional[int]:
         raw = item.get("resource_id")
         if raw is None:
@@ -825,16 +832,24 @@ async def api_incidents_pending(
             return None
 
     incident_ids = []
+    legacy_incident_ids = []
     for it in items:
         rid = _resolve_incident_resource(it)
         it["resource_id"] = rid
-        incident_ids.append(f"{it.get('site_id')}:{rid if rid is not None else 'none'}")
+        incident_id = _incident_row_id(it, rid)
+        legacy_id = f"{it.get('site_id')}:{rid if rid is not None else 'none'}"
+        it["incident_id"] = incident_id
+        incident_ids.append(incident_id)
+        legacy_incident_ids.append(legacy_id)
 
-    locks = service.runtime_store.get_incident_locks(incident_ids=incident_ids)
+    locks = service.runtime_store.get_incident_locks(
+        incident_ids=list(dict.fromkeys(incident_ids + legacy_incident_ids))
+    )
     for item in items:
         rid = item.get("resource_id")
-        incident_id = f"{item.get('site_id')}:{rid if rid is not None else 'none'}"
-        lock_info = locks.get(incident_id)
+        incident_id = str(item.get("incident_id") or "")
+        legacy_id = f"{item.get('site_id')}:{rid if rid is not None else 'none'}"
+        lock_info = locks.get(incident_id) or locks.get(legacy_id)
         if lock_info:
             item["locked"] = True
             item["lock_user_id"] = lock_info.get("user_id")

@@ -73,7 +73,8 @@ class AtcController:
             m = rx.search(text)
             if m:
                 return m.group(0).strip()
-        return text
+        # ATC: a veces llega "expediente + segunda parte", conservar solo la primera.
+        return text.split(" ", 1)[0].strip()
 
     @classmethod
     def _infer_protocol(cls, *, csv_acto: str, procedim: str) -> str:

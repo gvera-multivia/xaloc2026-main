@@ -51,3 +51,25 @@ def test_client_identity_falls_back_when_mandatario_juridica_missing_razon_socia
     identity = client_identity_from_payload(payload)
     assert identity.is_company is True
     assert identity.empresa == "ACME SL"
+
+
+def test_client_folder_name_ignores_degraded_sujeto_for_person() -> None:
+    identity = ClientIdentity(
+        is_company=False,
+        sujeto_recurso="ELIAS MU?OZ ORTIZ",
+        nombre="ELIAS",
+        apellido1="MUÑOZ",
+        apellido2="ORTIZ",
+    )
+    folder = get_client_folder_name(identity)
+    assert folder == "ELIAS MUÑOZ ORTIZ"
+
+
+def test_client_folder_name_ignores_degraded_sujeto_for_company() -> None:
+    identity = ClientIdentity(
+        is_company=True,
+        sujeto_recurso="EMPRESA ?LFA SL",
+        empresa="EMPRESA ALFA SL",
+    )
+    folder = get_client_folder_name(identity)
+    assert folder == "EMPRESA ALFA SL"

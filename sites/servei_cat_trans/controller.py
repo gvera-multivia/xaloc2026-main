@@ -146,8 +146,16 @@ class ServeiCatTransController:
             "direccion_nombre_via": self._clean(src.get("direccion_nombre_via")) or direccion,
             "direccion_numero": numero,
             "direccion_cp": cp,
+            "direccion_provincia": self._clean(src.get("direccion_provincia") or "Barcelona"),
             "direccion_comarca": self._clean(src.get("direccion_comarca")),
             "direccion_municipio": self._clean(src.get("direccion_municipio")),
+            "representado_tipo_via": self._clean(src.get("representado_tipo_via")),
+            "representado_nombre_via": self._clean(src.get("representado_calle") or src.get("representado_calle_raw")),
+            "representado_numero": self._clean(src.get("representado_numero") or src.get("representado_numero_raw")),
+            "representado_cp": self._clean(src.get("representado_cp")),
+            "representado_provincia": self._clean(src.get("representado_provincia")),
+            "representado_comarca": self._clean(src.get("representado_comarca")),
+            "representado_municipio": self._clean(src.get("representado_municipio") or src.get("representado_poblacion")),
             "tipo_escrito": tipo_escrito,
             "expongo": expongo,
             "solicito": solicita,
@@ -169,11 +177,12 @@ class ServeiCatTransController:
                 continue
             merged_payload[key] = value
 
-        direccion_tipo_via = self._clean(kwargs.get("direccion_tipo_via")) or "CALLE"
-        direccion_nombre_via = self._clean(kwargs.get("direccion_nombre_via")) or "GENERAL MITRE"
+        direccion_tipo_via = self._clean(kwargs.get("direccion_tipo_via")) or "Ronda"
+        direccion_nombre_via = self._clean(kwargs.get("direccion_nombre_via")) or "DEL GENERAL MITRE"
         direccion_numero = self._clean(kwargs.get("direccion_numero")) or "169"
         direccion_cp = self._clean(kwargs.get("direccion_cp")) or "08022"
-        direccion_comarca = self._clean(kwargs.get("direccion_comarca")) or "BARCELONES"
+        direccion_provincia = self._clean(kwargs.get("direccion_provincia")) or "Barcelona"
+        direccion_comarca = self._clean(kwargs.get("direccion_comarca")) or "Barcelon\u00e8s"
         direccion_municipio = self._clean(kwargs.get("direccion_municipio")) or "BARCELONA"
 
         return ServeiCatTransTarget(
@@ -198,8 +207,16 @@ class ServeiCatTransController:
             direccion_nombre_via=direccion_nombre_via,
             direccion_numero=direccion_numero,
             direccion_cp=direccion_cp,
+            direccion_provincia=direccion_provincia,
             direccion_comarca=direccion_comarca,
             direccion_municipio=direccion_municipio,
+            representado_tipo_via=self._clean(kwargs.get("representado_tipo_via")),
+            representado_nombre_via=self._clean(kwargs.get("representado_nombre_via")),
+            representado_numero=self._clean(kwargs.get("representado_numero")),
+            representado_cp=self._clean(kwargs.get("representado_cp")),
+            representado_provincia=self._clean(kwargs.get("representado_provincia")),
+            representado_comarca=self._clean(kwargs.get("representado_comarca")),
+            representado_municipio=self._clean(kwargs.get("representado_municipio")),
             tipo_escrito=self._clean(kwargs.get("tipo_escrito")) or "alegaciones",
             expongo=self._clean(kwargs.get("expongo")),
             solicito=self._clean(kwargs.get("solicito")),

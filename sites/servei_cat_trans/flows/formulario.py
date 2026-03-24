@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import re
+import logging
 from typing import TYPE_CHECKING
+
+logger = logging.getLogger(__name__)
 
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
@@ -99,12 +102,25 @@ async def _safe_fill(page: "Page | Frame", selector: str, value: str) -> bool:
 async def _safe_check(page: "Page | Frame", selector: str) -> bool:
     locator = page.locator(selector).first
     if await locator.count() <= 0:
+        logger.warning(f"Selector no encontrado para check: {selector}")
         return False
     try:
+        # Intentar check estandar
         await locator.check(timeout=FAST_ACTION_TIMEOUT_MS, force=True)
+        return True
     except Exception:
-        return False
-    return True
+        try:
+            # Intentar click si check falla (a veces los radios estan ocultos bajo un label)
+            await locator.click(timeout=FAST_ACTION_TIMEOUT_MS, force=True)
+            return True
+        except Exception:
+            try:
+                # Opcion nuclear: JS click
+                await locator.evaluate("(el) => { el.checked = true; el.click(); el.dispatchEvent(new Event('change', {bubbles:true})); }")
+                return True
+            except Exception as e:
+                logger.error(f"Error fatal intentando marcar {selector}: {e}")
+                return False
 
 
 async def _safe_click(page: "Page | Frame", selector: str) -> bool:
@@ -128,12 +144,12 @@ async def _safe_select_label(page: "Page | Frame", selector: str, label: str) ->
         return False
 
     try:
+        # Intentar selección directa Playwright
         await locator.select_option(label=wanted, timeout=FAST_SELECT_TIMEOUT_MS)
         return True
-    except PlaywrightTimeoutError:
-        return False
     except Exception:
-        option_value = await locator.evaluate(
+        # Fallback: buscar valor por texto normalizado (ignora acentos y mayúsculas) y seleccionar por valor
+        opt_value = await locator.evaluate(
             """(el, wantedLabel) => {
                 const normalize = (txt) => String(txt || "")
                     .normalize("NFD")
@@ -143,17 +159,30 @@ async def _safe_select_label(page: "Page | Frame", selector: str, label: str) ->
                     .toLowerCase();
                 const wanted = normalize(wantedLabel);
                 const options = Array.from(el.options || []);
+                
+                // 1. Coincidencia exacta normalizada
                 let match = options.find((opt) => normalize(opt.textContent || "") === wanted);
+                
+                // 2. Coincidencia parcial si no hay exacta
                 if (!match) {
                     match = options.find((opt) => normalize(opt.textContent || "").includes(wanted));
                 }
+                
+                // 3. Fallback a valor si el label coincide con el valor (ej: "CA" -> "CA")
+                if (!match) {
+                    match = options.find((opt) => normalize(opt.value || "") === wanted);
+                }
+                
                 return match ? String(match.value || "") : "";
             }""",
             wanted,
         )
-        if option_value:
-            await locator.select_option(value=option_value, timeout=FAST_SELECT_TIMEOUT_MS)
-            return True
+        if opt_value:
+            try:
+                await locator.select_option(value=opt_value, timeout=FAST_SELECT_TIMEOUT_MS)
+                return True
+            except Exception:
+                return False
     return False
 
 
@@ -303,6 +332,11 @@ async def _fill_presentador_direccion_fallback(page: "Page | Frame", datos: "Ser
     if cp_id:
         await _safe_fill(page, f"#{cp_id}", datos.direccion_cp)
 
+    provincia_id = await _find_field_id_by_label(page, section, ["provincia"], field_kind="select")
+    if provincia_id:
+        await _safe_select_label(page, f"#{provincia_id}", datos.direccion_provincia or "BARCELONA")
+        await page.wait_for_timeout(2000)
+
     comarca_id = await _find_field_id_by_label(
         page,
         section,
@@ -322,26 +356,63 @@ async def _fill_presentador_direccion_fallback(page: "Page | Frame", datos: "Ser
         await _safe_select_label(page, f"#{municipio_id}", datos.direccion_municipio)
 
 
-async def _fill_direccion(page: "Page | Frame", panel_id: str, cp_panel_id: str, datos: "ServeiCatTarget") -> None:
-    # Selectores mas robustos para el panel de direccion
-    await _safe_select_label(page, f"[id^='{panel_id}'][id$='-guidedropdownlist___widget']", datos.direccion_tipo_via)
-    await _safe_fill(page, f"[id^='{panel_id}'][id$='-guidetextbox___widget']", datos.direccion_nombre_via)
-    await _safe_fill(page, f"[id^='{panel_id}'] [id$='-guidetextbox___widget']", datos.direccion_numero)
-    await _safe_fill(page, f"[id^='{cp_panel_id}'][id$='-guidetextbox___widget']", datos.direccion_cp)
-    await page.wait_for_timeout(120)
+async def _fill_direccion(page: "Page | Frame", panel_id: str, cp_panel_id: str, datos: "ServeiCatTransTarget") -> None:
+    # Los panel_id de adreca son ESTABLES, usar selectores exactos con #id
+    await _safe_select_label(page, f"#{panel_id}-guidedropdownlist___widget", datos.direccion_tipo_via)
+    await _safe_fill(page, f"#{panel_id}-guidetextbox___widget", datos.direccion_nombre_via)
+    await _safe_fill(page, f"#{panel_id}-panel-guidetextbox___widget", datos.direccion_numero)
+    await _safe_fill(page, f"#{cp_panel_id}-guidetextbox___widget", datos.direccion_cp)
 
-    # Estos dropdowns de comarca/municipio tienen IDs muy especificos que podrian ser dinamicos
+    # --- CASCADA: Provincia -> (espera) -> Comarca -> (espera) -> Municipio ---
+    # 1. Seleccionar Provincia (ID estable: {cp_panel_id}-guidedropdownlist___widget)
     await _safe_select_via_id(
         page,
-        await _find_field_id_by_label(page, f"[id^='{cp_panel_id}']", ["comarca"], field_kind="select") or f"{cp_panel_id}-guidedropdownlist_2056216251___widget",
+        f"{cp_panel_id}-guidedropdownlist___widget",
+        datos.direccion_provincia or "Barcelona",
+    )
+    # 2. ESPERAR a que Comarca cargue sus opciones (depende de Provincia)
+    await page.wait_for_timeout(2500)
+    await _safe_select_via_id(
+        page,
+        f"{cp_panel_id}-guidedropdownlist_2056216251___widget",
         datos.direccion_comarca,
     )
-    await page.wait_for_timeout(120)
+    # 3. ESPERAR a que Municipio cargue sus opciones (depende de Comarca)
+    await page.wait_for_timeout(2500)
     await _safe_select_via_id(
         page,
-        await _find_field_id_by_label(page, f"[id^='{cp_panel_id}']", ["municipio"], field_kind="select") or f"{cp_panel_id}-guidedropdownlist_988023112___widget",
+        f"{cp_panel_id}-guidedropdownlist_988023112___widget",
         datos.direccion_municipio,
     )
+
+
+async def _fill_representado_direccion(page: "Page | Frame", panel_id: str, cp_panel_id: str, datos: "ServeiCatTransTarget") -> None:
+    # Lógica idéntica a _fill_direccion pero usando los campos de representado_*
+    await _safe_select_label(page, f"#{panel_id}-guidedropdownlist___widget", datos.representado_tipo_via)
+    await _safe_fill(page, f"#{panel_id}-guidetextbox___widget", datos.representado_nombre_via)
+    await _safe_fill(page, f"#{panel_id}-panel-guidetextbox___widget", datos.representado_numero)
+    await _safe_fill(page, f"#{cp_panel_id}-guidetextbox___widget", datos.representado_cp)
+
+    # CASCADA: Provincia -> Comarca -> Municipio para Representado
+    await _safe_select_via_id(
+        page,
+        f"{cp_panel_id}-guidedropdownlist___widget",
+        datos.representado_provincia or "Barcelona",
+    )
+    await page.wait_for_timeout(2500)
+    if datos.representado_comarca:
+        await _safe_select_via_id(
+            page,
+            f"{cp_panel_id}-guidedropdownlist_2056216251___widget",
+            datos.representado_comarca,
+        )
+        await page.wait_for_timeout(2500)
+    if datos.representado_municipio:
+        await _safe_select_via_id(
+            page,
+            f"{cp_panel_id}-guidedropdownlist_988023112___widget",
+            datos.representado_municipio,
+        )
 
 
 async def _fill_presentador_contacto(page: "Page | Frame", datos: "ServeiCatTransTarget") -> None:
@@ -367,60 +438,71 @@ async def _fill_presentador_contacto(page: "Page | Frame", datos: "ServeiCatTran
 async def _fill_solicitante_fisica(page: "Page | Frame", datos: "ServeiCatTransTarget") -> None:
     base = "guideContainer-rootPanel-seccio_solicitant-personaFisica-PF"
     prefix = f"{base}-panel_"
-    await _safe_check(page, "input[id*='seccio_solicitant-tipusPersona'][id$='-1_widget']")
-    await page.wait_for_timeout(80)
 
-    # IDs dinamicos para persona fisica (exact aria-label match)
-    await _safe_fill(page, f"input[id^='{prefix}'][id$='-guidetextbox_897852897___widget']", datos.nombre)
-    await _safe_fill(page, f"input[id^='{prefix}'][id$='-guidetextbox_1197861190___widget']", datos.apellido1)
-    await _safe_fill(page, f"input[id^='{prefix}'][id$='-guidetextbox___widget']", datos.apellido2)
-    
-    await _safe_select_label(page, f"select[id^='{prefix}'][id$='-guidedropdownlist___widget']", _documento_persona_label(datos.nif))
-    await _safe_fill(page, f"input[id^='{prefix}'][id$='-guidetextbox___widget']", _sanitize_doc(datos.nif))
-    
-    # Email y Movil
+    await _safe_fill(page, f"#{base}-panel-guidetextbox_897852897___widget", datos.nombre)
+    await _safe_fill(page, f"#{base}-panel-guidetextbox_1197861190___widget", datos.apellido1)
+    await _safe_fill(page, f"#{base}-panel-guidetextbox___widget", datos.apellido2)
+    await _safe_select_label(page, f"#{base}-panel_1244233668-guidedropdownlist___widget", _documento_persona_label(datos.nif))
+    await _safe_fill(page, f"#{base}-panel_1244233668-guidetextbox___widget", _sanitize_doc(datos.nif))
+
+    # Email y Movil (panel_XXXXX dinamico, usar aria-label)
+    prefix = f"{base}-panel_"
+    if not await _safe_fill(page, f"input[id^='{prefix}'][aria-label='Correo electr\u00f3nico'], input[id^='{prefix}'][aria-label='Adre\u00e7a electr\u00f2nica'], input[id^='{prefix}'][aria-label='Correu electr\u00f2nic']", datos.email):
+        await _safe_fill(page, f"input[id^='{prefix}'][id$='-guidetextbox_31092572___widget']", datos.email)
+
     if not await _safe_fill(page, f"input[id^='{prefix}'][aria-label='Teléfono móvil'], input[id^='{prefix}'][aria-label='Telèfon mòbil']", datos.telefono_movil):
         await _safe_fill(page, f"input[id^='{prefix}'][id$='-guidetextbox___widget']", datos.telefono_movil)
 
-    if not await _safe_fill(page, f"input[id^='{prefix}'][aria-label='Correo electrónico'], input[id^='{prefix}'][aria-label='Adreça electrònica'], input[id^='{prefix}'][aria-label='Correu electrònic']", datos.email):
-        await _safe_fill(page, f"input[id^='{prefix}'][id$='-guidetextbox_31092572___widget']", datos.email)
+    # Dirección del solicitante (persona física)
+    # Probar con prefijo -PF (segun md) y sin él (por si acaso es como PJ)
+    await page.wait_for_timeout(1000) # Esperar a que se despliegue
+    panel_id = f"{base}-adreca-panel_298747259"
+    cp_panel_id = f"{base}-adreca-panel_1697806457"
+    
+    # Verificar si el panel existe, si no, probar sin el sufijo -PF del base
+    if await page.locator(f"#{panel_id}-guidetextbox___widget").count() == 0:
+        base_short = base.replace("-PF", "")
+        panel_id = f"{base_short}-adreca-panel_298747259"
+        cp_panel_id = f"{base_short}-adreca-panel_1697806457"
 
-    await _fill_direccion(
+    await _fill_representado_direccion(
         page,
-        panel_id=f"{base}-adreca-panel_298747259",
-        cp_panel_id=f"{base}-adreca-panel_1697806457",
+        panel_id=panel_id,
+        cp_panel_id=cp_panel_id,
         datos=datos,
     )
 
 
+
 async def _fill_solicitante_juridica(page: "Page | Frame", datos: "ServeiCatTransTarget") -> None:
     pj = "guideContainer-rootPanel-seccio_solicitant-personaJuridica-PJ"
-    rep_prefix = f"{pj}-panel"
 
-    await _safe_check(page, "#guideContainer-rootPanel-seccio_solicitant-tipusPersona-guideradiobutton__-2_widget")
-    await page.wait_for_timeout(80)
-
+    # --- Datos de la empresa (panel raiz de PJ) ---
     await _safe_fill(page, f"#{pj}-panel-guidetextbox___widget", datos.razon_social)
+    # Tipo doc empresa + NIF empresa  (panel_1552294135 es ESTABLE)
     await _safe_select_label(page, f"#{pj}-panel_1552294135-guidedropdownlist___widget", _documento_empresa_label(datos.nif_empresa))
     await _safe_fill(page, f"#{pj}-panel_1552294135-guidetextbox___widget", _sanitize_doc(datos.nif_empresa))
 
-    # Representante legal / Datos de contacto (IDs dinamicos con prefijo largo)
-    rep_prefix = "guideContainer-rootPanel-seccio_solicitant-personaJuridica-PJ-panel_"
-    
-    await _safe_fill(page, f"input[id^='{rep_prefix}'][id$='-guidetextbox_8978528___widget']", datos.nombre)
-    await _safe_fill(page, f"input[id^='{rep_prefix}'][id$='-guidetextbox_1197861___widget']", datos.apellido1)
-    await _safe_fill(page, f"input[id^='{rep_prefix}'][id$='-guidetextbox_1958877719___widget']", datos.apellido2)
-    await _safe_select_label(page, f"select[id^='{rep_prefix}'][id$='-guidedropdownlist___widget']", _documento_persona_label(datos.nif))
-    await _safe_fill(page, f"input[id^='{rep_prefix}'][id$='-guidetextbox___widget']", _sanitize_doc(datos.nif))
-    
-    # Email y Movil (IDs dinamicos con prioridad a aria-label exacta)
+    # --- Datos del representante legal (panel_21004007 es ESTABLE) ---
+    rep = f"{pj}-panel_21004007"
+    await _safe_fill(page, f"#{rep}-guidetextbox_8978528___widget", datos.nombre)
+    await _safe_fill(page, f"#{rep}-guidetextbox_1197861___widget", datos.apellido1)
+    await _safe_fill(page, f"#{rep}-guidetextbox_1958877719___widget", datos.apellido2)
+    # Tipo doc representante + NIF representante (sub-panel 'panel' dentro de panel_21004007)
+    await _safe_select_label(page, f"#{pj}-panel_21004007-panel-guidedropdownlist___widget", _documento_persona_label(datos.nif))
+    await _safe_fill(page, f"#{pj}-panel_21004007-panel-guidetextbox___widget", _sanitize_doc(datos.nif))
+
+    # Email y Movil del representante (panel_XXXXX dinamico DENTRO de panel_21004007)
+    # Prioridad aria-label exacta, fallback a prefijo panel_21004007
+    rep_prefix = f"{rep}-panel_"
     if not await _safe_fill(page, f"input[id^='{rep_prefix}'][aria-label='Teléfono móvil'], input[id^='{rep_prefix}'][aria-label='Telèfon mòbil']", datos.telefono_movil):
         await _safe_fill(page, f"input[id^='{rep_prefix}'][id$='-guidetextbox___widget']", datos.telefono_movil)
 
     if not await _safe_fill(page, f"input[id^='{rep_prefix}'][aria-label='Correo electrónico'], input[id^='{rep_prefix}'][aria-label='Adreça electrònica'], input[id^='{rep_prefix}'][aria-label='Correu electrònic']", datos.email):
         await _safe_fill(page, f"input[id^='{rep_prefix}'][id$='-guidetextbox_31092572___widget']", datos.email)
 
-    await _fill_direccion(
+    # Dirección del representante (de la persona jurídica solicitante)
+    await _fill_representado_direccion(
         page,
         panel_id="guideContainer-rootPanel-seccio_solicitant-personaJuridica-adreca-panel_298747259",
         cp_panel_id="guideContainer-rootPanel-seccio_solicitant-personaJuridica-adreca-panel_1697806457",
@@ -544,9 +626,27 @@ async def run_formulario(page: "Page", config: "ServeiCatTransConfig", datos: "S
     await _safe_fill(page, "#codiPersonal-input", datos.codigo_personal)
     await _fill_presentador_contacto(form_scope, datos)
 
+    # Esperar a que el formulario se estabilice tras rellenar el municipio del representante
+    await page.wait_for_timeout(1000)
+
+    # El siguiente paso ES seleccionar el tipo de persona para que se despliegue el formulario
+    # Usamos directament el ID exacto proporcionado por el usuario
     if datos.tipo_persona == "juridica":
+        logger.info("Seleccionando Persona Juridica...")
+        checked = await _safe_check(form_scope, "#guideContainer-rootPanel-seccio_solicitant-tipusPersona-guideradiobutton__-2_widget")
+        if not checked:
+            # Intento desesperado con selector mas amplio si el ID exacto fallara (aunque no deberia)
+            await _safe_check(form_scope, "input[value='entitat_privada']")
+        
+        await page.wait_for_timeout(1500) # Mas tiempo para que se desplieguen los campos
         await _fill_solicitante_juridica(form_scope, datos)
     else:
+        logger.info("Seleccionando Persona Fisica...")
+        checked = await _safe_check(form_scope, "#guideContainer-rootPanel-seccio_solicitant-tipusPersona-guideradiobutton__-1_widget")
+        if not checked:
+            await _safe_check(form_scope, "input[id*='seccio_solicitant-tipusPersona'][id$='-1_widget']")
+            
+        await page.wait_for_timeout(1500)
         await _fill_solicitante_fisica(form_scope, datos)
 
     await _fill_notificaciones(form_scope, datos)

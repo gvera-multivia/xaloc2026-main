@@ -262,6 +262,31 @@ def _normalize_city_for_redsara(raw: str | None) -> str:
     return candidate
 
 
+def _normalize_street_for_redsara(raw: str | None) -> str:
+    """
+    Normaliza direcciones a una sola linea para inputs dnt-input (single-line).
+    Si viene en varias lineas, prioriza el fragmento mas "completo".
+    """
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    parts = [re.sub(r"\s+", " ", p).strip(" ,;") for p in text.split("\n")]
+    parts = [p for p in parts if p]
+    if not parts:
+        return ""
+    if len(parts) == 1:
+        return parts[0]
+
+    def _score(fragment: str) -> tuple[int, int]:
+        has_digit = 1 if re.search(r"\d", fragment) else 0
+        has_separator = 1 if "," in fragment else 0
+        return (has_digit + has_separator, len(fragment))
+
+    best = max(parts, key=_score)
+    return re.sub(r"\s+", " ", best).strip(" ,;")
+
+
 def _split_full_name(full_name: str | None) -> tuple[str, str, str]:
     """
     Split a full name into (given_name, surname1, surname2).
@@ -313,6 +338,7 @@ class RedsaraController:
             data,
             "interested_doc_number",
             "nif",
+            "cliente_nif",
             "interested_nif",
             canonical_path="client.document.nif",
         ) or self._pick(data, "cif", "cliente_nif_empresa", canonical_path="client.document.cif")
@@ -324,14 +350,21 @@ class RedsaraController:
             (doc_type or "").strip().upper() == "CIF"
         )
         if is_empresa:
-            doc_number = self._pick(data, "interested_doc_number", "cif", "cliente_nif_empresa", canonical_path="client.document.cif")
+            doc_number = self._pick(
+                data,
+                "interested_doc_number",
+                "cif",
+                "cliente_nif_empresa",
+                "nifempresa",
+                canonical_path="client.document.cif",
+            )
             doc_type = "CIF"
         else:
             doc_number = base_doc_number
         street_name = (
             self._pick(data, "interested_address", "address_street", "cliente_domicilio", "domicilio", canonical_path="client.address.street_name")
         )
-        street_name = str(street_name or "").strip()
+        street_name = _normalize_street_for_redsara(street_name)
         street_type = _infer_street_type(
             data.get("interested_street_type"),
             data.get("address_sigla"),
@@ -507,7 +540,9 @@ class RedsaraController:
             interested_surname1=resolved_surname1,
             interested_surname2=resolved_surname2,
             interested_street_type=resolved_street_type,
-            interested_address=_pick_required(interested_address, "REDSARA_INT_ADDRESS", "interested_address"),
+            interested_address=_normalize_street_for_redsara(
+                _pick_required(interested_address, "REDSARA_INT_ADDRESS", "interested_address")
+            ),
             interested_province=_pick_required(interested_province, "REDSARA_INT_PROVINCE", "interested_province"),
             interested_city=_normalize_city_for_redsara(_pick_required(interested_city, "REDSARA_INT_CITY", "interested_city")),
             interested_zip=_pick_required(interested_zip, "REDSARA_INT_ZIP", "interested_zip"),

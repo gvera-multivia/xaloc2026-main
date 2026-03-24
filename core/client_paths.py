@@ -81,16 +81,35 @@ def first_alnum_char(value: str) -> str:
 
 def get_client_folder_name(client: ClientIdentity) -> str:
     """Calcula el nombre de la carpeta del cliente."""
-    if client.sujeto_recurso:
-        return re.sub(r"\s+", " ", client.sujeto_recurso.strip()).rstrip("!.,?;:")
-    elif client.is_company:
-        return client.empresa.strip().rstrip("!.,?;:")
-    else:
-        nombre = (client.nombre or "").strip()
-        apellido1 = (client.apellido1 or "").strip().upper()
-        apellido2 = (client.apellido2 or "").strip().upper()
-        parts = [p for p in [nombre, apellido1, apellido2] if p]
-        return " ".join(parts).strip()
+    def _clean_name(value: str | None) -> str:
+        return re.sub(r"\s+", " ", (value or "").strip()).rstrip("!.,?;:")
+
+    def _is_degraded_subject(value: str) -> bool:
+        # Casos reales observados en runtime: MU?OZ, caracteres sustituidos y mojibake.
+        return ("?" in value) or ("\ufffd" in value)
+
+    sujeto = _clean_name(client.sujeto_recurso)
+    empresa = _clean_name(client.empresa)
+    nombre = (client.nombre or "").strip()
+    apellido1 = (client.apellido1 or "").strip().upper()
+    apellido2 = (client.apellido2 or "").strip().upper()
+    person_name = " ".join([p for p in [nombre, apellido1, apellido2] if p]).strip()
+
+    if sujeto and not _is_degraded_subject(sujeto):
+        return sujeto
+
+    if client.is_company:
+        if empresa:
+            return empresa
+        if sujeto:
+            return sujeto
+        return person_name
+
+    if person_name:
+        return person_name
+    if sujeto:
+        return sujeto
+    return empresa
 
 
 def normalize_client_folder_name(value: str) -> str:

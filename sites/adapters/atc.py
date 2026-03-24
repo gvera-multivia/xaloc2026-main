@@ -13,6 +13,12 @@ class AtcAdapter(SiteAdapter):
     CLIENTES_BLOQUEADOS = {13607, 14274}
     REA_RE = re.compile(r"(RECLAMACION\s+(ECONOMICO|ECO)[- ]*(ADMINISTRATIVA|ADVA)|(?<!\w)REA(?!\w))", re.IGNORECASE)
     REPOS_RE = re.compile(r"(RECURSO\s+(EXTRAORDINARIO|REVISION|DE\s+REPOSICION)|(?<!\w)REPOSICION(?!\w))", re.IGNORECASE)
+    _EXPEDIENT_PATTERNS = (
+        re.compile(r"\b\d{14}\b"),
+        re.compile(r"\b\d{5,}-\d{4}/\d{1,10}-[A-Z]{2,5}\b", re.IGNORECASE),
+        re.compile(r"\b\d-\d{4}/\d{1,10}-[A-Z]{2,5}\b", re.IGNORECASE),
+        re.compile(r"\b\d{4}/\d{6,}\b"),
+    )
 
     def __init__(self) -> None:
         super().__init__(site_id="atc", priority=7)
@@ -40,6 +46,19 @@ class AtcAdapter(SiteAdapter):
             except Exception:
                 continue
         return None
+
+    @classmethod
+    def _normalize_expediente(cls, value: Any) -> str:
+        raw = cls._clean(value)
+        if not raw:
+            return ""
+        text = " ".join(raw.split())
+        for rx in cls._EXPEDIENT_PATTERNS:
+            m = rx.search(text)
+            if m:
+                return m.group(0).strip()
+        # ATC: cuando llega "expediente + bloque extra", nos quedamos con el primero.
+        return text.split(" ", 1)[0].strip()
 
     @classmethod
     def _infer_protocol(cls, *, csv_acto: str, procedim: str) -> str:
@@ -125,6 +144,7 @@ class AtcAdapter(SiteAdapter):
     ) -> list[dict]:
         payloads: list[dict] = []
         for item in candidates:
+            expediente = self._normalize_expediente(item.get("Expedient"))
             csv_acto = self._clean(item.get("ExpedientePublicacion"))
             procedim = self._clean(item.get("Procedim"))
             protocol = self._infer_protocol(csv_acto=csv_acto, procedim=procedim)
@@ -152,7 +172,7 @@ class AtcAdapter(SiteAdapter):
                     "idRecurso": item.get("idRecurso"),
                     "idExp": item.get("idExp"),
                     "numclient": item.get("numclient"),
-                    "expediente": self._clean(item.get("Expedient")),
+                    "expediente": expediente,
                     "fase_procedimiento": self._clean(item.get("FaseProcedimiento")),
                     "FaseProcedimiento": self._clean(item.get("FaseProcedimiento")),
                     "procedim": procedim,
@@ -161,7 +181,7 @@ class AtcAdapter(SiteAdapter):
                     "fecpres": fecpres.isoformat() if fecpres else "",
                     "representado_nif": self._clean(item.get("nifempresa") or item.get("nif")),
                     "representado_nombre": representado,
-                    "alegaciones": f"Se formulan alegaciones en relacion con el expediente {self._clean(item.get('Expedient'))}.",
+                    "alegaciones": f"Se formulan alegaciones en relacion con el expediente {expediente}.",
                     "motivo_reposicion": "Altres motius diferents dels anteriors.",
                     "archivos": [],
                 }

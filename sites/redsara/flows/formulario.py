@@ -732,8 +732,14 @@ async def _fill_dnt_input(page: Page, form_group_name: str, form_control_name: s
     """
     Fill dnt-input by scoping to formgroupname and dispatching events expected by web component + Angular.
     """
-    filled = await page.evaluate(
+    fill_result = await page.evaluate(
         """({ groupName, controlName, val }) => new Promise((resolve) => {
+            const normalize = (s) => String(s || '')
+                .normalize('NFD')
+                .replace(/[\\u0300-\\u036f]/g, '')
+                .replace(/\\s+/g, ' ')
+                .trim()
+                .toLowerCase()
             const groups = document.querySelectorAll(`[formgroupname="${groupName}"]`)
             for (const group of groups) {
                 const dntInput = group.querySelector(`dnt-input[formcontrolname="${controlName}"]`)
@@ -742,7 +748,7 @@ async def _fill_dnt_input(page: Page, form_group_name: str, form_control_name: s
                 if (!innerInput) continue
 
                 const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
-                if (!nativeSetter) { resolve(false); return }
+                if (!nativeSetter) { resolve({ ok: false, reason: 'native_setter_missing' }); return }
 
                 innerInput.scrollIntoView({ block: 'nearest' })
                 innerInput.click()
@@ -765,18 +771,39 @@ async def _fill_dnt_input(page: Page, form_group_name: str, form_control_name: s
 
                     setTimeout(() => {
                         const finalValue = (dntInput.value || innerInput.value || '').trim()
-                        resolve(finalValue === (val || '').trim())
+                        const expectedNorm = normalize(val)
+                        const finalNorm = normalize(finalValue)
+                        const exactMatch = finalNorm === expectedNorm
+                        const relaxedStreetMatch = (
+                            controlName === 'streetName'
+                            && !!expectedNorm
+                            && !!finalNorm
+                            && (
+                                finalNorm.includes(expectedNorm)
+                                || expectedNorm.includes(finalNorm)
+                                || finalNorm.startsWith(expectedNorm.slice(0, Math.min(8, expectedNorm.length)))
+                            )
+                        )
+                        resolve({
+                            ok: exactMatch || relaxedStreetMatch,
+                            reason: exactMatch || relaxedStreetMatch ? 'ok' : 'value_mismatch',
+                            finalValue,
+                        })
                     }, 50)
                 }, 50)
                 return
             }
-            resolve(false)
+            resolve({ ok: false, reason: 'control_not_found' })
         })""",
         {"groupName": form_group_name, "controlName": form_control_name, "val": value},
     )
-    if not filled:
+    if not (isinstance(fill_result, dict) and fill_result.get("ok")):
+        reason = fill_result.get("reason") if isinstance(fill_result, dict) else "unknown"
+        final_value = fill_result.get("finalValue") if isinstance(fill_result, dict) else None
         raise RuntimeError(
-            f"No se pudo rellenar dnt-input[formgroupname='{form_group_name}'][formcontrolname='{form_control_name}']"
+            "No se pudo rellenar "
+            f"dnt-input[formgroupname='{form_group_name}'][formcontrolname='{form_control_name}'] "
+            f"(reason={reason}, final_value={final_value!r})"
         )
     print(f"[REDSARA] fill_dnt_input OK: {form_group_name}.{form_control_name}='{value}'")
 

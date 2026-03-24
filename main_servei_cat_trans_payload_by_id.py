@@ -5,6 +5,7 @@ import asyncio
 import json
 import os
 import re
+import aiohttp
 import unicodedata
 from dataclasses import asdict
 from pathlib import Path
@@ -16,6 +17,9 @@ from core.client_documentation import build_required_client_documents_for_payloa
 from core.client_paths import ClientIdentity, get_ruta_cliente_documentacion
 from core.contact_defaults import get_default_contact_email, get_default_contact_mobile
 from core.worker_execution.browser_executor import execute_browser_flow
+from core.worker_execution.document_fetcher import download_document_and_attachments
+from core.xvia_auth import create_authenticated_session
+from core.address_classifier import classify_address_with_ai
 from sites.servei_cat_trans.controller import ServeiCatTransController
 
 
@@ -49,7 +53,12 @@ SELECT TOP 1
     c.Apellido2,
     c.Nombrefiscal,
     c.nif,
-    c.nifempresa
+    c.nifempresa,
+    c.calle AS cl_calle,
+    c.numero AS cl_numero,
+    c.Cpostal AS cl_cp,
+    c.poblacion AS cl_poblacion,
+    c.provincia AS cl_provincia
 FROM Recursos.RecursosExp r
 LEFT JOIN clientes c ON r.numclient = c.numerocliente
 WHERE r.idRecurso = ?
@@ -79,6 +88,32 @@ def _norm(v: Any) -> str:
 
 def _sanitize_document(v: Any) -> str:
     return re.sub(r"[^A-Z0-9]+", "", _clean(v).upper())
+
+
+async def _get_comarca(provincia: str, municipio: str) -> str:
+    if not provincia or not municipio:
+        return ""
+    url = "http://192.168.184.72:8020/location/comarca"
+    params = {"provincia": provincia, "municipio": municipio}
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, params=params, timeout=5) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return str(data.get("comarca") or "").strip()
+    except Exception as e:
+        print(f"[WARNING] Error consultando comarca API: {e}")
+    return ""
+
+
+def _infer_tipo_escrito(fase: str) -> str:
+    f = _norm(fase)
+    if any(token in f for token in ("reposici", "repositio", "reposit")):
+        return "reposicion"
+    if any(token in f for token in ("revisio", "revisit")):
+        return "revision"
+    # Por defecto alegaciones (fase de propuesta, denuncia, etc)
+    return "alegaciones"
 
 
 def _split_expediente(expediente: str) -> tuple[str, str, str]:
@@ -173,18 +208,18 @@ def _collect_docs_from_subject_folder(
     def _score(path: Path) -> tuple[int, int]:
         name = path.name.upper()
         score = 0
-        if "AUT" in name:
+        if "AUT" in name or "ACREDITA" in name:
             score += 100
+        if "RECUR" in name or "ALEG" in name:
+            score += 150  # Mas prioridad que nada (XVIA Recurso)
         if "DNI" in name or "NIE" in name or "CIF" in name:
             score += 80
-        if "ALEG" in name or "RECUR" in name:
-            score += 50
         if path.suffix.lower() == ".pdf":
             score += 20
         return score, -len(str(path))
 
     candidates.sort(key=_score, reverse=True)
-    return candidates[:6]
+    return candidates[:10]  # Recoger mas candidatos para que documentos.py elija los mejores 5 (filtros de peso, etc)
 
 
 def fetch_resource_by_id(id_recurso: int) -> dict[str, Any]:
@@ -242,6 +277,7 @@ async def build_payload_from_row(row: dict[str, Any]) -> dict[str, Any]:
     nif_empresa = _sanitize_document(row.get("nifempresa"))
     sujeto_recurso = _clean(row.get("SujetoRecurso") or razon_social or nombre)
     expone, solicita = _build_texts(expediente, fase, sujeto_recurso)
+    tipo_escrito = _infer_tipo_escrito(fase)
 
     payload: dict[str, Any] = {
         "idRecurso": row.get("idRecurso"),
@@ -252,7 +288,7 @@ async def build_payload_from_row(row: dict[str, Any]) -> dict[str, Any]:
         "expediente_numero": expediente_num,
         "digito_control": digito_control,
         "fase_procedimiento": fase,
-        "tipo_escrito": _infer_tipo_escrito(fase),
+        "tipo_escrito": tipo_escrito,
         "tipodecliente": tipodecliente,
         "tipo_persona": tipo_persona,
         "sujeto_recurso": sujeto_recurso,
@@ -269,16 +305,58 @@ async def build_payload_from_row(row: dict[str, Any]) -> dict[str, Any]:
         "codigo_personal": _clean(row.get("idRecurso")),
         "expongo": expone,
         "solicito": solicita,
+        # Direccion del representado (sacada de clientes)
+        "representado_calle_raw": _clean(row.get("cl_calle")),
+        "representado_numero_raw": _clean(row.get("cl_numero")),
+        "representado_cp": _clean(row.get("cl_cp")),
+        "representado_poblacion": _clean(row.get("cl_poblacion")),
+        "representado_provincia": _clean(row.get("cl_provincia")),
         "adjuntos": list(row.get("adjuntos") or []),
         "docs_base_path": HARDCODED_CLIENT_DOCS_BASE_PATH,
         "archivos": [],
     }
+
+    # Clasificar direccion del representado usando Groq
+    if payload["representado_calle_raw"]:
+        try:
+            print(f"[IA] Clasificando direccion: {payload['representado_calle_raw']}...")
+            classified = await classify_address_with_ai(
+                direccion_raw=payload["representado_calle_raw"],
+                numero=payload["representado_numero_raw"],
+                poblacion=payload["representado_poblacion"]
+            )
+            payload["representado_tipo_via"] = classified.get("tipo_via")
+            payload["representado_calle"] = classified.get("calle")
+            payload["representado_numero"] = classified.get("numero")
+            print(f"[IA] Resultado: {payload['representado_tipo_via']} {payload['representado_calle']}, {payload['representado_numero']}")
+        except Exception as e:
+            print(f"[WARNING] Fallo clasificando direccion con IA: {e}")
+            payload["representado_tipo_via"] = "CALLE"
+            payload["representado_calle"] = payload["representado_calle_raw"]
+            payload["representado_numero"] = payload["representado_numero_raw"]
+
+    # Consultar comarca externa
+    if payload["representado_provincia"] and payload["representado_poblacion"]:
+        print(f"[API] Consultando comarca para {payload['representado_poblacion']} ({payload['representado_provincia']})...")
+        comarca = await _get_comarca(payload["representado_provincia"], payload["representado_poblacion"])
+        if comarca:
+            print(f"[API] Comarca obtenida: {comarca}")
+            payload["representado_comarca"] = comarca
+        else:
+            payload["representado_comarca"] = ""
+        
+        # El municipio para el formulario sera la poblacion de la DB
+        payload["representado_municipio"] = payload["representado_poblacion"]
+    else:
+        payload["representado_comarca"] = ""
+        payload["representado_municipio"] = ""
 
     manual_docs_raw = _clean(os.getenv("SERVEI_CAT_TRANS_DOC_PATHS"))
     if manual_docs_raw:
         payload["archivos"] = [item.strip() for item in manual_docs_raw.split(";") if item.strip()]
 
     if not payload["archivos"]:
+        # 1. Intentar coleccion desde carpeta del cliente
         try:
             files = await build_required_client_documents_for_payload(
                 payload,
@@ -296,10 +374,38 @@ async def build_payload_from_row(row: dict[str, Any]) -> dict[str, Any]:
                 apellido1=apellido1,
                 apellido2=apellido2,
             )
-        payload["archivos"] = [str(path) for path in files if str(path).strip()]
+        
+        # 2. Descargar Recurso y Adjuntos desde XVIA (Prioridad absoluta)
+        # El recurso NO esta en la carpeta del cliente, sino en la web de xvia.
+        xvia_files: list[Path] = []
+        try:
+            xvia_email = os.getenv("XVIA_EMAIL") or "ruv@ruv.net" # Fallback sugerido por el contexto
+            xvia_password = os.getenv("XVIA_PASSWORD") or "Xvia_Grupo_Multivia_20180806" # Del connection string
+            
+            async with await create_authenticated_session(xvia_email, xvia_password) as session:
+                xvia_files = await download_document_and_attachments(payload=payload, auth_session=session)
+                print(f"[OK] Descargados {len(xvia_files)} archivos de XVIA (Recurso + Adjuntos)")
+        except Exception as e:
+            print(f"[WARNING] No se pudo descargar el recurso de XVIA: {e}")
+
+        # 3. Combinar: Primero los de XVIA (el recurso va el primero), luego el resto
+        subject_files = [str(path) for path in files if str(path).strip()]
+        downloaded = [str(path) for path in xvia_files if str(path).strip()]
+        
+        # Eliminar duplicados manteniendo orden
+        seen = set()
+        final_list = []
+        for f in (downloaded + subject_files):
+            if f not in seen:
+                final_list.append(f)
+                seen.add(f)
+        
+        payload["archivos"] = final_list[:10]  # Pasamos hasta 10 candidatos para que documentos.py elija los mejores 5
 
     if tipo_persona == "juridica" and payload["archivos"]:
-        payload["acreditacion_path"] = payload["archivos"][-1]
+        # La acreditacion suele ser el ultimo documento o uno especifico de AUT
+        aut_docs = [f for f in payload["archivos"] if "AUT" in f.upper() or "ACREDITA" in f.upper()]
+        payload["acreditacion_path"] = aut_docs[-1] if aut_docs else payload["archivos"][-1]
 
     return payload
 

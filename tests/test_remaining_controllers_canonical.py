@@ -88,6 +88,30 @@ def test_redsara_map_data_prefers_canonical_when_legacy_missing() -> None:
     assert mapped["interested_province"] == "BARCELONA"
 
 
+def test_redsara_map_data_normalizes_multiline_interested_address() -> None:
+    controller = RedsaraController()
+    payload = {
+        "cliente_tipo": 2,
+        "cif": "B12345678",
+        "cliente_razon_social": "ACME SL",
+        "address_street": "MOLI DE LA TORRE\r\nPASSEIG DEL PONT\r\nPASSEIG DEL PONT, 1",
+        "address_zip": "17163",
+        "address_city": "FORNELLS DE LA SELVA",
+        "address_province": "GIRONA",
+        "destination_organism_code": "LA0006797",
+        "subject": "Asunto",
+        "exposes": "Expone",
+        "solicit": "Solicita",
+        "archivos": ["a.pdf"],
+    }
+
+    mapped = controller.map_data(payload)
+    assert mapped["interested_address"] == "PASSEIG DEL PONT, 1"
+    assert mapped["interested_zip"] == "17163"
+    assert mapped["interested_city"] == "FORNELLS DE LA SELVA"
+    assert mapped["interested_province"] == "GIRONA"
+
+
 def test_madrid_map_data_prefers_canonical_when_legacy_missing() -> None:
     controller = MadridController()
     payload = {

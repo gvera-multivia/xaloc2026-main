@@ -136,10 +136,17 @@ async def classify_address_with_ai(
         
         respuesta = json.loads(chat_completion.choices[0].message.content)
         
-        # Validar que la vía devuelta esté en nuestra lista
+        # Validar que la vía devuelta esté en nuestra lista (normalizada para ignorar acentos)
         via_ia = (respuesta.get("via") or "").strip().upper()
-        if via_ia not in VIAS_VALIDAS:
-            via_ia = "CALLE" # Fallback de seguridad
+        via_key = _token_key(via_ia)
+        
+        found_via = "CALLE"
+        for v in VIAS_VALIDAS:
+            if _token_key(v) == via_key:
+                found_via = v
+                break
+        
+        via_ia = found_via
 
         return {
             "tipo_via": via_ia,

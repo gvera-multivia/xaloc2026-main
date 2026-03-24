@@ -37,6 +37,21 @@ class PgRuntimeStore:
     def _conn(self):
         return psycopg.connect(self.dsn)
 
+    @staticmethod
+    def _job_site_expr() -> str:
+        return "COALESCE(payload_json->>'site_id', NULLIF(split_part(dedup_key, ':', 1), ''), '')"
+
+    @staticmethod
+    def _job_resource_expr() -> str:
+        return (
+            "COALESCE("
+            "CASE WHEN (payload_json->>'idRecurso') ~ '^[0-9]+$' THEN (payload_json->>'idRecurso')::bigint END,"
+            "CASE WHEN (payload_json->>'idRecurso') ~ '^[0-9]+\\.0+$' THEN ((payload_json->>'idRecurso')::numeric)::bigint END,"
+            "CASE WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+$' THEN split_part(dedup_key, ':', 2)::bigint END,"
+            "CASE WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+\\.0+$' THEN (split_part(dedup_key, ':', 2)::numeric)::bigint END"
+            ")"
+        )
+
     def ensure_schema(self) -> None:
         with self._conn() as conn:
             with conn.cursor() as cur:
@@ -385,6 +400,96 @@ class PgRuntimeStore:
                     (str(site_id), int(resource_id)),
                 )
                 return cur.fetchone() is not None
+
+    def purge_completed_resources_from_operational_tables(
+        self,
+        *,
+        site_id: str | None = None,
+    ) -> dict[str, int]:
+        site_filter = (site_id or "").strip() or None
+        site_expr = self._job_site_expr()
+        resource_expr = self._job_resource_expr()
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    WITH successful_resources AS (
+                        SELECT DISTINCT
+                            {site_expr} AS site_id,
+                            {resource_expr} AS resource_id
+                        FROM jobs
+                        WHERE status IN ('completed', 'succeeded')
+                          AND {site_expr} <> ''
+                          AND {resource_expr} IS NOT NULL
+                          AND (%s::text IS NULL OR {site_expr} = %s::text)
+                        UNION
+                        SELECT DISTINCT
+                            btrim(site_id) AS site_id,
+                            resource_id::bigint AS resource_id
+                        FROM realtime_task_results
+                        WHERE status = 'success'
+                          AND resource_id IS NOT NULL
+                          AND btrim(site_id) <> ''
+                          AND (%s::text IS NULL OR btrim(site_id) = %s::text)
+                    ),
+                    deleted_queue AS (
+                        DELETE FROM jobs q
+                        USING successful_resources s
+                        WHERE q.status IN ('queued', 'processing')
+                          AND {site_expr.replace('payload_json', 'q.payload_json').replace('dedup_key', 'q.dedup_key')} = s.site_id
+                          AND {resource_expr.replace('payload_json', 'q.payload_json').replace('dedup_key', 'q.dedup_key')} = s.resource_id
+                        RETURNING 1
+                    ),
+                    deleted_blacklist AS (
+                        DELETE FROM blocked_resources br
+                        USING successful_resources s
+                        WHERE br.site_id = s.site_id
+                          AND br.resource_id = s.resource_id
+                        RETURNING 1
+                    ),
+                    deleted_pending_auth AS (
+                        DELETE FROM pending_authorization_queue pa
+                        USING successful_resources s
+                        WHERE pa.status = 'pending'
+                          AND pa.site_id = s.site_id
+                          AND pa.resource_id = s.resource_id
+                        RETURNING 1
+                    ),
+                    deleted_incidents AS (
+                        DELETE FROM realtime_incidents ri
+                        USING successful_resources s
+                        WHERE ri.resource_id IS NOT NULL
+                          AND ri.site_id = s.site_id
+                          AND ri.resource_id = s.resource_id
+                        RETURNING 1
+                    )
+                    SELECT
+                        (SELECT COUNT(*) FROM deleted_queue) AS deleted_queue,
+                        (SELECT COUNT(*) FROM deleted_blacklist) AS deleted_blacklist,
+                        (SELECT COUNT(*) FROM deleted_pending_auth) AS deleted_pending_auth,
+                        (SELECT COUNT(*) FROM deleted_incidents) AS deleted_incidents
+                    """,
+                    (
+                        site_filter,
+                        site_filter,
+                        site_filter,
+                        site_filter,
+                    ),
+                )
+                row = cur.fetchone()
+            conn.commit()
+
+        deleted_queue = int(row[0] if row and row[0] is not None else 0)
+        deleted_blacklist = int(row[1] if row and row[1] is not None else 0)
+        deleted_pending_auth = int(row[2] if row and row[2] is not None else 0)
+        deleted_incidents = int(row[3] if row and row[3] is not None else 0)
+        return {
+            "deleted_queue": deleted_queue,
+            "deleted_blacklist": deleted_blacklist,
+            "deleted_pending_auth": deleted_pending_auth,
+            "deleted_incidents": deleted_incidents,
+            "deleted_total": deleted_queue + deleted_blacklist + deleted_pending_auth + deleted_incidents,
+        }
 
     # Worker runtime API
     def upsert_worker_runtime(

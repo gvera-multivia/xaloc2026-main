@@ -7,6 +7,7 @@ import { incidentsApi } from '@/lib/api';
 import { sileo } from 'sileo';
 
 type Incident = {
+    incident_id?: string;
     site_id: string;
     resource_id: number | string | null;
     expediente?: string;
@@ -30,6 +31,11 @@ export default function IncidentsPage() {
     const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
     const fmtRid = (rid: number | string | null | undefined) => (rid === null || rid === undefined || rid === '' ? 'N/A' : String(rid));
     const idRid = (rid: number | string | null | undefined) => (rid === null || rid === undefined || rid === '' ? 'none' : String(rid));
+    const incidentIdOf = (inc: Incident) =>
+        String(
+            inc.incident_id ||
+            `${inc.site_id}:${idRid(inc.resource_id)}:${String(inc.incident_type || '').trim().toUpperCase() || 'UNKNOWN'}:${String(inc.expediente || '').trim().toUpperCase() || 'none'}`
+        );
 
     const fetchIncidents = async () => {
         setLoading(true);
@@ -55,7 +61,7 @@ export default function IncidentsPage() {
             setIncidents(nextItems);
             const nextLocks: Record<string, string> = {};
             for (const item of nextItems) {
-                const incidentId = `${item.site_id}:${idRid(item.resource_id)}`;
+                const incidentId = incidentIdOf(item);
                 const locked = Boolean(item.locked);
                 if (locked) {
                     const lockedBy = item.lock_username || item.lock_user_id || 'unknown';
@@ -91,7 +97,7 @@ export default function IncidentsPage() {
     }, [lastMessage]);
 
     const handleClaim = async (incident: Incident) => {
-        const id = `${incident.site_id}:${idRid(incident.resource_id)}`;
+        const id = incidentIdOf(incident);
         try {
             await incidentsApi.claim(id);
             sileo.success({ title: 'Incidencia capturada', description: 'Has tomado el control de la incidencia.' });
@@ -101,7 +107,7 @@ export default function IncidentsPage() {
     };
 
     const handleRelease = async (incident: Incident) => {
-        const id = `${incident.site_id}:${idRid(incident.resource_id)}`;
+        const id = incidentIdOf(incident);
         try {
             await incidentsApi.release(id);
             sileo.success({ title: 'Incidencia liberada', description: 'La incidencia vuelve a estar disponible.' });
@@ -171,7 +177,7 @@ export default function IncidentsPage() {
                     </thead>
                     <tbody className="divide-y divide-[rgba(255,255,255,0.06)]">
                         {incidents.map((inc, i) => {
-                            const id = `${inc.site_id}:${idRid(inc.resource_id)}`;
+                            const id = incidentIdOf(inc);
                             const lockedBy = locks[id];
                             const isExpanded = expandedIds.has(id);
                             const critical = isCritical(inc);
