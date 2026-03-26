@@ -12,6 +12,14 @@ from core.runtime_flags import get_report_pg_dsn
 
 
 class PgAdminStore:
+    XALOC_REGEX_EXPEDIENTE_CURRENT = r"^(\d{4}/\d+(?:-(?:MUL|SAD|APR))?|\d{4}-\d+-APR|\d{10})$"
+    XALOC_REGEX_EXPEDIENTE_LEGACY = (
+        r"^\d{4}/\d{6}-MUL$",
+        r"^\d{4}/\d+-MUL$",
+        r"^\d{4}/\d+(?:-MUL)?$",
+        r"^\d{4}/\d+(?:-(?:MUL|SAD))?$",
+    )
+
     def __init__(self, dsn: str, logger: Optional[logging.Logger] = None):
         self.dsn = dsn
         self.logger = logger or logging.getLogger("pg_admin_store")
@@ -381,3 +389,24 @@ class PgAdminStore:
         except Exception as exc:
             self.logger.warning("No se pudo sincronizar site_id faltantes de organismo_config en PG: %s", exc)
             return []
+
+    def upgrade_xaloc_regex_expediente(self) -> int:
+        try:
+            with self._conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE organismo_config
+                           SET regex_expediente = %s,
+                               updated_at = NOW()
+                         WHERE site_id = 'xaloc_girona'
+                           AND regex_expediente = ANY(%s)
+                        """,
+                        (self.XALOC_REGEX_EXPEDIENTE_CURRENT, list(self.XALOC_REGEX_EXPEDIENTE_LEGACY)),
+                    )
+                    updated = int(cur.rowcount or 0)
+                conn.commit()
+            return updated
+        except Exception as exc:
+            self.logger.warning("No se pudo actualizar regex_expediente de xaloc_girona en PG: %s", exc)
+            return 0

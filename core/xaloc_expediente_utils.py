@@ -2,9 +2,9 @@ import re
 
 # Formatos aceptados:
 # 1. YYYY/NNNNNN-MUL o YYYY/NNNNNN-SAD
-# 2. YYYY-NNNNNN-APR
+# 2. YYYY/NNNNNN-APR o YYYY-NNNNNN-APR
 # 3. NNNNNNNNNN (10 dígitos exactos, como 1098266110)
-VALID_EXP_REGEX = re.compile(r'^(\d{4}/\d+(?:-(?:MUL|SAD))?|\d{4}-\d+-APR|\d{10})$')
+VALID_EXP_REGEX = re.compile(r'^(\d{4}/\d+(?:-(?:MUL|SAD|APR))?|\d{4}-\d+-APR|\d{10})$')
 
 def is_valid_format(expediente: str) -> bool:
     """Checks if the expediente matches the correct Xaloc format."""

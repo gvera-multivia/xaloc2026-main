@@ -164,6 +164,7 @@ def _backfill_identity_from_sqlserver(payload: dict) -> None:
                     rs.idExp,
                     rs.numclient,
                     rs.Expedient,
+                    rs.Procedim,
                     rs.SujetoRecurso,
                     rs.FaseProcedimiento,
                     rs.Empresa,
@@ -217,6 +218,8 @@ def _backfill_identity_from_sqlserver(payload: dict) -> None:
             "sujeto_recurso": data.get("SujetoRecurso"),
             "fase_procedimiento": data.get("FaseProcedimiento"),
             "FaseProcedimiento": data.get("FaseProcedimiento"),
+            "procedim": data.get("Procedim"),
+            "Procedim": data.get("Procedim"),
             "empresa": data.get("Empresa"),
             "cif": data.get("cif"),
             "cliente_nif": data.get("nif"),
@@ -460,6 +463,7 @@ async def _append_required_client_docs(
     )
 
     existing = {str(Path(p).resolve()).lower() for p in archivos_para_subir}
+    added_docs: list[str] = []
     is_madrid = str(site_id or "").strip().lower() == "madrid"
     max_madrid_doc_bytes = 10 * 1024 * 1024
     for p in extra_docs:
@@ -484,6 +488,8 @@ async def _append_required_client_docs(
         if key not in existing:
             archivos_para_subir.append(p)
             existing.add(key)
+            added_docs.append(str(p))
+    payload["required_client_doc_paths"] = added_docs
     return archivos_para_subir
 
 

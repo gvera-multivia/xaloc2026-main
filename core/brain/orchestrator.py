@@ -24,7 +24,7 @@ from core.client_docs_service import requires_gesdoc_authorization
 from core.address_classifier import classify_addresses_batch_with_ai, classify_address_fallback
 from core.contact_defaults import get_default_contact_email
 from core.repositories import ResourceRepository
-from sites.adapters import MadridAdapter, XalocAdapter, BaseOnlineAdapter, AyuntaPalmaAdapter, RedsaraAdapter, ValenciaAdapter, AtcAdapter
+from sites.adapters import MadridAdapter, XalocAdapter, BaseOnlineAdapter, AyuntaPalmaAdapter, RedsaraAdapter, ValenciaAdapter, AtcAdapter, ServeiCatTransAdapter
 from sites.adapters.site_adapter import SiteAdapter
 
 load_dotenv()
@@ -150,6 +150,7 @@ class BrainOrchestrator:
             "redsara": RedsaraAdapter(),
             "valencia": ValenciaAdapter(),
             "atc": AtcAdapter(),
+            "servei_cat_trans": ServeiCatTransAdapter(),
         }
 
     def _record_incident_once(

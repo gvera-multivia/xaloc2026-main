@@ -1,12 +1,14 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import re
 import logging
+import os
 from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+from .cookies import dismiss_cookie_banner_if_present
 
 if TYPE_CHECKING:
     from playwright.async_api import Frame, Page
@@ -17,14 +19,223 @@ from .form_scope import wait_form_scope
 
 FAST_ACTION_TIMEOUT_MS = 1200
 FAST_SELECT_TIMEOUT_MS = 1500
+CASCADE_OPTIONS_TIMEOUT_MS = int(os.getenv("XALOC_SERVEI_CASCADE_TIMEOUT_MS", "12000"))
+
+_TIPO_VIA_LABEL_BY_CODE = {
+    "AL": "Alameda",
+    "AP": "Apartamento",
+    "AV": "Avenida",
+    "BD": "Bajada",
+    "BC": "Barranco",
+    "BO": "Barrio",
+    "BL": "Bloque",
+    "CA": "Calle",
+    "CJ": "Callejon",
+    "CM": "Camino",
+    "CR": "Carretera",
+    "CS": "Casas",
+    "CH": "Chalet",
+    "CO": "Colonia",
+    "CT": "Cuesta",
+    "DS": "Diseminado",
+    "ED": "Edificio",
+    "GL": "Glorieta",
+    "GRAN VIA": "Gran Via",
+    "GR": "Grupo",
+    "LG": "Lugar",
+    "MC": "Mercado",
+    "PQ": "Parque",
+    "PD": "Partida",
+    "PJ": "Pasaje",
+    "PS": "Paseo",
+    "PT": "Playa",
+    "PZ": "Plaza",
+    "PL": "Plazuela",
+    "PB": "Poblado",
+    "PG": "Poligono",
+    "PR": "Prolongacion",
+    "PO": "Puerto",
+    "RB": "Rambla",
+    "RD": "Ronda",
+    "SN": "Senda",
+    "SD": "Subida",
+    "TT": "Torrente",
+    "TRAVESSERA": "Travessera",
+    "TR": "Travesia",
+    "UR": "Urbanizacion",
+    "VE": "Vecindario",
+    "VIA": "Via",
+}
+
+_TIPO_VIA_CODE_BY_ALIAS = {
+    "ALAMEDA": "AL",
+    "APARTAMENTO": "AP",
+    "AVENIDA": "AV",
+    "AVDA": "AV",
+    "AV": "AV",
+    "BAJADA": "BD",
+    "BARRANCO": "BC",
+    "BARRIO": "BO",
+    "BLOQUE": "BL",
+    "CALLE": "CA",
+    "CARRER": "CA",
+    "C": "CA",
+    "CL": "CA",
+    "C/": "CA",
+    "CALLEJON": "CJ",
+    "CAMINO": "CM",
+    "CARRETERA": "CR",
+    "CASAS": "CS",
+    "CHALET": "CH",
+    "COLONIA": "CO",
+    "CUESTA": "CT",
+    "DISEMINADO": "DS",
+    "EDIFICIO": "ED",
+    "GLORIETA": "GL",
+    "GRAN VIA": "GRAN VIA",
+    "GRUPO": "GR",
+    "LUGAR": "LG",
+    "MERCADO": "MC",
+    "PARQUE": "PQ",
+    "PARTIDA": "PD",
+    "PASAJE": "PJ",
+    "PASEO": "PS",
+    "PS": "PS",
+    "PLAYA": "PT",
+    "PLAZA": "PZ",
+    "PLAZUELA": "PL",
+    "POBLADO": "PB",
+    "POLIGONO": "PG",
+    "PROLONGACION": "PR",
+    "PUERTO": "PO",
+    "RAMBLA": "RB",
+    "RONDA": "RD",
+    "SENDA": "SN",
+    "SUBIDA": "SD",
+    "TORRENTE": "TT",
+    "TRAVESSERA": "TRAVESSERA",
+    "TRAVESIA": "TR",
+    "URBANIZACION": "UR",
+    "VECINDARIO": "VE",
+    "VIA": "VIA",
+}
 
 
 def _clean(v: object) -> str:
-    return str(v or "").strip()
+    raw = str(v or "")
+    if any(ch in raw for ch in ("Ã", "Â", "â")):
+        for enc in ("latin-1", "cp1252"):
+            try:
+                fixed = raw.encode(enc, errors="strict").decode("utf-8", errors="strict")
+                if fixed:
+                    raw = fixed
+                    break
+            except Exception:
+                continue
+    raw = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]+", " ", raw)
+    return raw.strip()
 
 
 def _sanitize_doc(v: object) -> str:
     return re.sub(r"[^A-Z0-9]+", "", _clean(v).upper())
+
+
+def _sanitize_phone(v: object) -> str:
+    raw = _clean(v)
+    # El formulario de SCT valida teléfono numérico; evitamos caracteres inválidos.
+    digits = re.sub(r"\D+", "", raw)
+    return digits
+
+
+def _phone_matches(expected: str, actual: str) -> bool:
+    exp = _sanitize_phone(expected)
+    cur = _sanitize_phone(actual)
+    if not exp or not cur:
+        return False
+    if cur == exp:
+        return True
+    # Algunos campos autoformatean o añaden prefijo país.
+    return cur.endswith(exp) or exp.endswith(cur)
+
+
+def _norm_text(v: object) -> str:
+    text = _clean(v).upper()
+    if not text:
+        return ""
+    text = text.replace("/", " ").replace(".", " ").replace(",", " ")
+    text = re.sub(r"[^A-Z0-9]+", " ", text).strip()
+    return re.sub(r"\s+", " ", text)
+
+
+def _infer_tipo_via_code(raw_tipo_via: str, raw_street: str = "") -> str:
+    for candidate in (_norm_text(raw_tipo_via), _norm_text(raw_street)):
+        if not candidate:
+            continue
+        if candidate in _TIPO_VIA_LABEL_BY_CODE:
+            return candidate
+        if candidate in _TIPO_VIA_CODE_BY_ALIAS:
+            return _TIPO_VIA_CODE_BY_ALIAS[candidate]
+        # Regex mas fuerte para detectar tipo de via al inicio (abreviaturas incluidas).
+        regex_rules = (
+            (r"^(?:CARRER|CALLE|C/|CL|C)\b", "CA"),
+            (r"^(?:AVENIDA|AVDA|AV)\b", "AV"),
+            (r"^(?:PASEO|PS)\b", "PS"),
+            (r"^(?:PLAZA)\b", "PZ"),
+            (r"^(?:RONDA)\b", "RD"),
+            (r"^(?:RAMBLA)\b", "RB"),
+            (r"^(?:TRAVESIA)\b", "TR"),
+            (r"^(?:TRAVESSERA)\b", "TRAVESSERA"),
+            (r"^(?:VIA)\b", "VIA"),
+        )
+        for pattern, code in regex_rules:
+            if re.match(pattern, candidate):
+                return code
+        for alias, code in _TIPO_VIA_CODE_BY_ALIAS.items():
+            if candidate.startswith(alias + " "):
+                return code
+    return ""
+
+
+_TIPO_VIA_EXTRA_LABELS: dict[str, list[str]] = {
+    "CA": ["Calle", "Carrer", "CALLE", "CARRER", "C/"],
+    "AV": ["Avenida", "Avinguda", "AVENIDA", "AVINGUDA"],
+    "PS": ["Paseo", "Passeig", "PASEO", "PASSEIG"],
+    "PZ": ["Plaza", "Plaça", "PLAZA", "PLAÇA"],
+    "RD": ["Ronda", "RONDA"],
+    "RB": ["Rambla", "RAMBLA"],
+    "CM": ["Camino", "Camí", "CAMINO", "CAMÍ"],
+    "TR": ["Travesia", "Travessia", "TRAVESIA", "TRAVESSIA"],
+    "PJ": ["Pasaje", "Passatge", "PASAJE", "PASSATGE"],
+}
+
+
+def _tipo_via_candidates(raw_tipo_via: str, raw_street: str = "") -> list[str]:
+    candidates: list[str] = []
+    code = _infer_tipo_via_code(raw_tipo_via, raw_street)
+    if code:
+        candidates.append(code)
+        label = _TIPO_VIA_LABEL_BY_CODE.get(code, "")
+        if label:
+            candidates.append(label)
+        # Añadir variantes catalanas/castellanas del mismo codigo
+        for extra in _TIPO_VIA_EXTRA_LABELS.get(code, []):
+            candidates.append(extra)
+    raw = _clean(raw_tipo_via)
+    if raw:
+        candidates.append(raw)
+    # Fallback: si no se pudo inferir nada, usar "Calle/Carrer" como tipo por defecto
+    # (es el tipo de via mas comun y evita que el campo quede vacio).
+    if not candidates:
+        candidates.extend(["CA", "Calle", "Carrer", "CALLE", "CARRER"])
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in candidates:
+        key = _norm_text(item)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+    return out
 
 
 def _documento_persona_label(document: str) -> str:
@@ -44,6 +255,7 @@ def _documento_empresa_label(document: str) -> str:
 
 
 async def _safe_fill(page: "Page | Frame", selector: str, value: str) -> bool:
+    await dismiss_cookie_banner_if_present(page)
     text = _clean(value)
     if not text:
         return False
@@ -100,6 +312,7 @@ async def _safe_fill(page: "Page | Frame", selector: str, value: str) -> bool:
 
 
 async def _safe_check(page: "Page | Frame", selector: str) -> bool:
+    await dismiss_cookie_banner_if_present(page)
     locator = page.locator(selector).first
     if await locator.count() <= 0:
         logger.warning(f"Selector no encontrado para check: {selector}")
@@ -124,6 +337,7 @@ async def _safe_check(page: "Page | Frame", selector: str) -> bool:
 
 
 async def _safe_click(page: "Page | Frame", selector: str) -> bool:
+    await dismiss_cookie_banner_if_present(page)
     locator = page.locator(selector).first
     if await locator.count() <= 0:
         return False
@@ -135,6 +349,7 @@ async def _safe_click(page: "Page | Frame", selector: str) -> bool:
 
 
 async def _safe_select_label(page: "Page | Frame", selector: str, label: str) -> bool:
+    await dismiss_cookie_banner_if_present(page)
     wanted = _clean(label)
     if not wanted:
         return False
@@ -144,11 +359,11 @@ async def _safe_select_label(page: "Page | Frame", selector: str, label: str) ->
         return False
 
     try:
-        # Intentar selección directa Playwright
+        # Intentar selecciÃ³n directa Playwright
         await locator.select_option(label=wanted, timeout=FAST_SELECT_TIMEOUT_MS)
         return True
     except Exception:
-        # Fallback: buscar valor por texto normalizado (ignora acentos y mayúsculas) y seleccionar por valor
+        # Fallback: buscar valor por texto normalizado (ignora acentos y mayÃºsculas) y seleccionar por valor
         opt_value = await locator.evaluate(
             """(el, wantedLabel) => {
                 const normalize = (txt) => String(txt || "")
@@ -163,14 +378,14 @@ async def _safe_select_label(page: "Page | Frame", selector: str, label: str) ->
                 // 1. Coincidencia exacta normalizada
                 let match = options.find((opt) => normalize(opt.textContent || "") === wanted);
                 
-                // 2. Coincidencia parcial si no hay exacta
-                if (!match) {
-                    match = options.find((opt) => normalize(opt.textContent || "").includes(wanted));
-                }
-                
-                // 3. Fallback a valor si el label coincide con el valor (ej: "CA" -> "CA")
+                // 2. Fallback a valor si el label coincide con el valor (ej: "CA" -> "CA")
                 if (!match) {
                     match = options.find((opt) => normalize(opt.value || "") === wanted);
+                }
+
+                // 3. Coincidencia parcial solo para etiquetas suficientemente largas
+                if (!match && wanted.length >= 4) {
+                    match = options.find((opt) => normalize(opt.textContent || "").includes(wanted));
                 }
                 
                 return match ? String(match.value || "") : "";
@@ -186,7 +401,53 @@ async def _safe_select_label(page: "Page | Frame", selector: str, label: str) ->
     return False
 
 
+async def _safe_select_tipo_via(
+    page: "Page | Frame",
+    *,
+    selector: str,
+    raw_tipo_via: str,
+    raw_street: str = "",
+) -> bool:
+    # Esperar a que el select tenga opciones evita fallos intermitentes por cascada tardia.
+    if selector.startswith("#") and " " not in selector and "[" not in selector and ":" not in selector:
+        await _wait_select_options(page, selector[1:], timeout_ms=5000, min_options=2)
+    candidates = _tipo_via_candidates(raw_tipo_via, raw_street)
+    for candidate in candidates:
+        if await _safe_select_label(page, selector, candidate):
+            logger.info(
+                "servei_cat_trans tipo-via selected selector=%s raw=%r street=%r candidate=%r",
+                selector,
+                _clean(raw_tipo_via),
+                _clean(raw_street),
+                candidate,
+            )
+            return True
+
+    # Fallback duro: si no casa ninguna inferencia, forzar Calle (CA).
+    hard_fallback = ["CA", "Calle", "Carrer", "CALLE", "CARRER"]
+    for candidate in hard_fallback:
+        if await _safe_select_label(page, selector, candidate):
+            logger.warning(
+                "servei_cat_trans tipo-via fallback-forzado selector=%s raw=%r street=%r candidate=%r",
+                selector,
+                _clean(raw_tipo_via),
+                _clean(raw_street),
+                candidate,
+            )
+            return True
+
+    logger.warning(
+        "servei_cat_trans tipo-via not-selected selector=%s raw=%r street=%r candidates=%s",
+        selector,
+        _clean(raw_tipo_via),
+        _clean(raw_street),
+        candidates,
+    )
+    return False
+
+
 async def _safe_select_via_id(page: "Page | Frame", element_id: str, label: str) -> bool:
+    await dismiss_cookie_banner_if_present(page)
     wanted = _clean(label)
     if not wanted:
         return False
@@ -214,6 +475,328 @@ async def _safe_select_via_id(page: "Page | Frame", element_id: str, label: str)
             {"elementId": element_id, "wantedLabel": wanted},
         )
     )
+
+
+async def _fill_exact_input(page: "Page | Frame", selector: str, value: str) -> bool:
+    await dismiss_cookie_banner_if_present(page)
+    text = _clean(value)
+    if not text:
+        return False
+
+    locator = page.locator(selector).first
+    if await locator.count() <= 0:
+        return False
+
+    try:
+        await locator.wait_for(state="visible", timeout=10000)
+    except Exception:
+        return False
+
+    try:
+        await locator.click(timeout=FAST_ACTION_TIMEOUT_MS)
+    except Exception:
+        pass
+
+    # Prioridad al comportamiento real del smoke: foco + fill nativo + verificacion.
+    try:
+        await locator.fill(text, timeout=5000)
+        current = _clean(await locator.input_value())
+        if current == text:
+            return True
+    except Exception:
+        pass
+
+    # Si fill no persiste, forzar seleccion total + tecleo real conservando el foco.
+    try:
+        await locator.press("Control+A", timeout=FAST_ACTION_TIMEOUT_MS)
+    except Exception:
+        pass
+    try:
+        await locator.press("Meta+A", timeout=FAST_ACTION_TIMEOUT_MS)
+    except Exception:
+        pass
+    try:
+        await locator.type(text, delay=40, timeout=5000)
+        current = _clean(await locator.input_value())
+        if current == text:
+            return True
+    except Exception:
+        pass
+
+    # Ultimo recurso: set por JS + foco explicito + eventos, y verificar.
+    try:
+        await locator.evaluate(
+            """(el, val) => {
+                el.focus();
+                el.value = "";
+                el.dispatchEvent(new Event("input", { bubbles: true }));
+                el.dispatchEvent(new Event("change", { bubbles: true }));
+                el.value = String(val || "");
+                el.dispatchEvent(new Event("input", { bubbles: true }));
+                el.dispatchEvent(new Event("change", { bubbles: true }));
+                el.focus();
+            }""",
+            text,
+        )
+        current = _clean(await locator.input_value())
+        return current == text
+    except Exception:
+        return False
+
+
+async def _log_input_state(page: "Page | Frame", selector: str, label: str) -> None:
+    try:
+        state = await page.locator(selector).first.evaluate(
+            """(el) => ({
+                id: el.id || "",
+                name: el.getAttribute("name") || "",
+                value: el.value || "",
+                visible: !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length),
+                disabled: !!el.disabled,
+                readonly: !!el.readOnly || el.hasAttribute("readonly") || el.getAttribute("aria-readonly") === "true",
+                ariaLabel: el.getAttribute("aria-label") || "",
+                className: el.className || "",
+            })"""
+        )
+        logger.info("servei_cat_trans field-state %s selector=%s state=%s", label, selector, state)
+    except Exception as exc:
+        logger.warning("servei_cat_trans field-state %s selector=%s error=%s", label, selector, exc)
+
+
+async def _log_select_state(page: "Page | Frame", element_id: str, label: str) -> None:
+    try:
+        state = await page.evaluate(
+            """({ elementId }) => {
+                const el = document.getElementById(elementId);
+                if (!el) return { exists: false };
+                const options = Array.from(el.options || []).map((o) => ({
+                    value: String(o.value || ""),
+                    text: String(o.textContent || "").trim(),
+                    selected: !!o.selected,
+                }));
+                return {
+                    exists: true,
+                    disabled: !!el.disabled,
+                    value: String(el.value || ""),
+                    selectedText: (options.find((o) => o.selected) || {}).text || "",
+                    optionsCount: options.length,
+                    firstOptions: options.slice(0, 10),
+                };
+            }""",
+            {"elementId": element_id},
+        )
+        logger.info("servei_cat_trans select-state %s element_id=%s state=%s", label, element_id, state)
+    except Exception as exc:
+        logger.warning("servei_cat_trans select-state %s element_id=%s error=%s", label, element_id, exc)
+
+
+async def _wait_select_options(
+    page: "Page | Frame",
+    element_id: str,
+    *,
+    timeout_ms: int = CASCADE_OPTIONS_TIMEOUT_MS,
+    min_options: int = 2,
+) -> None:
+    waited = 0
+    step = 300
+    while waited <= timeout_ms:
+        try:
+            state = await page.evaluate(
+                """({ elementId }) => {
+                    const el = document.getElementById(elementId);
+                    if (!el) return { exists: false, enabled: false, optionsCount: 0 };
+                    const enabled = !el.disabled;
+                    const optionsCount = Array.isArray(Array.from(el.options)) ? el.options.length : 0;
+                    return { exists: true, enabled, optionsCount };
+                }""",
+                {"elementId": element_id},
+            )
+        except Exception:
+            state = {"exists": False, "enabled": False, "optionsCount": 0}
+
+        exists = bool(state.get("exists"))
+        enabled = bool(state.get("enabled"))
+        options_count = int(state.get("optionsCount") or 0)
+        if exists and enabled and options_count >= min_options:
+            return
+
+        await page.wait_for_timeout(step)
+        waited += step
+
+    logger.warning(
+        "Timeout esperando opciones en select #%s (%sms). Continuando con fallback.",
+        element_id,
+        timeout_ms,
+    )
+
+
+async def _fill_cp_comarca_municipio_smoke(
+    page: "Page | Frame",
+    cp_panel_id: str,
+    codigo_postal: str,
+    comarca: str,
+    municipio: str,
+) -> tuple[bool, bool, bool]:
+    cp_selector = f"#{cp_panel_id}-guidetextbox___widget"
+    logger.info(
+        "servei_cat_trans representado-cascade start cp_panel_id=%s cp=%r comarca=%r municipio=%r",
+        cp_panel_id,
+        _clean(codigo_postal),
+        _clean(comarca),
+        _clean(municipio),
+    )
+    await _log_input_state(page, cp_selector, "representado-cp-before")
+    ok_cp = await _fill_exact_input(page, cp_selector, codigo_postal)
+    if ok_cp:
+        try:
+            current_cp = _clean(await page.locator(cp_selector).first.input_value())
+        except Exception:
+            current_cp = ""
+        logger.info(
+            "servei_cat_trans representado-cp selector=%s expected=%s actual=%s",
+            cp_selector,
+            _clean(codigo_postal),
+            current_cp,
+        )
+    else:
+        logger.warning(
+            "servei_cat_trans representado-cp fill failed selector=%s expected=%s",
+            cp_selector,
+            _clean(codigo_postal),
+        )
+    await _log_input_state(page, cp_selector, "representado-cp-after-fill")
+    if ok_cp and _clean(codigo_postal):
+        try:
+            await page.locator(cp_selector).first.press("Tab", timeout=5000)
+        except Exception:
+            try:
+                await page.locator(cp_selector).first.focus()
+                await page.keyboard.press("Tab")
+            except Exception:
+                pass
+        await page.wait_for_timeout(1000)
+    await _log_input_state(page, cp_selector, "representado-cp-after-tab")
+    await _log_select_state(page, f"{cp_panel_id}-guidedropdownlist___widget", "representado-provincia-after-tab")
+
+    comarca_id = f"{cp_panel_id}-guidedropdownlist_2056216251___widget"
+    ok_comarca = True
+    if _clean(comarca):
+        await _wait_select_options(page, comarca_id)
+        ok_comarca = await _safe_select_via_id(page, comarca_id, comarca)
+        logger.info(
+            "servei_cat_trans representado-comarca result element_id=%s wanted=%r ok=%s",
+            comarca_id,
+            _clean(comarca),
+            ok_comarca,
+        )
+        await _log_select_state(page, comarca_id, "representado-comarca-after-select")
+        await page.wait_for_timeout(500)
+
+    municipio_id = f"{cp_panel_id}-guidedropdownlist_988023112___widget"
+    ok_municipio = True
+    if _clean(municipio):
+        await _wait_select_options(page, municipio_id)
+        ok_municipio = await _safe_select_via_id(page, municipio_id, municipio)
+        logger.info(
+            "servei_cat_trans representado-municipio result element_id=%s wanted=%r ok=%s",
+            municipio_id,
+            _clean(municipio),
+            ok_municipio,
+        )
+        await _log_select_state(page, municipio_id, "representado-municipio-after-select")
+
+    logger.info(
+        "servei_cat_trans representado-cascade end cp_ok=%s comarca_ok=%s municipio_ok=%s",
+        ok_cp,
+        ok_comarca,
+        ok_municipio,
+    )
+
+    return ok_cp, ok_comarca, ok_municipio
+
+
+async def _fill_representado_direccion_fallback(
+    page: "Page | Frame",
+    datos: "ServeiCatTransTarget",
+    *,
+    preferred_panel_id: str = "",
+    preferred_cp_panel_id: str = "",
+) -> None:
+    # Fallback seguro: solo IDs de bloques de direccion (nunca etiquetas genericas),
+    # para evitar tocar por error campos de documento (DNI/NIE).
+    panel_candidates: list[tuple[str, str]] = []
+    if _clean(preferred_panel_id) and _clean(preferred_cp_panel_id):
+        panel_candidates.append((_clean(preferred_panel_id), _clean(preferred_cp_panel_id)))
+    panel_candidates.extend(
+        [
+            (
+                "guideContainer-rootPanel-seccio_solicitant-personaFisica-PF-adreca-panel_298747259",
+                "guideContainer-rootPanel-seccio_solicitant-personaFisica-PF-adreca-panel_1697806457",
+            ),
+            (
+                "guideContainer-rootPanel-seccio_solicitant-personaFisica-adreca-panel_298747259",
+                "guideContainer-rootPanel-seccio_solicitant-personaFisica-adreca-panel_1697806457",
+            ),
+            (
+                "guideContainer-rootPanel-seccio_solicitant-personaJuridica-adreca-panel_298747259",
+                "guideContainer-rootPanel-seccio_solicitant-personaJuridica-adreca-panel_1697806457",
+            ),
+        ]
+    )
+
+    seen: set[tuple[str, str]] = set()
+    for panel_id, cp_panel_id in panel_candidates:
+        key = (panel_id, cp_panel_id)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        has_any = False
+        cp_visible = False
+        try:
+            via_locator = page.locator(f"#{panel_id}-guidetextbox___widget")
+            cp_locator = page.locator(f"#{cp_panel_id}-guidetextbox___widget")
+            has_any = (await via_locator.count() > 0) or (await cp_locator.count() > 0)
+            if await cp_locator.count() > 0:
+                cp_visible = bool(await cp_locator.first.is_visible())
+        except Exception:
+            has_any = False
+            cp_visible = False
+
+        if not has_any or not cp_visible:
+            logger.info(
+                "servei_cat_trans representado fallback panel skipped panel_id=%s cp_panel_id=%s has_any=%s cp_visible=%s",
+                panel_id,
+                cp_panel_id,
+                has_any,
+                cp_visible,
+            )
+            continue
+
+        logger.warning(
+            "servei_cat_trans representado fallback panel selected panel_id=%s cp_panel_id=%s",
+            panel_id,
+            cp_panel_id,
+        )
+
+        await _safe_select_tipo_via(
+            page,
+            selector=f"#{panel_id}-guidedropdownlist___widget",
+            raw_tipo_via=datos.representado_tipo_via,
+            raw_street=datos.representado_nombre_via,
+        )
+        await _safe_fill(page, f"#{panel_id}-guidetextbox___widget", datos.representado_nombre_via)
+        await _safe_fill(page, f"#{panel_id}-panel-guidetextbox___widget", datos.representado_numero)
+        await _fill_cp_comarca_municipio_smoke(
+            page,
+            cp_panel_id,
+            datos.representado_cp,
+            datos.representado_comarca,
+            datos.representado_municipio,
+        )
+        return
+
+    logger.warning("Fallback direccion representado: no se localizaron paneles de direccion esperados.")
 
 
 async def _find_field_id_by_label(
@@ -370,59 +953,157 @@ async def _fill_direccion(page: "Page | Frame", panel_id: str, cp_panel_id: str,
         f"{cp_panel_id}-guidedropdownlist___widget",
         datos.direccion_provincia or "Barcelona",
     )
-    # 2. ESPERAR a que Comarca cargue sus opciones (depende de Provincia)
-    await page.wait_for_timeout(2500)
-    await _safe_select_via_id(
+    # 2. Esperar a que Comarca cargue opciones (dependiente de Provincia)
+    comarca_id = f"{cp_panel_id}-guidedropdownlist_2056216251___widget"
+    await _wait_select_options(page, comarca_id)
+    ok_comarca = await _safe_select_via_id(
         page,
-        f"{cp_panel_id}-guidedropdownlist_2056216251___widget",
+        comarca_id,
         datos.direccion_comarca,
     )
-    # 3. ESPERAR a que Municipio cargue sus opciones (depende de Comarca)
-    await page.wait_for_timeout(2500)
-    await _safe_select_via_id(
+    if datos.direccion_comarca and not ok_comarca:
+        raise RuntimeError(
+            f"servei_cat_trans.formulario: no se pudo seleccionar comarca '{datos.direccion_comarca}' en presentador."
+        )
+
+    # 3. Esperar a que Municipio cargue opciones (dependiente de Comarca)
+    municipio_id = f"{cp_panel_id}-guidedropdownlist_988023112___widget"
+    await _wait_select_options(page, municipio_id)
+    ok_municipio = await _safe_select_via_id(
         page,
-        f"{cp_panel_id}-guidedropdownlist_988023112___widget",
+        municipio_id,
         datos.direccion_municipio,
     )
+    if datos.direccion_municipio and not ok_municipio:
+        raise RuntimeError(
+            f"servei_cat_trans.formulario: no se pudo seleccionar municipio '{datos.direccion_municipio}' en presentador."
+        )
 
 
 async def _fill_representado_direccion(page: "Page | Frame", panel_id: str, cp_panel_id: str, datos: "ServeiCatTransTarget") -> None:
-    # Lógica idéntica a _fill_direccion pero usando los campos de representado_*
-    await _safe_select_label(page, f"#{panel_id}-guidedropdownlist___widget", datos.representado_tipo_via)
-    await _safe_fill(page, f"#{panel_id}-guidetextbox___widget", datos.representado_nombre_via)
-    await _safe_fill(page, f"#{panel_id}-panel-guidetextbox___widget", datos.representado_numero)
-    await _safe_fill(page, f"#{cp_panel_id}-guidetextbox___widget", datos.representado_cp)
-
-    # CASCADA: Provincia -> Comarca -> Municipio para Representado
-    await _safe_select_via_id(
-        page,
-        f"{cp_panel_id}-guidedropdownlist___widget",
-        datos.representado_provincia or "Barcelona",
+    # Logica smoke exacta para representado:
+    # tipo via -> calle -> numero -> CP -> Tab -> espera -> comarca -> espera -> municipio.
+    logger.info(
+        "servei_cat_trans representado-direccion start panel_id=%s cp_panel_id=%s via=%r calle=%r numero=%r cp=%r provincia=%r comarca=%r municipio=%r",
+        panel_id,
+        cp_panel_id,
+        datos.representado_tipo_via,
+        datos.representado_nombre_via,
+        datos.representado_numero,
+        datos.representado_cp,
+        datos.representado_provincia,
+        datos.representado_comarca,
+        datos.representado_municipio,
     )
-    await page.wait_for_timeout(2500)
-    if datos.representado_comarca:
-        await _safe_select_via_id(
-            page,
-            f"{cp_panel_id}-guidedropdownlist_2056216251___widget",
-            datos.representado_comarca,
+    await _log_input_state(page, f"#{panel_id}-guidetextbox___widget", "representado-calle-before")
+    await _log_input_state(page, f"#{panel_id}-panel-guidetextbox___widget", "representado-numero-before")
+    ok_tipo = await _safe_select_tipo_via(
+        page,
+        selector=f"#{panel_id}-guidedropdownlist___widget",
+        raw_tipo_via=datos.representado_tipo_via,
+        raw_street=datos.representado_nombre_via,
+    )
+    ok_calle = await _fill_exact_input(page, f"#{panel_id}-guidetextbox___widget", datos.representado_nombre_via)
+    ok_num = await _fill_exact_input(page, f"#{panel_id}-panel-guidetextbox___widget", datos.representado_numero)
+    await _log_input_state(page, f"#{panel_id}-guidetextbox___widget", "representado-calle-after")
+    await _log_input_state(page, f"#{panel_id}-panel-guidetextbox___widget", "representado-numero-after")
+    ok_cp, ok_comarca, ok_municipio = await _fill_cp_comarca_municipio_smoke(
+        page,
+        cp_panel_id,
+        datos.representado_cp,
+        datos.representado_comarca,
+        datos.representado_municipio,
+    )
+
+    if not (ok_tipo and ok_calle and ok_num and ok_cp and ok_comarca and ok_municipio):
+        logger.warning(
+            "Representado direccion incompleta por IDs (via=%s calle=%s num=%s cp=%s comarca=%s municipio=%s). Fallback seguro por IDs.",
+            ok_tipo,
+            ok_calle,
+            ok_num,
+            ok_cp,
+            ok_comarca,
+            ok_municipio,
         )
-        await page.wait_for_timeout(2500)
-    if datos.representado_municipio:
-        await _safe_select_via_id(
+        await _fill_representado_direccion_fallback(
             page,
-            f"{cp_panel_id}-guidedropdownlist_988023112___widget",
-            datos.representado_municipio,
+            datos,
+            preferred_panel_id=panel_id,
+            preferred_cp_panel_id=cp_panel_id,
         )
+
+
+async def _safe_fill_phone_by_label(
+    page: "Page | Frame",
+    *,
+    section_selector: str,
+    fallback_selector: str,
+    phone: str,
+) -> None:
+    phone_value = _sanitize_phone(phone)
+    if not phone_value:
+        logger.warning("servei_cat_trans telefono vacio tras sanitizacion; no se rellena campo.")
+        return
+
+    if await _fill_phone_input(page, fallback_selector, phone_value):
+        return
+    tel_id = await _find_field_id_by_label(
+        page,
+        section_selector,
+        ["telefono movil", "telefon mobil", "movil", "mobil", "telefono"],
+        field_kind="input",
+    )
+    if tel_id:
+        if await _fill_phone_input(page, f"#{tel_id}", phone_value):
+            logger.info("servei_cat_trans telefono rellenado por label en #%s", tel_id)
+            return
+
+    # Ultimo fallback: buscar input visible de telefono en la seccion.
+    generic_phone_id = await page.evaluate(
+        """({ sectionSelector }) => {
+            const section = document.querySelector(sectionSelector) || document;
+            const normalize = (txt) => String(txt || "")
+                .normalize("NFD")
+                .replace(/[\\u0300-\\u036f]/g, "")
+                .toLowerCase();
+            const candidates = Array.from(section.querySelectorAll("input"));
+            for (const el of candidates) {
+                const aria = normalize(el.getAttribute("aria-label") || "");
+                const type = normalize(el.getAttribute("type") || "");
+                const inputmode = normalize(el.getAttribute("inputmode") || "");
+                if (aria.includes("telefon") || aria.includes("telefono") || type === "tel" || inputmode === "tel") {
+                    if (el.id && !el.disabled && !el.readOnly) return el.id;
+                }
+            }
+            return "";
+        }""",
+        {"sectionSelector": section_selector},
+    )
+    generic_phone_id = str(generic_phone_id or "").strip()
+    if generic_phone_id:
+        ok = await _fill_phone_input(page, f"#{generic_phone_id}", phone_value)
+        logger.info(
+            "servei_cat_trans telefono fallback generico id=%s ok=%s value=%s",
+            generic_phone_id,
+            ok,
+            phone_value,
+        )
+    else:
+        logger.warning("servei_cat_trans no se encontro input de telefono en seccion=%s", section_selector)
 
 
 async def _fill_presentador_contacto(page: "Page | Frame", datos: "ServeiCatTransTarget") -> None:
     prefix = "guideContainer-rootPanel-seccio_presentador-personaJuridica-PJ"
     
     # Prioridad absoluta a aria-label exacta para evitar confusiones con otros campos similares
-    if not await _safe_fill(page, f"input[id^='{prefix}'][aria-label='Teléfono móvil'], input[id^='{prefix}'][aria-label='Telèfon mòbil']", datos.telefono_movil):
-         await _safe_fill(page, f"input[id^='{prefix}-panel_'][id$='-guidetextbox___widget']", datos.telefono_movil)
+    await _safe_fill_phone_by_label(
+        page,
+        section_selector="[id^='guideContainer-rootPanel-seccio_presentador']",
+        fallback_selector=f"input[id^='{prefix}'][aria-label='TelÃ©fono mÃ³vil'], input[id^='{prefix}'][aria-label='TelÃ¨fon mÃ²bil']",
+        phone=datos.telefono_movil,
+    )
 
-    if not await _safe_fill(page, f"input[id^='{prefix}'][aria-label='Correo electrónico'], input[id^='{prefix}'][aria-label='Adreça electrònica'], input[id^='{prefix}'][aria-label='Correu electrònic']", datos.email):
+    if not await _safe_fill(page, f"input[id^='{prefix}'][aria-label='Correo electrÃ³nico'], input[id^='{prefix}'][aria-label='AdreÃ§a electrÃ²nica'], input[id^='{prefix}'][aria-label='Correu electrÃ²nic']", datos.email):
          await _safe_fill(page, f"input[id^='{prefix}-panel_'][id$='-guidetextbox_31092572___widget']", datos.email)
 
     await _fill_direccion(
@@ -450,11 +1131,15 @@ async def _fill_solicitante_fisica(page: "Page | Frame", datos: "ServeiCatTransT
     if not await _safe_fill(page, f"input[id^='{prefix}'][aria-label='Correo electr\u00f3nico'], input[id^='{prefix}'][aria-label='Adre\u00e7a electr\u00f2nica'], input[id^='{prefix}'][aria-label='Correu electr\u00f2nic']", datos.email):
         await _safe_fill(page, f"input[id^='{prefix}'][id$='-guidetextbox_31092572___widget']", datos.email)
 
-    if not await _safe_fill(page, f"input[id^='{prefix}'][aria-label='Teléfono móvil'], input[id^='{prefix}'][aria-label='Telèfon mòbil']", datos.telefono_movil):
-        await _safe_fill(page, f"input[id^='{prefix}'][id$='-guidetextbox___widget']", datos.telefono_movil)
+    await _safe_fill_phone_by_label(
+        page,
+        section_selector="[id^='guideContainer-rootPanel-seccio_solicitant-personaFisica']",
+        fallback_selector=f"input[id^='{prefix}'][aria-label='TelÃ©fono mÃ³vil'], input[id^='{prefix}'][aria-label='TelÃ¨fon mÃ²bil']",
+        phone=datos.telefono_movil,
+    )
 
-    # Dirección del solicitante (persona física)
-    # Probar con prefijo -PF (segun md) y sin él (por si acaso es como PJ)
+    # DirecciÃ³n del solicitante (persona fÃ­sica)
+    # Probar con prefijo -PF (segun md) y sin Ã©l (por si acaso es como PJ)
     await page.wait_for_timeout(1000) # Esperar a que se despliegue
     panel_id = f"{base}-adreca-panel_298747259"
     cp_panel_id = f"{base}-adreca-panel_1697806457"
@@ -464,6 +1149,12 @@ async def _fill_solicitante_fisica(page: "Page | Frame", datos: "ServeiCatTransT
         base_short = base.replace("-PF", "")
         panel_id = f"{base_short}-adreca-panel_298747259"
         cp_panel_id = f"{base_short}-adreca-panel_1697806457"
+
+    logger.info(
+        "servei_cat_trans solicitante_fisica direccion panel chosen panel_id=%s cp_panel_id=%s",
+        panel_id,
+        cp_panel_id,
+    )
 
     await _fill_representado_direccion(
         page,
@@ -495,13 +1186,22 @@ async def _fill_solicitante_juridica(page: "Page | Frame", datos: "ServeiCatTran
     # Email y Movil del representante (panel_XXXXX dinamico DENTRO de panel_21004007)
     # Prioridad aria-label exacta, fallback a prefijo panel_21004007
     rep_prefix = f"{rep}-panel_"
-    if not await _safe_fill(page, f"input[id^='{rep_prefix}'][aria-label='Teléfono móvil'], input[id^='{rep_prefix}'][aria-label='Telèfon mòbil']", datos.telefono_movil):
-        await _safe_fill(page, f"input[id^='{rep_prefix}'][id$='-guidetextbox___widget']", datos.telefono_movil)
+    await _safe_fill_phone_by_label(
+        page,
+        section_selector=f"#{rep}",
+        fallback_selector=f"input[id^='{rep_prefix}'][aria-label='TelÃ©fono mÃ³vil'], input[id^='{rep_prefix}'][aria-label='TelÃ¨fon mÃ²bil']",
+        phone=datos.telefono_movil,
+    )
 
-    if not await _safe_fill(page, f"input[id^='{rep_prefix}'][aria-label='Correo electrónico'], input[id^='{rep_prefix}'][aria-label='Adreça electrònica'], input[id^='{rep_prefix}'][aria-label='Correu electrònic']", datos.email):
+    if not await _safe_fill(page, f"input[id^='{rep_prefix}'][aria-label='Correo electrÃ³nico'], input[id^='{rep_prefix}'][aria-label='AdreÃ§a electrÃ²nica'], input[id^='{rep_prefix}'][aria-label='Correu electrÃ²nic']", datos.email):
         await _safe_fill(page, f"input[id^='{rep_prefix}'][id$='-guidetextbox_31092572___widget']", datos.email)
 
-    # Dirección del representante (de la persona jurídica solicitante)
+    # DirecciÃ³n del representante (de la persona jurÃ­dica solicitante)
+    logger.info(
+        "servei_cat_trans solicitante_juridica direccion panel chosen panel_id=%s cp_panel_id=%s",
+        "guideContainer-rootPanel-seccio_solicitant-personaJuridica-adreca-panel_298747259",
+        "guideContainer-rootPanel-seccio_solicitant-personaJuridica-adreca-panel_1697806457",
+    )
     await _fill_representado_direccion(
         page,
         panel_id="guideContainer-rootPanel-seccio_solicitant-personaJuridica-adreca-panel_298747259",
@@ -519,16 +1219,118 @@ async def _fill_notificaciones(page: "Page | Frame", datos: "ServeiCatTransTarge
         except Exception:
             pass
 
-    await _safe_fill(
+    await _fill_exact_input(
         page,
         "#guideContainer-rootPanel-seccio_declaracions-declaracionsText-guidetextbox_6143511_740763653___widget",
         datos.email,
     )
-    await _safe_fill(
+    phone_value = _sanitize_phone(datos.telefono_movil)
+    ok_phone = await _fill_phone_input(
         page,
-        "#guideContainer-rootPanel-seccio_declaracions-declaracionsText-guidetextbox_6143511___widget",
-        datos.telefono_movil,
+        (
+            "input[id^='guideContainer-rootPanel-seccio_notificacions-notificacio-panel_']"
+            "[id$='-guidetextbox_copy_17___widget']"
+        ),
+        phone_value,
     )
+    if not ok_phone:
+        ok_phone = await _fill_phone_input(
+            page,
+            (
+                "input[id^='guideContainer-rootPanel-seccio_notificacions-notificacio-panel_']"
+                "[aria-label='TelÃ©fono mÃ³vil'], "
+                "input[id^='guideContainer-rootPanel-seccio_notificacions-notificacio-panel_']"
+                "[aria-label='Teléfono móvil'], "
+                "input[id^='guideContainer-rootPanel-seccio_notificacions-notificacio-panel_']"
+                "[aria-label='TelÃ¨fon mÃ²bil'], "
+                "input[id^='guideContainer-rootPanel-seccio_notificacions-notificacio-panel_']"
+                "[aria-label='Telèfon mòbil']"
+            ),
+            phone_value,
+        )
+    if not ok_phone:
+        tel_id = await _find_field_id_by_label(
+            page,
+            "[id^='guideContainer-rootPanel-seccio_notificacions']",
+            ["telefono", "telefon", "movil", "mobil"],
+            field_kind="input",
+        )
+        if tel_id:
+            ok_phone = await _fill_phone_input(page, f"#{tel_id}", phone_value)
+            logger.info("servei_cat_trans notificaciones telefono fallback id=%s ok=%s", tel_id, ok_phone)
+    logger.info("servei_cat_trans notificaciones telefono final ok=%s value=%s", ok_phone, phone_value)
+
+
+async def _fill_phone_input(page: "Page | Frame", selector: str, value: str) -> bool:
+    phone = _sanitize_phone(value)
+    if not phone:
+        return False
+
+    locator = page.locator(selector)
+    count = await locator.count()
+    if count <= 0:
+        return False
+
+    for idx in range(count):
+        candidate = locator.nth(idx)
+        try:
+            if not await candidate.is_visible():
+                continue
+        except Exception:
+            continue
+        try:
+            if await candidate.is_disabled():
+                continue
+        except Exception:
+            pass
+
+        async def _matches_now() -> bool:
+            try:
+                current = await candidate.input_value()
+            except Exception:
+                current = ""
+            return _phone_matches(phone, current)
+
+        try:
+            await candidate.fill(phone, timeout=FAST_ACTION_TIMEOUT_MS)
+            if await _matches_now():
+                return True
+        except Exception:
+            pass
+
+        try:
+            await candidate.click(timeout=FAST_ACTION_TIMEOUT_MS)
+        except Exception:
+            pass
+        for key in ("Control+A", "Meta+A"):
+            try:
+                await candidate.press(key, timeout=FAST_ACTION_TIMEOUT_MS)
+            except Exception:
+                pass
+        try:
+            await candidate.type(phone, delay=25, timeout=FAST_ACTION_TIMEOUT_MS)
+            if await _matches_now():
+                return True
+        except Exception:
+            pass
+
+        try:
+            await candidate.evaluate(
+                """(el, val) => {
+                    el.focus();
+                    el.value = String(val || "");
+                    el.dispatchEvent(new Event("input", { bubbles: true }));
+                    el.dispatchEvent(new Event("change", { bubbles: true }));
+                    el.blur();
+                }""",
+                phone,
+            )
+            if await _matches_now():
+                return True
+        except Exception:
+            pass
+
+    return False
 
 
 async def _fill_expediente(page: "Page | Frame", datos: "ServeiCatTransTarget", config: "ServeiCatTransConfig") -> None:

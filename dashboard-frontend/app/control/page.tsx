@@ -2,16 +2,12 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import {
-    Terminal as TerminalIcon,
     Play,
     Square,
     RotateCcw,
     AlertCircle,
     Cpu,
-    Database,
-    ArrowRight,
-    Maximize2,
-    Settings2
+    Database
 } from 'lucide-react';
 import { controlApi } from '@/lib/api';
 import { ProcessStatus } from '@/lib/types';
@@ -24,28 +20,26 @@ function cn(...inputs: ClassValue[]) {
 }
 
 export default function ControlPage() {
-    const [status, setStatus] = useState<{ worker: string; brain: string; frontend: string }>({ worker: 'stopped', brain: 'stopped', frontend: 'stopped' });
-    const [logs, setLogs] = useState<{ worker: string[]; brain: string[]; frontend: string[] }>({ worker: [], brain: [], frontend: [] });
+    const [status, setStatus] = useState<{ worker: string; brain: string }>({ worker: 'stopped', brain: 'stopped' });
+    const [logs, setLogs] = useState<{ worker: string[]; brain: string[] }>({ worker: [], brain: [] });
     const [busy, setBusy] = useState<string | null>(null);
     const [autoScroll, setAutoScroll] = useState(true);
 
     const workerLogRef = useRef<HTMLDivElement>(null);
     const brainLogRef = useRef<HTMLDivElement>(null);
-    const frontendLogRef = useRef<HTMLDivElement>(null);
+
 
     const refresh = async () => {
         try {
-            const [statusRes, workerLogs, brainLogs, frontendLogs] = await Promise.all([
+            const [statusRes, workerLogs, brainLogs] = await Promise.all([
                 controlApi.getStatus(),
                 controlApi.getLogs('worker', 100),
                 controlApi.getLogs('brain', 100),
-                controlApi.getLogs('frontend', 100),
             ]);
-            setStatus({ ...(statusRes || {}), frontend: frontendLogs.status || 'stopped' });
+            setStatus({ ...(statusRes || {}) });
             setLogs({
                 worker: workerLogs.stdout || [],
                 brain: brainLogs.stdout || [],
-                frontend: frontendLogs.stdout || [],
             });
         } catch (e) {
             sileo.error({ title: 'Error de conexión', description: 'No se pudo conectar con el servicio de control.' });
@@ -62,11 +56,10 @@ export default function ControlPage() {
         if (!autoScroll) return;
         if (workerLogRef.current) workerLogRef.current.scrollTop = workerLogRef.current.scrollHeight;
         if (brainLogRef.current) brainLogRef.current.scrollTop = brainLogRef.current.scrollHeight;
-        if (frontendLogRef.current) frontendLogRef.current.scrollTop = frontendLogRef.current.scrollHeight;
+
     }, [logs, autoScroll]);
 
-    const handleControl = async (name: 'worker' | 'brain' | 'frontend', action: 'start' | 'stop' | 'restart') => {
-        if (name === 'frontend') return;
+    const handleControl = async (name: 'worker' | 'brain', action: 'start' | 'stop' | 'restart') => {
         setBusy(`${name}-${action}`);
         try {
             if (action === 'start') await controlApi.start(name);
@@ -81,11 +74,11 @@ export default function ControlPage() {
         }
     };
 
-    const renderProcessCard = (name: 'worker' | 'brain' | 'frontend', logRef: React.RefObject<HTMLDivElement | null>) => {
+    const renderProcessCard = (name: 'worker' | 'brain', logRef: React.RefObject<HTMLDivElement | null>) => {
         const isRunning = status[name] === 'running';
-        const Icon = name === 'worker' ? Cpu : (name === 'brain' ? Database : TerminalIcon);
+        const Icon = name === 'worker' ? Cpu : Database;
         const processLogs = logs[name];
-        const readOnly = name === 'frontend';
+        const readOnly = false;
 
         return (
             <div className="flex flex-col h-full bg-card border border-border rounded-3xl overflow-hidden shadow-xl">
@@ -189,33 +182,8 @@ export default function ControlPage() {
                 {renderProcessCard('worker', workerLogRef)}
                 {renderProcessCard('brain', brainLogRef)}
             </div>
-            <div className="grid grid-cols-1 gap-6">
-                {renderProcessCard('frontend', frontendLogRef)}
-            </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="bg-card border border-border rounded-2xl p-4 flex items-center gap-4">
-                    <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center text-primary">
-                        <Settings2 size={24} />
-                    </div>
-                    <div>
-                        <h4 className="text-sm font-bold">Configuración</h4>
-                        <p className="text-xs text-muted-foreground">Ajustes de infraestructura</p>
-                    </div>
-                    <ArrowRight className="ml-auto text-muted-foreground/30" size={16} />
-                </div>
 
-                <div className="bg-card border border-border rounded-2xl p-4 flex items-center gap-4">
-                    <div className="w-12 h-12 bg-blue-400/10 rounded-xl flex items-center justify-center text-blue-400">
-                        <Maximize2 size={24} />
-                    </div>
-                    <div>
-                        <h4 className="text-sm font-bold">Logs Globales</h4>
-                        <p className="text-xs text-muted-foreground">Ver historial completo</p>
-                    </div>
-                    <ArrowRight className="ml-auto text-muted-foreground/30" size={16} />
-                </div>
-            </div>
         </div>
     );
 }

@@ -32,5 +32,8 @@ reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 
 reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 22 /t REG_SZ /d "{\"pattern\":\"https://atc.gencat.cat/*\",\"filter\":{\"SUBJECT\":{\"CN\":\"%CN%\"}}}" /f >nul
 reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 23 /t REG_SZ /d "{\"pattern\":\"https://seu.atc.gencat.cat/*\",\"filter\":{\"SUBJECT\":{\"CN\":\"%CN%\"}}}" /f >nul
 reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 24 /t REG_SZ /d "{\"pattern\":\"https://seu2.atc.gencat.cat/*\",\"filter\":{\"SUBJECT\":{\"CN\":\"%CN%\"}}}" /f >nul
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 25 /t REG_SZ /d "{\"pattern\":\"https://ovt.gencat.cat/*\",\"filter\":{\"SUBJECT\":{\"CN\":\"%CN%\"}}}" /f >nul
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 26 /t REG_SZ /d "{\"pattern\":\"https://transit.gencat.cat/*\",\"filter\":{\"SUBJECT\":{\"CN\":\"%CN%\"}}}" /f >nul
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\AutoSelectCertificateForUrls" /v 27 /t REG_SZ /d "{\"pattern\":\"https://signador.aoc.cat/*\",\"filter\":{\"SUBJECT\":{\"CN\":\"%CN%\"}}}" /f >nul
 :: Solo imprimimos esto si llegamos aqui
 echo EXITOSOS

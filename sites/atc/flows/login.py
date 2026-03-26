@@ -23,6 +23,8 @@ _POST_AUTH_READY_URL_MARKERS = (
     "tramitsgenerics.aspx",
     "/secured/reas/identificacio",
     "/secured/recurs/identificacio",
+    "/secured/reas/",
+    "/secured/recurs/",
 )
 
 _PUBLIC_REPOSICIO_URL_MARKERS = (
@@ -35,7 +37,7 @@ ATC_LOGIN_SHORT_TIMEOUT_MS = 5000
 ATC_LOGIN_MEDIUM_TIMEOUT_MS = 15000
 ATC_LOGIN_LONG_TIMEOUT_MS = 30000
 ATC_LOGIN_ENTRY_TIMEOUT_MS = 30000
-ATC_LOGIN_AUTH_TIMEOUT_MS = 120000
+ATC_LOGIN_AUTH_TIMEOUT_MS = 180000
 
 _CERT_BUTTON_SELECTOR = (
     "#btnContinuaCert, "
@@ -779,12 +781,14 @@ async def _login_rea_or_repos(page: "Page", config: "AtcConfig", datos: "AtcTarg
         if not _is_auth_url(page.url or "") and not _is_post_auth_ready_url(page.url or ""):
             presentar_clicked = await _click_presentar_reposicio(page, timeout=ATC_LOGIN_MEDIUM_TIMEOUT_MS)
             if not presentar_clicked and not await _reposicio_start_link_available(page):
-                raise RuntimeError("atc.login: no se encontro boton/enlace 'Presentar recurs de reposicio'.")
+                # En algunas variantes ATC no muestra este CTA y pasa directo al inicio/auth.
+                await page.wait_for_timeout(1200)
 
         if not _is_auth_url(page.url or "") and not _is_post_auth_ready_url(page.url or ""):
             internet_ready = await _expand_reposicio_online_access(page, timeout=ATC_LOGIN_MEDIUM_TIMEOUT_MS)
             if not internet_ready and not await _reposicio_start_link_available(page):
-                raise RuntimeError("atc.login: no se encontro acceso 'Per internet' ni enlace de inicio del tramite.")
+                # Tolerante: dejamos que _wait_for_reposicio_entry termine de resolver la navegación.
+                await page.wait_for_timeout(1200)
 
             # Esperar a que el acordeon termine de renderizar antes de buscar el enlace de inicio.
             await page.wait_for_timeout(1500)

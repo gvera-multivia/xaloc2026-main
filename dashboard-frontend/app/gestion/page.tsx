@@ -28,7 +28,7 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-const KNOWN_SITES = ["madrid", "xaloc_girona", "base_online", "ayunta_palma", "redsara", "terrassa", "valencia", "atc"];
+const KNOWN_SITES = ["madrid", "xaloc_girona", "base_online", "ayunta_palma", "redsara", "terrassa", "valencia", "atc", "servei_cat_trans"];
 
 /**
  * MORRIGAN ADMIN PAGE

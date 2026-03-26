@@ -64,3 +64,40 @@ docker compose -f infra/docker/docker-compose.microservices.yml ps
 - [ ] Los endpoints citados siguen existentes en `dashboard_api.py`.
 - [ ] Los runbooks de certificados/firma reflejan el entrypoint actual de runner.
 - [ ] Las guias de nuevos sites siguen el patron real de `sites/`, `sites/adapters` y `services/brain_claim/app.py`.
+
+
+
+
+
+
+# IMPORTANTE
+
+> Si se quieren aplicar cambios a las automatizaciones correr desde el directorio base del proyectos `python scripts/stack_control.py --restart`
+
+> Si se quieren aplicar cambios a la naturaleza de docker (cambiar el compose o algo asi) `python scripts/stack_control.py --restart-rebuild`
+
+> Si se quiere apagar todo `python scripts/stack_control.py --stop`
+
+> Si se quiere iniciar `python scripts/stack_control.py --start`
+
+
+
+USUARIO ADMINISTRADOR SEED -> TheMorrigan
+PWD -> WeAreTheMorrigan
+
+
+> Los datos en el .evn son criticos, si se borra la cuenta de correo de gvera@xvia-serviciosjuridicos.com tendreis que cambiar los datos. (cambiar cuenta y contraseña de la pagina de Juan para que no dependa de la mia)
+
+> Lo mismo para el perfil movil de windows, habra que cambiarlo en el .env
+
+> Y posiblemente lo mismo para la api de groq, habra que crear una nueva cuenta en groq y pillar un nuevo token, todo esto se pone en el .env del directorio base
+
+
+
+
+> Por si os interesa hay una api de mapas de toda españa hosteada en este proyecto (CARTOCIUDAD) se puede ver en el puerto 8020
+
+
+Si todo esta bien y corriendo en este ordenador podreis ver Morrigan corriendo en 192.184.168.72 (sin especificar puerto)
+
+Y cartociudad api en 192.184.168.72:8020 o 192.184.168.72:8020/docs para ver el Swagger

@@ -26,6 +26,7 @@ class ResourceRepository:
         "diputacio_bcn",
         "valencia",
         "atc",
+        "servei_cat_trans",
     }
 
     SQL_CANONICAL_SUPERSET = """

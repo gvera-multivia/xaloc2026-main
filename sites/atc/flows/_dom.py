@@ -25,8 +25,11 @@ def _norm_digits(value: str) -> str:
 
 
 async def wait_locator_ready(locator: "Locator", *, timeout: int = ATC_DOM_TIMEOUT_MS) -> None:
-    if await locator.count() <= 0:
-        raise RuntimeError("atc.dom: locator sin elementos.")
+    try:
+        await locator.first.wait_for(state="attached", timeout=timeout)
+    except Exception:
+        if await locator.count() <= 0:
+            raise RuntimeError("atc.dom: locator sin elementos.")
 
     try:
         await locator.wait_for(state="visible", timeout=timeout)

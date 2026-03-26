@@ -4,7 +4,7 @@
                         "site_id":  "xaloc_girona",
                         "query_organisme":  "%XALOC%",
                         "filtro_texp":  "2,3",
-                        "regex_expediente":  "^\\d{4}/\\d+(?:-(?:MUL|SAD))?$",
+                        "regex_expediente":  "^(\\d{4}/\\d+(?:-(?:MUL|SAD|APR))?|\\d{4}-\\d+-APR|\\d{10})$",
                         "claim_limit_per_tick":  null,
                         "login_url":  "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login",
                         "recursos_url":  "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos",
@@ -98,6 +98,17 @@
                         "recursos_url":  "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos",
                         "active":  true,
                         "notes":  "Diputacio BCN ORGT - filtro final en adapter con org_identif_direct y bloqueo temporal de apremio/embargo/identificacion"
+                    },
+                    {
+                        "site_id":  "servei_cat_trans",
+                        "query_organisme":  "%SERVEI CATALA DE TRANSIT DE%",
+                        "filtro_texp":  "2,3",
+                        "regex_expediente":  "^\\d{2}[-/]\\d{7,8}-\\d$",
+                        "claim_limit_per_tick":  null,
+                        "login_url":  "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login",
+                        "recursos_url":  "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos",
+                        "active":  true,
+                        "notes":  "Servei Cat Transit - filtro por organismo SCT y expediente ##-########-# / ##/########-#"
                     }
                 ]
 }

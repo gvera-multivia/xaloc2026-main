@@ -34,6 +34,7 @@ from sites.adapters import (
     ValenciaAdapter,
     AtcAdapter,
     DiputacioBcnAdapter,
+    ServeiCatTransAdapter,
 )
 from sites.adapters.site_adapter import SiteAdapter
 from services.brain_claim.processable_validator import validate_candidate
@@ -84,6 +85,9 @@ class BrainClaimService:
         inserted_missing = self.admin_store.seed_missing_organismo_configs()
         if inserted_missing:
             logger.info("[brain-claim] sincronizados site_id faltantes en PG: %s", ", ".join(sorted(inserted_missing)))
+        updated_xaloc_regex = self.admin_store.upgrade_xaloc_regex_expediente()
+        if updated_xaloc_regex:
+            logger.info("[brain-claim] actualizado regex_expediente legacy de xaloc_girona en PG: %s", updated_xaloc_regex)
         self.sqlserver_conn_str = build_sqlserver_connection_string()
         self.resource_repo = ResourceRepository(conn_str=self.sqlserver_conn_str, logger=logger)
         self.consultor = ConsultorService(conn_str=self.sqlserver_conn_str, logger=logger, repository=self.resource_repo)
@@ -124,6 +128,7 @@ class BrainClaimService:
             "valencia": ValenciaAdapter(),
             "atc": AtcAdapter(),
             "diputacio_bcn": DiputacioBcnAdapter(),
+            "servei_cat_trans": ServeiCatTransAdapter(),
         }
         if full_sites_env == "all":
             self.full_payload_sites = set(self.adapters.keys())

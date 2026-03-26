@@ -42,6 +42,7 @@ MUNICIPIO_TO_CODE: dict[str, str] = {
     "CERDANYOLA DEL VALLES": "266",
     "MOLINS DE REI": "122",
     "MONTGAT": "125",
+    "GRANOLLERS": "096",
     "IGUALADA": "101",
     "SANT FELIU DE LLOBREGAT": "210",
     "SANT JOAN DESPI": "216",

@@ -5,7 +5,7 @@ CERT_PATH="${PLAYWRIGHT_CERT_PATH:-/data/certificates/certificate.pfx}"
 PROFILE_DIR="${PLAYWRIGHT_PROFILE_DIR:-/app/profiles/worker}"
 NSS_DB_DIR="${PLAYWRIGHT_NSS_DB_DIR:-$PROFILE_DIR}"
 CERT_REQUIRED="${PLAYWRIGHT_CERT_REQUIRED:-1}"
-CERT_CN="${CERTIFICADO_CN:-35059210B MARIA TERESA MORENTE (R: B62798210)}"
+CERT_CN="${XALOC_CERT_CN:-${XALOC_CERT_SUBJECT_CN:-${CERTIFICADO_CN:-35059210B MARIA TERESA MORENTE (R: B62798210)}}}"
 CERT_FILTER_BY_CN="${XALOC_CERT_FILTER_BY_CN:-0}"
 AUTOSELECT_POLICY_ENABLED="${XALOC_CERT_AUTOSELECT_VIA_POLICY:-1}"
 AUTOSELECT_RULES_JSON="${XALOC_CERT_AUTOSELECT_RULES_JSON:-}"
@@ -15,6 +15,7 @@ AFIRMA_ORIGIN="${XALOC_AUTOFIRMA_ORIGIN:-https://palma.sedipualba.es}"
 AFIRMA_ALLOWED_ORIGINS="${XALOC_AUTOFIRMA_ALLOWED_ORIGINS:-}"
 AFIRMA_PROTOCOLS="${XALOC_AUTOFIRMA_PROTOCOLS:-afirma,xalocafirma}"
 AFIRMA_PROTOCOL_POLICY_ENABLED="${XALOC_AUTOFIRMA_PROTOCOL_POLICY_ENABLED:-1}"
+JAVAWS_AUTO_APPROVE="${XALOC_JAVAWS_AUTO_APPROVE:-1}"
 
 # En algunos entornos compose/Windows, HOME puede llegar corrupto (ej. C:Users...).
 # Forzamos un HOME Linux estable para que Chromium localice NSS correctamente.
@@ -63,6 +64,9 @@ default_patterns = [
     "https://seu2.atc.gencat.cat/*",
     "https://seu.atc.gencat.cat/*",
     "https://atc.gencat.cat/*",
+    "https://ovt.gencat.cat/*",
+    "https://transit.gencat.cat/*",
+    "https://signador.aoc.cat/*",
     "https://cas.madrid.es/*",
     "https://pasarela.clave.gob.es/*",
     "https://[*.]madrid.es/*",
@@ -218,6 +222,117 @@ start_autofirma_always_on() {
   fi
 }
 
+ensure_java8_for_jnlp() {
+  local java8_dir="/tmp/jdk8u432-b06-jre"
+  if [[ -x "$java8_dir/bin/java" ]]; then
+    echo "[playwright-runner] Java 8 ya disponible en $java8_dir"
+    return 0
+  fi
+  echo "[playwright-runner] Descargando Adoptium JRE 8 para compatibilidad con applet signador.aoc.cat..."
+  local url="https://github.com/adoptium/temurin8-binaries/releases/download/jdk8u432-b06/OpenJDK8U-jre_x64_linux_hotspot_8u432b06.tar.gz"
+  if curl -sL "$url" -o /tmp/jre8.tar.gz && tar xzf /tmp/jre8.tar.gz -C /tmp/ ; then
+    rm -f /tmp/jre8.tar.gz
+    echo "[playwright-runner] Java 8 instalado: $($java8_dir/bin/java -version 2>&1 | head -1)"
+  else
+    echo "[playwright-runner] WARN: no se pudo descargar Java 8; el applet JNLP puede fallar."
+  fi
+}
+
+configure_icedtea_web_security() {
+  if [[ "${JAVAWS_AUTO_APPROVE,,}" != "1" && "${JAVAWS_AUTO_APPROVE,,}" != "true" && "${JAVAWS_AUTO_APPROVE,,}" != "yes" && "${JAVAWS_AUTO_APPROVE,,}" != "on" ]]; then
+    echo "[playwright-runner] JavaWS auto-approve desactivado (XALOC_JAVAWS_AUTO_APPROVE=$JAVAWS_AUTO_APPROVE)."
+    return 0
+  fi
+  if ! command -v itweb-settings >/dev/null 2>&1; then
+    echo "[playwright-runner] itweb-settings no disponible; no se puede configurar auto-approve JavaWS."
+    return 0
+  fi
+
+  mkdir -p "${HOME}/.config/icedtea-web" "${HOME}/.config/icedtea-web/security" || true
+
+  # Write deployment.properties directly (itweb-settings -set is unreliable)
+  local props_file="${HOME}/.config/icedtea-web/deployment.properties"
+  cat > "$props_file" <<'ITWEBPROPS'
+deployment.security.askgrantdialog.show=false
+deployment.security.askgrantdialog.notinca=false
+deployment.security.notinca.warning=false
+deployment.security.expired.warning=false
+deployment.security.jsse.hostmismatch.warning=false
+deployment.security.level=ALLOW_UNSIGNED
+deployment.security.itw.ignorecertissues=true
+deployment.security.sandbox.awtwarningwindow=false
+deployment.security.sandbox.jnlp.enhanced=true
+ITWEBPROPS
+  echo "[playwright-runner] JavaWS IcedTea-Web deployment.properties escrito directamente en $props_file"
+
+  # Also try itweb-settings -set as backup
+  itweb-settings -set deployment.security.askgrantdialog.show false >/tmp/itweb-settings.log 2>&1 || true
+  itweb-settings -set deployment.security.askgrantdialog.notinca false >>/tmp/itweb-settings.log 2>&1 || true
+  itweb-settings -set deployment.security.level ALLOW_UNSIGNED >>/tmp/itweb-settings.log 2>&1 || true
+  itweb-settings -set deployment.security.itw.ignorecertissues true >>/tmp/itweb-settings.log 2>&1 || true
+
+  echo "[playwright-runner] JavaWS auto-approve configurado:"
+  itweb-settings -get deployment.security.askgrantdialog.show deployment.security.level deployment.security.itw.ignorecertissues 2>/dev/null || true
+}
+
+ensure_firefox_nss_profile() {
+  # El applet AOC (signador.aoc.cat) usa MozillaKeyStores para buscar certificados.
+  # Necesita un perfil Firefox con la base de datos NSS y el certificado importado.
+  local ff_dir="/root/.mozilla/firefox"
+  local profile_dir="$ff_dir/xaloc.default"
+
+  if [[ -f "$profile_dir/cert9.db" ]]; then
+    echo "[playwright-runner] Firefox NSS profile ya existe en $profile_dir"
+    return 0
+  fi
+
+  echo "[playwright-runner] Creando perfil Firefox NSS para applet AOC signador..."
+  mkdir -p "$profile_dir"
+
+  # profiles.ini para que MozillaKeyStores encuentre el perfil
+  cat > "$ff_dir/profiles.ini" <<'FFPROF'
+[General]
+StartWithLastProfile=1
+
+[Profile0]
+Name=default
+IsRelative=1
+Path=xaloc.default
+Default=1
+FFPROF
+
+  # Inicializar base de datos NSS en el perfil
+  certutil -d "sql:$profile_dir" -N --empty-password 2>/dev/null || true
+  # Tambien formato legacy (cert8.db) por si el applet usa la API antigua
+  certutil -d "dbm:$profile_dir" -N --empty-password 2>/dev/null || true
+
+  # Importar el certificado PFX
+  if [[ -f "$CERT_PATH" ]]; then
+    local pass="${PLAYWRIGHT_CERT_PASSWORD:-NetMulti01}"
+    pk12util -d "sql:$profile_dir" -i "$CERT_PATH" -W "$pass" 2>/dev/null && \
+      echo "[playwright-runner] Certificado importado en Firefox NSS (sql)" || \
+      echo "[playwright-runner] WARN: pk12util sql import fallo"
+    pk12util -d "dbm:$profile_dir" -i "$CERT_PATH" -W "$pass" 2>/dev/null && \
+      echo "[playwright-runner] Certificado importado en Firefox NSS (dbm)" || \
+      echo "[playwright-runner] WARN: pk12util dbm import fallo"
+  fi
+
+  # Marcar CAs importadas como trusted
+  certutil -d "sql:$profile_dir" -L 2>/dev/null | while IFS= read -r line; do
+    if echo "$line" | grep -q ',,   '; then
+      nickname="$(echo "$line" | sed 's/  \+[^ ]*$//' | sed 's/^ *//' | sed 's/ *$//')"
+      if [ -n "$nickname" ] && [ "$nickname" != "Certificate Nickname" ]; then
+        certutil -d "sql:$profile_dir" -M -n "$nickname" -t "CT,C,C" 2>/dev/null || true
+        certutil -d "dbm:$profile_dir" -M -n "$nickname" -t "CT,C,C" 2>/dev/null || true
+        echo "[playwright-runner] CA trusted: $nickname"
+      fi
+    fi
+  done
+
+  echo "[playwright-runner] Firefox NSS profile creado en $profile_dir"
+  certutil -d "sql:$profile_dir" -L 2>/dev/null || true
+}
+
 if [[ ! -f "$CERT_PATH" ]]; then
   echo "[playwright-runner] Certificado no encontrado: $CERT_PATH"
   if [[ "$CERT_REQUIRED" == "1" ]]; then
@@ -233,6 +348,9 @@ write_autoselect_policy
 write_afirma_protocol_policy
 register_afirma_xdg_handler
 start_autofirma_always_on
+configure_icedtea_web_security
+ensure_java8_for_jnlp
+ensure_firefox_nss_profile
 
 if [[ ! -f "$NSS_DB_DIR/cert9.db" ]]; then
   certutil -N --empty-password -d "sql:$NSS_DB_DIR"

@@ -41,6 +41,7 @@ SELECT TOP 1
     r.numclient,
     r.automatic_id,
     r.Expedient,
+    r.Procedim,
     r.FaseProcedimiento,
     r.SujetoRecurso,
     r.ConducNom,
@@ -265,6 +266,7 @@ async def build_payload_from_row(row: dict[str, Any]) -> dict[str, Any]:
     expediente = _clean(row.get("Expedient"))
     servicio, expediente_num, digito_control = _split_expediente(expediente)
     fase = _clean(row.get("FaseProcedimiento"))
+    procedim = _clean(row.get("Procedim"))
     tipodecliente = _clean(row.get("tipodecliente"))
     is_company = tipodecliente == "2" or bool(_clean(row.get("nifempresa")))
     tipo_persona = "juridica" if is_company else "fisica"
@@ -277,7 +279,7 @@ async def build_payload_from_row(row: dict[str, Any]) -> dict[str, Any]:
     nif_empresa = _sanitize_document(row.get("nifempresa"))
     sujeto_recurso = _clean(row.get("SujetoRecurso") or razon_social or nombre)
     expone, solicita = _build_texts(expediente, fase, sujeto_recurso)
-    tipo_escrito = _infer_tipo_escrito(fase)
+    tipo_escrito = ServeiCatTransController._infer_tipo_escrito(fase, procedim)
 
     payload: dict[str, Any] = {
         "idRecurso": row.get("idRecurso"),
@@ -288,6 +290,7 @@ async def build_payload_from_row(row: dict[str, Any]) -> dict[str, Any]:
         "expediente_numero": expediente_num,
         "digito_control": digito_control,
         "fase_procedimiento": fase,
+        "procedim": procedim,
         "tipo_escrito": tipo_escrito,
         "tipodecliente": tipodecliente,
         "tipo_persona": tipo_persona,

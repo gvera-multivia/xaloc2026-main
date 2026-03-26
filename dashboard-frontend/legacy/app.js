@@ -3,7 +3,7 @@ const { useState, useEffect, useMemo, useRef } = React;
 
 const API_BASE = '/api';
 const PAGE_SIZE_DEFAULT = 25;
-const KNOWN_SITES = ['madrid', 'xaloc_girona', 'base_online', 'ayunta_palma', 'terrassa', 'redsara', 'valencia', 'atc'];
+const KNOWN_SITES = ['madrid', 'xaloc_girona', 'base_online', 'ayunta_palma', 'terrassa', 'redsara', 'valencia', 'atc', 'servei_cat_trans'];
 const ROUTE_META = {
   '/': { label: 'Estado General' },
   '/control': { label: 'Panel de Control' },

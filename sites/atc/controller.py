@@ -195,7 +195,7 @@ class AtcController:
         csv_acto = self._clean(src.get("csv_acto") or src.get("ExpedientePublicacion"))
         procedim = self._clean(src.get("procedim") or src.get("Procedim"))
         protocol = self._clean(src.get("protocol")) or self._infer_protocol(csv_acto=csv_acto, procedim=procedim)
-        tipodecliente = self._clean(src.get("tipodecliente"))
+        tipodecliente = self._clean(src.get("tipodecliente") or src.get("cliente_tipo"))
         es_empresa = self._is_empresa_tipodecliente(tipodecliente)
         nombre_juridico = self._clean(src.get("Nombrefiscal") or src.get("cliente_razon_social"))
         nombre_persona = " ".join(
@@ -219,7 +219,12 @@ class AtcController:
             nif_repr = nif_persona or nif_empresa
         else:
             nombre_repr = self._build_nombre_representado(src)
-            nif_repr = self._sanitize_doc(src.get("nifempresa") or src.get("nif") or src.get("cliente_nif_empresa") or src.get("cliente_nif"))
+            nif_repr = self._sanitize_doc(
+                src.get("nifempresa")
+                or src.get("cliente_nif_empresa")
+                or src.get("nif")
+                or src.get("cliente_nif")
+            )
         phase_text = self._build_phase_text(src, expediente)
         alegaciones = phase_text or self._clean(src.get("alegaciones")) or self._default_alegaciones(expediente)
         email = self._clean(src.get("email")) or get_default_contact_email()

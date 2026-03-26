@@ -166,6 +166,77 @@ class PostgresHistoryRepository:
         finally:
             conn.close()
 
+    def clear_incident(
+        self,
+        *,
+        site_id: str,
+        resource_id: Optional[int],
+        incident_type: Optional[str] = None,
+    ) -> int:
+        conn = self._conn()
+        if conn is None:
+            return 0
+        site = str(site_id or "").strip()
+        if not site:
+            return 0
+        itype = str(incident_type or "").strip() or None
+        try:
+            with conn.cursor() as cur:
+                if resource_id is None:
+                    if itype:
+                        cur.execute(
+                            """
+                            DELETE FROM realtime_incidents
+                            WHERE site_id = %s
+                              AND resource_id IS NULL
+                              AND incident_type = %s
+                            """,
+                            (site, itype),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            DELETE FROM realtime_incidents
+                            WHERE site_id = %s
+                              AND resource_id IS NULL
+                            """,
+                            (site,),
+                        )
+                else:
+                    if itype:
+                        cur.execute(
+                            """
+                            DELETE FROM realtime_incidents
+                            WHERE site_id = %s
+                              AND resource_id = %s
+                              AND incident_type = %s
+                            """,
+                            (site, int(resource_id), itype),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            DELETE FROM realtime_incidents
+                            WHERE site_id = %s
+                              AND resource_id = %s
+                            """,
+                            (site, int(resource_id)),
+                        )
+                deleted = int(cur.rowcount or 0)
+            conn.commit()
+            return deleted
+        except Exception as exc:
+            self.logger.warning(
+                "Error limpiando incidencia en PG site=%s resource_id=%s type=%s: %s",
+                site,
+                resource_id,
+                itype,
+                exc,
+            )
+            return 0
+        finally:
+            conn.close()
+
     def list_successes(
         self,
         *,

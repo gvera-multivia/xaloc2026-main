@@ -62,6 +62,8 @@ class TerrassaAdapter(SiteAdapter):
         "MULT-#####/####",
         "MURC-#####-####",
         "MURC-#####/####",
+        "MURC-###/####",
+        "MURC-####/####",
         "ED#V######",
         "VD########",
         "###########RC##R######",
@@ -102,6 +104,15 @@ class TerrassaAdapter(SiteAdapter):
         if not exp:
             return False
         return any(rx.match(exp) for rx in self._compiled_expediente_regex)
+
+    def _normalize_expediente(self, expediente: Any) -> str:
+        exp = self._clean(expediente).upper()
+        if not exp:
+            return ""
+        first_token = exp.split()[0]
+        if first_token and self._is_valid_expediente(first_token):
+            return first_token
+        return exp
 
     def _is_target_organisme(self, organisme: Any) -> bool:
         return self._organisme_norm in self._norm(organisme)
@@ -265,7 +276,7 @@ class TerrassaAdapter(SiteAdapter):
                 break
             item = self._materialize_from_canonical_if_present(dict(resource.metadata or {}))
             rid = item.get("idRecurso")
-            expediente = self._clean(item.get("Expedient")).upper()
+            expediente = self._normalize_expediente(item.get("Expedient"))
             item["Expedient"] = expediente
             organisme = self._clean(item.get("Organisme"))
 
@@ -318,7 +329,7 @@ class TerrassaAdapter(SiteAdapter):
 
         for r in candidates:
             rid = r.get("idRecurso")
-            expediente = self._clean(r.get("Expedient"))
+            expediente = self._normalize_expediente(r.get("Expedient"))
             is_company = str(r.get("cliente_tipo") or "") == "2"
             doc = self._normalize_doc(r.get("cliente_nif_empresa") if is_company else r.get("cliente_nif"))
 

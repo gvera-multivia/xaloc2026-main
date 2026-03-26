@@ -9,6 +9,16 @@ from pathlib import Path
 from typing import List
 import os
 
+_DEFAULT_CERT_CN = "35059210B MARIA TERESA MORENTE (R: B62798210)"
+
+
+def _first_env(*keys: str, default: str = "") -> str:
+    for key in keys:
+        value = (os.getenv(key) or "").strip()
+        if value:
+            return value
+    return default
+
 
 @dataclass
 class BrowserConfig:
@@ -17,13 +27,15 @@ class BrowserConfig:
     headless: bool = field(default_factory=lambda: os.getenv("XALOC_HEADLESS", "0") == "1")
     perfil_path: Path = field(default_factory=lambda: Path(os.getenv("PLAYWRIGHT_PROFILE_DIR", "profiles/edge")))
     canal: str = field(default_factory=lambda: os.getenv("XALOC_BROWSER_CHANNEL", "msedge"))
-    default_cert_cn: str = "35059210B MARIA TERESA MORENTE (R: B62798210)"
+    default_cert_cn: str = _DEFAULT_CERT_CN
     certificado_cn: str = field(
-        default_factory=lambda: (
-            os.getenv("CERTIFICADO_CN")
-            or os.getenv("certificado_cn")
-            or "35059210B MARIA TERESA MORENTE (R: B62798210)"
-        ).strip()
+        default_factory=lambda: _first_env(
+            "XALOC_CERT_CN",
+            "XALOC_CERT_SUBJECT_CN",
+            "CERTIFICADO_CN",
+            "certificado_cn",
+            default=_DEFAULT_CERT_CN,
+        )
     )
     args: List[str] = field(
         default_factory=lambda: [

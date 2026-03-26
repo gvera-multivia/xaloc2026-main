@@ -1,17 +1,25 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import re
 from typing import TYPE_CHECKING
 
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
+from .cookies import ensure_cookie_banner_cleared, dismiss_cookie_banners_in_context
+
 if TYPE_CHECKING:
     from playwright.async_api import Page
+
     from ..config import ServeiCatTransConfig
     from ..data_models import ServeiCatTransTarget
 
 
+async def _dismiss_cookie_banner_if_present(page: "Page", *, timeout_ms: int = 4000) -> None:
+    await ensure_cookie_banner_cleared(page, total_timeout_ms=timeout_ms, poll_ms=250)
+
+
 async def _click_service_link(page: "Page", config: "ServeiCatTransConfig") -> "Page":
+    await dismiss_cookie_banners_in_context(page)
     link = page.locator(config.service_link_selector).first
     await link.wait_for(state="visible", timeout=config.navigation_timeout)
     try:
@@ -19,12 +27,20 @@ async def _click_service_link(page: "Page", config: "ServeiCatTransConfig") -> "
             await link.click()
         popup = await popup_info.value
         await popup.wait_for_load_state("domcontentloaded")
+        await dismiss_cookie_banners_in_context(popup)
         return popup
     except PlaywrightTimeoutError:
-        # El enlace puede navegar en la misma pestaña.
+        try:
+            await page.wait_for_url("**/renderitzar.do?reqCode=inicial**", timeout=8000)
+        except Exception:
+            pass
         return page
     except Exception:
         await link.click(force=True)
+        try:
+            await page.wait_for_url("**/renderitzar.do?reqCode=inicial**", timeout=8000)
+        except Exception:
+            pass
         return page
 
 
@@ -32,10 +48,13 @@ async def _click_access(page: "Page", config: "ServeiCatTransConfig") -> None:
     access_btn = page.locator(config.access_button_selector).first
     if await access_btn.count() <= 0:
         return
+    await dismiss_cookie_banners_in_context(page)
     await access_btn.click()
+    await dismiss_cookie_banners_in_context(page)
 
 
 async def _click_certificate_button(page: "Page", config: "ServeiCatTransConfig") -> None:
+    await dismiss_cookie_banners_in_context(page)
     cert_btn = page.locator(config.cert_button_selector).first
     if await cert_btn.count() > 0:
         try:
@@ -55,11 +74,19 @@ async def run_login(page: "Page", config: "ServeiCatTransConfig", datos: "Servei
         return page
 
     await page.goto(config.url_base, wait_until="domcontentloaded", timeout=config.navigation_timeout)
+    await dismiss_cookie_banners_in_context(page)
     page = await _click_service_link(page, config)
     await page.wait_for_load_state("domcontentloaded")
+    await dismiss_cookie_banners_in_context(page)
+
+    current = str(page.url or "")
+    if "renderitzar.do?reqCode=inicial" not in current and "renderitzaruploadSecure.do" not in current:
+        await page.goto(config.url_service_entry, wait_until="domcontentloaded", timeout=config.navigation_timeout)
+        await dismiss_cookie_banners_in_context(page)
 
     if "valid.aoc.cat" not in page.url and "renderitzaruploadSecure.do" not in page.url:
         await _click_access(page, config)
+        await dismiss_cookie_banners_in_context(page)
 
     if "valid.aoc.cat" in page.url:
         await _click_certificate_button(page, config)
@@ -69,12 +96,15 @@ async def run_login(page: "Page", config: "ServeiCatTransConfig", datos: "Servei
         timeout=config.auth_timeout_ms,
     )
     await page.wait_for_load_state("domcontentloaded")
+    await dismiss_cookie_banners_in_context(page)
 
     if "presentador=P" not in page.url:
+        await dismiss_cookie_banners_in_context(page)
         presentador = page.locator(config.presentador_link_selector).first
         if await presentador.count() > 0:
             await presentador.click()
             await page.wait_for_url("**presentador=P**", timeout=config.navigation_timeout)
             await page.wait_for_load_state("domcontentloaded")
+            await dismiss_cookie_banners_in_context(page)
 
     return page

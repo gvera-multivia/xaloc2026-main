@@ -342,9 +342,13 @@ services:
       XALOC_CERT_AUTOSELECT_VIA_POLICY: "1"
       XALOC_CERT_AUTOSELECT_CLI_FALLBACK: "1"
       XALOC_CERT_FILTER_BY_CN: "0"
+      XALOC_CERT_CN: ${XALOC_CERT_CN:-}
+      XALOC_CERT_SUBJECT_CN: ${XALOC_CERT_SUBJECT_CN:-}
+      CERTIFICADO_CN: ${CERTIFICADO_CN:-}
       PLAYWRIGHT_USE_CLIENT_CERTIFICATES: ${PLAYWRIGHT_USE_CLIENT_CERTIFICATES:-1}
       PLAYWRIGHT_CLIENT_CERT_ORIGINS: ${PLAYWRIGHT_CLIENT_CERT_ORIGINS:-https://sede.madrid.es,https://servcla.madrid.es,https://servpub.madrid.es,https://www.xalocgirona.cat,https://seu.xalocgirona.cat,https://www.base.cat,https://www.baseonline.cat,https://valid.aoc.cat,https://cert.valid.aoc.cat,https://autenticaciogicar5.extranet.gencat.cat,https://atc.gencat.cat,https://seu.atc.gencat.cat,https://seu2.atc.gencat.cat,https://cas.madrid.es,https://pasarela.clave.gob.es,https://palma.sedipualba.es,https://identificacionssl.sedipualba.es,https://reg.redsara.es,https://sede.valencia.es}
       PLAYWRIGHT_CERT_PATH: /data/certificates/certificate.pfx
+      PLAYWRIGHT_CERT_ALIAS: ${PLAYWRIGHT_CERT_ALIAS:-}
       PLAYWRIGHT_PROFILE_DIR: /app/profiles/worker
       PLAYWRIGHT_NSS_DB_DIR: ${PLAYWRIGHT_NSS_DB_DIR:-/root/.pki/nssdb}
       PLAYWRIGHT_GLOBAL_NSS_DB_DIR: /root/.pki/nssdb

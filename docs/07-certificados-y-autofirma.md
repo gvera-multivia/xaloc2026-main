@@ -42,7 +42,12 @@ graph TD
   - `XALOC_CERT_AUTOSELECT_RULES_JSON`
   - `XALOC_CERT_AUTOSELECT_PATTERN`
   - `XALOC_CERT_FILTER_BY_CN`
-  - `CERTIFICADO_CN`
+  - `XALOC_CERT_CN` (preferida)
+  - `XALOC_CERT_SUBJECT_CN` (alias)
+  - `CERTIFICADO_CN` (legacy)
+- Alias certificado (firma programatica):
+  - `SIGNING_PFX_ALIAS`
+  - `PLAYWRIGHT_CERT_ALIAS`
 - AutoFirma:
   - `XALOC_AUTOFIRMA_ORIGIN`
   - `XALOC_AUTOFIRMA_ALLOWED_ORIGINS`
@@ -51,6 +56,10 @@ graph TD
 
 ## Validacion rapida
 ```powershell
+# Ejemplo en .env:
+# XALOC_CERT_CN=ADRIA MARTINEZ (R: B12345678)
+# SIGNING_PFX_ALIAS=adria_martinez__r__b12345678_
+
 # 1) Confirmar variables aplicadas
 docker compose --env-file .env -f infra/docker/docker-compose.microservices.yml config
 

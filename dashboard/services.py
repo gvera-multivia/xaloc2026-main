@@ -364,6 +364,16 @@ class DashboardService:
         return self.incidents_history_repo.list_incidents(day=day_value, page=page, page_size=page_size)
 
     def list_pending_incidents(self, *, page: int, page_size: int) -> dict[str, Any]:
+        try:
+            cleanup = self.runtime_store.purge_completed_resources_from_operational_tables()
+            if int(cleanup.get("deleted_incidents") or 0) > 0:
+                self.logger.info(
+                    "Incidencias depuradas por completado local: %s",
+                    int(cleanup.get("deleted_incidents") or 0),
+                )
+        except Exception as exc:
+            self.logger.warning("No se pudo depurar incidencias por completado local: %s", exc)
+
         day_value = utc_today_iso()
         res = self.incidents_history_repo.list_incidents(
             day=day_value,
@@ -382,15 +392,78 @@ class DashboardService:
         if not items or not conn_str:
             return res
 
+        def _fetch_sqlserver_completed_ids(resource_ids: list[int]) -> set[int]:
+            if not resource_ids:
+                return set()
+            try:
+                import pyodbc
+            except Exception:
+                return set()
+
+            done: set[int] = set()
+            ids = sorted({int(x) for x in resource_ids})
+            chunk = 500
+            conn = pyodbc.connect(conn_str, autocommit=True)
+            try:
+                cur = conn.cursor()
+                for i in range(0, len(ids), chunk):
+                    batch = ids[i : i + chunk]
+                    placeholders = ",".join(["?"] * len(batch))
+                    query = (
+                        f"SELECT idRecurso FROM Recursos.RecursosExp "
+                        f"WHERE idRecurso IN ({placeholders}) "
+                        "AND (Estado = 2 OR FUsuarioCompletado IS NOT NULL)"
+                    )
+                    cur.execute(query, batch)
+                    for row in cur.fetchall():
+                        try:
+                            done.add(int(row[0]))
+                        except Exception:
+                            continue
+            finally:
+                conn.close()
+            return done
+
         try:
             rids = []
+            rid_to_sites: dict[int, set[str]] = {}
             for it in items:
                 rid = it.get("resource_id")
                 if rid is not None:
                     try:
-                        rids.append(int(rid))
+                        rid_int = int(rid)
+                        rids.append(rid_int)
+                        site = str(it.get("site_id") or "").strip()
+                        if site:
+                            rid_to_sites.setdefault(rid_int, set()).add(site)
                     except (ValueError, TypeError):
                         pass
+
+            sql_completed_ids = _fetch_sqlserver_completed_ids(rids)
+            if sql_completed_ids:
+                removed = 0
+                for rid in sorted(sql_completed_ids):
+                    for site in sorted(rid_to_sites.get(rid, set())):
+                        removed += int(
+                            self.incidents_history_repo.clear_incident(
+                                site_id=site,
+                                resource_id=rid,
+                                incident_type=None,
+                            )
+                        )
+                if removed > 0:
+                    self.logger.info(
+                        "Incidencias depuradas por completado en SQL Server: %s (resources=%s)",
+                        removed,
+                        len(sql_completed_ids),
+                    )
+                    res = self.incidents_history_repo.list_incidents(
+                        day=day_value,
+                        page=page,
+                        page_size=page_size,
+                        statuses=["NEW", "REVIEWED"],
+                    )
+                    items = res.get("items") or []
 
             if rids:
                 from core.repositories.resource_repository import ResourceRepository

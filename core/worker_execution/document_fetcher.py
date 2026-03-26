@@ -64,6 +64,8 @@ async def download_document_and_attachments(
             raise RuntimeError("El archivo descargado no es un PDF valido.")
 
     archivos_para_subir: list[Path] = [local_pdf_path]
+    payload["xvia_recurso_path"] = str(local_pdf_path)
+    xvia_attachment_paths: list[str] = []
     adjuntos_metadata = payload.get("adjuntos", [])
     if adjuntos_metadata:
         attachment_downloader = AttachmentDownloader()
@@ -117,8 +119,10 @@ async def download_document_and_attachments(
         for result in download_results:
             if result.success and result.local_path:
                 archivos_para_subir.append(result.local_path)
+                xvia_attachment_paths.append(str(result.local_path))
             else:
                 logger.warning("No se pudo descargar adjunto %s: %s", result.filename, result.error)
+    payload["xvia_attachment_paths"] = xvia_attachment_paths
 
     merged: list[Path] = []
     seen_keys: set[str] = set()
