@@ -2083,9 +2083,15 @@ async def catch_all(rest_of_path: str, request: Request):
     if not _frontend_process or _frontend_process.returncode is not None:
         await _start_frontend_server()
 
-    target_url = f"http://{FRONTEND_HOST}:{FRONTEND_PORT}/{rest_of_path}"
-    if request.url.query:
-        target_url = f"{target_url}?{request.url.query}"
+    normalized_path = (rest_of_path or "").strip("/")
+    if normalized_path == "history/top":
+        target_url = f"http://{FRONTEND_HOST}:{FRONTEND_PORT}/history?view=top"
+        if request.url.query:
+            target_url = f"{target_url}&{request.url.query}"
+    else:
+        target_url = f"http://{FRONTEND_HOST}:{FRONTEND_PORT}/{rest_of_path}"
+        if request.url.query:
+            target_url = f"{target_url}?{request.url.query}"
 
     body = await request.body()
     incoming_host = request.headers.get("host", "").strip()

@@ -973,7 +973,13 @@ async def proxy_api(rest_of_path: str, request: Request) -> Response:
 async def proxy_frontend(rest_of_path: str, request: Request) -> Response:
     if not _frontend_process or _frontend_process.returncode is not None:
         await _start_frontend_server()
-    target_url = f"http://{FRONTEND_HOST}:{FRONTEND_PORT}/{rest_of_path}"
+    normalized_path = (rest_of_path or "").strip("/")
+    query = str(request.url.query or "")
+    if normalized_path == "history/top":
+        target_url = f"http://{FRONTEND_HOST}:{FRONTEND_PORT}/history"
+        target_url = f"{target_url}?view=top&{query}" if query else f"{target_url}?view=top"
+    else:
+        target_url = f"http://{FRONTEND_HOST}:{FRONTEND_PORT}/{rest_of_path}"
     try:
         return await _proxy_request(request, target_url=target_url)
     except Exception as exc:
