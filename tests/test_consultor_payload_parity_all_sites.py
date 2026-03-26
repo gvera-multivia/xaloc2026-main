@@ -227,6 +227,53 @@ def test_base_online_fetch_candidates_accepts_no_gim_with_legacy_regex() -> None
     assert discarded == []
 
 
+def test_base_online_build_payloads_p1_accepts_no_gim_and_parses_parts(monkeypatch) -> None:
+    adapter = BaseOnlineAdapter()
+    monkeypatch.setattr(adapter._groq_guardian, "classify_batch", _fake_classify_batch)
+    monkeypatch.setattr(client_docs_service_mod, "get_required_client_documents", _fake_docs_builder)
+    monkeypatch.setattr(base_mod, "build_sqlserver_connection_string", lambda: "unused")
+
+    candidate = {
+        "idRecurso": 103275,
+        "idExp": 5101,
+        "numclient": 12001,
+        "Expedient": "43038-2026/2710",
+        "FaseProcedimiento": "Identificacion",
+        "SujetoRecurso": "CONDUCTOR TEST",
+        "matricula": "1234ABC",
+        "dia_denuncia": "2026-03-23",
+        "FAlta": "2026-03-23",
+        "cif": "",
+        "cliente_nif": "47236831Y",
+        "conduc_dni": "47236831Y",
+        "conduc_nom": "ALBERT ROSSON PICO",
+        "conduc_adr": "CALLE MAYOR",
+        "conduc_codpost": "08001",
+        "conduc_pobl": "BARCELONA",
+        "conduc_prov": "BARCELONA",
+        "cliente_nombre": "ALBERT",
+        "cliente_apellido1": "ROSSON",
+        "cliente_apellido2": "PICO",
+        "cliente_razon_social": "",
+        "cliente_escalera": "",
+        "cliente_planta": "",
+        "cliente_puerta": "",
+    }
+    discarded: list[dict[str, Any]] = []
+
+    payloads = asyncio.run(adapter.build_payloads([candidate], on_discard=lambda item: discarded.append(item)))
+
+    assert len(payloads) == 1
+    payload = payloads[0]
+    assert payload["protocol"] == "P1"
+    assert payload["expediente"] == "43038-2026/2710"
+    assert payload["expediente_id_ens"] == "43038"
+    assert payload["expediente_any"] == "2026"
+    assert payload["expediente_num"] == "2710"
+    assert payload["num_butlleti"] == "43038-2026/2710"
+    assert discarded == []
+
+
 def test_redsara_payload_parity_legacy_vs_consultor(monkeypatch) -> None:
     adapter = RedsaraAdapter()
     monkeypatch.setattr(redsara_mod, "get_required_client_documents", _fake_docs_builder)

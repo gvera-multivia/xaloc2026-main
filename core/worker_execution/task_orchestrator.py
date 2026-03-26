@@ -770,7 +770,11 @@ async def process_task(
                     success=False,
                     error="xaloc_girona: tramite enviado pero justificante no descargado; cierre no confirmado",
                 )
-            diputacio_justificante_ok = bool(payload.get("diputacio_justificante_descargado", False))
+            dipu_final_path = str(payload.get("diputacio_justificante_path") or "").strip()
+            dipu_artifact_path = str(payload.get("diputacio_justificante_artifact_path") or "").strip()
+            diputacio_justificante_ok = bool(payload.get("diputacio_justificante_descargado", False)) or bool(
+                dipu_final_path or dipu_artifact_path
+            )
             if site_id == "diputacio_bcn" and not diputacio_justificante_ok:
                 logger.critical(
                     "CRITICAL_DIPUTACIO_BCN: tramite sin PDF de justificante. idRecurso=%s",

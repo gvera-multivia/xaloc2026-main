@@ -33,25 +33,8 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     const connect = () => {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const host = window.location.host;
-      const token = (() => {
-        try {
-          return window.localStorage.getItem('dashboard_access_token') || '';
-        } catch {
-          return '';
-        }
-      })();
       const baseWsUrl = process.env.NEXT_PUBLIC_WS_URL || `${protocol}//${host}/ws/dashboard`;
-      const wsUrl = (() => {
-        if (!token.trim()) return baseWsUrl;
-        try {
-          const u = new URL(baseWsUrl, window.location.origin);
-          u.searchParams.set('token', token.trim());
-          return u.toString();
-        } catch {
-          const sep = baseWsUrl.includes('?') ? '&' : '?';
-          return `${baseWsUrl}${sep}token=${encodeURIComponent(token.trim())}`;
-        }
-      })();
+      const wsUrl = baseWsUrl;
 
       console.log('Connecting to WebSocket:', wsUrl);
       const socket = new WebSocket(wsUrl);
@@ -79,6 +62,16 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
         setIsConnected(false);
         // Do not retry when backend explicitly indicates service unavailable/auth required.
         if (event.code === 1013 || event.code === 4401) {
+          if (event.code === 4401 && typeof window !== 'undefined') {
+            try {
+              window.localStorage.removeItem('dashboard_access_token');
+            } catch {
+              // ignore storage issues and force login route anyway
+            }
+            if (window.location.pathname !== '/login') {
+              window.location.assign('/login');
+            }
+          }
           return;
         }
         // Reconnect logic

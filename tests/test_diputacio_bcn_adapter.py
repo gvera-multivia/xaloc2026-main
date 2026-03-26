@@ -241,12 +241,40 @@ def test_fetch_candidates_still_blocks_identificacion_phase() -> None:
     assert len(discards) == 1
 
 
+def test_fetch_candidates_discards_when_assigned_to_other_user() -> None:
+    adapter = _make_adapter_with_allowed({"AYUNTAMIENTO DE IGUALADA"})
+    discards: list[dict] = []
+    repo = _FakeRepo(
+        [
+            {
+                "idRecurso": 200004,
+                "Expedient": "IG-004/26",
+                "Organisme": "AYUNTAMIENTO DE IGUALADA",
+                "FaseProcedimiento": "denuncia",
+                "Estado": 1,
+                "UsuarioAsignado": "Ainoa Gan",
+            }
+        ]
+    )
+    candidates = adapter.fetch_candidates(
+        config={"query_organisme": "%AYUNTAMIENTO DE IGUALADA%"},
+        conn_str="dummy",
+        authenticated_user="Guillen Vera",
+        limit=50,
+        resource_repo=repo,
+        on_discard=lambda d: discards.append(d),
+    )
+    assert len(candidates) == 0
+    assert len(discards) == 1
+    assert discards[0]["tipo_incidencia"] == "RESOURCE_ASSIGNED_TO_OTHER_USER"
+
+
 def test_extract_municipio_from_organisme_returns_empty_for_orgt_diba_alias() -> None:
     value = "ORGANISMO DE GESTION TRIBUTARIA (ORGT) DE LA DIPUTACION DE BARCELONA"
     assert DiputacioBcnAdapter._extract_municipio_from_organisme(value) == ""
 
 
-def test_build_payloads_prefers_client_municipio_over_organisme() -> None:
+def test_build_payloads_prefers_organisme_municipio_when_resolvable() -> None:
     adapter = DiputacioBcnAdapter()
     payloads = asyncio.run(
         adapter.build_payloads(
@@ -257,13 +285,79 @@ def test_build_payloads_prefers_client_municipio_over_organisme() -> None:
                     "numclient": 999001,
                     "automatic_id": 12345,
                     "Expedient": "541999/25",
-                    "Organisme": "ORGANISMO DE GESTION TRIBUTARIA (ORGT) DE LA DIPUTACION DE BARCELONA",
+                    "Organisme": "AYUNTAMIENTO DE IGUALADA",
                     "FaseProcedimiento": "denuncia",
                     "SujetoRecurso": "JUAN PEREZ",
                     "tipodecliente": "1",
                     "nif": "12345678Z",
                     "nifempresa": "",
                     "Nombre": "JUAN",
+                    "Apellido1": "PEREZ",
+                    "Apellido2": "LOPEZ",
+                    "Nombrefiscal": "",
+                    "cliente_municipio": "CALZADA DE CALATRAVA",
+                    "adjuntos": [],
+                }
+            ]
+        )
+    )
+
+    assert len(payloads) == 1
+    assert payloads[0]["municipio"] == "IGUALADA"
+    assert payloads[0]["codmuni"] == "101"
+
+
+def test_build_payloads_prefers_organisme_hospitalet_over_wrong_client_municipio() -> None:
+    adapter = DiputacioBcnAdapter()
+    payloads = asyncio.run(
+        adapter.build_payloads(
+            [
+                {
+                    "idRecurso": 555002,
+                    "idExp": 777002,
+                    "numclient": 999002,
+                    "automatic_id": 12346,
+                    "Expedient": "542000/25",
+                    "Organisme": "AJUNTAMENT DE HOSPITALET DE LLOBREGAT",
+                    "FaseProcedimiento": "denuncia",
+                    "SujetoRecurso": "MARIA PEREZ",
+                    "tipodecliente": "1",
+                    "nif": "12345678Z",
+                    "nifempresa": "",
+                    "Nombre": "MARIA",
+                    "Apellido1": "PEREZ",
+                    "Apellido2": "LOPEZ",
+                    "Nombrefiscal": "",
+                    "cliente_municipio": "BARCELONA",
+                    "adjuntos": [],
+                }
+            ]
+        )
+    )
+
+    assert len(payloads) == 1
+    assert payloads[0]["municipio"] == "HOSPITALET DE LLOBREGAT"
+    assert payloads[0]["codmuni"] == "100"
+
+
+def test_build_payloads_uses_client_municipio_for_orgt_alias() -> None:
+    adapter = DiputacioBcnAdapter()
+    payloads = asyncio.run(
+        adapter.build_payloads(
+            [
+                {
+                    "idRecurso": 555003,
+                    "idExp": 777003,
+                    "numclient": 999003,
+                    "automatic_id": 12347,
+                    "Expedient": "542001/25",
+                    "Organisme": "ORGANISMO DE GESTION TRIBUTARIA (ORGT) DE LA DIPUTACION DE BARCELONA",
+                    "FaseProcedimiento": "denuncia",
+                    "SujetoRecurso": "JOAN PEREZ",
+                    "tipodecliente": "1",
+                    "nif": "12345678Z",
+                    "nifempresa": "",
+                    "Nombre": "JOAN",
                     "Apellido1": "PEREZ",
                     "Apellido2": "LOPEZ",
                     "Nombrefiscal": "",

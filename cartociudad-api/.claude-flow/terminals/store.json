@@ -1,0 +1,22 @@
+{
+  "sessions": {
+    "term-1774267939170-xly6di": {
+      "id": "term-1774267939170-xly6di",
+      "name": "cartociudad-server",
+      "status": "active",
+      "createdAt": "2026-03-23T12:12:19.171Z",
+      "lastActivity": "2026-03-23T12:12:22.292Z",
+      "workingDir": "C:\\Users\\Guillem Vera\\Desktop\\Proyectos\\cartociudad-api",
+      "history": [
+        {
+          "command": ".\\.venv\\Scripts\\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000",
+          "output": "[STATE TRACKING] Command recorded: .\\.venv\\Scripts\\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000",
+          "timestamp": "2026-03-23T12:12:22.292Z",
+          "exitCode": 0
+        }
+      ],
+      "env": {}
+    }
+  },
+  "version": "3.0.0"
+}

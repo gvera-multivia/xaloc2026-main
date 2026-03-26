@@ -1,10 +1,31 @@
 export const API_BASE = '/api';
 
+function isJwtExpired(token: string): boolean {
+    try {
+        const payloadPart = token.split('.')[1];
+        if (!payloadPart) return false;
+        const normalized = payloadPart.replace(/-/g, '+').replace(/_/g, '/');
+        const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+        const payload = JSON.parse(atob(padded)) as { exp?: number };
+        if (!payload.exp || !Number.isFinite(payload.exp)) return false;
+        const nowSec = Math.floor(Date.now() / 1000);
+        return payload.exp <= nowSec;
+    } catch {
+        return false;
+    }
+}
+
 function readAuthToken(): string | null {
     if (typeof window === 'undefined') return null;
     try {
         const value = window.localStorage.getItem('dashboard_access_token');
-        return value && value.trim() ? value.trim() : null;
+        const token = value && value.trim() ? value.trim() : null;
+        if (!token) return null;
+        if (isJwtExpired(token)) {
+            window.localStorage.removeItem('dashboard_access_token');
+            return null;
+        }
+        return token;
     } catch {
         return null;
     }

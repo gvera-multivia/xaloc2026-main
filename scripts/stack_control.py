@@ -13,6 +13,7 @@ from typing import Any
 ROOT_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_ENV_FILE = ROOT_DIR / ".env"
 DEFAULT_COMPOSE_FILE = ROOT_DIR / "infra" / "docker" / "docker-compose.microservices.yml"
+DEFAULT_CARTOCIUDAD_COMPOSE_FILE = ROOT_DIR / "cartociudad-api" / "docker-compose.yml"
 
 
 def _compose_base_cmd(env_file: Path, compose_file: Path) -> list[str]:
@@ -206,6 +207,29 @@ def _run_compose_action(env_file: Path, compose_file: Path, action: str) -> None
         raise RuntimeError(f"docker compose {action} fallo con returncode={proc.returncode}")
 
 
+def _run_multi_compose_action(env_file: Path, compose_files: list[Path], action: str) -> None:
+    for cf in compose_files:
+        _run_compose_action(env_file, cf, action)
+
+
+def _wait_multi_for_start(env_file: Path, compose_files: list[Path], timeout: int, interval: float) -> int:
+    for cf in compose_files:
+        print(f"[WAIT] Verificando arranque compose: {cf}")
+        rc = _wait_for_start(env_file, cf, timeout=timeout, interval=interval)
+        if rc != 0:
+            return rc
+    return 0
+
+
+def _wait_multi_for_stop(env_file: Path, compose_files: list[Path], timeout: int, interval: float) -> int:
+    for cf in compose_files:
+        print(f"[WAIT] Verificando apagado compose: {cf}")
+        rc = _wait_for_stop(env_file, cf, timeout=timeout, interval=interval)
+        if rc != 0:
+            return rc
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Controla stack Docker Compose (start/stop/restart) con espera activa.")
     mode = parser.add_mutually_exclusive_group(required=True)
@@ -217,6 +241,16 @@ def main() -> int:
     parser.add_argument("--interval", type=float, default=3.0, help="Intervalo de polling en segundos (default: 3).")
     parser.add_argument("--env-file", default=str(DEFAULT_ENV_FILE), help="Ruta a .env.")
     parser.add_argument("--compose-file", default=str(DEFAULT_COMPOSE_FILE), help="Ruta a docker-compose.")
+    parser.add_argument(
+        "--cartociudad-compose-file",
+        default=str(DEFAULT_CARTOCIUDAD_COMPOSE_FILE),
+        help="Ruta al docker-compose de CartoCiudad.",
+    )
+    parser.add_argument(
+        "--skip-cartociudad",
+        action="store_true",
+        help="No incluye cartociudad-api en start/stop/restart.",
+    )
     parser.add_argument(
         "--skip-client-docs-check",
         action="store_true",
@@ -236,17 +270,24 @@ def main() -> int:
 
     env_file = Path(args.env_file).resolve()
     compose_file = Path(args.compose_file).resolve()
+    cartociudad_compose_file = Path(args.cartociudad_compose_file).resolve()
     if not env_file.exists():
         print(f"[ERROR] No existe env file: {env_file}", file=sys.stderr)
         return 1
     if not compose_file.exists():
         print(f"[ERROR] No existe compose file: {compose_file}", file=sys.stderr)
         return 1
+    compose_files: list[Path] = [compose_file]
+    if not args.skip_cartociudad:
+        if not cartociudad_compose_file.exists():
+            print(f"[ERROR] No existe compose file de CartoCiudad: {cartociudad_compose_file}", file=sys.stderr)
+            return 1
+        compose_files.append(cartociudad_compose_file)
 
     try:
         if args.start:
-            _run_compose_action(env_file, compose_file, "start")
-            rc = _wait_for_start(env_file, compose_file, timeout=args.timeout, interval=args.interval)
+            _run_multi_compose_action(env_file, compose_files, "start")
+            rc = _wait_multi_for_start(env_file, compose_files, timeout=args.timeout, interval=args.interval)
             if rc != 0:
                 return rc
             if not args.skip_client_docs_check:
@@ -258,18 +299,18 @@ def main() -> int:
                 )
             return 0
         if args.stop:
-            _run_compose_action(env_file, compose_file, "stop")
-            return _wait_for_stop(env_file, compose_file, timeout=args.timeout, interval=args.interval)
+            _run_multi_compose_action(env_file, compose_files, "stop")
+            return _wait_multi_for_stop(env_file, compose_files, timeout=args.timeout, interval=args.interval)
         if args.restart_rebuild:
             # restart-rebuild: down + build + up
-            _run_compose_action(env_file, compose_file, "stop")
-            rc = _wait_for_stop(env_file, compose_file, timeout=args.timeout, interval=args.interval)
+            _run_multi_compose_action(env_file, compose_files, "stop")
+            rc = _wait_multi_for_stop(env_file, compose_files, timeout=args.timeout, interval=args.interval)
             if rc != 0:
                 return rc
             print("[BUILD] Rebuilding images...")
-            _run_compose_action(env_file, compose_file, "build")
-            _run_compose_action(env_file, compose_file, "start")
-            rc = _wait_for_start(env_file, compose_file, timeout=args.timeout, interval=args.interval)
+            _run_multi_compose_action(env_file, compose_files, "build")
+            _run_multi_compose_action(env_file, compose_files, "start")
+            rc = _wait_multi_for_start(env_file, compose_files, timeout=args.timeout, interval=args.interval)
             if rc != 0:
                 return rc
             if not args.skip_client_docs_check:
@@ -281,12 +322,12 @@ def main() -> int:
                 )
             return 0
         # restart
-        _run_compose_action(env_file, compose_file, "stop")
-        rc = _wait_for_stop(env_file, compose_file, timeout=args.timeout, interval=args.interval)
+        _run_multi_compose_action(env_file, compose_files, "stop")
+        rc = _wait_multi_for_stop(env_file, compose_files, timeout=args.timeout, interval=args.interval)
         if rc != 0:
             return rc
-        _run_compose_action(env_file, compose_file, "start")
-        rc = _wait_for_start(env_file, compose_file, timeout=args.timeout, interval=args.interval)
+        _run_multi_compose_action(env_file, compose_files, "start")
+        rc = _wait_multi_for_start(env_file, compose_files, timeout=args.timeout, interval=args.interval)
         if rc != 0:
             return rc
         if not args.skip_client_docs_check:

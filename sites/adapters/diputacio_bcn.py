@@ -266,12 +266,22 @@ class DiputacioBcnAdapter(SiteAdapter):
 
     @classmethod
     def _resolve_municipio_for_payload(cls, item: dict[str, Any]) -> str:
-        # Prioridad al domicilio del cliente (municipio real del representado).
+        # Prioridad al municipio del organismo sancionador cuando sea resoluble
+        # en el combo de Diputacio BCN; ORGT queda cubierto porque retorna "".
+        organisme_municipio = cls._extract_municipio_from_organisme(item.get("Organisme"))
+        if organisme_municipio and resolve_codmuni(organisme_municipio):
+            return organisme_municipio
+
+        first_candidate = organisme_municipio
         for key in ("cliente_municipio", "MunicipioPoblacion", "poblacion", "municipio", "conduc_pobl"):
             value = cls._clean(item.get(key))
-            if value:
+            if not value:
+                continue
+            if resolve_codmuni(value):
                 return value
-        return cls._extract_municipio_from_organisme(item.get("Organisme"))
+            if not first_candidate:
+                first_candidate = value
+        return first_candidate
 
     def fetch_candidates(
         self,
@@ -341,8 +351,31 @@ class DiputacioBcnAdapter(SiteAdapter):
             estado = int(item.get("Estado") or 0)
             usuario = self._clean(item.get("UsuarioAsignado"))
             if estado == 1 and authenticated_user and not self._same_user_identity(usuario, authenticated_user):
+                if on_discard:
+                    on_discard(
+                        {
+                            "site_id": self.site_id,
+                            "idRecurso": rid,
+                            "Expedient": expediente,
+                            "tipo_incidencia": "RESOURCE_ASSIGNED_TO_OTHER_USER",
+                            "motivo": (
+                                "Recurso asignado a otro usuario en XVIA "
+                                f"(asignado={usuario!r}, actual={self._clean(authenticated_user)!r})."
+                            ),
+                        }
+                    )
                 continue
             if estado == 1 and not authenticated_user:
+                if on_discard:
+                    on_discard(
+                        {
+                            "site_id": self.site_id,
+                            "idRecurso": rid,
+                            "Expedient": expediente,
+                            "tipo_incidencia": "RESOURCE_ASSIGNED_WITHOUT_SESSION",
+                            "motivo": "Recurso ya asignado en XVIA y no hay usuario autenticado para validarlo.",
+                        }
+                    )
                 continue
 
             adjuntos = list(item.get("adjuntos") or [])

@@ -64,6 +64,11 @@ SITES: dict[str, SiteDefinition] = {
         automation_path="sites.diputacio_bcn.automation:DiputacioBcnAutomation",
         controller_path="sites.diputacio_bcn.controller:get_controller",
     ),
+    "servei_cat_trans": SiteDefinition(
+        site_id="servei_cat_trans",
+        automation_path="sites.servei_cat_trans.automation:ServeiCatTransAutomation",
+        controller_path="sites.servei_cat_trans.controller:get_controller",
+    ),
 }
 
 

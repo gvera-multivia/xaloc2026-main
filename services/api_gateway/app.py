@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import io
 import json
 import logging
 import os
 import re
+import time
 import zipfile
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import aiohttp
 from dotenv import load_dotenv
@@ -53,6 +55,9 @@ FRONTEND_HOST = (os.getenv("DASHBOARD_FRONTEND_HOST") or "127.0.0.1").strip() or
 FRONTEND_PORT = int((os.getenv("DASHBOARD_FRONTEND_PORT") or "3000").strip() or "3000")
 FRONTEND_DEV = (os.getenv("DASHBOARD_FRONTEND_DEV") or "0").strip().lower() not in {"0", "false", "no", "off"}
 BACKEND_BASE_URL = (os.getenv("DASHBOARD_BACKEND_URL") or "http://dashboard-backend-service:8788").strip().rstrip("/")
+PLAYWRIGHT_NOVNC_BASE_URL = (
+    os.getenv("PLAYWRIGHT_NOVNC_BASE_URL") or "http://playwright-runner-service:6080"
+).strip().rstrip("/")
 MORRIGAN_RELEASE_DIR = Path(
     (os.getenv("MORRIGAN_RELEASE_DIR") or "/app/morrigan-electron/release").strip()
 )
@@ -235,6 +240,33 @@ def _mask_token(token: str | None) -> str:
     if len(text) <= 10:
         return f"{text[:2]}...{text[-2:]}"
     return f"{text[:6]}...{text[-4:]}"
+
+
+def _jwt_exp_unverified(token: str | None) -> int | None:
+    if not token:
+        return None
+    parts = str(token).split(".")
+    if len(parts) < 2:
+        return None
+    payload_raw = parts[1]
+    payload_raw += "=" * ((4 - len(payload_raw) % 4) % 4)
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(payload_raw.encode("ascii")).decode("utf-8"))
+    except Exception:
+        return None
+    exp = payload.get("exp")
+    return int(exp) if isinstance(exp, (int, float)) else None
+
+
+def _choose_fresh_ws_token(*tokens: str | None) -> str | None:
+    now = int(time.time())
+    for token in tokens:
+        if not token:
+            continue
+        exp = _jwt_exp_unverified(token)
+        if exp is None or exp > now:
+            return token
+    return None
 
 
 def _copy_auth_headers(request: Request) -> dict[str, str]:
@@ -574,17 +606,60 @@ def _frontend_ws_url(path: str, query: str = "") -> str:
     return f"{base}?{query}" if query else base
 
 
-async def _proxy_websocket(websocket: WebSocket, upstream_url: str, *, include_auth_headers: bool = False) -> None:
-    await websocket.accept()
+def _playwright_ws_url(path: str, query: str = "") -> str:
+    if PLAYWRIGHT_NOVNC_BASE_URL.startswith("https://"):
+        base = "wss://" + PLAYWRIGHT_NOVNC_BASE_URL[len("https://"):] + path
+    elif PLAYWRIGHT_NOVNC_BASE_URL.startswith("http://"):
+        base = "ws://" + PLAYWRIGHT_NOVNC_BASE_URL[len("http://"):] + path
+    else:
+        base = PLAYWRIGHT_NOVNC_BASE_URL + path
+    return f"{base}?{query}" if query else base
+
+
+def _build_dashboard_ws_upstream_url(websocket: WebSocket) -> str:
+    raw_query = str(websocket.url.query or "")
+    params = parse_qsl(raw_query, keep_blank_values=True)
+    filtered: list[tuple[str, str]] = [(k, v) for (k, v) in params if k.lower() != "token"]
+    query_token = next((v for (k, v) in params if k.lower() == "token" and (v or "").strip()), "")
+    header_token = (_extract_bearer_from_authorization(websocket.headers.get("authorization")) or "").strip()
+    cookie_token = (websocket.cookies.get("dashboard_access_token") or "").strip()
+    # Prefer a non-expired token among header/query/cookie. This avoids WS 403 loops
+    # when one source (often cookie/query) is stale while another source is fresh.
+    chosen_token = _choose_fresh_ws_token(header_token, query_token, cookie_token)
+    if chosen_token:
+        filtered.append(("token", chosen_token))
+    upstream_query = urlencode(filtered, doseq=True)
+    return _backend_ws_url("/ws/dashboard", upstream_query)
+
+
+async def _proxy_websocket(
+    websocket: WebSocket,
+    upstream_url: str,
+    *,
+    include_auth_headers: bool = False,
+    include_cookies: bool = True,
+) -> None:
     headers: dict[str, str] = {}
+    if websocket.headers.get("origin"):
+        headers["Origin"] = str(websocket.headers.get("origin"))
     if include_auth_headers and websocket.headers.get("authorization"):
         headers["Authorization"] = str(websocket.headers.get("authorization"))
-    if websocket.headers.get("cookie"):
+    if include_cookies and websocket.headers.get("cookie"):
         headers["Cookie"] = str(websocket.headers.get("cookie"))
+    subprotocols_header = str(websocket.headers.get("sec-websocket-protocol") or "").strip()
+    requested_subprotocols = [p.strip() for p in subprotocols_header.split(",") if p.strip()]
 
     session = await _ensure_proxy_session()
     try:
-        async with session.ws_connect(upstream_url, headers=headers) as upstream_ws:
+        ws_connect_kwargs: dict[str, Any] = {"headers": headers}
+        if requested_subprotocols:
+            ws_connect_kwargs["protocols"] = requested_subprotocols
+        async with session.ws_connect(upstream_url, **ws_connect_kwargs) as upstream_ws:
+            selected_subprotocol = getattr(upstream_ws, "protocol", None)
+            if not selected_subprotocol and requested_subprotocols:
+                selected_subprotocol = requested_subprotocols[0]
+            await websocket.accept(subprotocol=selected_subprotocol)
+
             async def _client_to_upstream() -> None:
                 while True:
                     msg = await websocket.receive()
@@ -792,15 +867,81 @@ async def admin_electron_release_build(
 
 @app.websocket("/ws/dashboard")
 async def proxy_ws_dashboard(websocket: WebSocket) -> None:
-    query = str(websocket.url.query or "")
-    await _proxy_websocket(websocket, _backend_ws_url("/ws/dashboard", query), include_auth_headers=True)
+    await _proxy_websocket(
+        websocket,
+        _build_dashboard_ws_upstream_url(websocket),
+        include_auth_headers=True,
+    )
 
 
 @app.websocket("/_next/webpack-hmr")
 async def proxy_ws_frontend_hmr(websocket: WebSocket) -> None:
     # Next.js dev HMR channel.
     query = str(websocket.url.query or "")
-    await _proxy_websocket(websocket, _frontend_ws_url("/_next/webpack-hmr", query), include_auth_headers=False)
+    await _proxy_websocket(
+        websocket,
+        _frontend_ws_url("/_next/webpack-hmr", query),
+        include_auth_headers=False,
+        include_cookies=False,
+    )
+
+
+@app.websocket("/websockify")
+async def proxy_ws_novnc_websockify(websocket: WebSocket) -> None:
+    query = str(websocket.url.query or "")
+    logger.warning(
+        "[proxy-ws-novnc] sec-websocket-protocol=%s origin=%s",
+        websocket.headers.get("sec-websocket-protocol"),
+        websocket.headers.get("origin"),
+    )
+    await _proxy_websocket(
+        websocket,
+        _playwright_ws_url("/websockify", query),
+        include_auth_headers=False,
+        include_cookies=False,
+    )
+
+
+@app.websocket("/websockify/{rest_of_path:path}")
+async def proxy_ws_novnc_websockify_path(websocket: WebSocket, rest_of_path: str) -> None:
+    query = str(websocket.url.query or "")
+    await _proxy_websocket(
+        websocket,
+        _playwright_ws_url(f"/websockify/{rest_of_path}", query),
+        include_auth_headers=False,
+        include_cookies=False,
+    )
+
+
+@app.api_route("/vnc/{rest_of_path:path}", methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+async def proxy_novnc_assets(rest_of_path: str, request: Request) -> Response:
+    # The public URL uses "/vnc/..." prefix, but upstream noVNC serves assets from "/".
+    target_url = f"{PLAYWRIGHT_NOVNC_BASE_URL}/{rest_of_path}"
+    try:
+        return await _proxy_request(request, target_url=target_url)
+    except Exception as exc:
+        logger.error("[proxy-novnc-assets] error: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Error conectando noVNC interno: {exc}") from exc
+
+
+@app.api_route("/websockify", methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+async def proxy_novnc_websockify(request: Request) -> Response:
+    target_url = f"{PLAYWRIGHT_NOVNC_BASE_URL}/websockify"
+    try:
+        return await _proxy_request(request, target_url=target_url)
+    except Exception as exc:
+        logger.error("[proxy-novnc-websockify] error: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Error conectando websockify interno: {exc}") from exc
+
+
+@app.api_route("/websockify/{rest_of_path:path}", methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+async def proxy_novnc_websockify_path(rest_of_path: str, request: Request) -> Response:
+    target_url = f"{PLAYWRIGHT_NOVNC_BASE_URL}/websockify/{rest_of_path}"
+    try:
+        return await _proxy_request(request, target_url=target_url)
+    except Exception as exc:
+        logger.error("[proxy-novnc-websockify-path] error: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Error conectando websockify interno: {exc}") from exc
 
 
 @app.api_route("/api/admin/{rest_of_path:path}", methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])

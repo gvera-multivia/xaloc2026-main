@@ -807,6 +807,21 @@ class DashboardService:
         removed = self.admin_store.unblock_resource(site_id=site, resource_id=rid)
         if removed:
             self._clear_resource_dedupe_keys(site_id=site, resource_id=rid)
+            try:
+                # Al desbloquear, limpiar la incidencia operativa asociada para
+                # evitar que quede pendiente visualmente aunque ya no este bloqueado.
+                self.incidents_history_repo.clear_incident(
+                    site_id=site,
+                    resource_id=rid,
+                    incident_type="RESOURCE_BLOCKED",
+                )
+            except Exception as exc:
+                self.logger.warning(
+                    "No se pudo limpiar incidencia RESOURCE_BLOCKED site=%s resource_id=%s: %s",
+                    site,
+                    rid,
+                    exc,
+                )
         return {"site_id": site, "resource_id": rid, "unblocked": bool(removed)}
 
     def list_organismo_configs(self) -> list[dict[str, Any]]:

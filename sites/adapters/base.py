@@ -182,7 +182,7 @@ class BaseOnlineAdapter(SiteAdapter):
     @classmethod
     def _valida_expediente_gim(cls, expediente: str) -> bool:
         exp = cls._clean_str(expediente).upper()
-        return bool(re.match(r"^\d{5}-\d{4}[/\-]\d{4,5}-GIM$", exp))
+        return bool(re.match(r"^\d{5}-\d{4}[/\-]\d{1,5}(?:-GIM)?$", exp))
 
     @classmethod
     def _materialize_from_canonical_if_present(cls, record: dict[str, Any]) -> dict[str, Any]:
@@ -259,6 +259,14 @@ class BaseOnlineAdapter(SiteAdapter):
                 "expediente_id_ens": m_gim.group("id_ens"),
                 "expediente_any": m_gim.group("any"),
                 "expediente_num": m_gim.group("num"),
+                "num_butlleti": exp,
+            }
+        m_base = re.match(r"^(?P<id_ens>\d{5})-(?P<any>\d{4})[/\-](?P<num>\d{1,5})$", exp)
+        if m_base:
+            return {
+                "expediente_id_ens": m_base.group("id_ens"),
+                "expediente_any": m_base.group("any"),
+                "expediente_num": m_base.group("num"),
                 "num_butlleti": exp,
             }
         m_exe = re.match(r"^(?P<id_ens>\d)-(?P<any>\d{4})[/\-](?P<num>\d{4,6})-(EXE|ECC)$", exp)
@@ -469,7 +477,7 @@ class BaseOnlineAdapter(SiteAdapter):
                                 "idRecurso": r.get("idRecurso"),
                                 "Expedient": expediente_raw,
                                 "tipo_incidencia": "SITE_RULE_DISCARDED",
-                                "motivo": "P1 solo admite expedientes GIM validos",
+                                "motivo": "P1 solo admite expedientes base validos (con o sin -GIM)",
                             }
                         )
                     continue

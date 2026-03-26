@@ -1,0 +1,12 @@
+.git
+.gitignore
+.venv
+.tmp
+.claude-flow
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.log
+MAPAS

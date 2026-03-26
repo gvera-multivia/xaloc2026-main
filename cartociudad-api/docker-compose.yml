@@ -1,0 +1,9 @@
+services:
+  cartociudad-api:
+    build: .
+    container_name: cartociudad-api
+    ports:
+      - "8020:8000"
+    volumes:
+      - ./MAPAS:/app/MAPAS:ro
+    restart: unless-stopped

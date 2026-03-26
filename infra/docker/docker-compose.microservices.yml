@@ -104,6 +104,7 @@ services:
       - dptos_smb:/mnt/dptos:rw
     ports:
       - "8788:8788"
+      - "8010:8788"
     depends_on:
       auth-rbac-service:
         condition: service_started
@@ -139,9 +140,10 @@ services:
              /opt/venv/bin/uvicorn services.api_gateway.app:app --host 0.0.0.0 --port 8080"
     environment:
       DASHBOARD_BACKEND_URL: http://dashboard-backend-service:8788
-      DASHBOARD_FRONTEND_HOST: 0.0.0.0
+      DASHBOARD_FRONTEND_HOST: 127.0.0.1
       DASHBOARD_FRONTEND_PORT: "3000"
       DASHBOARD_FRONTEND_DEV: ${DASHBOARD_FRONTEND_DEV:-0}
+      NEXT_PUBLIC_ENABLE_WS: ${NEXT_PUBLIC_ENABLE_WS:-1}
       MORRIGAN_RELEASE_DIR: /app/morrigan-electron/release
       MORRIGAN_INSTALLER_PATTERN: Morrigan*.exe
       MORRIGAN_MSI_PATTERN: Morrigan*.msi
@@ -158,6 +160,8 @@ services:
     depends_on:
       dashboard-backend-service:
         condition: service_started
+    ports:
+      - "80:8080"
     labels:
       autoheal: "true"
     healthcheck:
@@ -425,7 +429,7 @@ services:
     container_name: xaloc-proxy
     restart: unless-stopped
     ports:
-      - "80:80"
+      - "8088:80"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
     depends_on:

@@ -22,6 +22,156 @@ ATC_FORM_NAV_TIMEOUT_MS = 45000
 ATC_FORM_VALIDATE_SETTLE_TIMEOUT_MS = 120000
 
 
+def _normalize_modal_text(value: str) -> str:
+    return (
+        str(value or "")
+        .replace("\xa0", " ")
+        .strip()
+        .lower()
+        .translate(str.maketrans("àáèéíïòóúüç", "aaeeiioouuc"))
+    )
+
+
+def _is_csv_rejected_modal_text(value: str) -> bool:
+    text = _normalize_modal_text(value)
+    if not text:
+        return False
+    return (
+        "no identifiquem el csv" in text
+        or "no identificamos el csv" in text
+        or "csv que heu indicat" in text
+        or "csv que ha indicado" in text
+        or "el csv no es correcte" in text
+        or "csv no es correcto" in text
+    )
+
+
+def _is_atencio_continue_modal_text(value: str) -> bool:
+    text = _normalize_modal_text(value)
+    if not text:
+        return False
+    has_term = ("termini" in text or "plazo" in text) and "reclam" in text
+    has_economic = (
+        "economicoadministrativa" in text
+        or "economico administrativa" in text
+        or "economico-administrativa" in text
+    )
+    has_continue_question = (
+        "voleu continuar" in text
+        or "desea continuar" in text
+        or "quieres continuar" in text
+        or "vol continuar" in text
+    )
+    return bool(has_term and has_economic and has_continue_question)
+
+
+async def _click_continue_inside_dialog(dialog) -> bool:
+    button = dialog.locator("button.se-button--primary, button").filter(
+        has_text=re.compile(r"^\s*(Continuar|Continue)\s*$", re.IGNORECASE)
+    ).first
+    if await button.count() <= 0:
+        return False
+
+    for kwargs in ({}, {"force": True}):
+        try:
+            await button.click(timeout=ATC_FORM_SHORT_TIMEOUT_MS, **kwargs)
+            return True
+        except Exception:
+            continue
+
+    try:
+        await button.evaluate(
+            """(el) => {
+                const host = el.closest("se-button");
+                if (host && host.style) host.style.pointerEvents = "auto";
+                if (el.style) el.style.pointerEvents = "auto";
+                if (typeof el.click === "function") el.click();
+                el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+            }"""
+        )
+        return True
+    except Exception:
+        return False
+
+
+async def _dismiss_atencio_continue_modal_if_present(page: "Page") -> bool:
+    dialogs = page.locator(
+        "se-modal:has(button.se-button--primary), app-modal-info, dialog, [role='dialog']"
+    )
+    count = await dialogs.count()
+    if count <= 0:
+        return False
+
+    for idx in range(min(count, 6)):
+        dialog = dialogs.nth(idx)
+        try:
+            if not await dialog.is_visible():
+                continue
+            text = await dialog.inner_text()
+        except Exception:
+            continue
+        if _is_csv_rejected_modal_text(text):
+            continue
+
+        should_click_continue = _is_atencio_continue_modal_text(text)
+        if not should_click_continue:
+            text_norm = _normalize_modal_text(text)
+            should_click_continue = "atencio" in text_norm or "atencion" in text_norm or "continuar" in text_norm
+
+        has_primary_continue = False
+        try:
+            has_primary_continue = (
+                await dialog.locator("button.se-button--primary").filter(
+                    has_text=re.compile(r"^\s*(Continuar|Continue)\s*$", re.IGNORECASE)
+                ).count()
+            ) > 0
+        except Exception:
+            has_primary_continue = False
+
+        if not (should_click_continue or has_primary_continue):
+            continue
+
+        try:
+            clicked = await _click_continue_inside_dialog(dialog)
+            if clicked:
+                await wait_after_action(page)
+                return True
+        except Exception:
+            pass
+
+    # Fallback extra: click directo global sobre el botón primario de se-modal.
+    try:
+        modal_continue = page.locator("se-modal button.se-button--primary").filter(
+            has_text=re.compile(r"^\s*(Continuar|Continue)\s*$", re.IGNORECASE)
+        ).first
+        if await modal_continue.count() > 0:
+            for kwargs in ({}, {"force": True}):
+                try:
+                    await modal_continue.click(timeout=ATC_FORM_SHORT_TIMEOUT_MS, **kwargs)
+                    await wait_after_action(page)
+                    return True
+                except Exception:
+                    continue
+            try:
+                await modal_continue.evaluate(
+                    """(el) => {
+                        const host = el.closest("se-button");
+                        if (host && host.style) host.style.pointerEvents = "auto";
+                        if (el.style) el.style.pointerEvents = "auto";
+                        if (typeof el.click === "function") el.click();
+                        el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+                    }"""
+                )
+                await wait_after_action(page)
+                return True
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    return False
+
+
 def _matches_third_person_label(value: str) -> bool:
     return bool(_THIRD_PERSON_RADIO_RE.search(str(value or "").strip()))
 
@@ -840,6 +990,22 @@ async def _search_csv_and_continue(page: "Page", datos: "AtcTarget") -> None:
                 pass
 
     await _click_button(page, [r"Continuar", r"Continue"])
+    for _ in range(10):
+        try:
+            await page.wait_for_url("**/allegacions**", timeout=2500)
+            return
+        except Exception:
+            pass
+
+        # Si aparece aviso intermedio de plazo, hay que confirmarlo.
+        await _dismiss_atencio_continue_modal_if_present(page)
+
+        # Tras cualquier modal, volver a intentar el continuar de la pantalla base.
+        try:
+            await _click_button(page, [r"Continuar", r"Continue"], timeout=ATC_FORM_SHORT_TIMEOUT_MS)
+        except Exception:
+            pass
+
     await page.wait_for_url("**/allegacions**", timeout=ATC_FORM_NAV_TIMEOUT_MS)
 
 

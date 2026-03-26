@@ -13,10 +13,12 @@ class DiputacioBcnAutomation(BaseAutomation):
     def __init__(self, config: DiputacioBcnConfig):
         super().__init__(config)
         self.config = config
+        self.last_flow_metadata: dict = {}
 
     async def ejecutar_flujo_completo(self, datos: DiputacioBcnTarget) -> str:
         if not self.page:
             raise RuntimeError("Automation no inicializada (usar 'async with').")
+        self.last_flow_metadata = {"diputacio_justificante_descargado": False}
 
         async def _run_step(name: str, coro, timeout_s: int):
             try:
@@ -31,6 +33,15 @@ class DiputacioBcnAutomation(BaseAutomation):
         self.page = await _run_step("documentos", run_documentos(self.page, self.config, datos), 360)
         self.page = await _run_step("confirmacion", run_confirmacion(self.page, self.config, datos), 180)
         self.page = await _run_step("presentmul_pas2", run_presentmul_pas2(self.page, self.config, datos), 180)
+        self.last_flow_metadata = {
+            "diputacio_justificante_descargado": bool(
+                datos.payload.get("diputacio_justificante_descargado", False)
+            ),
+            "diputacio_justificante_path": str(datos.payload.get("diputacio_justificante_path") or ""),
+            "diputacio_justificante_artifact_path": str(
+                datos.payload.get("diputacio_justificante_artifact_path") or ""
+            ),
+        }
 
         shot = self.config.dir_screenshots / f"diputacio_bcn_standalone.png"
         await self.page.screenshot(path=shot, full_page=True)

@@ -108,6 +108,7 @@ class RedsaraAdapter(SiteAdapter):
             "destination_code": "LA0006797",
             "regex_list": [
                 r"^\d{4}SACR\d{7}$",
+                r"^MU\d{15}$",
                 r"^EI\d{15}$",
                 r"^\d{4}SACG\d{7}$",
                 r"^\d{11}$",
@@ -151,7 +152,10 @@ class RedsaraAdapter(SiteAdapter):
             "name": "AYUNTAMIENTO DE MOSTOLES",
             "like_patterns": ["%AYUNTAMIENTO DE MOSTOLES%"],
             "destination_code": "LA0007892",
-            "regex_list": [r"^\d{9}$"],
+            "regex_list": [
+                r"^\d{9}$",
+                r"^\d{1,4}/\d{4}/MUL$",
+            ],
         },
         {
             "name": "AYUNTAMIENTO DE SANTIAGO DE COMPOSTELA",

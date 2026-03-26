@@ -17,6 +17,7 @@ def test_validate_expediente_by_official_patterns() -> None:
     assert adapter.validate_expediente_for_organisme("AJUNTAMENT DE BARCELONA", "2026SACR0141800")
     assert adapter.validate_expediente_for_organisme("AJUNTAMENT DE BARCELONA", "26F013176")
     assert adapter.validate_expediente_for_organisme("AJUNTAMENT DE BARCELONA", "2025-1017739")
+    assert adapter.validate_expediente_for_organisme("AJUNTAMENT DE BARCELONA", "MU202640555138641")
     assert adapter.validate_expediente_for_organisme(
         "SECTOR DE SEGURIDAD Y MOVILIDAD DEL AYUNTAMIENTO DE BARCELONA", "U8099161"
     )
@@ -32,8 +33,11 @@ def test_validate_expediente_by_official_patterns() -> None:
     )
     assert adapter.validate_expediente_for_organisme("AJUNTAMENT MIGJORN GRAN", "2025013916")
     assert adapter.validate_expediente_for_organisme("AYUNTAMIENTO DE MOSTOLES", "888249540")
+    assert adapter.validate_expediente_for_organisme("AYUNTAMIENTO DE MOSTOLES", "550/2026/MUL")
     assert adapter.validate_expediente_for_organisme("JEFATURA PROVINCIAL DE TRÁFICO DE BARCELONA", "083313177")
     assert not adapter.validate_expediente_for_organisme("AYUNTAMIENTO DE MOSTOLES", "2026SACR0141800")
+    assert not adapter.validate_expediente_for_organisme("AYUNTAMIENTO DE MOSTOLES", "550/2026/MULA")
+    assert not adapter.validate_expediente_for_organisme("AJUNTAMENT DE BARCELONA", "MU20264055513864")
 
 
 def test_fetch_candidates_discards_invalid_by_pattern() -> None:

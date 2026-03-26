@@ -76,13 +76,15 @@ async def _resolve_upload_index(
         await page.wait_for_timeout(step_ms)
         waited += step_ms
 
-    # Terrassa no siempre pinta un bloque nuevo tras confirmar una subida.
-    # Si tras agotar la espera sigue habiendo bloques visibles, reutilizamos
-    # uno de ellos en vez de abortar el lote completo.
+    # Regla anti-sobrescritura: nunca reutilizar un bloque ya marcado como usado.
+    # Si no hay bloque libre, forzamos error para reintento externo y evitamos
+    # pisar un documento previamente cargado.
     if last_visible:
-        if preferred_index in last_visible:
+        free_last_visible = [idx for idx in last_visible if idx not in used_indices]
+        if preferred_index in free_last_visible:
             return preferred_index
-        return min(last_visible)
+        if free_last_visible:
+            return min(free_last_visible)
 
     raise RuntimeError(
         f"terrassa-docs: no hay bloques de subida libres para doc index={preferred_index}. "
@@ -301,7 +303,6 @@ async def _wait_until_upload_committed(
 ) -> dict[str, object]:
     waited = 0
     step_ms = 500
-    soft_candidate_hits = 0
     last_analysis: dict[str, object] = {}
 
     while waited <= timeout_ms:
@@ -316,24 +317,12 @@ async def _wait_until_upload_committed(
         )
         if bool(last_analysis.get("confirmed")):
             return last_analysis
-        if bool(last_analysis.get("same_block_soft_candidate")):
-            soft_candidate_hits += 1
-            if soft_candidate_hits >= 3:
-                return {
-                    **last_analysis,
-                    "confirmed": True,
-                    "same_block_registered": True,
-                    "soft_confirmed": True,
-                    "soft_hits": soft_candidate_hits,
-                }
-        else:
-            soft_candidate_hits = 0
         await page.wait_for_timeout(step_ms)
         waited += step_ms
 
     raise RuntimeError(
         "terrassa-docs: no se pudo confirmar la subida del fichero "
-        f"{file_name} en el bloque {upload_index}. estado={last_analysis} soft_hits={soft_candidate_hits}"
+        f"{file_name} en el bloque {upload_index}. estado={last_analysis}"
     )
 
 

@@ -424,17 +424,35 @@ def _extract_bearer_from_authorization(authorization: Optional[str]) -> Optional
 
 
 def _extract_token_from_websocket(websocket: WebSocket) -> Optional[str]:
-    token = websocket.query_params.get("token")
-    if token:
-        return token
+    candidates = _extract_tokens_from_websocket(websocket)
+    return candidates[0] if candidates else None
+
+
+def _extract_tokens_from_websocket(websocket: WebSocket) -> list[str]:
+    candidates: list[str] = []
+    query_token = websocket.query_params.get("token")
     auth_header = websocket.headers.get("authorization")
     header_token = _extract_bearer_from_authorization(auth_header)
-    if header_token:
-        return header_token
     cookie_token = websocket.cookies.get(AUTH_COOKIE_NAME)
-    if cookie_token:
-        return cookie_token
-    return None
+    for token in (query_token, header_token, cookie_token):
+        value = (token or "").strip()
+        if value and value not in candidates:
+            candidates.append(value)
+    return candidates
+
+
+def _token_exp_unverified(token: str) -> Optional[int]:
+    try:
+        payload_part = token.split(".")[1]
+        padding = "=" * (-len(payload_part) % 4)
+        raw = base64.urlsafe_b64decode(payload_part + padding)
+        payload = json.loads(raw.decode("utf-8"))
+        exp = payload.get("exp")
+        if isinstance(exp, (int, float)):
+            return int(exp)
+        return None
+    except Exception:
+        return None
 
 
 def _extract_token_from_request(request: Request, authorization: Optional[str]) -> Optional[str]:
@@ -584,14 +602,34 @@ async def websocket_dashboard(websocket: WebSocket):
         await websocket.close(code=1008, reason="Realtime disabled")
         return
 
-    token = _extract_token_from_websocket(websocket)
-    if not token:
+    candidate_tokens = _extract_tokens_from_websocket(websocket)
+    query_token = (websocket.query_params.get("token") or "").strip()
+    header_token = (_extract_bearer_from_authorization(websocket.headers.get("authorization")) or "").strip()
+    cookie_token = (websocket.cookies.get(AUTH_COOKIE_NAME) or "").strip()
+    logger.warning(
+        "WS auth candidates query=%s header=%s cookie=%s query_exp=%s header_exp=%s cookie_exp=%s",
+        bool(query_token),
+        bool(header_token),
+        bool(cookie_token),
+        _token_exp_unverified(query_token) if query_token else None,
+        _token_exp_unverified(header_token) if header_token else None,
+        _token_exp_unverified(cookie_token) if cookie_token else None,
+    )
+    if not candidate_tokens:
         _WS_DEBUG_STATS["rejected_missing_token"] += 1
         await websocket.close(code=4401, reason="Missing auth token")
         return
-    try:
-        await _auth_introspect(token)
-    except HTTPException:
+
+    authenticated = False
+    for token in candidate_tokens:
+        try:
+            await _auth_introspect(token)
+            authenticated = True
+            break
+        except HTTPException:
+            continue
+
+    if not authenticated:
         _WS_DEBUG_STATS["rejected_invalid_token"] += 1
         await websocket.close(code=4401, reason="Invalid auth token")
         return
