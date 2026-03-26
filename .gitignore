@@ -76,4 +76,4 @@ certificates/*
 logs/*
 *.db
 tmp/*
-cartociudad-api/MAPAS/*.gpkg
+*.gpkg
