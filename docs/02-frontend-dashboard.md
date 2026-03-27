@@ -37,7 +37,6 @@ sequenceDiagram
 - `/incidents`: cola de incidencias pendientes.
 - `/blacklist`: recursos bloqueados y desbloqueo.
 - `/documentos`: utilidades documentales.
-- `/descargas`: notificaciones/broadcast y utilidades Electron.
 - `/users`: gestion de usuarios (admin).
 - `/control`: control de procesos (admin).
 - `/login`: acceso.

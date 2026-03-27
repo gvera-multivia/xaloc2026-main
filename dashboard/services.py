@@ -470,7 +470,7 @@ class DashboardService:
                 repo = ResourceRepository(conn_str=conn_str, logger=self.logger)
                 # Fetch only basics to get numclient
                 resources = repo.get_resources_by_ids(site_id="all", resource_ids=rids)
-                client_map = {r.resource_id: r.numclient for r in resources}
+                client_map = {int(r.id): (r.metadata or {}).get("numclient") for r in resources if getattr(r, "id", None) is not None}
                 for it in items:
                     rid = it.get("resource_id")
                     if rid is not None:
@@ -617,6 +617,37 @@ class DashboardService:
             "morrigan_total": morrigan_total,
             "morrigan_today_total": morrigan_today_total,
         }
+
+    def get_history_postgres_details(
+        self,
+        *,
+        site_id: str,
+        resource_id: int,
+        limit: int = 200,
+    ) -> dict[str, Any]:
+        site = str(site_id or "").strip()
+        if not site:
+            raise ValueError("site_id es obligatorio.")
+        try:
+            rid = int(resource_id)
+        except Exception as exc:
+            raise ValueError("resource_id debe ser entero.") from exc
+        safe_limit = max(1, min(int(limit), 1000))
+        primary = self.incidents_history_repo.list_postgres_details(
+            site_id=site,
+            resource_id=rid,
+            limit=safe_limit,
+        )
+        if primary.get("total"):
+            return primary
+
+        # Fallback: cuando el historial visible viene de SQL Server, site_id puede
+        # ser el nombre del organismo y no el identificador técnico de PG.
+        return self.incidents_history_repo.list_postgres_details(
+            site_id=None,
+            resource_id=rid,
+            limit=safe_limit,
+        )
 
     def list_queue_days(self, *, page: int, page_size: int) -> dict[str, Any]:
         days = self.queue_repo.list_days()

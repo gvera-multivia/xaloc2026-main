@@ -141,6 +141,8 @@ def _classify_sign_result_from_text(*, step4_present: bool, detail_loaded: bool,
     # Redsara puede mostrar modal "other_error" con texto de éxito.
     if "se ha firmado correctamente" in txt:
         return "success"
+    if "no se ha podido validar el documento firmado" in txt:
+        return "unmarshalling_timeout"
     if ("unmarshalling" in txt) or ("read timed out" in txt) or ("timed out" in txt):
         return "unmarshalling_timeout"
     if ("applicationnotfoundexception" in txt) or ("no se ha podido conectar" in txt):

@@ -435,8 +435,8 @@ async def run_presentmul_pas2(page: "Page", config: "DiputacioBcnConfig", datos:
         await _ensure_checked(page, signature_checkbox, label="SignaturaDocument")
     firmar_btn = page.locator("input.btn.btn-info[type='submit'][value*='Firmar y']").first
     if await firmar_btn.count() > 0:
-        await firmar_btn.wait_for(state="visible", timeout=15000)
-        await firmar_btn.click()
+        await firmar_btn.wait_for(state="visible", timeout=30000)
+        await firmar_btn.click(timeout=90000)
     recibo_btn = page.locator("button.btn.btn-info.pull-left:has-text('Recibo de presentación')").first
     if await recibo_btn.count() > 0:
         await recibo_btn.wait_for(state="visible", timeout=15000)

@@ -1,7 +1,0 @@
-# Morrigan Electron
-
-node_modules/
-dist/
-release/
-.env
-*.log

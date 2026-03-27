@@ -306,6 +306,271 @@ class PostgresHistoryRepository:
         finally:
             conn.close()
 
+    @staticmethod
+    def _job_site_expr() -> str:
+        return "COALESCE(payload_json->>'site_id', NULLIF(split_part(dedup_key, ':', 1), ''), 'unknown')"
+
+    @staticmethod
+    def _job_resource_expr() -> str:
+        return (
+            "COALESCE("
+            "CASE WHEN (payload_json->>'idRecurso') ~ '^[0-9]+$' THEN (payload_json->>'idRecurso')::bigint END,"
+            "CASE WHEN (payload_json->>'idRecurso') ~ '^[0-9]+\\.0+$' THEN ((payload_json->>'idRecurso')::numeric)::bigint END,"
+            "CASE WHEN (payload_json->>'resource_id') ~ '^[0-9]+$' THEN (payload_json->>'resource_id')::bigint END,"
+            "CASE WHEN (payload_json->>'resource_id') ~ '^[0-9]+\\.0+$' THEN ((payload_json->>'resource_id')::numeric)::bigint END,"
+            "CASE WHEN (payload_json->>'id_recurso') ~ '^[0-9]+$' THEN (payload_json->>'id_recurso')::bigint END,"
+            "CASE WHEN (payload_json->>'id_recurso') ~ '^[0-9]+\\.0+$' THEN ((payload_json->>'id_recurso')::numeric)::bigint END,"
+            "CASE WHEN (payload_json->>'external_resource_id') ~ '^[0-9]+$' THEN (payload_json->>'external_resource_id')::bigint END,"
+            "CASE WHEN (payload_json->>'external_resource_id') ~ '^[0-9]+\\.0+$' THEN ((payload_json->>'external_resource_id')::numeric)::bigint END,"
+            "CASE WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+$' THEN split_part(dedup_key, ':', 2)::bigint END,"
+            "CASE WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+\\.0+$' THEN (split_part(dedup_key, ':', 2)::numeric)::bigint END"
+            ")"
+        )
+
+    def list_postgres_details(
+        self,
+        *,
+        site_id: str | None,
+        resource_id: int,
+        limit: int = 200,
+    ) -> dict[str, Any]:
+        conn = self._conn()
+        if conn is None:
+            return {"items": [], "total": 0}
+
+        site = str(site_id or "").strip()
+        safe_limit = max(1, min(int(limit), 1000))
+        rid = int(resource_id)
+
+        job_site_expr = self._job_site_expr()
+        job_resource_expr = self._job_resource_expr()
+
+        try:
+            with conn.cursor() as cur:
+                task_site_clause = "site_id = %s" if site else "TRUE"
+                incidents_site_clause = "site_id = %s" if site else "TRUE"
+                jobs_site_clause = f"{job_site_expr} = %s AND" if site else ""
+                payload_resource_match_expr = (
+                    "("
+                    "EXISTS ("
+                    "  SELECT 1"
+                    "  FROM (VALUES"
+                    "    (payload->>'idRecurso'),"
+                    "    (payload->>'resource_id'),"
+                    "    (payload->>'id_recurso'),"
+                    "    (payload->>'external_resource_id')"
+                    "  ) AS rid(raw)"
+                    "  WHERE "
+                    "    (rid.raw ~ '^[0-9]+$' AND rid.raw::bigint = %s)"
+                    "    OR (rid.raw ~ '^[0-9]+\\.0+$' AND (rid.raw::numeric)::bigint = %s)"
+                    ")"
+                    ")"
+                )
+
+                params: list[Any] = []
+                if site:
+                    params.append(site)
+                params.extend([rid, rid, rid])
+                if site:
+                    params.append(site)
+                params.extend([rid, rid, rid])
+                if site:
+                    params.append(site)
+                params.extend([rid, safe_limit])
+
+                cur.execute(
+                    f"""
+                    SELECT source,
+                           status,
+                           day,
+                           started_at,
+                           ended_at,
+                           site_id,
+                           resource_id,
+                           job_id,
+                           protocol,
+                           payload,
+                           result,
+                           metadata
+                    FROM (
+                        SELECT
+                            'realtime_task_results'::text AS source,
+                            status::text AS status,
+                            day::text AS day,
+                            started_at,
+                            ended_at,
+                            site_id::text AS site_id,
+                            resource_id::bigint AS resource_id,
+                            job_id::text AS job_id,
+                            protocol::text AS protocol,
+                            payload,
+                            result,
+                            NULL::jsonb AS metadata
+                        FROM realtime_task_results
+                        WHERE {task_site_clause}
+                          AND (
+                              resource_id = %s
+                              OR {payload_resource_match_expr}
+                          )
+
+                        UNION ALL
+
+                        SELECT
+                            'realtime_incidents'::text AS source,
+                            status::text AS status,
+                            day::text AS day,
+                            started_at,
+                            ended_at,
+                            site_id::text AS site_id,
+                            COALESCE(
+                                resource_id,
+                                CASE
+                                    WHEN (payload->>'idRecurso') ~ '^[0-9]+$' THEN (payload->>'idRecurso')::bigint
+                                    WHEN (payload->>'resource_id') ~ '^[0-9]+$' THEN (payload->>'resource_id')::bigint
+                                    WHEN (payload->>'id_recurso') ~ '^[0-9]+$' THEN (payload->>'id_recurso')::bigint
+                                    WHEN (payload->>'external_resource_id') ~ '^[0-9]+$' THEN (payload->>'external_resource_id')::bigint
+                                    ELSE NULL
+                                END
+                            )::bigint AS resource_id,
+                            NULL::text AS job_id,
+                            NULL::text AS protocol,
+                            payload,
+                            NULL::jsonb AS result,
+                            jsonb_build_object(
+                                'incident_type', incident_type,
+                                'reason', reason,
+                                'expediente', expediente
+                            ) AS metadata
+                        FROM realtime_incidents
+                        WHERE {incidents_site_clause}
+                          AND (
+                              resource_id = %s
+                              OR {payload_resource_match_expr}
+                          )
+
+                        UNION ALL
+
+                        SELECT
+                            'jobs'::text AS source,
+                            status::text AS status,
+                            TO_CHAR(COALESCE(queued_at, created_at), 'YYYY-MM-DD') AS day,
+                            COALESCE(queued_at, created_at) AS started_at,
+                            COALESCE(finished_at, updated_at) AS ended_at,
+                            {job_site_expr}::text AS site_id,
+                            {job_resource_expr}::bigint AS resource_id,
+                            job_id::text AS job_id,
+                            COALESCE(
+                                payload_json->>'protocol',
+                                payload_json->>'protocolo',
+                                NULLIF(split_part(dedup_key, ':', 3), 'none')
+                            )::text AS protocol,
+                            payload_json AS payload,
+                            NULL::jsonb AS result,
+                            jsonb_build_object(
+                                'status', status,
+                                'dedup_key', dedup_key,
+                                'finished_at', finished_at
+                            ) AS metadata
+                        FROM jobs
+                        WHERE {jobs_site_clause}
+                          {job_resource_expr} = %s
+                    ) events
+                    ORDER BY COALESCE(ended_at, started_at) DESC NULLS LAST
+                    LIMIT %s
+                    """,
+                    params,
+                )
+                rows = list(cur.fetchall())
+                try:
+                    cur.execute("SELECT to_regclass('public.job_drafts')")
+                    has_job_drafts = cur.fetchone()[0] is not None
+                except Exception:
+                    has_job_drafts = False
+
+                if has_job_drafts:
+                    drafts_params: list[Any] = []
+                    drafts_site_clause = "organism_id = %s AND" if site else ""
+                    if site:
+                        drafts_params.append(site)
+                    drafts_params.append(rid)
+                    draft_resource_expr = (
+                        "COALESCE("
+                        "CASE WHEN (external_resource_id) ~ '^[0-9]+$' THEN (external_resource_id)::bigint END,"
+                        "CASE WHEN (external_resource_id) ~ '^[0-9]+\\.0+$' THEN ((external_resource_id)::numeric)::bigint END,"
+                        "CASE WHEN (normalized_payload_json->>'idRecurso') ~ '^[0-9]+$' THEN (normalized_payload_json->>'idRecurso')::bigint END,"
+                        "CASE WHEN (normalized_payload_json->>'idRecurso') ~ '^[0-9]+\\.0+$' THEN ((normalized_payload_json->>'idRecurso')::numeric)::bigint END,"
+                        "CASE WHEN (normalized_payload_json->>'resource_id') ~ '^[0-9]+$' THEN (normalized_payload_json->>'resource_id')::bigint END,"
+                        "CASE WHEN (normalized_payload_json->>'resource_id') ~ '^[0-9]+\\.0+$' THEN ((normalized_payload_json->>'resource_id')::numeric)::bigint END,"
+                        "CASE WHEN (normalized_payload_json->>'id_recurso') ~ '^[0-9]+$' THEN (normalized_payload_json->>'id_recurso')::bigint END,"
+                        "CASE WHEN (normalized_payload_json->>'id_recurso') ~ '^[0-9]+\\.0+$' THEN ((normalized_payload_json->>'id_recurso')::numeric)::bigint END,"
+                        "CASE WHEN (normalized_payload_json->>'external_resource_id') ~ '^[0-9]+$' THEN (normalized_payload_json->>'external_resource_id')::bigint END,"
+                        "CASE WHEN (normalized_payload_json->>'external_resource_id') ~ '^[0-9]+\\.0+$' THEN ((normalized_payload_json->>'external_resource_id')::numeric)::bigint END,"
+                        "CASE WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+$' THEN split_part(dedup_key, ':', 2)::bigint END,"
+                        "CASE WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+\\.0+$' THEN (split_part(dedup_key, ':', 2)::numeric)::bigint END"
+                        ")"
+                    )
+                    cur.execute(
+                        f"""
+                        SELECT
+                            'job_drafts'::text AS source,
+                            status::text AS status,
+                            TO_CHAR(COALESCE(dispatched_at, updated_at, created_at), 'YYYY-MM-DD') AS day,
+                            created_at AS started_at,
+                            COALESCE(dispatched_at, updated_at) AS ended_at,
+                            organism_id::text AS site_id,
+                            {draft_resource_expr}::bigint AS resource_id,
+                            COALESCE(job_id, draft_id)::text AS job_id,
+                            job_type::text AS protocol,
+                            normalized_payload_json AS payload,
+                            NULL::jsonb AS result,
+                            jsonb_build_object(
+                                'dedup_key', dedup_key,
+                                'cert_profile', cert_profile,
+                                'priority', priority,
+                                'batch_group_key', batch_group_key,
+                                'last_error', last_error
+                            ) AS metadata
+                        FROM job_drafts
+                        WHERE {drafts_site_clause}
+                          {draft_resource_expr} = %s
+                        ORDER BY COALESCE(dispatched_at, updated_at, created_at) DESC NULLS LAST
+                        LIMIT %s
+                        """,
+                        [*drafts_params, safe_limit],
+                    )
+                    rows.extend(cur.fetchall())
+
+                rows.sort(key=lambda row: row[4] or row[3], reverse=True)
+                rows = rows[:safe_limit]
+                items = [
+                    {
+                        "source": row[0],
+                        "status": row[1],
+                        "day": row[2],
+                        "started_at": row[3].isoformat() if row[3] else None,
+                        "ended_at": row[4].isoformat() if row[4] else None,
+                        "site_id": row[5],
+                        "resource_id": row[6],
+                        "job_id": row[7],
+                        "protocol": row[8],
+                        "payload": row[9] if isinstance(row[9], dict) else {},
+                        "result": row[10] if isinstance(row[10], dict) else {},
+                        "metadata": row[11] if isinstance(row[11], dict) else {},
+                    }
+                    for row in rows
+                ]
+                return {"items": items, "total": len(items)}
+        except Exception as exc:
+            self.logger.warning(
+                "Error obteniendo detalle PostgreSQL site=%s resource_id=%s: %s",
+                site,
+                rid,
+                exc,
+            )
+            return {"items": [], "total": 0}
+        finally:
+            conn.close()
+
     def list_top_users(self, *, limit: int = 500, day: Optional[str] = None) -> list[dict[str, Any]]:
         conn = self._conn()
         if conn is None:
@@ -624,6 +889,10 @@ class SQLServerHistoryRepository:
 
 
 class PostgresQueueRepository:
+    ACTIVE_STATES_SQL = "'queued', 'processing', 'in_progress'"
+    SUCCESS_STATES_SQL = "'completed', 'succeeded'"
+    FINISHED_STATES_SQL = "'completed', 'succeeded', 'failed', 'dead', 'dead_letter', 'cancelled'"
+
     def __init__(self, pg_dsn: Optional[str], logger: Optional[logging.Logger] = None):
         self.pg_dsn = (pg_dsn or "").strip() or None
         self.logger = logger or logging.getLogger("dashboard.pg_queue_repo")
@@ -656,6 +925,17 @@ class PostgresQueueRepository:
     def _protocol_expr() -> str:
         return "COALESCE(payload_json->>'protocol', payload_json->>'protocolo', NULLIF(split_part(dedup_key, ':', 3), 'none'))"
 
+    @staticmethod
+    def _normalize_state(value: Any) -> str:
+        raw = str(value or "").strip().lower()
+        if raw == "in_progress":
+            return "processing"
+        if raw == "succeeded":
+            return "completed"
+        if raw == "dead_letter":
+            return "dead"
+        return raw
+
     def list_days(self) -> list[str]:
         conn = self._conn()
         if conn is None:
@@ -663,10 +943,10 @@ class PostgresQueueRepository:
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    """
+                    f"""
                     SELECT DISTINCT TO_CHAR(COALESCE(queued_at, created_at), 'YYYY-MM-DD') AS day
                     FROM jobs
-                    WHERE status IN ('queued', 'processing')
+                    WHERE status IN ({self.ACTIVE_STATES_SQL})
                     ORDER BY day DESC
                     """
                 )
@@ -688,10 +968,10 @@ class PostgresQueueRepository:
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    """
+                    f"""
                     SELECT COUNT(*)
                     FROM jobs
-                    WHERE status IN ('queued', 'processing')
+                    WHERE status IN ({self.ACTIVE_STATES_SQL})
                     """
                 )
                 total = int(cur.fetchone()[0] or 0)
@@ -707,7 +987,7 @@ class PostgresQueueRepository:
                         updated_at AS ended_at,
                         payload_json
                     FROM jobs
-                    WHERE status IN ('queued', 'processing')
+                    WHERE status IN ({self.ACTIVE_STATES_SQL})
                     ORDER BY COALESCE(queued_at, created_at) DESC
                     LIMIT %s OFFSET %s
                     """,
@@ -720,7 +1000,7 @@ class PostgresQueueRepository:
                         "resource_id": row[1],
                         "job_id": row[2],
                         "protocol": row[3],
-                        "state": row[4],
+                        "state": self._normalize_state(row[4]),
                         "day": (row[5].date().isoformat() if row[5] else ""),
                         "started_at": row[5].isoformat() if row[5] else None,
                         "ended_at": row[6].isoformat() if row[6] else None,
@@ -756,7 +1036,7 @@ class PostgresQueueRepository:
                         updated_at AS ended_at,
                         payload_json
                     FROM jobs
-                    WHERE status = 'processing'
+                    WHERE status IN ('processing', 'in_progress')
                       AND TO_CHAR(COALESCE(queued_at, created_at), 'YYYY-MM-DD') = %s
                     ORDER BY COALESCE(queued_at, created_at) DESC
                     LIMIT 1
@@ -771,7 +1051,7 @@ class PostgresQueueRepository:
                     "resource_id": row[1],
                     "job_id": row[2],
                     "protocol": row[3],
-                    "state": row[4],
+                    "state": self._normalize_state(row[4]),
                     "day": (row[5].date().isoformat() if row[5] else ""),
                     "started_at": row[5].isoformat() if row[5] else None,
                     "ended_at": row[6].isoformat() if row[6] else None,
@@ -796,12 +1076,12 @@ class PostgresQueueRepository:
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    """
+                    f"""
                     SELECT
                         COUNT(*) AS finished_count,
                         MAX(COALESCE(finished_at, updated_at, created_at)) AS last_finished_at
                     FROM jobs
-                    WHERE status IN ('completed', 'succeeded', 'failed', 'dead', 'cancelled')
+                    WHERE status IN ({self.FINISHED_STATES_SQL})
                       AND TO_CHAR(COALESCE(finished_at, updated_at, created_at), 'YYYY-MM-DD') = %s
                     """,
                     (day,),
@@ -813,9 +1093,9 @@ class PostgresQueueRepository:
 
                 # Success-specific data for UI notifications
                 cur.execute(
-                    """
+                    f"""
                     SELECT COUNT(*) FROM jobs
-                    WHERE status IN ('completed', 'succeeded')
+                    WHERE status IN ({self.SUCCESS_STATES_SQL})
                       AND TO_CHAR(COALESCE(finished_at, updated_at, created_at), 'YYYY-MM-DD') = %s
                     """,
                     (day,),
@@ -831,7 +1111,7 @@ class PostgresQueueRepository:
                                {resource_expr} AS resource_id,
                                COALESCE(finished_at, updated_at, created_at) AS finished_at
                         FROM jobs
-                        WHERE status IN ('completed', 'succeeded')
+                        WHERE status IN ({self.SUCCESS_STATES_SQL})
                           AND TO_CHAR(COALESCE(finished_at, updated_at, created_at), 'YYYY-MM-DD') = %s
                         ORDER BY COALESCE(finished_at, updated_at, created_at) DESC
                         LIMIT 1
@@ -872,7 +1152,7 @@ class PostgresQueueRepository:
                     f"""
                     SELECT id, job_id, status
                     FROM jobs
-                    WHERE status IN ('queued', 'processing')
+                    WHERE status IN ({self.ACTIVE_STATES_SQL})
                       AND {site_expr} = %s
                       AND {resource_expr} = %s
                     ORDER BY COALESCE(queued_at, started_at, created_at) DESC, id DESC
@@ -888,7 +1168,7 @@ class PostgresQueueRepository:
 
                 row_id = int(row[0])
                 job_id = str(row[1] or "")
-                status = str(row[2] or "").strip().lower()
+                status = self._normalize_state(row[2])
                 if status == "processing":
                     conn.rollback()
                     return {"removed": False, "reason": "processing", "job_id": job_id}

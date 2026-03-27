@@ -164,7 +164,7 @@ class PgRuntimeStore:
             worker_id=worker_id,
         )
 
-    def count_job_runs(self, site_id: str, states: tuple[str, ...] = ("queued", "processing")) -> int:
+    def count_job_runs(self, site_id: str, states: tuple[str, ...] = ("queued", "processing", "in_progress")) -> int:
         with self._conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -195,7 +195,7 @@ class PgRuntimeStore:
                     """
                     SELECT 1
                     FROM jobs
-                    WHERE status IN ('queued', 'processing')
+                    WHERE status IN ('queued', 'processing', 'in_progress')
                       AND COALESCE(payload_json->>'site_id', split_part(dedup_key, ':', 1), '') = %s
                       AND COALESCE(
                             CASE
@@ -244,7 +244,7 @@ class PgRuntimeStore:
                         END
                     ) AS rid
                     FROM jobs
-                    WHERE status IN ('queued', 'processing')
+                    WHERE status IN ('queued', 'processing', 'in_progress')
                       AND COALESCE(payload_json->>'site_id', split_part(dedup_key, ':', 1), '') = %s
                       AND COALESCE(
                             CASE
@@ -287,7 +287,7 @@ class PgRuntimeStore:
                     """
                     SELECT id, job_id, status, COALESCE(queued_at, updated_at, created_at) AS anchor_ts
                     FROM jobs
-                    WHERE status IN ('queued', 'processing')
+                    WHERE status IN ('queued', 'processing', 'in_progress')
                       AND COALESCE(payload_json->>'site_id', split_part(dedup_key, ':', 1), '') = %s
                       AND COALESCE(
                             CASE
@@ -435,7 +435,7 @@ class PgRuntimeStore:
                     deleted_queue AS (
                         DELETE FROM jobs q
                         USING successful_resources s
-                        WHERE q.status IN ('queued', 'processing')
+                        WHERE q.status IN ('queued', 'processing', 'in_progress')
                           AND {site_expr.replace('payload_json', 'q.payload_json').replace('dedup_key', 'q.dedup_key')} = s.site_id
                           AND {resource_expr.replace('payload_json', 'q.payload_json').replace('dedup_key', 'q.dedup_key')} = s.resource_id
                         RETURNING 1
@@ -630,7 +630,7 @@ class PgRuntimeStore:
                     if current_job_value:
                         alive_current_job_ids.add(current_job_value)
 
-                clauses = ["status = 'processing'"]
+                clauses = ["status IN ('processing', 'in_progress')"]
                 params: list[Any] = []
                 if site_filter:
                     clauses.append(f"{site_expr} = %s")
@@ -700,7 +700,7 @@ class PgRuntimeStore:
                             updated_at = NOW(),
                             error_message = %s
                         WHERE id = %s
-                          AND status = 'processing'
+                          AND status IN ('processing', 'in_progress')
                         """,
                         (recovery_msg, job_row_id),
                     )

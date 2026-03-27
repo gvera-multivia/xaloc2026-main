@@ -369,10 +369,18 @@ async def _safe_select_label(page: "Page | Frame", selector: str, label: str) ->
                 const normalize = (txt) => String(txt || "")
                     .normalize("NFD")
                     .replace(/[\\u0300-\\u036f]/g, "")
+                    .replace(/[^a-zA-Z0-9]+/g, " ")
                     .replace(/\\s+/g, " ")
                     .trim()
                     .toLowerCase();
+                const tokenSet = (txt) =>
+                    new Set(
+                        normalize(txt)
+                            .split(" ")
+                            .filter((t) => t.length >= 3)
+                    );
                 const wanted = normalize(wantedLabel);
+                const wantedTokens = tokenSet(wantedLabel);
                 const options = Array.from(el.options || []);
                 
                 // 1. Coincidencia exacta normalizada
@@ -386,6 +394,18 @@ async def _safe_select_label(page: "Page | Frame", selector: str, label: str) ->
                 // 3. Coincidencia parcial solo para etiquetas suficientemente largas
                 if (!match && wanted.length >= 4) {
                     match = options.find((opt) => normalize(opt.textContent || "").includes(wanted));
+                }
+
+                // 4. Coincidencia por tokens significativos (ignora orden y puntuacion)
+                if (!match && wantedTokens.size > 0) {
+                    match = options.find((opt) => {
+                        const optTokens = tokenSet(opt.textContent || "");
+                        if (optTokens.size === 0) return false;
+                        for (const token of wantedTokens) {
+                            if (!optTokens.has(token)) return false;
+                        }
+                        return true;
+                    });
                 }
                 
                 return match ? String(match.value || "") : "";
@@ -457,15 +477,33 @@ async def _safe_select_via_id(page: "Page | Frame", element_id: str, label: str)
                 const normalize = (txt) => String(txt || "")
                     .normalize("NFD")
                     .replace(/[\\u0300-\\u036f]/g, "")
+                    .replace(/[^a-zA-Z0-9]+/g, " ")
                     .replace(/\\s+/g, " ")
                     .trim()
                     .toLowerCase();
+                const tokenSet = (txt) =>
+                    new Set(
+                        normalize(txt)
+                            .split(" ")
+                            .filter((t) => t.length >= 3)
+                    );
                 const el = document.getElementById(elementId);
                 if (!el || !el.options) return false;
                 const wanted = normalize(wantedLabel);
+                const wantedTokens = tokenSet(wantedLabel);
                 const options = Array.from(el.options);
                 let opt = options.find((item) => normalize(item.textContent || "") === wanted);
                 if (!opt) opt = options.find((item) => normalize(item.textContent || "").includes(wanted));
+                if (!opt && wantedTokens.size > 0) {
+                    opt = options.find((item) => {
+                        const optTokens = tokenSet(item.textContent || "");
+                        if (optTokens.size === 0) return false;
+                        for (const token of wantedTokens) {
+                            if (!optTokens.has(token)) return false;
+                        }
+                        return true;
+                    });
+                }
                 if (!opt) return false;
                 el.value = String(opt.value || "");
                 el.dispatchEvent(new Event("input", { bubbles: true }));

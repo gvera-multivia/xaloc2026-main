@@ -38,8 +38,24 @@ type TopUserItem = {
   total_recursos: number;
 };
 
+type PostgresDetailItem = {
+  source: string;
+  status?: string | null;
+  day?: string | null;
+  started_at?: string | null;
+  ended_at?: string | null;
+  site_id?: string | null;
+  resource_id?: number | string | null;
+  job_id?: string | null;
+  protocol?: string | null;
+  payload?: Record<string, any>;
+  result?: Record<string, any>;
+  metadata?: Record<string, any>;
+};
+
 const DAYS_PER_BLOCK = 35;
 const MORRIGAN_LABEL = 'MORRIGAN';
+const PG_SOURCE_ALL = 'all';
 
 export default function HistoryPage() {
   const searchParams = useSearchParams();
@@ -55,6 +71,9 @@ export default function HistoryPage() {
   const [selectedItem, setSelectedItem] = useState<HistoryItem | null>(null);
   const [folderInfo, setFolderInfo] = useState<FolderResolve | null>(null);
   const [folderLoading, setFolderLoading] = useState(false);
+  const [pgDetails, setPgDetails] = useState<PostgresDetailItem[]>([]);
+  const [pgLoading, setPgLoading] = useState(false);
+  const [pgSourceFilter, setPgSourceFilter] = useState<string>(PG_SOURCE_ALL);
   const [topItems, setTopItems] = useState<TopUserItem[]>([]);
   const [todayTopItems, setTodayTopItems] = useState<TopUserItem[]>([]);
   const [morriganTotal, setMorriganTotal] = useState(0);
@@ -149,7 +168,15 @@ export default function HistoryPage() {
   const openDetail = async (item: HistoryItem) => {
     setSelectedItem(item);
     setFolderInfo(null);
+    setPgDetails([]);
+    setPgSourceFilter(PG_SOURCE_ALL);
     setFolderLoading(true);
+    setPgLoading(true);
+    const normalizedSiteId = String(item.payload?.site_id || item.site_id || '').trim();
+    const rawRid = item.resource_id ?? item.payload?.idRecurso ?? item.payload?.resource_id;
+    const rid = rawRid !== null && rawRid !== undefined && Number.isFinite(Number(rawRid))
+      ? Number(rawRid)
+      : null;
     try {
       const payload = item.payload || {};
       const mergedPayload = {
@@ -157,15 +184,35 @@ export default function HistoryPage() {
         expediente: payload.expediente || item.expediente,
         fase_procedimiento: payload.fase_procedimiento || item.fase_procedimiento || item.protocol,
       };
-      const folder = await historyApi.resolveClientFolder(mergedPayload);
-      setFolderInfo(folder);
+      const [folderRes, pgRes] = await Promise.allSettled([
+        historyApi.resolveClientFolder(mergedPayload),
+        rid !== null
+          ? historyApi.getPostgresDetails(normalizedSiteId || 'all', rid, 200)
+          : Promise.resolve({ items: [], total: 0 }),
+      ]);
+
+      if (folderRes.status === 'fulfilled') {
+        setFolderInfo(folderRes.value);
+      } else {
+        sileo.error({
+          title: 'No se pudo reconstruir la ruta',
+          description: String((folderRes.reason as any)?.message || 'Error desconocido'),
+        });
+      }
+
+      if (pgRes.status === 'fulfilled') {
+        setPgDetails((pgRes.value.items || []) as PostgresDetailItem[]);
+      } else {
+        sileo.warning({
+          title: 'Sin detalle PostgreSQL',
+          description: String((pgRes.reason as any)?.message || 'No se pudo cargar trazas de PostgreSQL.'),
+        });
+      }
     } catch (err: any) {
-      sileo.error({
-        title: 'No se pudo reconstruir la ruta',
-        description: String(err?.message || 'Error desconocido'),
-      });
+      sileo.error({ title: 'Error cargando detalle', description: String(err?.message || 'Error desconocido') });
     } finally {
       setFolderLoading(false);
+      setPgLoading(false);
     }
   };
 
@@ -220,6 +267,16 @@ export default function HistoryPage() {
     getFaseProcedimiento(it).toLowerCase().includes(search.toLowerCase())
   );
   const top3 = topItems.slice(0, 3);
+  const pgSourceOptions = Array.from(
+    new Set(
+      (pgDetails || [])
+        .map((ev) => String(ev.source || '').trim())
+        .filter(Boolean),
+    ),
+  );
+  const filteredPgDetails = pgSourceFilter === PG_SOURCE_ALL
+    ? pgDetails
+    : pgDetails.filter((ev) => String(ev.source || '').trim() === pgSourceFilter);
 
   return (
     <div className="space-y-10 animate-in fade-in duration-700">
@@ -506,7 +563,7 @@ export default function HistoryPage() {
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-black uppercase tracking-[0.14em]">Detalle del Registro</h3>
               <button
-                onClick={() => { setSelectedItem(null); setFolderInfo(null); }}
+                onClick={() => { setSelectedItem(null); setFolderInfo(null); setPgDetails([]); }}
                 className="rounded-md border border-border/70 p-2 hover:border-foreground/40 transition"
               >
                 <X size={14} />
@@ -539,6 +596,48 @@ export default function HistoryPage() {
             <div className="rounded-md border border-border/60 bg-black/30 p-3 text-[11px]">
               <div className="font-semibold mb-1">Payload técnico</div>
               <pre className="whitespace-pre-wrap">{JSON.stringify(selectedItem.payload || {}, null, 2)}</pre>
+            </div>
+
+            <div className="rounded-md border border-border/60 bg-black/30 p-3 text-[11px]">
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <div className="font-semibold">Detalle historial PostgreSQL</div>
+                <select
+                  value={pgSourceFilter}
+                  onChange={(e) => setPgSourceFilter(e.target.value)}
+                  className="text-[10px] bg-[rgba(17,19,26,0.65)] border border-border/70 rounded px-2 py-1"
+                >
+                  <option value={PG_SOURCE_ALL}>Todas las fuentes</option>
+                  {pgSourceOptions.map((src) => (
+                    <option key={src} value={src}>{src}</option>
+                  ))}
+                </select>
+              </div>
+              {pgLoading ? (
+                <div className="text-muted-foreground">Cargando trazas PostgreSQL...</div>
+              ) : filteredPgDetails.length === 0 ? (
+                <div className="text-muted-foreground">Sin eventos PostgreSQL para este recurso.</div>
+              ) : (
+                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                  {filteredPgDetails.map((ev, idx) => {
+                    const ts = ev.ended_at || ev.started_at || '';
+                    return (
+                      <div key={`${ev.source}-${ev.job_id || 'nojid'}-${idx}`} className="rounded border border-border/50 p-2 bg-background/20">
+                        <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] uppercase tracking-[0.08em]">
+                          <span><strong>Fuente:</strong> {ev.source}</span>
+                          <span><strong>Estado:</strong> {ev.status || '-'}</span>
+                          <span><strong>Fecha:</strong> {ts ? new Date(ts).toLocaleString('es-ES') : '-'}</span>
+                          <span><strong>Job:</strong> {ev.job_id || '-'}</span>
+                        </div>
+                        {(ev.metadata && Object.keys(ev.metadata).length > 0) && (
+                          <div className="mt-1 text-[10px] text-muted-foreground">
+                            {JSON.stringify(ev.metadata)}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -28,6 +28,17 @@ class JobsRepository:
     def _dedup_key(job_id: str, dedup_key: Optional[str]) -> str:
         return (dedup_key or "").strip() or f"job:{job_id}"
 
+    @staticmethod
+    def _normalize_status(status: str) -> str:
+        raw = str(status or "").strip().lower()
+        if raw == "in_progress":
+            return "processing"
+        if raw == "succeeded":
+            return "completed"
+        if raw == "dead_letter":
+            return "dead"
+        return raw or "created"
+
     def create_or_update_job(
         self,
         *,
@@ -39,6 +50,7 @@ class JobsRepository:
     ) -> dict[str, Any]:
         now = datetime.now().isoformat()
         dedup = self._dedup_key(job_id, dedup_key)
+        normalized_status = self._normalize_status(status)
         with self._conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -59,7 +71,7 @@ class JobsRepository:
                     (
                         str(job_id),
                         dedup,
-                        str(status),
+                        normalized_status,
                         int(priority),
                         json.dumps(payload, ensure_ascii=False),
                         now,
@@ -97,6 +109,7 @@ class JobsRepository:
         result: Optional[dict[str, Any]] = None,
     ) -> Optional[dict[str, Any]]:
         now = datetime.now().isoformat()
+        normalized_status = self._normalize_status(status)
         with self._conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -122,18 +135,18 @@ class JobsRepository:
                               error_message, queued_at, started_at, finished_at, created_at, updated_at
                     """,
                     (
-                        str(status),
+                        normalized_status,
                         error_message,
                         error_message,
                         json.dumps(result, ensure_ascii=False) if result is not None else None,
                         json.dumps(result, ensure_ascii=False) if result is not None else None,
-                        str(status),
+                        normalized_status,
                         now,
-                        str(status),
-                        str(status),
+                        normalized_status,
+                        normalized_status,
                         now,
-                        str(status),
-                        str(status),
+                        normalized_status,
+                        normalized_status,
                         now,
                         now,
                         str(job_id),

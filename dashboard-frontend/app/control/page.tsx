@@ -5,12 +5,10 @@ import {
     Play,
     Square,
     RotateCcw,
-    AlertCircle,
     Cpu,
     Database
 } from 'lucide-react';
 import { controlApi } from '@/lib/api';
-import { ProcessStatus } from '@/lib/types';
 import { sileo } from 'sileo';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -36,12 +34,16 @@ export default function ControlPage() {
                 controlApi.getLogs('worker', 100),
                 controlApi.getLogs('brain', 100),
             ]);
-            setStatus({ ...(statusRes || {}) });
+            const nextStatus = statusRes?.status ?? statusRes ?? {};
+            setStatus({
+                worker: String(nextStatus.worker || 'stopped').toLowerCase(),
+                brain: String(nextStatus.brain || 'stopped').toLowerCase(),
+            });
             setLogs({
                 worker: workerLogs.stdout || [],
                 brain: brainLogs.stdout || [],
             });
-        } catch (e) {
+        } catch {
             sileo.error({ title: 'Error de conexión', description: 'No se pudo conectar con el servicio de control.' });
         }
     };
@@ -67,7 +69,7 @@ export default function ControlPage() {
             else if (action === 'restart') await controlApi.restart(name);
             sileo.success({ title: `Servicio ${name}`, description: `Acción [${action}] ejecutada correctamente.` });
             await refresh();
-        } catch (e) {
+        } catch {
             sileo.error({ title: 'Error de control', description: `No se pudo ${action} el servicio ${name}.` });
         } finally {
             setBusy(null);

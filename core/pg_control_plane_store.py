@@ -148,7 +148,7 @@ class PgControlPlaneStore:
                         """
                         SELECT job_id, status
                         FROM jobs
-                        WHERE status IN ('queued', 'processing')
+                        WHERE status IN ('queued', 'processing', 'in_progress')
                           AND COALESCE(payload_json->>'site_id', split_part(dedup_key, ':', 1), '') = %s
                           AND COALESCE(
                                 CASE
@@ -197,7 +197,7 @@ class PgControlPlaneStore:
                 existing_status = str(existing[1] or "").strip().lower() if existing and existing[1] is not None else None
                 if existing and existing[0]:
                     job_id = str(existing[0])
-                    if existing_status in {"queued", "processing"}:
+                    if existing_status in {"queued", "processing", "in_progress"}:
                         cur.execute(
                             """
                             UPDATE job_drafts

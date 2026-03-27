@@ -102,6 +102,7 @@ services:
       - ../../:/app
       - clientes_smb:/mnt/clientes:rw
       - dptos_smb:/mnt/dptos:rw
+      - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "8788:8788"
       - "8010:8788"
@@ -111,7 +112,7 @@ services:
     labels:
       autoheal: "true"
     healthcheck:
-      test: ["CMD-SHELL", "ps -ef | grep -q '[u]vicorn services.dashboard_backend.app:app'"]
+      test: ["CMD-SHELL", "python -c \"import sys; s=open('/proc/1/cmdline','rb').read().decode('utf-8','ignore'); sys.exit(0 if 'services.dashboard_backend.app:app' in s else 1)\""]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -144,13 +145,6 @@ services:
       DASHBOARD_FRONTEND_PORT: "3000"
       DASHBOARD_FRONTEND_DEV: ${DASHBOARD_FRONTEND_DEV:-0}
       NEXT_PUBLIC_ENABLE_WS: ${NEXT_PUBLIC_ENABLE_WS:-1}
-      MORRIGAN_RELEASE_DIR: /app/morrigan-electron/release
-      MORRIGAN_INSTALLER_PATTERN: Morrigan*.exe
-      MORRIGAN_MSI_PATTERN: Morrigan*.msi
-      MORRIGAN_API_BASE_URL: ${MORRIGAN_API_BASE_URL:-}
-      MORRIGAN_WS_URL: ${MORRIGAN_WS_URL:-}
-      MORRIGAN_BOOTSTRAP_URL: ${MORRIGAN_BOOTSTRAP_URL:-}
-      MORRIGAN_CONFIG_REFRESH_SEC: ${MORRIGAN_CONFIG_REFRESH_SEC:-120}
       ELECTRON_AUTH_DEBUG: ${ELECTRON_AUTH_DEBUG:-1}
     volumes:
       - ../../:/app
@@ -199,7 +193,7 @@ services:
     labels:
       autoheal: "true"
     healthcheck:
-      test: ["CMD-SHELL", "ps -ef | grep -q '[s]ervices.brain_claim.app'"]
+      test: ["CMD-SHELL", "python -c \"import sys; s=open('/proc/1/cmdline','rb').read().decode('utf-8','ignore'); sys.exit(0 if 'services.brain_claim.app' in s else 1)\""]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -234,7 +228,7 @@ services:
     labels:
       autoheal: "true"
     healthcheck:
-      test: ["CMD-SHELL", "ps -ef | grep -q '[s]ervices.payload_validator.app'"]
+      test: ["CMD-SHELL", "python -c \"import sys; s=open('/proc/1/cmdline','rb').read().decode('utf-8','ignore'); sys.exit(0 if 'services.payload_validator.app' in s else 1)\""]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -269,7 +263,7 @@ services:
     labels:
       autoheal: "true"
     healthcheck:
-      test: ["CMD-SHELL", "ps -ef | grep -q '[s]ervices.batcher_dispatcher.app'"]
+      test: ["CMD-SHELL", "python -c \"import sys; s=open('/proc/1/cmdline','rb').read().decode('utf-8','ignore'); sys.exit(0 if 'services.batcher_dispatcher.app' in s else 1)\""]
       interval: 30s
       timeout: 10s
       retries: 3

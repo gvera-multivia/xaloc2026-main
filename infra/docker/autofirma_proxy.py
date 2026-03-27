@@ -551,7 +551,6 @@ def _build_legacy_text_response_for_sign(
     """
     def _to_urlsafe_b64(txt: str) -> str:
         norm = re.sub(r"\s+", "", txt or "")
-        # Redsara manual capture uses URL-safe base64 (e.g. "MII...-..._...").
         return norm.replace("+", "-").replace("/", "_").rstrip("=")
 
     sig = _to_urlsafe_b64(signature_b64)
