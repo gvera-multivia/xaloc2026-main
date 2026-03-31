@@ -95,7 +95,7 @@ def test_fetch_candidates_discards_invalid_expediente_shape() -> None:
     assert out == []
 
 
-def test_fetch_candidates_discards_identificacion_phase() -> None:
+def test_fetch_candidates_accepts_identificacion_phase() -> None:
     adapter = ServeiCatTransAdapter()
     row = _base_row()
     row["FaseProcedimiento"] = "Identificació del conductor"
@@ -107,7 +107,7 @@ def test_fetch_candidates_discards_identificacion_phase() -> None:
         limit=50,
         resource_repo=repo,
     )
-    assert out == []
+    assert len(out) == 1
 
 
 def test_build_payloads_maps_expected_core_fields() -> None:
@@ -145,3 +145,65 @@ def test_build_payloads_representado_fallbacks_when_cl_fields_missing() -> None:
     assert payload["representado_calle_raw"] == "Av Diagonal"
     assert payload["representado_cp"] == "08019"
     assert payload["representado_poblacion"] == "Barcelona"
+
+
+def test_build_payloads_identificacion_sets_tramite_and_identificado_fields() -> None:
+    adapter = ServeiCatTransAdapter()
+    row = _base_row()
+    row["FaseProcedimiento"] = "IdentificaciÃ³ del conductor"
+    row["ConducNom"] = "PEP"
+    row["ConducApellido1"] = "PROVES"
+    row["ConducDni"] = "12345678Z"
+    row["ConducAdr"] = "Carrer Major"
+    row["ConducNumero"] = "12"
+    row["ConducCodpost"] = "08001"
+    row["ConducPobl"] = "Barcelona"
+    row["ConducProv"] = "Barcelona"
+
+    payloads = asyncio.run(adapter.build_payloads([row]))
+
+    assert len(payloads) == 1
+    payload = payloads[0]
+    assert payload["tramite_tipo"] == "identificacion"
+    assert payload["identificado_tipo_persona"] == "fisica"
+    assert payload["identificado_nombre"] == "PEP"
+    assert payload["identificado_nif"] == "12345678Z"
+    assert payload["identificado_calle_raw"] == "Carrer Major"
+    assert payload["identificado_numero_raw"] == "12"
+
+
+def test_build_payloads_identificacion_pf_requires_document_and_name() -> None:
+    adapter = ServeiCatTransAdapter()
+    row = _base_row()
+    row["FaseProcedimiento"] = "IdentificaciÃ³ del conductor"
+    row["ConducNom"] = ""
+    row["ConducDni"] = ""
+    discards: list[dict] = []
+
+    payloads = asyncio.run(adapter.build_payloads([row], on_discard=discards.append))
+
+    assert payloads == []
+    assert any(
+        d.get("tipo_incidencia") == "SITE_RULE_DISCARDED"
+        and "Identificacion fisica sin documento o nombre del identificado" in str(d.get("motivo"))
+        for d in discards
+    )
+
+
+def test_build_payloads_identificacion_pj_requires_nif_empresa_and_razon_social() -> None:
+    adapter = ServeiCatTransAdapter()
+    row = _base_row()
+    row["FaseProcedimiento"] = "IdentificaciÃ³ del conductor"
+    row["identificado_tipo_persona"] = "juridica"
+    row["ConducCif"] = ""
+    row["ConducRazonSocial"] = ""
+    discards: list[dict] = []
+
+    payloads = asyncio.run(adapter.build_payloads([row], on_discard=discards.append))
+
+    assert payloads == []
+    assert any(
+        d.get("tipo_incidencia") == "SITE_RULE_DISCARDED"
+        and "Identificacion juridica sin nif_empresa o razon_social del identificado" in str(d.get("motivo"))
+        for d in discards
+    )

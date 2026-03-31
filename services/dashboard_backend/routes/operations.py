@@ -1,17 +1,26 @@
 from __future__ import annotations
 
+import asyncio
 import os
+import re
 from pathlib import Path
 from typing import Any, Optional
 
 import aiohttp
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Header, Query, Response
 
 import dashboard_api as api
+from core.authorization_fetcher import find_authorization_in_tmp, move_authorization_to_destinations
+from core.client_documentation import client_identity_from_db
+from core.client_paths import get_ruta_cliente_documentacion, resolve_client_docs_base_path
+from core.gesdoc_auth import close_gesdoc_session, create_gesdoc_session, execute_gesdoc_action, search_client_in_gesdoc
+from core.sqlserver_utils import build_sqlserver_connection_string
 from core.xvia_auth import create_authenticated_session_in_place
 from core.xvia_deselect import deselect_resource
+from dashboard.services import DashboardConflictError, DashboardNotFoundError
 
 router = APIRouter()
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
 def _build_novnc_proxy_url() -> str:
@@ -21,6 +30,390 @@ def _build_novnc_proxy_url() -> str:
         "/vnc/vnc.html"
         f"?autoconnect=1&quality={quality}&compression={compression}&resize=scale&path=websockify"
     )
+
+
+def _compact_text_snippet(html: str, *, max_len: int = 1200) -> str:
+    text = _HTML_TAG_RE.sub(" ", html or "")
+    text = " ".join(text.split()).strip()
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 3].rstrip() + "..."
+
+
+def _resolve_gesdoc_credentials(
+    gesdoc_user: str | None,
+    gesdoc_password: str | None,
+) -> tuple[str, str]:
+    username = str(gesdoc_user or os.getenv("GESDOC_USER") or "").strip()
+    password = str(gesdoc_password or os.getenv("GESDOC_PWD") or "").strip()
+    if not username or not password:
+        raise HTTPException(
+            status_code=400,
+            detail="Credenciales GESDOC no disponibles. Usa cabeceras X-Gesdoc-User/X-Gesdoc-Password o variables GESDOC_USER/GESDOC_PWD.",
+        )
+    return username, password
+
+
+async def _open_gesdoc_session_from_headers(
+    gesdoc_user: str | None,
+    gesdoc_password: str | None,
+):
+    username, password = _resolve_gesdoc_credentials(gesdoc_user, gesdoc_password)
+    return await create_gesdoc_session(username, password)
+
+
+def _build_proxy_response(action_result: dict[str, Any]) -> Response:
+    headers: dict[str, str] = {"X-Gesdoc-Final-Url": str(action_result.get("final_url") or "")}
+    content_disposition = str(action_result.get("content_disposition") or "").strip()
+    if content_disposition:
+        headers["Content-Disposition"] = content_disposition
+    return Response(
+        content=action_result.get("body") or b"",
+        status_code=int(action_result.get("status_code") or 200),
+        media_type=str(action_result.get("content_type") or "application/octet-stream"),
+        headers=headers,
+    )
+
+
+def _normalize_int(value: Any) -> int | None:
+    try:
+        if value is None or str(value).strip() == "":
+            return None
+        return int(str(value).strip())
+    except Exception:
+        return None
+
+
+def _cliente_tipo_label(cliente_tipo: Any) -> str:
+    return "empresa" if _normalize_int(cliente_tipo) == 2 else "particular"
+
+
+def _gesdoc_generate_action_key(cliente_tipo: Any) -> str:
+    return "generate_company" if _normalize_int(cliente_tipo) == 2 else "generate_particular"
+
+
+def _build_gesdoc_available_actions(search_result: dict[str, Any]) -> list[str]:
+    if bool(search_result.get("has_sent_request")):
+        return ["generate"]
+    return ["generate", "send"]
+
+
+def _resolve_gesdoc_destination_folders(
+    *,
+    numclient: int,
+    conn_str: str,
+    sujeto_recurso: str | None = None,
+) -> tuple[Path, list[Path]]:
+    client = client_identity_from_db(numclient, conn_str, sujeto_recurso=sujeto_recurso)
+    client_root = get_ruta_cliente_documentacion(client, base_path=resolve_client_docs_base_path())
+    dest_folders: list[Path] = []
+    if client_root.exists():
+        for sub in client_root.iterdir():
+            if sub.is_dir() and "DOCUMENTA" in sub.name.upper():
+                dest_folders.append(sub)
+    if not dest_folders:
+        dest_folders = [
+            client_root / "DOCUMENTACION",
+            client_root / "DOCUMENTACION RECURSOS",
+        ]
+    return client_root, dest_folders
+
+
+async def _poll_and_store_gesdoc_authorization(
+    *,
+    numclient: int,
+    cliente_tipo: Any,
+    conn_str: str,
+    sujeto_recurso: str | None = None,
+    max_polling_retries: int = 5,
+    polling_interval: float = 2.0,
+) -> dict[str, Any]:
+    client_type = _cliente_tipo_label(cliente_tipo)
+    try:
+        client_root, dest_folders = _resolve_gesdoc_destination_folders(
+            numclient=numclient,
+            conn_str=conn_str,
+            sujeto_recurso=sujeto_recurso,
+        )
+    except Exception as exc:
+        return {
+            "ok": False,
+            "authorization_found": False,
+            "authorization_file": None,
+            "destination_paths": [],
+            "message": f"No se pudo resolver la carpeta de documentación del cliente: {exc}",
+        }
+
+    auth_file = find_authorization_in_tmp(numclient, client_type)
+    if auth_file is None:
+        for _ in range(max_polling_retries):
+            await asyncio.sleep(polling_interval)
+            auth_file = find_authorization_in_tmp(numclient, client_type)
+            if auth_file is not None:
+                break
+
+    destination_paths = [str(path) for path in dest_folders]
+    if auth_file is None:
+        return {
+            "ok": False,
+            "authorization_found": False,
+            "authorization_file": None,
+            "destination_paths": destination_paths,
+            "client_folder_path": str(client_root),
+            "message": "GESDOC respondió, pero no apareció ningún PDF de autorización en la carpeta temporal.",
+        }
+
+    copied = move_authorization_to_destinations(auth_file, dest_folders)
+    return {
+        "ok": bool(copied),
+        "authorization_found": True,
+        "authorization_file": str(auth_file),
+        "destination_paths": destination_paths,
+        "client_folder_path": str(client_root),
+        "message": (
+            "Autorización copiada a la documentación del cliente."
+            if copied
+            else "Se encontró la autorización en GESDOC, pero no se pudo copiar al destino."
+        ),
+    }
+
+
+async def _run_gesdoc_client_action(
+    *,
+    cliente: int,
+    action_key: str,
+    gesdoc_user: str | None,
+    gesdoc_password: str | None,
+) -> Response:
+    session = await _open_gesdoc_session_from_headers(gesdoc_user, gesdoc_password)
+    try:
+        search_result = await search_client_in_gesdoc(session, cliente)
+        action_links = dict(search_result.get("action_links") or {})
+        action_url = str(action_links.get(action_key) or "").strip()
+        if not action_url:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No se encontró el enlace GESDOC para la acción '{action_key}' del cliente {cliente}.",
+            )
+        action_result = await execute_gesdoc_action(session, action_url)
+        return _build_proxy_response(action_result)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except aiohttp.ClientError as exc:
+        raise HTTPException(status_code=502, detail=f"Error llamando a GESDOC: {exc}") from exc
+    finally:
+        await close_gesdoc_session(session)
+
+
+@router.get("/api/gesdoc/client-search")
+async def api_gesdoc_client_search(
+    cliente: int = Query(..., ge=1),
+    include_html: bool = Query(False),
+    gesdoc_user: str | None = Header(default=None, alias="X-Gesdoc-User"),
+    gesdoc_password: str | None = Header(default=None, alias="X-Gesdoc-Password"),
+    _user: dict = Depends(api.require_user),
+) -> dict[str, Any]:
+    session = await _open_gesdoc_session_from_headers(gesdoc_user, gesdoc_password)
+    try:
+        result = await search_client_in_gesdoc(session, cliente)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except aiohttp.ClientError as exc:
+        raise HTTPException(status_code=502, detail=f"Error llamando a GESDOC: {exc}") from exc
+    finally:
+        await close_gesdoc_session(session)
+
+    html = str(result.get("html") or "")
+    response_payload: dict[str, Any] = {
+        "ok": True,
+        "cliente": cliente,
+        "status_code": int(result.get("status_code") or 0),
+        "final_url": str(result.get("final_url") or ""),
+        "logged_user": result.get("logged_user"),
+        "has_client_number": bool(result.get("has_client_number")),
+        "has_sent_request": bool(result.get("has_sent_request")),
+        "sent_request_entries": list(result.get("sent_request_entries") or []),
+        "html_snippet": _compact_text_snippet(html),
+    }
+    if include_html:
+        response_payload["html"] = html
+    return response_payload
+
+
+@router.get("/api/gesdoc/client-send-authorization")
+async def api_gesdoc_client_send_authorization(
+    cliente: int = Query(..., ge=1),
+    confirm: bool = Query(False),
+    gesdoc_user: str | None = Header(default=None, alias="X-Gesdoc-User"),
+    gesdoc_password: str | None = Header(default=None, alias="X-Gesdoc-Password"),
+    _user: dict = Depends(api.require_user),
+) -> Response:
+    if not confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="Esta acción puede enviar una solicitud real. Repite con confirm=true para ejecutarla.",
+        )
+    return await _run_gesdoc_client_action(
+        cliente=cliente,
+        action_key="send",
+        gesdoc_user=gesdoc_user,
+        gesdoc_password=gesdoc_password,
+    )
+
+
+@router.get("/api/gesdoc/client-generate-company-authorization")
+async def api_gesdoc_client_generate_company_authorization(
+    cliente: int = Query(..., ge=1),
+    gesdoc_user: str | None = Header(default=None, alias="X-Gesdoc-User"),
+    gesdoc_password: str | None = Header(default=None, alias="X-Gesdoc-Password"),
+    _user: dict = Depends(api.require_user),
+) -> Response:
+    return await _run_gesdoc_client_action(
+        cliente=cliente,
+        action_key="generate_company",
+        gesdoc_user=gesdoc_user,
+        gesdoc_password=gesdoc_password,
+    )
+
+
+@router.get("/api/gesdoc/client-generate-particular-authorization")
+async def api_gesdoc_client_generate_particular_authorization(
+    cliente: int = Query(..., ge=1),
+    gesdoc_user: str | None = Header(default=None, alias="X-Gesdoc-User"),
+    gesdoc_password: str | None = Header(default=None, alias="X-Gesdoc-Password"),
+    _user: dict = Depends(api.require_user),
+) -> Response:
+    return await _run_gesdoc_client_action(
+        cliente=cliente,
+        action_key="generate_particular",
+        gesdoc_user=gesdoc_user,
+        gesdoc_password=gesdoc_password,
+    )
+
+
+@router.get("/api/incidents/{site_id}/{resource_id}/gesdoc-status")
+async def api_incident_gesdoc_status(
+    site_id: str,
+    resource_id: int,
+    gesdoc_user: str | None = Header(default=None, alias="X-Gesdoc-User"),
+    gesdoc_password: str | None = Header(default=None, alias="X-Gesdoc-Password"),
+    user: dict = Depends(api.require_user),
+) -> dict[str, Any]:
+    try:
+        incident = api.service.get_pending_gesdoc_incident(
+            site_id=site_id,
+            resource_id=resource_id,
+            user=user,
+            require_lock_owner=True,
+        )
+    except DashboardNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DashboardConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    numclient = _normalize_int(incident.get("numclient"))
+    if numclient is None:
+        raise HTTPException(status_code=400, detail="La incidencia no tiene numclient resoluble.")
+
+    session = await _open_gesdoc_session_from_headers(gesdoc_user, gesdoc_password)
+    try:
+        search_result = await search_client_in_gesdoc(session, numclient)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except aiohttp.ClientError as exc:
+        raise HTTPException(status_code=502, detail=f"Error llamando a GESDOC: {exc}") from exc
+    finally:
+        await close_gesdoc_session(session)
+
+    return {
+        "ok": True,
+        "site_id": site_id,
+        "resource_id": resource_id,
+        "incident_id": incident.get("incident_id"),
+        "numclient": numclient,
+        "cliente_tipo": _normalize_int(incident.get("cliente_tipo")),
+        "client_folder_exists": bool(incident.get("client_folder_exists")),
+        "client_folder_path": incident.get("client_folder_path"),
+        "has_sent_request": bool(search_result.get("has_sent_request")),
+        "sent_request_entries": list(search_result.get("sent_request_entries") or []),
+        "available_actions": _build_gesdoc_available_actions(search_result),
+        "locked_required": True,
+    }
+
+
+@router.post("/api/incidents/{site_id}/{resource_id}/gesdoc-action")
+async def api_incident_gesdoc_action(
+    site_id: str,
+    resource_id: int,
+    body: dict[str, Any] = Body(...),
+    gesdoc_user: str | None = Header(default=None, alias="X-Gesdoc-User"),
+    gesdoc_password: str | None = Header(default=None, alias="X-Gesdoc-Password"),
+    user: dict = Depends(api.require_user),
+) -> dict[str, Any]:
+    action = str((body or {}).get("action") or "").strip().lower()
+    if action not in {"generate", "send"}:
+        raise HTTPException(status_code=400, detail="action debe ser 'generate' o 'send'.")
+
+    try:
+        incident = api.service.get_pending_gesdoc_incident(
+            site_id=site_id,
+            resource_id=resource_id,
+            user=user,
+            require_lock_owner=True,
+        )
+    except DashboardNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DashboardConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    numclient = _normalize_int(incident.get("numclient"))
+    if numclient is None:
+        raise HTTPException(status_code=400, detail="La incidencia no tiene numclient resoluble.")
+    cliente_tipo = _normalize_int(incident.get("cliente_tipo"))
+    if not bool(incident.get("client_folder_exists")):
+        raise HTTPException(status_code=409, detail="La carpeta de documentación del cliente no existe.")
+
+    conn_str = getattr(api.service, "sqlserver_conn_str", "") or ""
+    if not conn_str:
+        try:
+            conn_str = build_sqlserver_connection_string()
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"No se pudo resolver SQL Server: {exc}") from exc
+
+    session = await _open_gesdoc_session_from_headers(gesdoc_user, gesdoc_password)
+    try:
+        search_result = await search_client_in_gesdoc(session, numclient)
+        action_links = dict(search_result.get("action_links") or {})
+        action_key = "send" if action == "send" else _gesdoc_generate_action_key(cliente_tipo)
+        action_url = str(action_links.get(action_key) or "").strip()
+        if not action_url:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No se encontró el enlace GESDOC para la acción '{action}' del cliente {numclient}.",
+            )
+        await execute_gesdoc_action(session, action_url)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except aiohttp.ClientError as exc:
+        raise HTTPException(status_code=502, detail=f"Error llamando a GESDOC: {exc}") from exc
+    finally:
+        await close_gesdoc_session(session)
+
+    move_result = await _poll_and_store_gesdoc_authorization(
+        numclient=numclient,
+        cliente_tipo=cliente_tipo,
+        conn_str=conn_str,
+        sujeto_recurso=str((incident.get("payload") or {}).get("sujeto_recurso") or (incident.get("payload") or {}).get("SujetoRecurso") or "").strip() or None,
+    )
+    return {
+        "ok": bool(move_result.get("ok")),
+        "action": action,
+        "cliente_tipo": cliente_tipo,
+        "authorization_found": bool(move_result.get("authorization_found")),
+        "authorization_file": move_result.get("authorization_file"),
+        "destination_paths": list(move_result.get("destination_paths") or []),
+        "message": str(move_result.get("message") or ""),
+    }
 
 
 @router.post("/api/incidents/{id}/claim")

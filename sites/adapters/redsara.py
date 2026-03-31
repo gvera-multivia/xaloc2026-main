@@ -84,6 +84,8 @@ class RedsaraAdapter(SiteAdapter):
     OFFICIAL_QUERY_ORGANISME = (
         "%AJUNTAMENT DE BARCELONA%|"
         "%SECTOR DE SEGURIDAD Y MOVILIDAD DEL AYUNTAMIENTO DE BARCELONA%|"
+        "%ORGANISME DE GESTI%TRIBUT%ORGT%DIPUTACI%BARCELONA%|"
+        "%ORGANISMO DE GESTION TRIBUT%ORGT%DIPUTACION DE BARCELONA%|"
         "%ISLAS BALEARES, AGENCIA TRIBUTARIA MUNICIPAL%|"
         "%AGENCIA TRIBUTARIA MUNICIPAL DE ISLAS BALEARES%|"
         "%AGENCIA TRIBITARIA ISLAS BALEARES (ATIB)%|"
@@ -271,6 +273,27 @@ class RedsaraAdapter(SiteAdapter):
         txt = str(expediente or "").strip().upper()
         return re.sub(r"\s+", "", txt)
 
+    @classmethod
+    def _is_orgt_diba_alias(cls, organisme_raw: Any) -> bool:
+        text = cls._normalize_for_match(organisme_raw)
+        if not text:
+            return False
+        has_orgt = "ORGT" in text or "GESTION TRIBUTA" in text or "GESTIO TRIBUTA" in text
+        has_diba = "DIPUTAC" in text or "DIBA" in text
+        has_bcn = "BARCELONA" in text or "OFICINA DE MULTES" in text
+        return bool(has_orgt and has_diba and has_bcn)
+
+    @classmethod
+    def _candidate_city_is_barcelona(cls, candidate: dict[str, Any]) -> bool:
+        for key in ("cliente_municipio", "MunicipioPoblacion", "poblacion", "municipio", "conduc_pobl"):
+            if cls._normalize_for_match(candidate.get(key)) == "BARCELONA":
+                return True
+        return False
+
+    @classmethod
+    def _is_identificacion_phase(cls, fase_raw: Any) -> bool:
+        return "IDENTIFIC" in cls._normalize_for_match(fase_raw)
+
     @staticmethod
     def _normalize_document_id(doc: Any) -> str:
         text = str(doc or "").strip().upper()
@@ -419,6 +442,19 @@ class RedsaraAdapter(SiteAdapter):
                     return rule
         return None
 
+    def _resolve_rule_for_candidate(self, candidate: dict[str, Any]) -> Optional[dict[str, Any]]:
+        organisme = candidate.get("Organisme")
+        direct = self.resolve_rule_by_organisme(organisme)
+        if direct is not None:
+            return direct
+        if (
+            self._is_orgt_diba_alias(organisme)
+            and self._candidate_city_is_barcelona(candidate)
+            and not self._is_identificacion_phase(candidate.get("FaseProcedimiento"))
+        ):
+            return self.resolve_rule_by_organisme("AJUNTAMENT DE BARCELONA - IMH")
+        return None
+
     def validate_expediente_for_organisme(self, organisme_raw: Any, expediente: str) -> bool:
         normalized = self._normalize_expediente(expediente)
         if not normalized:
@@ -464,7 +500,13 @@ class RedsaraAdapter(SiteAdapter):
             recurso["Expedient"] = expediente
             organisme = self._clean_str(recurso.get("Organisme"))
 
-            if not self.validate_expediente_for_organisme(organisme, expediente):
+            rule = self._resolve_rule_for_candidate(recurso)
+            if not rule or not any(
+                rx.match(expediente)
+                for _rule, compiled in self._compiled_rules
+                if _rule.get("name") == rule.get("name")
+                for rx in compiled
+            ):
                 if on_discard:
                     on_discard(
                         {
@@ -501,7 +543,7 @@ class RedsaraAdapter(SiteAdapter):
 
         for r in candidates:
             organisme = self._clean_str(r.get("Organisme"))
-            rule = self.resolve_rule_by_organisme(organisme)
+            rule = self._resolve_rule_for_candidate(r)
             if not rule:
                 if on_discard:
                     on_discard(

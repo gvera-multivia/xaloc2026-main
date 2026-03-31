@@ -25,6 +25,18 @@ def test_ensure_diputacio_codmuni_errors_for_orgt_without_municipio() -> None:
     assert "falta 'codmuni'" in err
 
 
+def test_ensure_diputacio_codmuni_uses_cliente_domicilio_as_fallback_for_orgt() -> None:
+    payload = {
+        "organismo": "ORGANISMO DE GESTION TRIBUTARIA (ORGT) DE LA DIPUTACION DE BARCELONA",
+        "cliente_municipio": "BARCELONA",
+        "cliente_domicilio": "CARRER GRAN, 12 - ESPARREGUERA",
+    }
+    err = task_orchestrator._ensure_diputacio_codmuni(payload)  # type: ignore[attr-defined]
+    assert err is None
+    assert payload.get("codmuni") == "075"
+    assert payload.get("municipio") == "ESPARREGUERA"
+
+
 @pytest.mark.asyncio
 async def test_process_task_diputacio_fails_without_justificante_and_skips_complete(
     monkeypatch: pytest.MonkeyPatch,

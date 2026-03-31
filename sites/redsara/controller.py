@@ -230,6 +230,8 @@ def _normalize_city_for_redsara(raw: str | None) -> str:
     value_norm = " ".join(value_norm.split())
     if value_norm == "fornells de la seva":
         return "FORNELLS DE LA SELVA"
+    if value_norm == "esparraguera":
+        return "ESPARREGUERA"
 
     # 1) Formato "NUCLEO - MUNICIPIO" -> usar municipio.
     split_parts = re.split(r"\s+-\s+", value, maxsplit=1)

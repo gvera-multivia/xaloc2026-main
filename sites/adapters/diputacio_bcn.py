@@ -13,7 +13,7 @@ import pyodbc
 from core.contact_defaults import get_default_contact_email, get_default_contact_mobile
 from core.validation.validators import normalize_plate_with_fallback
 from sites.diputacio_bcn.texts import resolve_phase_texts
-from sites.diputacio_bcn.municipio_codes import resolve_codmuni
+from sites.diputacio_bcn.municipio_codes import MUNICIPIO_TO_CODE, resolve_codmuni
 
 from .site_adapter import SiteAdapter
 
@@ -265,6 +265,16 @@ class DiputacioBcnAdapter(SiteAdapter):
         return ""
 
     @classmethod
+    def _extract_municipio_from_cliente_direccion(cls, value: Any) -> str:
+        raw = cls._norm(value)
+        if not raw:
+            return ""
+        for municipio in sorted(MUNICIPIO_TO_CODE.keys(), key=len, reverse=True):
+            if municipio and municipio in raw:
+                return municipio
+        return ""
+
+    @classmethod
     def _resolve_municipio_for_payload(cls, item: dict[str, Any]) -> str:
         # Prioridad al municipio del organismo sancionador cuando sea resoluble
         # en el combo de Diputacio BCN; ORGT queda cubierto porque retorna "".
@@ -281,7 +291,24 @@ class DiputacioBcnAdapter(SiteAdapter):
                 return value
             if not first_candidate:
                 first_candidate = value
+
+        direccion_municipio = cls._extract_municipio_from_cliente_direccion(
+            item.get("cliente_domicilio")
+            or item.get("direccion_raw")
+            or item.get("domicilio")
+            or item.get("address")
+        )
+        if direccion_municipio and resolve_codmuni(direccion_municipio):
+            return direccion_municipio
         return first_candidate
+
+    @classmethod
+    def _should_route_to_redsara_barcelona(cls, item: dict[str, Any]) -> bool:
+        if not cls._is_orgt_diba_alias(item.get("Organisme")):
+            return False
+        if cls._is_blocked_phase(item.get("FaseProcedimiento")):
+            return False
+        return cls._norm(item.get("cliente_municipio")) == "BARCELONA"
 
     def fetch_candidates(
         self,
@@ -315,6 +342,9 @@ class DiputacioBcnAdapter(SiteAdapter):
             organisme = self._norm_membership_key(item.get("Organisme"))
             fase = self._clean(item.get("FaseProcedimiento"))
             expediente = self._clean(item.get("Expedient"))
+
+            if self._should_route_to_redsara_barcelona(item):
+                continue
 
             if organisme not in allowed_organismes:
                 is_alias = self._is_orgt_diba_alias(organisme)

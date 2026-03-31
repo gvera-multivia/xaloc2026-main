@@ -306,6 +306,86 @@ class PostgresHistoryRepository:
         finally:
             conn.close()
 
+    def list_incidents_for_resource(
+        self,
+        *,
+        day: str,
+        site_id: str,
+        resource_id: int,
+        statuses: Optional[list[str]] = None,
+    ) -> list[dict[str, Any]]:
+        conn = self._conn()
+        if conn is None:
+            return []
+        normalized_statuses = [
+            str(s or "").strip().upper()
+            for s in (statuses or [])
+            if str(s or "").strip()
+        ]
+        normalized_statuses = [s for s in normalized_statuses if s in {"NEW", "REVIEWED", "RESOLVED"}]
+        status_filter_sql = ""
+        status_filter_params: list[Any] = []
+        if normalized_statuses:
+            status_filter_sql = " AND status = ANY(%s)"
+            status_filter_params.append(normalized_statuses)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT site_id,
+                           COALESCE(
+                             resource_id,
+                             CASE
+                               WHEN (payload->>'idRecurso') ~ '^[0-9]+$' THEN (payload->>'idRecurso')::bigint
+                               WHEN (payload->>'resource_id') ~ '^[0-9]+$' THEN (payload->>'resource_id')::bigint
+                               ELSE NULL
+                             END
+                           ) AS resource_id,
+                           expediente, incident_type, reason, status,
+                           day::text, started_at, ended_at, payload
+                    FROM realtime_incidents
+                    WHERE day = %s::date
+                      AND site_id = %s
+                      AND COALESCE(
+                            resource_id,
+                            CASE
+                              WHEN (payload->>'idRecurso') ~ '^[0-9]+$' THEN (payload->>'idRecurso')::bigint
+                              WHEN (payload->>'resource_id') ~ '^[0-9]+$' THEN (payload->>'resource_id')::bigint
+                              ELSE NULL
+                            END
+                          ) = %s
+                      {status_filter_sql}
+                    ORDER BY started_at DESC
+                    """,
+                    (day, str(site_id), int(resource_id), *status_filter_params),
+                )
+                rows = cur.fetchall()
+                return [
+                    {
+                        "site_id": row[0],
+                        "resource_id": row[1],
+                        "expediente": row[2],
+                        "incident_type": row[3],
+                        "reason": row[4],
+                        "status": row[5],
+                        "day": row[6],
+                        "started_at": row[7].isoformat() if row[7] else None,
+                        "ended_at": row[8].isoformat() if row[8] else None,
+                        "payload": row[9],
+                    }
+                    for row in rows
+                ]
+        except Exception as exc:
+            self.logger.warning(
+                "Error listando incidencias PG para site=%s resource_id=%s: %s",
+                site_id,
+                resource_id,
+                exc,
+            )
+            return []
+        finally:
+            conn.close()
+
     @staticmethod
     def _job_site_expr() -> str:
         return "COALESCE(payload_json->>'site_id', NULLIF(split_part(dedup_key, ':', 1), ''), 'unknown')"

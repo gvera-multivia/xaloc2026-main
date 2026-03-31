@@ -13,6 +13,10 @@ class AtcAdapter(SiteAdapter):
     CLIENTES_BLOQUEADOS = {13607, 14274}
     REA_RE = re.compile(r"(RECLAMACION\s+(ECONOMICO|ECO)[- ]*(ADMINISTRATIVA|ADVA)|(?<!\w)REA(?!\w))", re.IGNORECASE)
     REPOS_RE = re.compile(r"(RECURSO\s+(EXTRAORDINARIO|REVISION|DE\s+REPOSICION)|(?<!\w)REPOSICION(?!\w))", re.IGNORECASE)
+    _TARGET_ORGANISME_PATTERNS = (
+        re.compile(r"\bAGENCIA\W+TRIBUTARIA\W+AUTONOMICA\W+DE\W+CATALUN(?:A|YA)\b"),
+        re.compile(r"\bAGENCIA\W+TRIBUTARIA\W+DE\W+CATALUN(?:A|YA)\b"),
+    )
     _EXPEDIENT_PATTERNS = (
         re.compile(r"\b\d{14}\b"),
         re.compile(r"\b\d{5,}-\d{4}/\d{1,10}-[A-Z]{2,5}\b", re.IGNORECASE),
@@ -73,10 +77,11 @@ class AtcAdapter(SiteAdapter):
     @classmethod
     def _is_target_organisme(cls, organisme: Any) -> bool:
         norm_value = cls._norm(organisme)
-        if cls.TARGET_ORGANISME_TOKEN in norm_value:
+        if not norm_value:
+            return False
+        if cls._norm(cls.TARGET_ORGANISME_TOKEN) in norm_value:
             return True
-        raw_upper = cls._clean(organisme).upper()
-        return cls.TARGET_ORGANISME_TOKEN in raw_upper
+        return any(pattern.search(norm_value) for pattern in cls._TARGET_ORGANISME_PATTERNS)
 
     @classmethod
     def _materialize_from_canonical_if_present(cls, record: dict[str, Any]) -> dict[str, Any]:

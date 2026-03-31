@@ -373,6 +373,11 @@ class ServeiCatTransController:
         return "alegaciones"
 
     @classmethod
+    def _infer_tramite_tipo(cls, fase: str, procedim: str) -> str:
+        blob = f"{cls._norm(fase)} {cls._norm(procedim)}"
+        return "identificacion" if "identificac" in blob else "normal"
+
+    @classmethod
     def _split_expediente(cls, expediente: str) -> tuple[str, str, str]:
         raw = cls._clean(expediente)
         if not raw:
@@ -434,6 +439,7 @@ class ServeiCatTransController:
         fase = self._clean(src.get("fase_procedimiento") or src.get("FaseProcedimiento"))
         procedim = self._clean(src.get("procedim") or src.get("Procedim"))
         tipo_escrito = self._clean(src.get("tipo_escrito")) or self._infer_tipo_escrito(fase, procedim)
+        tramite_tipo = self._clean(src.get("tramite_tipo")) or self._infer_tramite_tipo(fase, procedim)
         expongo = self._clean(src.get("expongo")) or self._fallback_expone(expediente)
         solicita = self._clean(src.get("solicito")) or self._fallback_solicita(expediente)
         email = self._clean(src.get("email")) or get_default_contact_email()
@@ -504,6 +510,69 @@ class ServeiCatTransController:
             nombre_via_raw=self._clean(src.get("representado_nombre_via")),
         )
 
+        identificado_tipo_persona_raw = self._clean(src.get("identificado_tipo_persona")).lower()
+        if identificado_tipo_persona_raw in {"juridica", "2", "empresa", "pj"}:
+            identificado_tipo_persona = "juridica"
+        elif identificado_tipo_persona_raw in {"fisica", "1", "pf", "particular"}:
+            identificado_tipo_persona = "fisica"
+        else:
+            identificado_tipo_persona = "juridica" if self._clean(src.get("identificado_nif_empresa")) else "fisica"
+
+        identificado_nombre = self._clean(src.get("identificado_nombre") or src.get("ConducNom") or src.get("conduc_nom"))
+        identificado_apellido1 = self._clean(src.get("identificado_apellido1") or src.get("ConducApellido1") or src.get("conduc_apellido1"))
+        identificado_apellido2 = self._clean(src.get("identificado_apellido2") or src.get("ConducApellido2") or src.get("conduc_apellido2"))
+        identificado_razon_social = self._clean(
+            src.get("identificado_razon_social")
+            or src.get("ConducRazonSocial")
+            or src.get("conduc_razon_social")
+        )
+        identificado_nif = self._ensure_nif_nie_letter(src.get("identificado_nif") or src.get("ConducDni") or src.get("conduc_dni"))
+        identificado_nif_empresa = self._sanitize_document(
+            src.get("identificado_nif_empresa")
+            or src.get("identificado_cif")
+            or src.get("ConducCif")
+            or src.get("conduc_cif")
+        )
+        identificado_calle_raw = self._clean(
+            src.get("identificado_calle_raw")
+            or src.get("identificado_calle")
+            or src.get("ConducAdr")
+            or src.get("conduc_adr")
+        )
+        identificado_numero_raw = self._clean(
+            src.get("identificado_numero_raw")
+            or src.get("identificado_numero")
+            or src.get("ConducNumero")
+            or src.get("conduc_numero")
+        )
+        identificado_cp_raw = self._clean(
+            src.get("identificado_cp")
+            or src.get("ConducCodpost")
+            or src.get("conduc_codpost")
+        )
+        identificado_municipio_raw = self._clean(
+            src.get("identificado_municipio")
+            or src.get("identificado_poblacion")
+            or src.get("ConducPobl")
+            or src.get("conduc_pobl")
+        )
+        identificado_provincia_raw = self._clean(
+            src.get("identificado_provincia")
+            or src.get("ConducProv")
+            or src.get("conduc_prov")
+        )
+        identificado_ai = self._enrich_address_fields(
+            direccion_raw=identificado_calle_raw,
+            cp_raw=identificado_cp_raw,
+            numero_raw=identificado_numero_raw,
+            municipio_raw=identificado_municipio_raw,
+            provincia_raw=identificado_provincia_raw,
+            piso_raw=self._clean(src.get("identificado_piso")),
+            puerta_raw=self._clean(src.get("identificado_puerta")),
+            tipo_via_raw=self._clean(src.get("identificado_tipo_via")),
+            nombre_via_raw=self._clean(src.get("identificado_nombre_via")),
+        )
+
         archivos = src.get("archivos") or src.get("archivos_adjuntos") or []
         if isinstance(archivos, str):
             archivos = [archivos]
@@ -528,6 +597,7 @@ class ServeiCatTransController:
             "expediente_numero": expediente_num,
             "digito_control": digito,
             "codigo_personal": self._clean(src.get("codigo_personal")) or self._clean(src.get("idRecurso")),
+            "tramite_tipo": tramite_tipo,
             "tipo_persona": tipo_persona,
             "nombre": nombre,
             "apellido1": apellido1,
@@ -553,6 +623,22 @@ class ServeiCatTransController:
             "representado_provincia": representado_ai["provincia"],
             "representado_comarca": self._clean(src.get("representado_comarca")) or self._clean(representado_ai.get("comarca")),
             "representado_municipio": representado_ai["municipio"],
+            "identificado_tipo_persona": identificado_tipo_persona,
+            "identificado_nombre": identificado_nombre,
+            "identificado_apellido1": identificado_apellido1,
+            "identificado_apellido2": identificado_apellido2,
+            "identificado_razon_social": identificado_razon_social,
+            "identificado_nif": identificado_nif,
+            "identificado_nif_empresa": identificado_nif_empresa,
+            "identificado_documento_tipo": self._infer_document_type_persona(identificado_nif),
+            "identificado_documento_empresa_tipo": self._infer_document_type_empresa(identificado_nif_empresa),
+            "identificado_tipo_via": identificado_ai["tipo_via"],
+            "identificado_nombre_via": identificado_ai["nombre_via"],
+            "identificado_numero": identificado_ai["numero"],
+            "identificado_cp": identificado_ai["cp"],
+            "identificado_provincia": identificado_ai["provincia"],
+            "identificado_comarca": self._clean(src.get("identificado_comarca")) or self._clean(identificado_ai.get("comarca")),
+            "identificado_municipio": identificado_ai["municipio"],
             "tipo_escrito": tipo_escrito,
             "expongo": expongo,
             "solicito": solicita,
@@ -581,6 +667,41 @@ class ServeiCatTransController:
         direccion_provincia = self._clean(kwargs.get("direccion_provincia")) or "Barcelona"
         direccion_comarca = self._clean(kwargs.get("direccion_comarca")) or "Barcelon\u00e8s"
         direccion_municipio = self._clean(kwargs.get("direccion_municipio")) or "BARCELONA"
+        tramite_tipo = self._clean(kwargs.get("tramite_tipo")) or "normal"
+
+        identificado_tipo_persona_raw = self._clean(kwargs.get("identificado_tipo_persona")).lower()
+        if identificado_tipo_persona_raw in {"juridica", "2", "empresa", "pj"}:
+            identificado_tipo_persona = "juridica"
+        elif identificado_tipo_persona_raw in {"fisica", "1", "pf", "particular"}:
+            identificado_tipo_persona = "fisica"
+        else:
+            identificado_tipo_persona = "juridica" if self._clean(kwargs.get("identificado_nif_empresa")) else "fisica"
+
+        identificado_nombre = self._clean(kwargs.get("identificado_nombre"))
+        identificado_apellido1 = self._clean(kwargs.get("identificado_apellido1"))
+        identificado_apellido2 = self._clean(kwargs.get("identificado_apellido2"))
+        identificado_razon_social = self._clean(kwargs.get("identificado_razon_social"))
+        identificado_nif = self._ensure_nif_nie_letter(kwargs.get("identificado_nif"))
+        identificado_nif_empresa = self._sanitize_document(kwargs.get("identificado_nif_empresa"))
+        identificado_tipo_via = self._clean(kwargs.get("identificado_tipo_via"))
+        identificado_nombre_via = self._clean(kwargs.get("identificado_nombre_via"))
+        identificado_numero = self._clean(kwargs.get("identificado_numero"))
+        identificado_cp = self._clean(kwargs.get("identificado_cp"))
+        identificado_provincia = self._clean(kwargs.get("identificado_provincia"))
+        identificado_comarca = self._clean(kwargs.get("identificado_comarca"))
+        identificado_municipio = self._clean(kwargs.get("identificado_municipio"))
+
+        if tramite_tipo == "identificacion":
+            if identificado_tipo_persona == "juridica":
+                if not identificado_nif_empresa or not identificado_razon_social:
+                    raise ValueError(
+                        "servei_cat_trans: identificacion juridica requiere identificado_nif_empresa e identificado_razon_social."
+                    )
+            else:
+                if not identificado_nif or not identificado_nombre:
+                    raise ValueError(
+                        "servei_cat_trans: identificacion fisica requiere identificado_nif e identificado_nombre."
+                    )
 
         target = ServeiCatTransTarget(
             idRecurso=kwargs.get("idRecurso"),
@@ -591,6 +712,7 @@ class ServeiCatTransController:
             expediente_numero=self._clean(kwargs.get("expediente_numero")),
             digito_control=self._clean(kwargs.get("digito_control")),
             codigo_personal=self._clean(kwargs.get("codigo_personal")),
+            tramite_tipo=tramite_tipo,
             tipo_persona=self._clean(kwargs.get("tipo_persona")) or "fisica",
             nombre=self._clean(kwargs.get("nombre")),
             apellido1=self._clean(kwargs.get("apellido1")),
@@ -614,6 +736,20 @@ class ServeiCatTransController:
             representado_provincia=self._clean(kwargs.get("representado_provincia")),
             representado_comarca=self._clean(kwargs.get("representado_comarca")),
             representado_municipio=self._clean(kwargs.get("representado_municipio")),
+            identificado_tipo_persona=identificado_tipo_persona,
+            identificado_nombre=identificado_nombre,
+            identificado_apellido1=identificado_apellido1,
+            identificado_apellido2=identificado_apellido2,
+            identificado_razon_social=identificado_razon_social,
+            identificado_nif=identificado_nif,
+            identificado_nif_empresa=identificado_nif_empresa,
+            identificado_tipo_via=identificado_tipo_via,
+            identificado_nombre_via=identificado_nombre_via,
+            identificado_numero=identificado_numero,
+            identificado_cp=identificado_cp,
+            identificado_provincia=identificado_provincia,
+            identificado_comarca=identificado_comarca,
+            identificado_municipio=identificado_municipio,
             tipo_escrito=self._clean(kwargs.get("tipo_escrito")) or "alegaciones",
             expongo=self._clean(kwargs.get("expongo")),
             solicito=self._clean(kwargs.get("solicito")),

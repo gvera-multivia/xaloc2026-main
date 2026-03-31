@@ -18,9 +18,15 @@ async def _dismiss_cookie_banner_if_present(page: "Page", *, timeout_ms: int = 4
     await ensure_cookie_banner_cleared(page, total_timeout_ms=timeout_ms, poll_ms=250)
 
 
-async def _click_service_link(page: "Page", config: "ServeiCatTransConfig") -> "Page":
+def _is_identificacion(datos: "ServeiCatTransTarget") -> bool:
+    return str(getattr(datos, "tramite_tipo", "") or "").strip().lower() == "identificacion"
+
+
+async def _click_service_link(page: "Page", config: "ServeiCatTransConfig", *, service_selector: str) -> "Page":
     await dismiss_cookie_banners_in_context(page)
-    link = page.locator(config.service_link_selector).first
+    link = page.locator(service_selector).first
+    if await link.count() <= 0:
+        return page
     await link.wait_for(state="visible", timeout=config.navigation_timeout)
     try:
         async with page.context.expect_page(timeout=5000) as popup_info:
@@ -69,19 +75,30 @@ async def _click_certificate_button(page: "Page", config: "ServeiCatTransConfig"
 
 
 async def run_login(page: "Page", config: "ServeiCatTransConfig", datos: "ServeiCatTransTarget") -> "Page":
-    _ = datos
+    is_identificacion = _is_identificacion(datos)
+    service_selector = (
+        config.service_link_selector_identificacion if is_identificacion else config.service_link_selector
+    )
+    expected_service_token = "idServei=TRN002SIGN" if is_identificacion else "idServei=TRN001SIGN"
+    service_entry_url = (
+        config.url_service_entry_identificacion if is_identificacion else config.url_service_entry
+    )
+
     if "presentador=P" in page.url:
         return page
 
     await page.goto(config.url_base, wait_until="domcontentloaded", timeout=config.navigation_timeout)
     await dismiss_cookie_banners_in_context(page)
-    page = await _click_service_link(page, config)
+    page = await _click_service_link(page, config, service_selector=service_selector)
     await page.wait_for_load_state("domcontentloaded")
     await dismiss_cookie_banners_in_context(page)
 
     current = str(page.url or "")
     if "renderitzar.do?reqCode=inicial" not in current and "renderitzaruploadSecure.do" not in current:
-        await page.goto(config.url_service_entry, wait_until="domcontentloaded", timeout=config.navigation_timeout)
+        await page.goto(service_entry_url, wait_until="domcontentloaded", timeout=config.navigation_timeout)
+        await dismiss_cookie_banners_in_context(page)
+    elif "renderitzar.do?reqCode=inicial" in current and expected_service_token not in current:
+        await page.goto(service_entry_url, wait_until="domcontentloaded", timeout=config.navigation_timeout)
         await dismiss_cookie_banners_in_context(page)
 
     if "valid.aoc.cat" not in page.url and "renderitzaruploadSecure.do" not in page.url:

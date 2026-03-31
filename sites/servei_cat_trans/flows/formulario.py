@@ -1392,6 +1392,248 @@ async def _fill_expediente(page: "Page | Frame", datos: "ServeiCatTransTarget", 
             )
         ).first
         await ok_text.wait_for(timeout=15000)
+        if _clean(datos.tramite_tipo).lower() == "identificacion":
+            await _fill_identificacion_conductor(page, datos)
+
+
+async def _fill_identificacion_conductor_direccion(
+    page: "Page | Frame",
+    *,
+    tipo_via_id: str,
+    nombre_via_id: str,
+    numero_id: str,
+    cp_id: str,
+    provincia_id: str,
+    comarca_id: str,
+    municipio_id: str,
+    datos: "ServeiCatTransTarget",
+) -> None:
+    ok_tipo = await _safe_select_tipo_via(
+        page,
+        selector=f"#{tipo_via_id}",
+        raw_tipo_via=datos.identificado_tipo_via,
+        raw_street=datos.identificado_nombre_via,
+    )
+    ok_calle = await _fill_exact_input(page, f"#{nombre_via_id}", datos.identificado_nombre_via)
+    ok_num = await _fill_exact_input(page, f"#{numero_id}", datos.identificado_numero)
+    ok_cp = await _fill_exact_input(page, f"#{cp_id}", datos.identificado_cp)
+    if ok_cp and _clean(datos.identificado_cp):
+        try:
+            await page.locator(f"#{cp_id}").first.press("Tab", timeout=5000)
+        except Exception:
+            pass
+        await page.wait_for_timeout(1000)
+
+    ok_provincia = True
+    if _clean(datos.identificado_provincia):
+        await _wait_select_options(page, provincia_id, timeout_ms=5000)
+        ok_provincia = await _safe_select_via_id(page, provincia_id, datos.identificado_provincia)
+
+    ok_comarca = True
+    if _clean(datos.identificado_comarca):
+        await _wait_select_options(page, comarca_id)
+        ok_comarca = await _safe_select_via_id(page, comarca_id, datos.identificado_comarca)
+        await page.wait_for_timeout(500)
+
+    ok_municipio = True
+    if _clean(datos.identificado_municipio):
+        await _wait_select_options(page, municipio_id)
+        ok_municipio = await _safe_select_via_id(page, municipio_id, datos.identificado_municipio)
+
+    if not (ok_tipo and ok_calle and ok_num and ok_cp and ok_provincia and ok_comarca and ok_municipio):
+        logger.warning(
+            "Identificado direccion parcial via=%s calle=%s num=%s cp=%s provincia=%s comarca=%s municipio=%s",
+            ok_tipo,
+            ok_calle,
+            ok_num,
+            ok_cp,
+            ok_provincia,
+            ok_comarca,
+            ok_municipio,
+        )
+
+
+async def _select_identificado_tipo_persona(page: "Page | Frame", *, is_juridica: bool) -> None:
+    input_id = (
+        "guideContainer-rootPanel-seccio_dadesParticulars-panel-panel1662017961273-guideradiobutton__-2_widget"
+        if is_juridica
+        else "guideContainer-rootPanel-seccio_dadesParticulars-panel-panel1662017961273-guideradiobutton__-1_widget"
+    )
+    panel_wait_selector = (
+        "#guideContainer-rootPanel-seccio_dadesParticulars-panel-personaJuridica___guide-item"
+        if is_juridica
+        else "#guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica___guide-item"
+    )
+    label_text = "Persona jurídica" if is_juridica else "Persona física"
+
+    ok = await _safe_check(page, f"#{input_id}")
+    if not ok:
+        await _safe_click(
+            page,
+            f"div.guideRadioButtonItem:has(input#{input_id})",
+        )
+
+    try:
+        await page.evaluate(
+            """({ inputId }) => {
+                const input = document.getElementById(inputId);
+                if (!input) return false;
+                input.checked = true;
+                input.setAttribute("aria-checked", "true");
+                input.dispatchEvent(new Event("input", { bubbles: true }));
+                input.dispatchEvent(new Event("change", { bubbles: true }));
+                input.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+                const item = input.closest(".guideRadioButtonItem");
+                if (item) {
+                    for (const sib of item.parentElement?.querySelectorAll(".guideRadioButtonItem") || []) {
+                        sib.classList.remove("guideItemSelected");
+                    }
+                    item.classList.add("guideItemSelected");
+                }
+                return true;
+            }""",
+            {"inputId": input_id},
+        )
+    except Exception:
+        pass
+
+    radio_group = page.locator("#guideContainer-rootPanel-seccio_dadesParticulars-panel-panel1662017961273___guide-item").first
+    try:
+        alt_label = radio_group.get_by_text(label_text, exact=False).first
+        if await alt_label.count() > 0:
+            await alt_label.click(timeout=FAST_ACTION_TIMEOUT_MS, force=True)
+    except Exception:
+        pass
+
+    try:
+        await page.locator(panel_wait_selector).first.wait_for(state="visible", timeout=8000)
+    except Exception:
+        logger.warning("No se hizo visible el panel del identificado tras seleccionar tipo persona: %s", label_text)
+
+    await page.wait_for_timeout(800)
+
+
+async def _fill_identificacion_conductor(page: "Page | Frame", datos: "ServeiCatTransTarget") -> None:
+    logger.info("servei_cat_trans rellenando bloque identificado tras comprobar expediente")
+    persona = _clean(datos.identificado_tipo_persona).lower() or "fisica"
+    is_juridica = persona == "juridica"
+    await _select_identificado_tipo_persona(page, is_juridica=is_juridica)
+
+    if is_juridica:
+        razon_id = "guideContainer-rootPanel-seccio_dadesParticulars-panel-personaJuridica-PJ-panel-guidetextbox___widget"
+        tipo_doc_id = "guideContainer-rootPanel-seccio_dadesParticulars-panel-personaJuridica-PJ-panel_1552294135-guidedropdownlist___widget"
+        doc_id = "guideContainer-rootPanel-seccio_dadesParticulars-panel-personaJuridica-PJ-panel_1552294135-guidetextbox___widget"
+        ok_razon = await _fill_exact_input(page, f"#{razon_id}", datos.identificado_razon_social)
+        ok_tipo_doc = await _safe_select_label(
+            page,
+            f"#{tipo_doc_id}",
+            _documento_empresa_label(datos.identificado_nif_empresa),
+        )
+        ok_doc = await _fill_exact_input(
+            page,
+            f"#{doc_id}",
+            _sanitize_doc(datos.identificado_nif_empresa),
+        )
+        if not ok_razon:
+            fallback_razon_id = await _find_field_id_by_label(
+                page,
+                "#guideContainer-rootPanel-seccio_dadesParticulars-panel-personaJuridica-PJ__",
+                ["razon social"],
+                field_kind="input",
+            )
+            if fallback_razon_id:
+                await _fill_exact_input(page, f"#{fallback_razon_id}", datos.identificado_razon_social)
+        if not ok_tipo_doc:
+            fallback_tipo_id = await _find_field_id_by_label(
+                page,
+                "#guideContainer-rootPanel-seccio_dadesParticulars-panel-personaJuridica-PJ__",
+                ["tipo de documento de identificacion"],
+                field_kind="select",
+            )
+            if fallback_tipo_id:
+                await _safe_select_label(page, f"#{fallback_tipo_id}", _documento_empresa_label(datos.identificado_nif_empresa))
+        if not ok_doc:
+            fallback_doc_id = await _find_field_id_by_label(
+                page,
+                "#guideContainer-rootPanel-seccio_dadesParticulars-panel-personaJuridica-PJ__",
+                ["numero de identificacion"],
+                field_kind="input",
+            )
+            if fallback_doc_id:
+                await _fill_exact_input(page, f"#{fallback_doc_id}", _sanitize_doc(datos.identificado_nif_empresa))
+        await _fill_identificacion_conductor_direccion(
+            page,
+            tipo_via_id="guideContainer-rootPanel-seccio_dadesParticulars-panel-personaJuridica-ADRECA_PJ_PANEL-ADRECA_LOCALITAT_PJ_PANEL-panel_298747259-guidedropdownlist___widget",
+            nombre_via_id="guideContainer-rootPanel-seccio_dadesParticulars-panel-personaJuridica-ADRECA_PJ_PANEL-ADRECA_LOCALITAT_PJ_PANEL-panel_298747259-guidetextbox___widget",
+            numero_id="guideContainer-rootPanel-seccio_dadesParticulars-panel-personaJuridica-ADRECA_PJ_PANEL-ADRECA_LOCALITAT_PJ_PANEL-panel_298747259-panel-guidetextbox___widget",
+            cp_id="guideContainer-rootPanel-seccio_dadesParticulars-panel-personaJuridica-ADRECA_PJ_PANEL-ADRECA_LOCALITAT_PJ_PANEL-panel_1697806457-guidetextbox___widget",
+            provincia_id="guideContainer-rootPanel-seccio_dadesParticulars-panel-personaJuridica-ADRECA_PJ_PANEL-ADRECA_LOCALITAT_PJ_PANEL-panel_1697806457-guidedropdownlist___widget",
+            comarca_id="guideContainer-rootPanel-seccio_dadesParticulars-panel-personaJuridica-ADRECA_PJ_PANEL-ADRECA_LOCALITAT_PJ_PANEL-panel_1697806457-guidedropdownlist_2056216251___widget",
+            municipio_id="guideContainer-rootPanel-seccio_dadesParticulars-panel-personaJuridica-ADRECA_PJ_PANEL-ADRECA_LOCALITAT_PJ_PANEL-panel_1697806457-guidedropdownlist_988023112___widget",
+            datos=datos,
+        )
+    else:
+        nombre_id = "guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-PF-panel-guidetextbox_897852897___widget"
+        apellido1_id = "guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-PF-panel-guidetextbox_1197861190___widget"
+        apellido2_id = "guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-PF-panel-guidetextbox___widget"
+        tipo_doc_id = "guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-PF-panel_1244233668-guidedropdownlist___widget"
+        doc_id = "guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-PF-panel_1244233668-guidetextbox___widget"
+        ok_nombre = await _fill_exact_input(page, f"#{nombre_id}", datos.identificado_nombre)
+        ok_ap1 = await _fill_exact_input(page, f"#{apellido1_id}", datos.identificado_apellido1)
+        await _fill_exact_input(page, f"#{apellido2_id}", datos.identificado_apellido2)
+        ok_tipo_doc = await _safe_select_label(
+            page,
+            f"#{tipo_doc_id}",
+            _documento_persona_label(datos.identificado_nif),
+        )
+        ok_doc = await _fill_exact_input(page, f"#{doc_id}", _sanitize_doc(datos.identificado_nif))
+        if not ok_nombre:
+            fallback_nombre_id = await _find_field_id_by_label(
+                page,
+                "#guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-PF__",
+                ["nombre"],
+                field_kind="input",
+            )
+            if fallback_nombre_id:
+                await _fill_exact_input(page, f"#{fallback_nombre_id}", datos.identificado_nombre)
+        if not ok_ap1:
+            fallback_ap1_id = await _find_field_id_by_label(
+                page,
+                "#guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-PF__",
+                ["primer apellido"],
+                field_kind="input",
+            )
+            if fallback_ap1_id:
+                await _fill_exact_input(page, f"#{fallback_ap1_id}", datos.identificado_apellido1)
+        if not ok_tipo_doc:
+            fallback_tipo_id = await _find_field_id_by_label(
+                page,
+                "#guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-PF__",
+                ["tipo de documento de identificacion"],
+                field_kind="select",
+            )
+            if fallback_tipo_id:
+                await _safe_select_label(page, f"#{fallback_tipo_id}", _documento_persona_label(datos.identificado_nif))
+        if not ok_doc:
+            fallback_doc_id = await _find_field_id_by_label(
+                page,
+                "#guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-PF__",
+                ["numero de identificacion"],
+                field_kind="input",
+            )
+            if fallback_doc_id:
+                await _fill_exact_input(page, f"#{fallback_doc_id}", _sanitize_doc(datos.identificado_nif))
+        await _fill_identificacion_conductor_direccion(
+            page,
+            tipo_via_id="guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-ADRECA_PF-panel1662104193616-panel_298747259-guidedropdownlist___widget",
+            nombre_via_id="guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-ADRECA_PF-panel1662104193616-panel_298747259-guidetextbox___widget",
+            numero_id="guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-ADRECA_PF-panel1662104193616-panel_298747259-panel-guidetextbox___widget",
+            cp_id="guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-ADRECA_PF-panel1662104193616-panel_1697806457-guidetextbox___widget",
+            provincia_id="guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-ADRECA_PF-panel1662104193616-panel_1697806457-guidedropdownlist___widget",
+            comarca_id="guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-ADRECA_PF-panel1662104193616-panel_1697806457-guidedropdownlist_2056216251___widget",
+            municipio_id="guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-ADRECA_PF-panel1662104193616-panel_1697806457-guidedropdownlist_988023112___widget",
+            datos=datos,
+        )
 
 
 async def _fill_contenido(page: "Page | Frame", datos: "ServeiCatTransTarget") -> None:

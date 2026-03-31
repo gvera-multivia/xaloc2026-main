@@ -26,6 +26,7 @@ PROVINCE_ALIASES = {
 CITY_ALIASES = {
     # Errores frecuentes en origen de datos
     "fornells de la seva": "fornells de la selva",
+    "esparraguera": "esparreguera",
     "palau solita i plegamas": "palau-solita i plegamans",
     "palau solita i plegamans": "palau-solita i plegamans",
     "palau-solita i plegamas": "palau-solita i plegamans",

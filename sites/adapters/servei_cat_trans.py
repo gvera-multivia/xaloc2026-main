@@ -120,6 +120,10 @@ class ServeiCatTransAdapter(SiteAdapter):
         return "IDENTIFICAC" in blob
 
     @classmethod
+    def _infer_tramite_tipo(cls, fase: Any, procedim: Any) -> str:
+        return "identificacion" if cls._is_identificacion_phase(fase, procedim) else "normal"
+
+    @classmethod
     def _materialize_from_canonical_if_present(cls, record: dict[str, Any]) -> dict[str, Any]:
         out = dict(record or {})
         canonical = out.get("__canonical_v1")
@@ -219,19 +223,6 @@ class ServeiCatTransAdapter(SiteAdapter):
                     )
                 continue
 
-            if self._is_identificacion_phase(fase, procedim):
-                if on_discard:
-                    on_discard(
-                        {
-                            "site_id": self.site_id,
-                            "idRecurso": rid,
-                            "Expedient": expediente,
-                            "tipo_incidencia": "SITE_RULE_DISCARDED",
-                            "motivo": f"Identificacion descartada para servei_cat_trans: fase={fase} procedim={procedim}",
-                        }
-                    )
-                continue
-
             if not expediente or not regex.match(expediente):
                 if on_discard:
                     on_discard(
@@ -283,8 +274,80 @@ class ServeiCatTransAdapter(SiteAdapter):
             razon_social = self._clean(r.get("cliente_razon_social") or r.get("Nombrefiscal") or r.get("SujetoRecurso"))
             fase = self._clean(r.get("FaseProcedimiento"))
             procedim = self._clean(r.get("Procedim"))
+            tramite_tipo = self._infer_tramite_tipo(fase, procedim)
             sujeto_recurso = self._clean(r.get("SujetoRecurso") or razon_social or nombre)
             expone, solicita = self._build_texts(expediente=expediente, fase=fase, sujeto_recurso=sujeto_recurso)
+
+            identificado_nombre = self._clean(
+                r.get("identificado_nombre")
+                or r.get("ConducNom")
+                or r.get("conduc_nom")
+            )
+            identificado_apellido1 = self._clean(
+                r.get("identificado_apellido1")
+                or r.get("ConducApellido1")
+                or r.get("conduc_apellido1")
+            )
+            identificado_apellido2 = self._clean(
+                r.get("identificado_apellido2")
+                or r.get("ConducApellido2")
+                or r.get("conduc_apellido2")
+            )
+            identificado_nif = self._normalize_document(
+                r.get("identificado_nif")
+                or r.get("ConducDni")
+                or r.get("conduc_dni")
+            )
+            identificado_nif_empresa = self._normalize_document(
+                r.get("identificado_nif_empresa")
+                or r.get("identificado_cif")
+                or r.get("ConducCif")
+                or r.get("conduc_cif")
+            )
+            identificado_razon_social = self._clean(
+                r.get("identificado_razon_social")
+                or r.get("ConducRazonSocial")
+                or r.get("conduc_razon_social")
+            )
+            identificado_calle_raw = self._clean(
+                r.get("identificado_calle_raw")
+                or r.get("identificado_calle")
+                or r.get("ConducAdr")
+                or r.get("conduc_adr")
+            )
+            identificado_numero_raw = self._clean(
+                r.get("identificado_numero_raw")
+                or r.get("identificado_numero")
+                or r.get("ConducNumero")
+                or r.get("conduc_numero")
+            )
+            identificado_cp = self._clean(
+                r.get("identificado_cp")
+                or r.get("ConducCodpost")
+                or r.get("conduc_codpost")
+            )
+            identificado_municipio = self._clean(
+                r.get("identificado_municipio")
+                or r.get("identificado_poblacion")
+                or r.get("ConducPobl")
+                or r.get("conduc_pobl")
+            )
+            identificado_provincia = self._clean(
+                r.get("identificado_provincia")
+                or r.get("ConducProv")
+                or r.get("conduc_prov")
+            )
+
+            tipo_identificado_raw = self._clean(
+                r.get("identificado_tipo_persona")
+                or r.get("identificado_tipodecliente")
+            ).lower()
+            if tipo_identificado_raw in {"juridica", "2", "empresa", "pj"}:
+                identificado_tipo_persona = "juridica"
+            elif tipo_identificado_raw in {"fisica", "1", "pf", "particular"}:
+                identificado_tipo_persona = "fisica"
+            else:
+                identificado_tipo_persona = "juridica" if identificado_nif_empresa else "fisica"
 
             if is_company and not nif_empresa:
                 if on_discard:
@@ -299,6 +362,34 @@ class ServeiCatTransAdapter(SiteAdapter):
                     )
                 continue
 
+            if tramite_tipo == "identificacion":
+                if identificado_tipo_persona == "juridica":
+                    if not identificado_nif_empresa or not identificado_razon_social:
+                        if on_discard:
+                            on_discard(
+                                {
+                                    "site_id": self.site_id,
+                                    "idRecurso": rid,
+                                    "Expedient": expediente,
+                                    "tipo_incidencia": "SITE_RULE_DISCARDED",
+                                    "motivo": "Identificacion juridica sin nif_empresa o razon_social del identificado.",
+                                }
+                            )
+                        continue
+                else:
+                    if not identificado_nif or not identificado_nombre:
+                        if on_discard:
+                            on_discard(
+                                {
+                                    "site_id": self.site_id,
+                                    "idRecurso": rid,
+                                    "Expedient": expediente,
+                                    "tipo_incidencia": "SITE_RULE_DISCARDED",
+                                    "motivo": "Identificacion fisica sin documento o nombre del identificado.",
+                                }
+                            )
+                        continue
+
             payloads.append(
                 {
                     "idRecurso": r.get("idRecurso"),
@@ -310,6 +401,7 @@ class ServeiCatTransAdapter(SiteAdapter):
                     "fase_procedimiento": fase,
                     "Procedim": procedim,
                     "procedim": procedim,
+                    "tramite_tipo": tramite_tipo,
                     "SujetoRecurso": sujeto_recurso,
                     "tipodecliente": tipodecliente,
                     "tipo_persona": "juridica" if is_company else "fisica",
@@ -341,6 +433,18 @@ class ServeiCatTransAdapter(SiteAdapter):
                         r.get("cl_provincia")
                         or r.get("cliente_provincia")
                     ),
+                    "identificado_tipo_persona": identificado_tipo_persona,
+                    "identificado_nombre": identificado_nombre,
+                    "identificado_apellido1": identificado_apellido1,
+                    "identificado_apellido2": identificado_apellido2,
+                    "identificado_nif": identificado_nif,
+                    "identificado_nif_empresa": identificado_nif_empresa,
+                    "identificado_razon_social": identificado_razon_social,
+                    "identificado_calle_raw": identificado_calle_raw,
+                    "identificado_numero_raw": identificado_numero_raw,
+                    "identificado_cp": identificado_cp,
+                    "identificado_municipio": identificado_municipio,
+                    "identificado_provincia": identificado_provincia,
                     "expongo": expone,
                     "solicito": solicita,
                     "email": get_default_contact_email(),

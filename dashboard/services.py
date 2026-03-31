@@ -30,6 +30,11 @@ from .repositories import (
 
 XVIA_HOME_URL = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/home"
 USER_RE = re.compile(r'<i class="fa fa-user-circle"[^>]*></i>\s*([^<]+)')
+_AUTH_TOKEN_RE = re.compile(r"(autorizaci|authorization|autoritzaci|(?:^|[^a-z])aut(?:[^a-z]|$))", re.IGNORECASE)
+_AUTH_MISSING_RE = re.compile(
+    r"(missing|falt(?:a|an|aba|ante)?|sin\s+aut|no\s+(?:se\s+)?(?:encuentra|encontro|existe)|ausent)",
+    re.IGNORECASE,
+)
 
 
 class DashboardNotFoundError(ValueError):
@@ -126,6 +131,7 @@ class DashboardService:
             sqlserver_conn_str = build_sqlserver_connection_string()
         except Exception:
             sqlserver_conn_str = ""
+        self.sqlserver_conn_str = sqlserver_conn_str
 
         pg_dsn_value = get_report_pg_dsn(pg_dsn)
         has_valid_pg_dsn = bool(pg_dsn_value) and is_pg_source_of_truth_enabled()
@@ -318,6 +324,237 @@ class DashboardService:
         return {"items": items[start:end], "page": page, "page_size": page_size, "total": len(items)}
 
     @staticmethod
+    def _extract_resource_id_from_incident(item: dict[str, Any]) -> Optional[int]:
+        raw = item.get("resource_id")
+        if raw is None:
+            payload = item.get("payload") or {}
+            if isinstance(payload, dict):
+                raw = payload.get("idRecurso")
+                if raw is None:
+                    raw = payload.get("resource_id")
+        try:
+            return int(raw) if raw is not None else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _build_incident_row_id(item: dict[str, Any], rid: Optional[int]) -> str:
+        site = str(item.get("site_id") or "").strip()
+        rid_part = str(rid) if rid is not None else "none"
+        incident_type = str(item.get("incident_type") or "").strip().upper() or "UNKNOWN"
+        expediente = str(item.get("expediente") or "").strip().upper() or "none"
+        return f"{site}:{rid_part}:{incident_type}:{expediente}"
+
+    @staticmethod
+    def _to_int_or_none(value: Any) -> Optional[int]:
+        try:
+            if value is None or str(value).strip() == "":
+                return None
+            return int(str(value).strip())
+        except Exception:
+            return None
+
+    def _looks_like_missing_authorization_incident(self, item: dict[str, Any]) -> bool:
+        text = " ".join(
+            part for part in (
+                str(item.get("incident_type") or "").strip(),
+                str(item.get("reason") or "").strip(),
+            )
+            if part
+        )
+        if not text:
+            return False
+        return bool(_AUTH_TOKEN_RE.search(text) and _AUTH_MISSING_RE.search(text))
+
+    def _resolve_client_folder_context(
+        self,
+        *,
+        numclient: int | None,
+        conn_str: str | None,
+        sujeto_recurso: str | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        from core.client_documentation import client_identity_from_db, client_identity_from_payload
+        from core.client_paths import get_ruta_cliente_documentacion, resolve_client_docs_base_path
+
+        identity = None
+        if numclient is not None and conn_str:
+            try:
+                identity = client_identity_from_db(
+                    int(numclient),
+                    conn_str,
+                    sujeto_recurso=sujeto_recurso,
+                )
+            except Exception:
+                identity = None
+
+        if identity is None and isinstance(payload, dict):
+            try:
+                identity = client_identity_from_payload(payload)
+            except Exception:
+                identity = None
+
+        if identity is None:
+            return {"exists": False, "path": None}
+
+        try:
+            base_path = resolve_client_docs_base_path()
+            client_root = get_ruta_cliente_documentacion(identity, base_path)
+        except Exception:
+            return {"exists": False, "path": None}
+
+        return {"exists": client_root.exists(), "path": str(client_root)}
+
+    def _enrich_incident_items_with_gesdoc(
+        self,
+        *,
+        items: list[dict[str, Any]],
+        conn_str: str | None,
+    ) -> None:
+        if not items:
+            return
+
+        for item in items:
+            item.setdefault("gesdoc_missing_auth_candidate", False)
+            item.setdefault("client_folder_exists", False)
+            item.setdefault("gesdoc_ui_variant", "default")
+
+        rid_list: list[int] = []
+        for item in items:
+            rid = self._extract_resource_id_from_incident(item)
+            if rid is not None:
+                item["resource_id"] = rid
+                rid_list.append(rid)
+
+        metadata_map: dict[int, dict[str, Any]] = {}
+        if conn_str and rid_list:
+            try:
+                from core.repositories.resource_repository import ResourceRepository
+
+                repo = ResourceRepository(conn_str=conn_str, logger=self.logger)
+                resources = repo.get_resources_by_ids(site_id="all", resource_ids=rid_list)
+                metadata_map = {
+                    int(resource.id): dict(resource.metadata or {})
+                    for resource in resources
+                    if getattr(resource, "id", None) is not None
+                }
+            except Exception as exc:
+                self.logger.warning("Error cargando metadata de recursos para incidencias GESDOC: %s", exc)
+
+        folder_cache: dict[tuple[int, str], dict[str, Any]] = {}
+
+        for item in items:
+            rid = self._extract_resource_id_from_incident(item)
+            payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+            metadata = metadata_map.get(rid or -1, {})
+
+            numclient = self._to_int_or_none(
+                item.get("numclient")
+                or metadata.get("numclient")
+                or payload.get("numclient")
+                or payload.get("idCliente")
+                or payload.get("client_id")
+                or payload.get("id_cliente")
+            )
+            cliente_tipo = self._to_int_or_none(
+                item.get("cliente_tipo")
+                or metadata.get("cliente_tipo")
+                or payload.get("cliente_tipo")
+                or payload.get("tipodecliente")
+            )
+            sujeto_recurso = (
+                str(
+                    metadata.get("SujetoRecurso")
+                    or metadata.get("sujeto_recurso")
+                    or payload.get("sujeto_recurso")
+                    or payload.get("SujetoRecurso")
+                    or ""
+                ).strip()
+                or None
+            )
+
+            if numclient is not None:
+                item["numclient"] = numclient
+            if cliente_tipo is not None:
+                item["cliente_tipo"] = cliente_tipo
+
+            is_candidate = bool(numclient is not None and self._looks_like_missing_authorization_incident(item))
+            item["gesdoc_missing_auth_candidate"] = is_candidate
+            if not is_candidate:
+                item["client_folder_exists"] = False
+                item["gesdoc_ui_variant"] = "default"
+                continue
+
+            cache_key = (int(numclient), sujeto_recurso or "")
+            if cache_key not in folder_cache:
+                folder_cache[cache_key] = self._resolve_client_folder_context(
+                    numclient=numclient,
+                    conn_str=conn_str,
+                    sujeto_recurso=sujeto_recurso,
+                    payload=payload,
+                )
+            folder_ctx = folder_cache[cache_key]
+            exists = bool(folder_ctx.get("exists"))
+            item["client_folder_exists"] = exists
+            item["gesdoc_ui_variant"] = "purple" if exists else "default"
+            if folder_ctx.get("path"):
+                item["client_folder_path"] = folder_ctx.get("path")
+
+    def get_pending_gesdoc_incident(
+        self,
+        *,
+        site_id: str,
+        resource_id: int,
+        user: Optional[dict[str, Any]] = None,
+        require_lock_owner: bool = True,
+    ) -> dict[str, Any]:
+        site = str(site_id or "").strip()
+        if not site:
+            raise DashboardNotFoundError("site_id es obligatorio.")
+        rid = int(resource_id)
+        items = self.incidents_history_repo.list_incidents_for_resource(
+            day=utc_today_iso(),
+            site_id=site,
+            resource_id=rid,
+            statuses=["NEW", "REVIEWED"],
+        )
+        if not items:
+            raise DashboardNotFoundError(f"No hay incidencia pendiente para {site}/{rid}.")
+
+        self._enrich_incident_items_with_gesdoc(items=items, conn_str=self.sqlserver_conn_str)
+        candidates = [item for item in items if item.get("gesdoc_missing_auth_candidate")]
+        if not candidates:
+            raise DashboardNotFoundError(f"La incidencia {site}/{rid} no es candidata a operativa GESDOC.")
+
+        chosen = next((item for item in candidates if item.get("gesdoc_ui_variant") == "purple"), candidates[0])
+        incident_id = self._build_incident_row_id(chosen, rid)
+        legacy_id = f"{site}:{rid}"
+        chosen["incident_id"] = incident_id
+        locks = self.runtime_store.get_incident_locks(incident_ids=[incident_id, legacy_id])
+        lock_info = locks.get(incident_id) or locks.get(legacy_id)
+        if lock_info:
+            chosen["locked"] = True
+            chosen["lock_user_id"] = lock_info.get("user_id")
+            chosen["lock_username"] = lock_info.get("username")
+            chosen["lock_expires_at"] = lock_info.get("expires_at")
+        else:
+            chosen["locked"] = False
+            chosen["lock_user_id"] = None
+            chosen["lock_username"] = None
+            chosen["lock_expires_at"] = None
+
+        if require_lock_owner:
+            current_user_id = str((user or {}).get("sub") or "").strip()
+            if not lock_info:
+                raise DashboardConflictError("La incidencia debe estar bloqueada antes de consultar GESDOC.")
+            lock_user_id = str(lock_info.get("user_id") or "").strip()
+            if not current_user_id or lock_user_id != current_user_id:
+                owner = lock_info.get("username") or lock_user_id or "otro usuario"
+                raise DashboardConflictError(f"La incidencia está bloqueada por {owner}.")
+
+        return chosen
+
+    @staticmethod
     def _history_user_candidates(user: Optional[dict[str, Any]]) -> list[str]:
         if not isinstance(user, dict):
             return []
@@ -389,7 +626,7 @@ class DashboardService:
             except Exception:
                 pass
 
-        if not items or not conn_str:
+        if not items:
             return res
 
         def _fetch_sqlserver_completed_ids(resource_ids: list[int]) -> set[int]:
@@ -428,16 +665,14 @@ class DashboardService:
             rids = []
             rid_to_sites: dict[int, set[str]] = {}
             for it in items:
-                rid = it.get("resource_id")
-                if rid is not None:
-                    try:
-                        rid_int = int(rid)
-                        rids.append(rid_int)
-                        site = str(it.get("site_id") or "").strip()
-                        if site:
-                            rid_to_sites.setdefault(rid_int, set()).add(site)
-                    except (ValueError, TypeError):
-                        pass
+                rid = self._extract_resource_id_from_incident(it)
+                if rid is None:
+                    continue
+                it["resource_id"] = rid
+                rids.append(rid)
+                site = str(it.get("site_id") or "").strip()
+                if site:
+                    rid_to_sites.setdefault(rid, set()).add(site)
 
             sql_completed_ids = _fetch_sqlserver_completed_ids(rids)
             if sql_completed_ids:
@@ -465,23 +700,9 @@ class DashboardService:
                     )
                     items = res.get("items") or []
 
-            if rids:
-                from core.repositories.resource_repository import ResourceRepository
-                repo = ResourceRepository(conn_str=conn_str, logger=self.logger)
-                # Fetch only basics to get numclient
-                resources = repo.get_resources_by_ids(site_id="all", resource_ids=rids)
-                client_map = {int(r.id): (r.metadata or {}).get("numclient") for r in resources if getattr(r, "id", None) is not None}
-                for it in items:
-                    rid = it.get("resource_id")
-                    if rid is not None:
-                        try:
-                            val = client_map.get(int(rid))
-                            if val:
-                                it["numclient"] = val
-                        except (ValueError, TypeError):
-                            pass
+            self._enrich_incident_items_with_gesdoc(items=items, conn_str=conn_str)
         except Exception as exc:
-            self.logger.warning("Error enriqueciendo incidencias con numclient: %s", exc)
+            self.logger.warning("Error enriqueciendo incidencias con datos GESDOC: %s", exc)
 
         return res
 

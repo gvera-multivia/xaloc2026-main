@@ -204,6 +204,33 @@ export const incidentsApi = {
         api.get<{ items: any[], total: number }>(`/incidents?page=${page}&page_size=${pageSize}`),
     claim: (id: string) => api.post<any>(`/incidents/${id}/claim`),
     release: (id: string) => api.post<any>(`/incidents/${id}/release`),
+    getIncidentGesdocStatus: (siteId: string, resourceId: number | string) =>
+        api.get<{
+            ok: boolean;
+            incident_id?: string;
+            numclient?: number | string;
+            cliente_tipo?: number | null;
+            client_folder_exists: boolean;
+            client_folder_path?: string | null;
+            has_sent_request: boolean;
+            sent_request_entries: string[];
+            available_actions: string[];
+            locked_required: boolean;
+        }>(`/incidents/${encodeURIComponent(siteId)}/${resourceId}/gesdoc-status`),
+    runIncidentGesdocAction: (
+        siteId: string,
+        resourceId: number | string,
+        action: 'generate' | 'send',
+    ) =>
+        api.post<{
+            ok: boolean;
+            action: 'generate' | 'send';
+            cliente_tipo?: number | null;
+            authorization_found: boolean;
+            authorization_file?: string | null;
+            destination_paths: string[];
+            message: string;
+        }>(`/incidents/${encodeURIComponent(siteId)}/${resourceId}/gesdoc-action`, { action }),
 };
 
 export const blacklistApi = {

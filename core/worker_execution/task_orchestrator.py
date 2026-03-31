@@ -27,7 +27,7 @@ from core.redsara_upload_planner import PreparedUploadPlan, prepare_redsara_uplo
 from core.sqlserver_utils import build_sqlserver_connection_string
 from core.validation.validators import normalize_plate_with_fallback
 from core.xvia_auth import mark_resource_complete
-from sites.diputacio_bcn.municipio_codes import resolve_codmuni
+from sites.diputacio_bcn.municipio_codes import MUNICIPIO_TO_CODE, resolve_codmuni
 from .browser_executor import execute_browser_flow
 from .document_fetcher import download_document_and_attachments
 from .models import ProcessOutcome
@@ -341,6 +341,21 @@ def _extract_municipio_from_organisme_for_diputacio(organisme: object) -> str:
     return ""
 
 
+def _extract_municipio_from_cliente_direccion_for_diputacio(value: object) -> str:
+    norm = _normalize_diputacio_municipio_text(value)
+    if not norm:
+        return ""
+
+    best_match = ""
+    for municipio in MUNICIPIO_TO_CODE.keys():
+        muni_norm = _normalize_diputacio_municipio_text(municipio)
+        if not muni_norm:
+            continue
+        if muni_norm in norm and len(muni_norm) > len(best_match):
+            best_match = municipio
+    return best_match
+
+
 def _ensure_diputacio_codmuni(payload: dict) -> Optional[str]:
     raw_code = str(
         payload.get("codmuni")
@@ -363,22 +378,35 @@ def _ensure_diputacio_codmuni(payload: dict) -> Optional[str]:
         payload.get("poblacion"),
         payload.get("conduc_pobl"),
     ]
-    municipio_value = ""
-    for candidate in municipio_candidates:
-        txt = str(candidate or "").strip()
-        if txt:
-            municipio_value = txt
-            break
+    ordered_candidates: list[str] = []
 
-    if not municipio_value:
-        municipio_value = _extract_municipio_from_organisme_for_diputacio(
+    def _push_candidate(value: object) -> None:
+        txt = str(value or "").strip()
+        if txt and txt not in ordered_candidates:
+            ordered_candidates.append(txt)
+
+    for candidate in municipio_candidates:
+        _push_candidate(candidate)
+
+    _push_candidate(
+        _extract_municipio_from_organisme_for_diputacio(
             payload.get("organismo") or payload.get("Organisme")
         )
+    )
+    _push_candidate(
+        _extract_municipio_from_cliente_direccion_for_diputacio(
+            payload.get("cliente_domicilio")
+            or payload.get("direccion_raw")
+            or payload.get("domicilio")
+            or payload.get("address")
+        )
+    )
 
-    if municipio_value:
+    for municipio_value in ordered_candidates:
         payload.setdefault("municipio", municipio_value)
         code = resolve_codmuni(municipio_value)
         if code:
+            payload["municipio"] = municipio_value
             payload["codmuni"] = code
             return None
 

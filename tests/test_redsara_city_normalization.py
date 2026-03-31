@@ -14,9 +14,19 @@ def test_controller_normalizes_nucleo_municipio_form() -> None:
     assert out == "FRANQUESES DEL VALLES, LES"
 
 
+def test_controller_normalizes_esparraguera_to_esparreguera() -> None:
+    out = _normalize_city_for_redsara("ESPARRAGUERA")
+    assert out == "ESPARREGUERA"
+
+
 def test_select_heuristic_alias_for_les_franqueses() -> None:
     out = normalize_city_alias("LES FRANQUESES DEL VALLES")
     assert out == "Franqueses del Valles, Les"
+
+
+def test_select_heuristic_alias_for_esparraguera() -> None:
+    out = normalize_city_alias("ESPARRAGUERA")
+    assert out == "esparreguera"
 
 
 def test_select_heuristic_alias_for_guipuzcoa_variants() -> None:

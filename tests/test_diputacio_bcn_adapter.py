@@ -269,6 +269,44 @@ def test_fetch_candidates_discards_when_assigned_to_other_user() -> None:
     assert discards[0]["tipo_incidencia"] == "RESOURCE_ASSIGNED_TO_OTHER_USER"
 
 
+def test_fetch_candidates_skips_orgt_barcelona_city_to_redsara_when_not_identificacion() -> None:
+    adapter = _make_adapter_with_allowed(set())
+    repo = _FakeRepo(
+        [
+            {
+                "idRecurso": 200005,
+                "Expedient": "0187374314",
+                "Organisme": "ORGANISMO DE GESTION TRIBUTARIA (ORGT) DE LA DIPUTACION DE BARCELONA",
+                "FaseProcedimiento": "denuncia",
+                "Estado": 0,
+                "UsuarioAsignado": None,
+                "cliente_municipio": "BARCELONA",
+            }
+        ]
+    )
+    candidates = adapter.fetch_candidates(
+        config={"query_organisme": "%ORGT%"},
+        conn_str="dummy",
+        authenticated_user="test",
+        limit=50,
+        resource_repo=repo,
+    )
+    assert candidates == []
+
+
+def test_should_route_to_redsara_barcelona_is_false_for_identificacion() -> None:
+    assert (
+        DiputacioBcnAdapter._should_route_to_redsara_barcelona(
+            {
+                "Organisme": "ORGANISMO DE GESTION TRIBUTARIA (ORGT) DE LA DIPUTACION DE BARCELONA",
+                "FaseProcedimiento": "identificacion del conductor",
+                "cliente_municipio": "BARCELONA",
+            }
+        )
+        is False
+    )
+
+
 def test_extract_municipio_from_organisme_returns_empty_for_orgt_diba_alias() -> None:
     value = "ORGANISMO DE GESTION TRIBUTARIA (ORGT) DE LA DIPUTACION DE BARCELONA"
     assert DiputacioBcnAdapter._extract_municipio_from_organisme(value) == ""
@@ -371,3 +409,37 @@ def test_build_payloads_uses_client_municipio_for_orgt_alias() -> None:
     assert len(payloads) == 1
     assert payloads[0]["municipio"] == "SABADELL"
     assert payloads[0]["codmuni"] == "186"
+
+
+def test_build_payloads_uses_cliente_domicilio_fallback_for_orgt_alias() -> None:
+    adapter = DiputacioBcnAdapter()
+    payloads = asyncio.run(
+        adapter.build_payloads(
+            [
+                {
+                    "idRecurso": 555004,
+                    "idExp": 777004,
+                    "numclient": 999004,
+                    "automatic_id": 12348,
+                    "Expedient": "542002/25",
+                    "Organisme": "ORGANISMO DE GESTION TRIBUTARIA (ORGT) DE LA DIPUTACION DE BARCELONA",
+                    "FaseProcedimiento": "denuncia",
+                    "SujetoRecurso": "JOAN PEREZ",
+                    "tipodecliente": "1",
+                    "nif": "12345678Z",
+                    "nifempresa": "",
+                    "Nombre": "JOAN",
+                    "Apellido1": "PEREZ",
+                    "Apellido2": "LOPEZ",
+                    "Nombrefiscal": "",
+                    "cliente_municipio": "BARCELONA",
+                    "cliente_domicilio": "CARRER GRAN, 12 - ESPARREGUERA",
+                    "adjuntos": [],
+                }
+            ]
+        )
+    )
+
+    assert len(payloads) == 1
+    assert payloads[0]["municipio"] == "ESPARREGUERA"
+    assert payloads[0]["codmuni"] == "075"
