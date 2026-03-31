@@ -98,10 +98,12 @@ services:
       DASHBOARD_HISTORY_SOURCE: ${DASHBOARD_HISTORY_SOURCE:-sqlserver}
       REPORT_PG_DSN: ${REPORT_PG_DSN:-postgresql://xaloc:xaloc_dev_password@postgres:5432/xaloc}
       CLIENT_DOCS_BASE_PATH: /mnt/clientes
+      GESDOC_TMP_PDF_PATH: /mnt/tmp_pdf
     volumes:
       - ../../:/app
       - clientes_smb:/mnt/clientes:rw
       - dptos_smb:/mnt/dptos:rw
+      - tmp_pdf_smb:/mnt/tmp_pdf:rw
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "8788:8788"
@@ -454,3 +456,9 @@ volumes:
         type: cifs
         o: "username=Guillem Vera,password=1234,vers=3.0,rw,iocharset=utf8"
         device: "//192.168.184.150/dptos multivia"
+  tmp_pdf_smb:
+      driver: local
+      driver_opts:
+        type: cifs
+        o: "username=Guillem Vera,password=1234,vers=3.0,rw,iocharset=utf8"
+        device: "//192.168.184.150/tmp_pdf"

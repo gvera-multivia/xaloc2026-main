@@ -58,12 +58,14 @@ async function fetcher<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
-    get: <T>(path: string) => fetcher<T>(path),
-    post: <T>(path: string, body?: any) => fetcher<T>(path, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: body ? JSON.stringify(body) : undefined,
-    }),
+    get: <T>(path: string, additionalHeaders?: Record<string, string>) =>
+        fetcher<T>(path, { headers: additionalHeaders }),
+    post: <T>(path: string, body?: any, additionalHeaders?: Record<string, string>) =>
+        fetcher<T>(path, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...additionalHeaders },
+            body: body ? JSON.stringify(body) : undefined,
+        }),
     put: <T>(path: string, body?: any) => fetcher<T>(path, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -204,8 +206,11 @@ export const incidentsApi = {
         api.get<{ items: any[], total: number }>(`/incidents?page=${page}&page_size=${pageSize}`),
     claim: (id: string) => api.post<any>(`/incidents/${id}/claim`),
     release: (id: string) => api.post<any>(`/incidents/${id}/release`),
-    getIncidentGesdocStatus: (siteId: string, resourceId: number | string) =>
-        api.get<{
+    getIncidentGesdocStatus: (siteId: string, resourceId: number | string, gesdocUser?: string, gesdocPassword?: string) => {
+        const headers: Record<string, string> = {};
+        if (gesdocUser) headers['X-Gesdoc-User'] = gesdocUser;
+        if (gesdocPassword) headers['X-Gesdoc-Password'] = gesdocPassword;
+        return api.get<{
             ok: boolean;
             incident_id?: string;
             numclient?: number | string;
@@ -216,13 +221,19 @@ export const incidentsApi = {
             sent_request_entries: string[];
             available_actions: string[];
             locked_required: boolean;
-        }>(`/incidents/${encodeURIComponent(siteId)}/${resourceId}/gesdoc-status`),
+        }>(`/incidents/${encodeURIComponent(siteId)}/${resourceId}/gesdoc-status`, headers);
+    },
     runIncidentGesdocAction: (
         siteId: string,
         resourceId: number | string,
         action: 'generate' | 'send',
-    ) =>
-        api.post<{
+        gesdocUser?: string,
+        gesdocPassword?: string,
+    ) => {
+        const headers: Record<string, string> = {};
+        if (gesdocUser) headers['X-Gesdoc-User'] = gesdocUser;
+        if (gesdocPassword) headers['X-Gesdoc-Password'] = gesdocPassword;
+        return api.post<{
             ok: boolean;
             action: 'generate' | 'send';
             cliente_tipo?: number | null;
@@ -230,7 +241,8 @@ export const incidentsApi = {
             authorization_file?: string | null;
             destination_paths: string[];
             message: string;
-        }>(`/incidents/${encodeURIComponent(siteId)}/${resourceId}/gesdoc-action`, { action }),
+        }>(`/incidents/${encodeURIComponent(siteId)}/${resourceId}/gesdoc-action`, { action }, headers);
+    },
 };
 
 export const blacklistApi = {

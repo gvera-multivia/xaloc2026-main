@@ -54,6 +54,7 @@ SELECT
     e.Idpublic AS exp_idpublic,
     e.ExpedientePublicacion,
     e.dia AS dia_denuncia,
+    e.notas AS exp_notas,
 
     pe.[publicación] AS pub_publicacion,
     pe.matricula AS pub_matricula,

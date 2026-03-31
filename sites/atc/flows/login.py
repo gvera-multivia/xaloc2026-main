@@ -33,6 +33,12 @@ _PUBLIC_REPOSICIO_URL_MARKERS = (
     "/gestions/impugnacions/recursos/",
 )
 
+_ATC_SECURED_URL_MARKERS = (
+    "seu2.atc.gencat.cat",
+    "seu.atc.gencat.cat",
+    "/secured/",
+)
+
 ATC_LOGIN_SHORT_TIMEOUT_MS = 5000
 ATC_LOGIN_MEDIUM_TIMEOUT_MS = 15000
 ATC_LOGIN_LONG_TIMEOUT_MS = 30000
@@ -63,6 +69,11 @@ def _is_post_auth_ready_url(url: str) -> bool:
 def _is_reposicio_public_url(url: str) -> bool:
     current = (url or "").lower()
     return any(marker in current for marker in _PUBLIC_REPOSICIO_URL_MARKERS)
+
+
+def _looks_like_atc_secured_url(url: str) -> bool:
+    current = (url or "").lower()
+    return all(marker in current for marker in _ATC_SECURED_URL_MARKERS)
 
 
 async def _click_first_selector(page: "Page", selectors: list[str], *, timeout: int = ATC_LOGIN_MEDIUM_TIMEOUT_MS) -> bool:
@@ -619,14 +630,14 @@ async def _resolve_cert_button(page: "Page", selector: str, timeout_ms: int):
     raise RuntimeError(f"atc.login: no se encontro boton de certificado con selector: {selector}")
 
 
-async def _click_certificate_button(page: "Page") -> None:
+async def _click_certificate_button(page: "Page") -> bool:
     await _accept_cookies_if_present(page)
     try:
         button, _, _ = await _resolve_cert_button(page, _CERT_BUTTON_SELECTOR, ATC_LOGIN_LONG_TIMEOUT_MS)
     except Exception:
         button = page.get_by_role("button", name=re.compile(r"certificat|certificado", re.IGNORECASE)).first
         if await button.count() <= 0:
-            raise RuntimeError("atc.login: no se encontro boton de acceso con certificado.")
+            return False
 
     try:
         await button.scroll_into_view_if_needed(timeout=1200)
@@ -637,27 +648,16 @@ async def _click_certificate_button(page: "Page") -> None:
         try:
             await button.click(timeout=ATC_LOGIN_LONG_TIMEOUT_MS, **kwargs)
             await wait_after_action(page)
-            return
+            return True
         except Exception:
             continue
 
-    clicked = await page.evaluate(
-        """({ selector }) => {
-            const nodes = Array.from(document.querySelectorAll(selector));
-            if (!nodes.length) return false;
-            const visible = nodes.find((el) => {
-                const cs = window.getComputedStyle(el);
-                const r = el.getBoundingClientRect();
-                return cs && cs.display !== 'none' && cs.visibility !== 'hidden' && r.width > 0 && r.height > 0;
-            });
-            (visible || nodes[0]).click();
-            return true;
-        }""",
-        {"selector": _CERT_BUTTON_SELECTOR},
-    )
-    if not clicked:
-        raise RuntimeError("atc.login: no se encontro boton de acceso con certificado.")
+    try:
+        await button.evaluate("(el) => el.click()")
+    except Exception:
+        return False
     await wait_after_action(page)
+    return True
 
 
 async def _pick_auth_page(context: "BrowserContext", fallback: "Page") -> "Page":
@@ -667,11 +667,80 @@ async def _pick_auth_page(context: "BrowserContext", fallback: "Page") -> "Page"
 
     for page in reversed(candidates):
         url = (page.url or "").lower()
-        if "tramitsgenerics.aspx" in url:
+        if _is_post_auth_ready_url(url):
             return page
+    for page in reversed(candidates):
+        url = (page.url or "").lower()
+        if _looks_like_atc_secured_url(url):
+            return page
+    for page in reversed(candidates):
+        url = (page.url or "").lower()
         if any(marker in url for marker in _AUTH_URL_MARKERS):
             return page
     return candidates[-1]
+
+
+async def _is_post_auth_ready_dom(page: "Page") -> bool:
+    try:
+        state = await page.evaluate(
+            """() => {
+                const normalize = (value) =>
+                    String(value || "")
+                        .normalize("NFD")
+                        .replace(/[\\u0300-\\u036f]/g, "")
+                        .replace(/\\s+/g, " ")
+                        .trim()
+                        .toLowerCase();
+                const isVisible = (el) => {
+                    if (!el) return false;
+                    const st = window.getComputedStyle(el);
+                    const rect = el.getBoundingClientRect();
+                    return !!st && st.display !== "none" && st.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+                };
+                const bodyText = normalize(document.body?.innerText || "");
+                const radioCount = document.querySelectorAll(
+                    "input[type='radio'][name='identification'], se-radio input[type='radio'], [role='radio'] input[type='radio']"
+                ).length;
+                const continueButton = Array.from(document.querySelectorAll("button, [role='button']"))
+                    .some((el) => isVisible(el) && /continuar|continue/.test(normalize(el.textContent || el.getAttribute("aria-label") || "")));
+                return {
+                    radioCount,
+                    hasThirdNif: !!document.querySelector("#thirdPresenterNif"),
+                    hasThirdName: !!document.querySelector("#thirdPresenterName"),
+                    hasCsvInput: !!document.querySelector("#csvActInput"),
+                    hasContinueButton: continueButton,
+                    hasIdentityHeading: bodyText.includes("com voleu actuar") || bodyText.includes("en nom propi") || bodyText.includes("tercera persona"),
+                    loading: bodyText.includes("carregant") || bodyText.includes("cargando") || bodyText.includes("loading"),
+                };
+            }"""
+        )
+    except Exception:
+        return False
+
+    if state.get("loading"):
+        return False
+    if state.get("hasThirdNif") and state.get("hasThirdName"):
+        return True
+    if int(state.get("radioCount") or 0) >= 2:
+        return True
+    if state.get("hasCsvInput"):
+        return True
+    return bool(state.get("hasIdentityHeading") and state.get("hasContinueButton"))
+
+
+async def _refresh_auth_context_page(page: "Page") -> "Page":
+    current = await _pick_auth_page(page.context, page)
+    if await _is_post_auth_ready_dom(current):
+        return current
+
+    candidates = [candidate for candidate in current.context.pages if not candidate.is_closed()]
+    for candidate in reversed(candidates):
+        try:
+            if await _is_post_auth_ready_dom(candidate):
+                return candidate
+        except Exception:
+            continue
+    return current
 
 
 async def _wait_for_form_after_auth(
@@ -685,13 +754,13 @@ async def _wait_for_form_after_auth(
     last_url = current.url or ""
 
     while time.monotonic() < deadline:
-        current = await _pick_auth_page(context, current)
+        current = await _refresh_auth_context_page(current)
         await _accept_cookies_if_present(current)
         url = (current.url or "").lower()
         if url:
             last_url = current.url
 
-        if _is_post_auth_ready_url(url):
+        if _is_post_auth_ready_url(url) or await _is_post_auth_ready_dom(current):
             try:
                 await current.wait_for_load_state("domcontentloaded", timeout=10000)
             except Exception:
@@ -699,8 +768,17 @@ async def _wait_for_form_after_auth(
             return current
 
         if _is_auth_url(url):
+            current = await _refresh_auth_context_page(current)
+            url = (current.url or "").lower()
+            if _is_post_auth_ready_url(url) or await _is_post_auth_ready_dom(current):
+                return current
             if await _has_certificate_button(current):
-                await _click_certificate_button(current)
+                clicked = await _click_certificate_button(current)
+                if not clicked:
+                    try:
+                        await current.wait_for_load_state("domcontentloaded", timeout=4000)
+                    except Exception:
+                        pass
                 await current.wait_for_timeout(1000)
                 continue
             try:
@@ -823,7 +901,8 @@ async def _login_rea_or_repos(page: "Page", config: "AtcConfig", datos: "AtcTarg
     if datos.protocol != "rea" and not _is_auth_url(current.url or "") and not _is_post_auth_ready_url(current.url or ""):
         current = await _wait_for_reposicio_entry(current, timeout_ms=ATC_LOGIN_ENTRY_TIMEOUT_MS)
         await _accept_cookies_if_present(current)
-    if await _has_certificate_button(current):
+    current = await _refresh_auth_context_page(current)
+    if _is_auth_url(current.url or "") and await _has_certificate_button(current):
         await _click_certificate_button(current)
 
     current = await _wait_for_form_after_auth(current, timeout_ms=ATC_LOGIN_AUTH_TIMEOUT_MS)
@@ -851,7 +930,8 @@ async def _login_registro(page: "Page", config: "AtcConfig") -> "Page":
         await current.goto(config.url_registro_form, wait_until="domcontentloaded", timeout=config.navigation_timeout)
 
     await _accept_cookies_if_present(current)
-    if await _has_certificate_button(current):
+    current = await _refresh_auth_context_page(current)
+    if _is_auth_url(current.url or "") and await _has_certificate_button(current):
         await _click_certificate_button(current)
 
     current = await _wait_for_form_after_auth(current, timeout_ms=ATC_LOGIN_AUTH_TIMEOUT_MS)

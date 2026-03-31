@@ -19,8 +19,10 @@ logger = logging.getLogger("brain")
 
 
 class BaseOnlineAdapter(SiteAdapter):
-    DEFAULT_REGEX_EXPEDIENTE = r"^\s*(\d{5}-\d{4}[/\-]\d{4,5}-GIM|\d{5}-\d{4}/\d{1,5}|\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{6,7}|\d-\d{4}[/\-]\d{4,6}-(EXE|ECC))\s*$"
+    DEFAULT_REGEX_EXPEDIENTE = r"^\s*(\d{5}-\d{4}[/\-]\d{1,5}-GIM|\d{5}-\d{4}/\d{1,5}|\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{6,7}|\d-\d{4}[/\-]\d{4,6}-(EXE|ECC))\s*$"
     _LEGACY_REGEX_EXPEDIENTE_VARIANTS: tuple[str, ...] = (
+        r"^\s*(\d{5}-\d{4}[/\-]\d{4,5}-GIM|\d{5}-\d{4}/\d{1,5}|\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{6,7}|\d-\d{4}[/\-]\d{4,6}-(EXE|ECC))\s*$",
+        r"^(\d{5}-\d{4}[/\-]\d{4,5}-GIM|\d{5}-\d{4}/\d{1,5}|\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{6,7}|\d-\d{4}[/\-]\d{4,6}-(EXE|ECC))$",
         r"^(\d{5}-\d{4}[/\-]\d{1,5}-GIM|\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{7}|\d-\d{4}[/\-]\d{4,6}-(EXE|ECC))$",
         r"^(\d{5}-\d{4}[/\-]\d{1,5}-GIM|\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{6,7}|\d-\d{4}[/\-]\d{4,6}-(EXE|ECC))$",
         r"^\s*(\d{5}-\d{4}[/\-]\d{1,5}-GIM|\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{7}|\d-\d{4}[/\-]\d{4,6}-(EXE|ECC))\s*$",
@@ -169,7 +171,7 @@ class BaseOnlineAdapter(SiteAdapter):
     @classmethod
     def _valida_expediente_base(cls, expediente: str) -> bool:
         exp = cls._clean_str(expediente).upper()
-        if re.match(r"^\d{5}-\d{4}[/\-]\d{4,5}-GIM$", exp):
+        if re.match(r"^\d{5}-\d{4}[/\-]\d{3,5}-GIM$", exp):
             return True
         if re.match(r"^\d{5}-\d{4}/\d{1,5}$", exp):
             return True

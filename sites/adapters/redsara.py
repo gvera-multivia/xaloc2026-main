@@ -81,11 +81,11 @@ class RedsaraAdapter(SiteAdapter):
     """
 
     # Query con OR explícito para los organismos activos de la fase inicial.
+    # Los recursos ORGT de Diputació Barcelona ya NO se procesan por RedSara;
+    # se gestionan íntegramente por DiputacioBcnAdapter.
     OFFICIAL_QUERY_ORGANISME = (
         "%AJUNTAMENT DE BARCELONA%|"
         "%SECTOR DE SEGURIDAD Y MOVILIDAD DEL AYUNTAMIENTO DE BARCELONA%|"
-        "%ORGANISME DE GESTI%TRIBUT%ORGT%DIPUTACI%BARCELONA%|"
-        "%ORGANISMO DE GESTION TRIBUT%ORGT%DIPUTACION DE BARCELONA%|"
         "%ISLAS BALEARES, AGENCIA TRIBUTARIA MUNICIPAL%|"
         "%AGENCIA TRIBUTARIA MUNICIPAL DE ISLAS BALEARES%|"
         "%AGENCIA TRIBITARIA ISLAS BALEARES (ATIB)%|"
@@ -274,23 +274,6 @@ class RedsaraAdapter(SiteAdapter):
         return re.sub(r"\s+", "", txt)
 
     @classmethod
-    def _is_orgt_diba_alias(cls, organisme_raw: Any) -> bool:
-        text = cls._normalize_for_match(organisme_raw)
-        if not text:
-            return False
-        has_orgt = "ORGT" in text or "GESTION TRIBUTA" in text or "GESTIO TRIBUTA" in text
-        has_diba = "DIPUTAC" in text or "DIBA" in text
-        has_bcn = "BARCELONA" in text or "OFICINA DE MULTES" in text
-        return bool(has_orgt and has_diba and has_bcn)
-
-    @classmethod
-    def _candidate_city_is_barcelona(cls, candidate: dict[str, Any]) -> bool:
-        for key in ("cliente_municipio", "MunicipioPoblacion", "poblacion", "municipio", "conduc_pobl"):
-            if cls._normalize_for_match(candidate.get(key)) == "BARCELONA":
-                return True
-        return False
-
-    @classmethod
     def _is_identificacion_phase(cls, fase_raw: Any) -> bool:
         return "IDENTIFIC" in cls._normalize_for_match(fase_raw)
 
@@ -444,16 +427,7 @@ class RedsaraAdapter(SiteAdapter):
 
     def _resolve_rule_for_candidate(self, candidate: dict[str, Any]) -> Optional[dict[str, Any]]:
         organisme = candidate.get("Organisme")
-        direct = self.resolve_rule_by_organisme(organisme)
-        if direct is not None:
-            return direct
-        if (
-            self._is_orgt_diba_alias(organisme)
-            and self._candidate_city_is_barcelona(candidate)
-            and not self._is_identificacion_phase(candidate.get("FaseProcedimiento"))
-        ):
-            return self.resolve_rule_by_organisme("AJUNTAMENT DE BARCELONA - IMH")
-        return None
+        return self.resolve_rule_by_organisme(organisme)
 
     def validate_expediente_for_organisme(self, organisme_raw: Any, expediente: str) -> bool:
         normalized = self._normalize_expediente(expediente)

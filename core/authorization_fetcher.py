@@ -18,8 +18,9 @@ from datetime import datetime
 logger = logging.getLogger("[AUTH-FETCHER]")
 
 # Rutas de red donde GESDOC genera los PDFs
-TMP_PDF_PATH = Path(r"\\server-doc\tmp_pdf")
-TMP_PDF_SEDES_PATH = Path(r"\\server-doc\tmp_pdf\SEDES")
+# Configurables via env vars para Docker (GESDOC_TMP_PDF_PATH=/mnt/tmp_pdf)
+TMP_PDF_PATH = Path(os.getenv("GESDOC_TMP_PDF_PATH") or r"\\server-doc\tmp_pdf")
+TMP_PDF_SEDES_PATH = Path(os.getenv("GESDOC_TMP_PDF_SEDES_PATH") or str(TMP_PDF_PATH / "SEDES"))
 
 # Rutas base de documentación
 DOCS_BASE_PATH = Path(r"\\SERVER-DOC\Documentacion")
@@ -95,10 +96,10 @@ def find_authorization_in_tmp(
     patterns = []
     if client_type == "particular" or client_type is None:
         patterns.append((TMP_PDF_PATH, f"Autoriza_Particular_*_{numclient}.pdf"))
-    
+
     if client_type == "empresa" or client_type is None:
-        patterns.append((TMP_PDF_SEDES_PATH, f"Autoriza_Empresa_solo_*_{numclient}.pdf"))
-        patterns.append((TMP_PDF_SEDES_PATH, f"Autoriza_Empresa_*_{numclient}.pdf"))
+        patterns.append((TMP_PDF_PATH, f"Autoriza_Empresa_solo_*_{numclient}.pdf"))
+        patterns.append((TMP_PDF_PATH, f"Autoriza_Empresa_*_{numclient}.pdf"))
 
     found_files: list[Path] = []
     for base_path, pattern in patterns:

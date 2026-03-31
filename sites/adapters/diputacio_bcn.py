@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import re
 import unicodedata
 from datetime import datetime
@@ -275,14 +276,34 @@ class DiputacioBcnAdapter(SiteAdapter):
         return ""
 
     @classmethod
+    def _extract_municipio_from_notas(cls, value: Any) -> str:
+        """Busca el municipio sancionador en el campo libre 'notas' de expedientes.
+
+        El campo contiene texto como:
+          '25-0117905 55289676E 3452-KJD 10/12/2025 12:00 L'HOSPITALET DE LLOBREGAT 80,00 94.02 RGC 000'
+        Se busca por substring contra los municipios conocidos de MUNICIPIO_TO_CODE,
+        ordenados de mas largo a mas corto para evitar falsos positivos parciales.
+        El campo llega como 'exp_notas' en el metadata del recurso (JOIN con expedientes).
+        """
+        raw = cls._norm(value)
+        if not raw:
+            return ""
+        for municipio in sorted(MUNICIPIO_TO_CODE.keys(), key=len, reverse=True):
+            if municipio and municipio in raw:
+                return municipio
+        return ""
+
+    @classmethod
     def _resolve_municipio_for_payload(cls, item: dict[str, Any]) -> str:
-        # Prioridad al municipio del organismo sancionador cuando sea resoluble
-        # en el combo de Diputacio BCN; ORGT queda cubierto porque retorna "".
+        # 1. Municipio extraido del nombre del organismo sancionador (funciona para
+        #    ayuntamientos directos; ORGT retorna "" porque es un ente agregador).
         organisme_municipio = cls._extract_municipio_from_organisme(item.get("Organisme"))
         if organisme_municipio and resolve_codmuni(organisme_municipio):
             return organisme_municipio
 
         first_candidate = organisme_municipio
+
+        # 2. Campos de municipio del cliente.
         for key in ("cliente_municipio", "MunicipioPoblacion", "poblacion", "municipio", "conduc_pobl"):
             value = cls._clean(item.get(key))
             if not value:
@@ -292,6 +313,7 @@ class DiputacioBcnAdapter(SiteAdapter):
             if not first_candidate:
                 first_candidate = value
 
+        # 3. Municipio embebido en la direccion del cliente.
         direccion_municipio = cls._extract_municipio_from_cliente_direccion(
             item.get("cliente_domicilio")
             or item.get("direccion_raw")
@@ -300,15 +322,14 @@ class DiputacioBcnAdapter(SiteAdapter):
         )
         if direccion_municipio and resolve_codmuni(direccion_municipio):
             return direccion_municipio
-        return first_candidate
 
-    @classmethod
-    def _should_route_to_redsara_barcelona(cls, item: dict[str, Any]) -> bool:
-        if not cls._is_orgt_diba_alias(item.get("Organisme")):
-            return False
-        if cls._is_blocked_phase(item.get("FaseProcedimiento")):
-            return False
-        return cls._norm(item.get("cliente_municipio")) == "BARCELONA"
+        # 4. Texto libre de expedientes.notas (clave SQL: exp_notas).
+        #    Util para ORGT donde el municipio sancionador aparece en el campo notas.
+        notas_municipio = cls._extract_municipio_from_notas(item.get("exp_notas"))
+        if notas_municipio and resolve_codmuni(notas_municipio):
+            return notas_municipio
+
+        return first_candidate
 
     def fetch_candidates(
         self,
@@ -342,9 +363,6 @@ class DiputacioBcnAdapter(SiteAdapter):
             organisme = self._norm_membership_key(item.get("Organisme"))
             fase = self._clean(item.get("FaseProcedimiento"))
             expediente = self._clean(item.get("Expedient"))
-
-            if self._should_route_to_redsara_barcelona(item):
-                continue
 
             if organisme not in allowed_organismes:
                 is_alias = self._is_orgt_diba_alias(organisme)
@@ -452,20 +470,25 @@ class DiputacioBcnAdapter(SiteAdapter):
             municipio_value = self._resolve_municipio_for_payload(item)
             codmuni = resolve_codmuni(municipio_value)
             if not codmuni:
-                if on_discard:
-                    on_discard(
-                        {
-                            "site_id": self.site_id,
-                            "idRecurso": item.get("idRecurso"),
-                            "Expedient": expediente,
-                            "tipo_incidencia": "SITE_RULE_DISCARDED",
-                            "motivo": (
-                                "No se pudo resolver codmuni de Diputacio BCN "
-                                f"(municipio={municipio_value!r}, organismo={self._clean(item.get('Organisme'))!r})"
-                            ),
-                        }
-                    )
-                continue
+                # Fallback de ultimo recurso: municipio aleatorio del catalogo.
+                # Ocurre cuando ORGT no tiene municipio resoluble por ninguna via
+                # (organismo, cliente_municipio, direccion ni notas).
+                # NUNCA se redirige a RedSara; se elige un municipio aleatorio
+                # para mantener el recurso en el flujo de Diputacio BCN.
+                fallback_municipio = random.choice(list(MUNICIPIO_TO_CODE.keys()))
+                fallback_codmuni = MUNICIPIO_TO_CODE[fallback_municipio]
+                logger.warning(
+                    "[diputacio_bcn] No se pudo resolver codmuni para idRecurso=%s "
+                    "organismo=%r municipio_intentado=%r. "
+                    "Usando fallback aleatorio: municipio=%r codmuni=%s",
+                    item.get("idRecurso"),
+                    self._clean(item.get("Organisme")),
+                    municipio_value,
+                    fallback_municipio,
+                    fallback_codmuni,
+                )
+                municipio_value = fallback_municipio
+                codmuni = fallback_codmuni
 
             payloads.append(
                 {

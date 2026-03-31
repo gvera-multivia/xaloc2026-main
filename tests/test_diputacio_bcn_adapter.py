@@ -269,7 +269,8 @@ def test_fetch_candidates_discards_when_assigned_to_other_user() -> None:
     assert discards[0]["tipo_incidencia"] == "RESOURCE_ASSIGNED_TO_OTHER_USER"
 
 
-def test_fetch_candidates_skips_orgt_barcelona_city_to_redsara_when_not_identificacion() -> None:
+def test_fetch_candidates_keeps_orgt_barcelona_city_as_diputacio_candidate() -> None:
+    """ORGT con cliente de Barcelona ya NO se redirige a RedSara; queda en Diputacio BCN."""
     adapter = _make_adapter_with_allowed(set())
     repo = _FakeRepo(
         [
@@ -291,20 +292,10 @@ def test_fetch_candidates_skips_orgt_barcelona_city_to_redsara_when_not_identifi
         limit=50,
         resource_repo=repo,
     )
-    assert candidates == []
+    # Ya no se redirige a RedSara: el recurso se mantiene como candidato de Diputacio BCN.
+    assert len(candidates) == 1
+    assert candidates[0]["idRecurso"] == 200005
 
-
-def test_should_route_to_redsara_barcelona_is_false_for_identificacion() -> None:
-    assert (
-        DiputacioBcnAdapter._should_route_to_redsara_barcelona(
-            {
-                "Organisme": "ORGANISMO DE GESTION TRIBUTARIA (ORGT) DE LA DIPUTACION DE BARCELONA",
-                "FaseProcedimiento": "identificacion del conductor",
-                "cliente_municipio": "BARCELONA",
-            }
-        )
-        is False
-    )
 
 
 def test_extract_municipio_from_organisme_returns_empty_for_orgt_diba_alias() -> None:
@@ -411,29 +402,30 @@ def test_build_payloads_uses_client_municipio_for_orgt_alias() -> None:
     assert payloads[0]["codmuni"] == "186"
 
 
-def test_build_payloads_uses_cliente_domicilio_fallback_for_orgt_alias() -> None:
+def test_build_payloads_uses_notas_for_orgt_when_municipio_unresolvable() -> None:
+    """Cuando cliente_municipio es BARCELONA (irresoluble para ORGT) se usa exp_notas."""
     adapter = DiputacioBcnAdapter()
     payloads = asyncio.run(
         adapter.build_payloads(
             [
                 {
-                    "idRecurso": 555004,
-                    "idExp": 777004,
-                    "numclient": 999004,
-                    "automatic_id": 12348,
-                    "Expedient": "542002/25",
+                    "idRecurso": 555005,
+                    "idExp": 777005,
+                    "numclient": 999005,
+                    "automatic_id": 12349,
+                    "Expedient": "542003/25",
                     "Organisme": "ORGANISMO DE GESTION TRIBUTARIA (ORGT) DE LA DIPUTACION DE BARCELONA",
                     "FaseProcedimiento": "denuncia",
-                    "SujetoRecurso": "JOAN PEREZ",
+                    "SujetoRecurso": "MARC PUIG",
                     "tipodecliente": "1",
                     "nif": "12345678Z",
                     "nifempresa": "",
-                    "Nombre": "JOAN",
-                    "Apellido1": "PEREZ",
-                    "Apellido2": "LOPEZ",
+                    "Nombre": "MARC",
+                    "Apellido1": "PUIG",
+                    "Apellido2": "",
                     "Nombrefiscal": "",
                     "cliente_municipio": "BARCELONA",
-                    "cliente_domicilio": "CARRER GRAN, 12 - ESPARREGUERA",
+                    "exp_notas": "25-0117905 55289676E 3452-KJD 10/12/2025 12:00 L'HOSPITALET DE LLOBREGAT 80,00 94.02 RGC 000",
                     "adjuntos": [],
                 }
             ]
@@ -441,5 +433,44 @@ def test_build_payloads_uses_cliente_domicilio_fallback_for_orgt_alias() -> None
     )
 
     assert len(payloads) == 1
-    assert payloads[0]["municipio"] == "ESPARREGUERA"
-    assert payloads[0]["codmuni"] == "075"
+    assert payloads[0]["municipio"] == "HOSPITALET DE LLOBREGAT"
+    assert payloads[0]["codmuni"] == "100"
+
+
+def test_build_payloads_random_fallback_when_no_municipio_resolvable_for_orgt() -> None:
+    """Cuando ninguna via resuelve municipio, el payload usa un fallback aleatorio (no descarta)."""
+    adapter = DiputacioBcnAdapter()
+    payloads = asyncio.run(
+        adapter.build_payloads(
+            [
+                {
+                    "idRecurso": 555006,
+                    "idExp": 777006,
+                    "numclient": 999006,
+                    "automatic_id": 12350,
+                    "Expedient": "542004/25",
+                    "Organisme": "ORGANISMO DE GESTION TRIBUTARIA (ORGT) DE LA DIPUTACION DE BARCELONA",
+                    "FaseProcedimiento": "denuncia",
+                    "SujetoRecurso": "ANNA ROCA",
+                    "tipodecliente": "1",
+                    "nif": "12345678Z",
+                    "nifempresa": "",
+                    "Nombre": "ANNA",
+                    "Apellido1": "ROCA",
+                    "Apellido2": "",
+                    "Nombrefiscal": "",
+                    "cliente_municipio": "BARCELONA",  # irresoluble para ORGT
+                    "exp_notas": "",  # sin notas utiles
+                    "adjuntos": [],
+                }
+            ]
+        )
+    )
+
+    # El recurso NO debe descartarse; debe tener algun codmuni del catalogo.
+    assert len(payloads) == 1
+    codmuni = payloads[0]["codmuni"]
+    assert codmuni != ""
+    # El codmuni debe ser un valor conocido del catalogo
+    from sites.diputacio_bcn.municipio_codes import KNOWN_CODES
+    assert codmuni in KNOWN_CODES

@@ -57,6 +57,8 @@ export default function IncidentsPage() {
     const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
     const [gesdocStates, setGesdocStates] = useState<Record<string, GesdocState>>({});
     const [gesdocActionBusy, setGesdocActionBusy] = useState<Record<string, 'generate' | 'send' | undefined>>({});
+    const [gesdocCredentials, setGesdocCredentials] = useState<{ user: string; password: string } | null>(null);
+    const [gesdocCredInput, setGesdocCredInput] = useState({ user: '', password: '' });
 
     const fmtRid = (rid: number | string | null | undefined) => (rid === null || rid === undefined || rid === '' ? 'N/A' : String(rid));
     const idRid = (rid: number | string | null | undefined) => (rid === null || rid === undefined || rid === '' ? 'none' : String(rid));
@@ -112,18 +114,21 @@ export default function IncidentsPage() {
         }
     };
 
-    const loadGesdocStatus = async (incident: Incident, force = false) => {
+    const loadGesdocStatus = async (incident: Incident, force = false, creds?: { user: string; password: string } | null) => {
         const id = incidentIdOf(incident);
         const current = gesdocStates[id];
         if (!force && (current?.loading || current?.data)) return;
+        const credentials = creds ?? gesdocCredentials;
         setGesdocStates((prev) => ({ ...prev, [id]: { loading: true, error: null, data: force ? null : prev[id]?.data } }));
         try {
-            const data = await incidentsApi.getIncidentGesdocStatus(incident.site_id, incident.resource_id || 0);
+            const data = await incidentsApi.getIncidentGesdocStatus(incident.site_id, incident.resource_id || 0, credentials?.user, credentials?.password);
             setGesdocStates((prev) => ({ ...prev, [id]: { loading: false, error: null, data } }));
         } catch (error: any) {
+            let msg = String(error?.message || 'No se pudo consultar GESDOC.');
+            try { msg = (JSON.parse(msg) as { detail?: string }).detail || msg; } catch { /* not JSON */ }
             setGesdocStates((prev) => ({
                 ...prev,
-                [id]: { loading: false, data: null, error: String(error?.message || 'No se pudo consultar GESDOC.') },
+                [id]: { loading: false, data: null, error: msg },
             }));
         }
     };
@@ -139,7 +144,7 @@ export default function IncidentsPage() {
 
         setGesdocActionBusy((prev) => ({ ...prev, [id]: action }));
         try {
-            const result = await incidentsApi.runIncidentGesdocAction(incident.site_id, incident.resource_id || 0, action);
+            const result = await incidentsApi.runIncidentGesdocAction(incident.site_id, incident.resource_id || 0, action, gesdocCredentials?.user, gesdocCredentials?.password);
             if (result.ok) {
                 sileo.success({ title: 'Autorizacion copiada', description: result.message || 'Autorizacion copiada a la documentacion del cliente.' });
             } else {
@@ -151,9 +156,11 @@ export default function IncidentsPage() {
             await fetchIncidents();
             await loadGesdocStatus(incident, true);
         } catch (error: any) {
+            let msg = String(error?.message || 'No se pudo completar la accion GESDOC.');
+            try { msg = (JSON.parse(msg) as { detail?: string }).detail || msg; } catch { /* not JSON */ }
             sileo.error({
                 title: action === 'send' ? 'Error al enviar solicitud' : 'Error al generar autorizacion',
-                description: String(error?.message || 'No se pudo completar la accion GESDOC.'),
+                description: msg,
             });
         } finally {
             setGesdocActionBusy((prev) => ({ ...prev, [id]: undefined }));
@@ -242,6 +249,7 @@ export default function IncidentsPage() {
     }, [lastMessage]);
 
     useEffect(() => {
+        if (!gesdocCredentials) return;
         for (const incident of incidents) {
             const id = incidentIdOf(incident);
             if (!expandedIds.has(id)) continue;
@@ -249,9 +257,9 @@ export default function IncidentsPage() {
             if (!isLockedByCurrentUser(incident)) continue;
             const state = gesdocStates[id];
             if (state?.loading || state?.data || state?.error) continue;
-            void loadGesdocStatus(incident);
+            void loadGesdocStatus(incident, false, gesdocCredentials);
         }
-    }, [expandedIds, gesdocStates, incidents, user]);
+    }, [expandedIds, gesdocStates, incidents, user, gesdocCredentials]);
 
     return (
         <div className="space-y-10 animate-in fade-in duration-700">
@@ -435,18 +443,66 @@ export default function IncidentsPage() {
                                                                     </p>
                                                                 )}
 
-                                                                {ownedByCurrentUser && gesdocState?.loading && (
+                                                                {ownedByCurrentUser && !gesdocCredentials && (
+                                                                    <form
+                                                                        onSubmit={(e) => {
+                                                                            e.preventDefault();
+                                                                            const creds = { user: gesdocCredInput.user.trim(), password: gesdocCredInput.password.trim() };
+                                                                            if (!creds.user || !creds.password) return;
+                                                                            setGesdocCredentials(creds);
+                                                                            void loadGesdocStatus(inc, true, creds);
+                                                                        }}
+                                                                        className="space-y-2"
+                                                                    >
+                                                                        <p className="text-[10px] text-violet-300/70 uppercase tracking-widest">Credenciales GESDOC</p>
+                                                                        <input
+                                                                            type="text"
+                                                                            placeholder="Usuario"
+                                                                            autoComplete="username"
+                                                                            value={gesdocCredInput.user}
+                                                                            onChange={(e) => setGesdocCredInput((p) => ({ ...p, user: e.target.value }))}
+                                                                            className="w-full px-3 py-1.5 rounded text-xs bg-black/30 border border-violet-500/30 text-violet-100 placeholder-violet-300/40 focus:outline-none focus:border-violet-400/60"
+                                                                        />
+                                                                        <input
+                                                                            type="password"
+                                                                            placeholder="Contraseña"
+                                                                            autoComplete="current-password"
+                                                                            value={gesdocCredInput.password}
+                                                                            onChange={(e) => setGesdocCredInput((p) => ({ ...p, password: e.target.value }))}
+                                                                            className="w-full px-3 py-1.5 rounded text-xs bg-black/30 border border-violet-500/30 text-violet-100 placeholder-violet-300/40 focus:outline-none focus:border-violet-400/60"
+                                                                        />
+                                                                        <button
+                                                                            type="submit"
+                                                                            className="px-3 py-1 rounded text-[10px] font-black uppercase tracking-wide bg-violet-500/20 border border-violet-400/40 text-violet-100 hover:bg-violet-500/30"
+                                                                        >
+                                                                            Conectar
+                                                                        </button>
+                                                                    </form>
+                                                                )}
+
+                                                                {ownedByCurrentUser && gesdocCredentials && gesdocState?.loading && (
                                                                     <div className="flex items-center gap-2 text-xs text-violet-100/80">
                                                                         <RefreshCw size={12} className="animate-spin" />
                                                                         <span>Consultando GESDOC...</span>
                                                                     </div>
                                                                 )}
 
-                                                                {ownedByCurrentUser && !gesdocState?.loading && gesdocState?.error && (
-                                                                    <div className="text-xs text-red-300">{gesdocState.error}</div>
+                                                                {ownedByCurrentUser && gesdocCredentials && !gesdocState?.loading && gesdocState?.error && (
+                                                                    <div className="space-y-2">
+                                                                        <div className="text-xs text-red-300">{gesdocState.error}</div>
+                                                                        <button
+                                                                            onClick={() => {
+                                                                                setGesdocCredentials(null);
+                                                                                setGesdocCredInput({ user: '', password: '' });
+                                                                            }}
+                                                                            className="px-3 py-1 rounded text-[10px] font-black uppercase tracking-wide bg-red-500/10 border border-red-400/30 text-red-300 hover:bg-red-500/20"
+                                                                        >
+                                                                            Reconectar
+                                                                        </button>
+                                                                    </div>
                                                                 )}
 
-                                                                {ownedByCurrentUser && !gesdocState?.loading && gesdocState?.data && (
+                                                                {ownedByCurrentUser && gesdocCredentials && !gesdocState?.loading && gesdocState?.data && (
                                                                     <>
                                                                         <div className="space-y-1 text-xs text-violet-100/85">
                                                                             <div>
