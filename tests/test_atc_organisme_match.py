@@ -30,3 +30,11 @@ def test_atc_rejects_other_tax_agencies() -> None:
 
     for organism in rejected:
         assert not AtcAdapter._is_target_organisme(organism), organism
+
+
+def test_atc_merge_query_organisme_adds_missing_catalunya_variants() -> None:
+    merged = AtcAdapter._merge_query_organisme("%AGENCIA TRIBUTARIA AUTONOMICA DE CATALUÑA%")
+
+    assert "%AGENCIA TRIBUTARIA AUTONOMICA DE CATALUÑA%" in merged
+    assert "%AGENCIA TRIBUTARIA DE CATALUÑA%" in merged
+    assert "%AGÈNCIA TRIBUTARIA DE CATALUÑA%" in merged

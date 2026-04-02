@@ -40,6 +40,14 @@ def test_validate_expediente_by_official_patterns() -> None:
     assert not adapter.validate_expediente_for_organisme("AJUNTAMENT DE BARCELONA", "MU20264055513864")
 
 
+def test_validate_expediente_sector_barcelona_sarp_8_digits() -> None:
+    adapter = RedsaraAdapter()
+    assert adapter.validate_expediente_for_organisme(
+        "SECTOR DE SEGURIDAD Y MOVILIDAD DEL AYUNTAMIENTO DE BARCELONA",
+        "2026SARP90179573",
+    )
+
+
 def test_fetch_candidates_discards_invalid_by_pattern() -> None:
     adapter = RedsaraAdapter()
 
@@ -122,4 +130,3 @@ def test_document_type_bundle_inference() -> None:
     assert bundle["2"] == "NIF"
     assert bundle["3"] == "CIF"
     assert bundle["4"] == "PASAPORTE"
-

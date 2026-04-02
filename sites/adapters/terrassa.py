@@ -72,6 +72,7 @@ class TerrassaAdapter(SiteAdapter):
         "GC#######",
         "UR####I########",
         "SADM#######",
+        "PQ############",
     ]
 
     def __init__(self):

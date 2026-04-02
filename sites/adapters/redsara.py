@@ -125,6 +125,7 @@ class RedsaraAdapter(SiteAdapter):
                 r"^ET\d{15}$",
                 r"^\d{4}SAGA\d{7}$",
                 r"^\d{4}SARP\d{7}$",
+                r"^\d{4}SARP\d{8}$",
                 r"^\d{4}SACR\d{6}$",
                 r"^\d{4}SACH\d{6}$",
                 r"^\d{10}$",

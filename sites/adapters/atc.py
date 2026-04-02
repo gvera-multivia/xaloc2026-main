@@ -10,6 +10,15 @@ from .site_adapter import SiteAdapter
 
 class AtcAdapter(SiteAdapter):
     TARGET_ORGANISME_TOKEN = "AGENCIA TRIBUTARIA AUTONOMICA DE CATALUÑA"
+    TARGET_ORGANISME_TOKEN_SHORT = "AGENCIA TRIBUTARIA DE CATALUÑA"
+    DEFAULT_QUERY_ORGANISME = (
+        "%AGENCIA TRIBUTARIA AUTONOMICA DE CATALUÑA%"
+        "|%AGENCIA TRIBUTARIA AUTONOMICA DE CATALUNA%"
+        "|%AGENCIA TRIBUTARIA DE CATALUÑA%"
+        "|%AGENCIA TRIBUTARIA DE CATALUNA%"
+        "|%AGÈNCIA TRIBUTARIA DE CATALUÑA%"
+        "|%AGÈNCIA TRIBUTÀRIA DE CATALUNYA%"
+    )
     CLIENTES_BLOQUEADOS = {13607, 14274}
     REA_RE = re.compile(r"(RECLAMACION\s+(ECONOMICO|ECO)[- ]*(ADMINISTRATIVA|ADVA)|(?<!\w)REA(?!\w))", re.IGNORECASE)
     REPOS_RE = re.compile(r"(RECURSO\s+(EXTRAORDINARIO|REVISION|DE\s+REPOSICION)|(?<!\w)REPOSICION(?!\w))", re.IGNORECASE)
@@ -81,7 +90,24 @@ class AtcAdapter(SiteAdapter):
             return False
         if cls._norm(cls.TARGET_ORGANISME_TOKEN) in norm_value:
             return True
+        # Token corto: cubre "AGÈNCIA TRIBUTARIA DE CATALUÑA" (sin "AUTONOMICA")
+        if cls.TARGET_ORGANISME_TOKEN_SHORT in norm_value:
+            return True
         return any(pattern.search(norm_value) for pattern in cls._TARGET_ORGANISME_PATTERNS)
+
+    @classmethod
+    def _merge_query_organisme(cls, configured: Any) -> str:
+        raw = cls._clean(configured)
+        if not raw:
+            return cls.DEFAULT_QUERY_ORGANISME
+        chunks = [cls._clean(part) for part in re.split(r"[|;,]+", raw)]
+        chunks = [part for part in chunks if part]
+        existing_upper = {part.upper() for part in chunks}
+        for token in cls.DEFAULT_QUERY_ORGANISME.split("|"):
+            if token.upper() not in existing_upper:
+                chunks.append(token)
+                existing_upper.add(token.upper())
+        return "|".join(chunks)
 
     @classmethod
     def _materialize_from_canonical_if_present(cls, record: dict[str, Any]) -> dict[str, Any]:
@@ -123,6 +149,8 @@ class AtcAdapter(SiteAdapter):
     ) -> list[dict]:
         if resource_repo is None:
             raise RuntimeError("[atc] fetch_candidates requires injected resource_repo (consultor/repository).")
+        config = dict(config or {})
+        config["query_organisme"] = self._merge_query_organisme(config.get("query_organisme"))
         resources = resource_repo.get_pending_resources(site_id=self.site_id, config=config, limit=limit)
         out: list[dict] = []
         for resource in resources:

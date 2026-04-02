@@ -784,6 +784,10 @@ class BaseAutomation:
                         self.playwright = BaseAutomation._shared_playwright
                         self.context = BaseAutomation._shared_context
 
+                        # Verificar que el contexto sigue vivo (detecta proceso Chrome zombie).
+                        # Si el proceso murio, .pages lanzara excepcion y caeremos al except.
+                        _ = self.context.pages
+
                         if BaseAutomation._shared_home_page is None:
                             if self.context.pages:
                                 BaseAutomation._shared_home_page = self.context.pages[0]
@@ -895,6 +899,21 @@ class BaseAutomation:
         keep_open = os.getenv("XALOC_KEEP_BROWSER_OPEN") == "1"
         if keep_open:
             if os.getenv("XALOC_KEEP_TAB_OPEN") == "1":
+                if not success:
+                    # Fallo con pestaña reutilizable: cerrar la pestaña actual y resetear
+                    # _shared_home_page para que el siguiente job abra una pestaña limpia.
+                    # El contexto/playwright se mantienen para evitar recrear el perfil.
+                    self.logger.info(
+                        "Fallo con XALOC_KEEP_TAB_OPEN=1: cerrando pestana corrupta para que el siguiente job empiece limpio."
+                    )
+                    if self.page and not self.page.is_closed():
+                        try:
+                            await self.page.close()
+                        except Exception:
+                            pass
+                    self.page = None
+                    BaseAutomation._shared_home_page = None
+                    return
                 self.logger.info("PestaÃ±a y navegador mantenidos abiertos (XALOC_KEEP_TAB_OPEN=1)")
                 return
             if not success:

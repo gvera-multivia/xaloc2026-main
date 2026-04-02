@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Optional
@@ -17,6 +18,34 @@ from .models import ProcessOutcome
 from .utils import call_with_supported_kwargs
 
 logger = logging.getLogger("worker.browser_executor")
+
+# Timeout maximo para todo el flujo de automatizacion (incluye carga de paginas, firma, subida).
+# Si el flujo supera este tiempo, se mata el proceso Chromium para evitar zombis en noVNC.
+# Configurable via XALOC_BROWSER_FLOW_TIMEOUT_SECONDS (default: 2700 = 45 minutos).
+_DEFAULT_FLOW_TIMEOUT_S = 2700
+
+
+def _kill_chromium_for_profile(profile_path: Path | None) -> None:
+    """Mata cualquier proceso Chromium asociado al perfil dado.
+
+    Necesario cuando asyncio.wait_for cancela el flujo: el proceso del navegador
+    puede quedar vivo (zombie en noVNC) aunque Python ya no espere por el.
+    Solo actua en Linux (entorno Docker); en Windows no hace nada.
+    """
+    if not profile_path or os.name == "nt":
+        return
+    profile_str = str(profile_path)
+    try:
+        result = subprocess.run(
+            ["pkill", "-9", "-f", f"--user-data-dir={profile_str}"],
+            capture_output=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            logger.info("Proceso(s) Chromium zombi eliminados (perfil=%s)", profile_str)
+        # returncode 1 = no process found, that's fine
+    except Exception as exc:
+        logger.warning("No se pudo matar Chromium para perfil %s: %s", profile_str, exc)
 
 
 async def execute_browser_flow(
@@ -105,6 +134,8 @@ async def execute_browser_flow(
             os.environ["XALOC_KEEP_BROWSER_OPEN"] = "1"
             os.environ["XALOC_KEEP_TAB_OPEN"] = "1"
 
+        _flow_timeout_s = int((os.getenv("XALOC_BROWSER_FLOW_TIMEOUT_SECONDS") or str(_DEFAULT_FLOW_TIMEOUT_S)).strip())
+
         try:
             async with AutomationCls(config) as bot:
                 if screencast_enabled:
@@ -113,7 +144,28 @@ async def execute_browser_flow(
                     except Exception as exc:
                         logger.warning("No se pudo iniciar screencast: %s", exc)
                 try:
-                    screenshot_path = await bot.ejecutar_flujo_completo(datos)
+                    screenshot_path = await asyncio.wait_for(
+                        bot.ejecutar_flujo_completo(datos),
+                        timeout=_flow_timeout_s,
+                    )
+                except asyncio.TimeoutError:
+                    logger.error(
+                        "%s: flujo colgado — timeout tras %ss. Matando Chromium para limpiar noVNC.",
+                        site_id,
+                        _flow_timeout_s,
+                    )
+                    screenshot_path = None
+                    try:
+                        screenshot_path = await bot.capture_error_screenshot("flow_timeout.png")
+                    except Exception:
+                        pass
+                    _kill_chromium_for_profile(config.navegador.perfil_path)
+                    return ProcessOutcome(
+                        success=False,
+                        error=f"Timeout global del flujo tras {_flow_timeout_s}s (posible cuelgue en la web de destino)",
+                        screenshot=str(screenshot_path) if screenshot_path else None,
+                        payload_updates=payload,
+                    )
                 except RestartRequiredError as e:
                     screenshot_path = None
                     try:

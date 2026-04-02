@@ -661,23 +661,23 @@ def _heuristic_groups(docs: list[PreparedDocument]) -> list[list[PreparedDocumen
     ordered = sorted(docs, key=lambda doc: (doc.priority, doc.display_name.lower()))
     if not ordered:
         return []
-    count = len(ordered)
-    if count <= REDSARA_MAX_ATTACHMENTS:
+    if len(ordered) <= REDSARA_MAX_ATTACHMENTS:
+        # Cada documento va por separado: no se hace bundle si caben todos.
         return [[doc] for doc in ordered]
-    partitions = _first_fit_decreasing_groups(
-        ordered,
-        max_bins=REDSARA_MAX_ATTACHMENTS,
-        capacity_bytes=REDSARA_SOFT_FILE_TARGET_BYTES,
-    )
-    if partitions is None:
-        partitions = _first_fit_decreasing_groups(
-            ordered,
-            max_bins=REDSARA_MAX_ATTACHMENTS,
-            capacity_bytes=REDSARA_PER_FILE_UPLOAD_BYTES,
-        )
-    if partitions is None:
-        raise ValueError("REDSARA: no se pudieron agrupar los adjuntos en un maximo de 5 ficheros.")
-    return partitions
+
+    # Mas de 5 documentos: los primeros REDSARA_MAX_ATTACHMENTS van como grupos individuales.
+    # Cada documento adicional se fusiona con el grupo de menor tamaño acumulado,
+    # simulando un "merge with smallest" iterativo.
+    groups: list[list[PreparedDocument]] = [[doc] for doc in ordered[:REDSARA_MAX_ATTACHMENTS]]
+    group_sizes: list[int] = [doc.working_size_bytes for doc in ordered[:REDSARA_MAX_ATTACHMENTS]]
+
+    for doc in ordered[REDSARA_MAX_ATTACHMENTS:]:
+        # Buscar el grupo con menor tamaño acumulado
+        min_idx = group_sizes.index(min(group_sizes))
+        groups[min_idx].append(doc)
+        group_sizes[min_idx] += doc.working_size_bytes
+
+    return groups
 
 
 def _partition_docs_into_seats(

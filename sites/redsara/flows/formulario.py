@@ -1084,22 +1084,38 @@ async def _select_destination_organism(page: Page, organism_code: str, select_id
 
 async def _select_representante(page: Page) -> None:
     print("[REDSARA] Seleccionando radio 'Representante'...")
-    clicked = await page.evaluate(
-        """() => {
-            const radios = document.querySelectorAll('dnt-radio[name="typeRepresented"]')
-            for (const radio of radios) {
-                const label = radio.shadowRoot?.querySelector('label')
-                const input = radio.shadowRoot?.querySelector('input[type="radio"]')
-                if ((input?.value || '').toLowerCase() !== 'representante') continue
-                if (!label || !input) continue
-                label.click()
-                input.dispatchEvent(new Event('input', { bubbles: true }))
-                input.dispatchEvent(new Event('change', { bubbles: true }))
-                return !!input.checked
-            }
-            return false
-        }"""
-    )
+    # Esperar a que el componente Angular este en el DOM antes de intentar interactuar.
+    # La web de Redsara puede tardar en renderizar dnt-radio tras desaparecer el spinner.
+    try:
+        await page.locator('dnt-radio[name="typeRepresented"]').first.wait_for(
+            state="attached", timeout=15000
+        )
+    except Exception:
+        pass  # Si no aparece, el evaluate fallara con el mensaje habitual
+
+    _JS_CLICK = """() => {
+        const radios = document.querySelectorAll('dnt-radio[name="typeRepresented"]')
+        for (const radio of radios) {
+            const label = radio.shadowRoot?.querySelector('label')
+            const input = radio.shadowRoot?.querySelector('input[type="radio"]')
+            if ((input?.value || '').toLowerCase() !== 'representante') continue
+            if (!label || !input) continue
+            label.click()
+            input.dispatchEvent(new Event('input', { bubbles: true }))
+            input.dispatchEvent(new Event('change', { bubbles: true }))
+            return !!input.checked
+        }
+        return false
+    }"""
+
+    clicked = False
+    for attempt in range(1, 4):
+        clicked = await page.evaluate(_JS_CLICK)
+        if clicked:
+            break
+        print(f"[REDSARA] Radio 'Representante' no marcado (intento {attempt}/3), reintentando...")
+        await page.wait_for_timeout(1000)
+
     if not clicked:
         raise RuntimeError("No se pudo marcar radio 'Representante'.")
     await page.wait_for_timeout(300)
