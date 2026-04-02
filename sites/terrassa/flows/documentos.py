@@ -184,33 +184,34 @@ async def _resolve_upload_index(
         waited += step_ms
 
     # Modo resistente: si hay bloques visibles pero todos estan marcados como usados,
-    # reutilizamos uno visible para evitar bloqueo total del flujo.
-    # Este comportamiento cubre pantallas donde Terrassa no abre bloques nuevos
-    # aunque el upload previo ya este efectivamente persistido.
+    # comprobamos primero si algun bloque esta vaciado en DOM (el servidor lo reseteo
+    # pero used_indices no lo sabe). Solo reutilizamos bloques verdaderamente vacios.
     if last_visible:
         free_last_visible = [idx for idx in last_visible if idx not in used_indices]
         if preferred_index in free_last_visible:
             return preferred_index
         if free_last_visible:
             return min(free_last_visible)
-        if preferred_index in last_visible:
-            logger.warning(
-                "[terrassa-docs] sin bloques libres tras timeout; reusando preferred visible index=%s. "
-                "visible=%s used=%s",
-                preferred_index,
-                last_visible,
-                sorted(used_indices),
-            )
-            return preferred_index
-        fallback_idx = min(last_visible)
-        logger.warning(
-            "[terrassa-docs] sin bloques libres tras timeout; reusando visible index=%s. "
+        # Todos visibles estan en used_indices: verificar vaciado real en DOM
+        candidates = ([preferred_index] if preferred_index in last_visible else []) + sorted(last_visible)
+        for candidate in candidates:
+            if await _is_block_truly_empty(page, upload_index=candidate):
+                used_indices.discard(candidate)
+                logger.warning(
+                    "[terrassa-docs] fallback: bloque %s en used_indices pero vacio en DOM, "
+                    "liberando para reuso. visible=%s used=%s",
+                    candidate,
+                    last_visible,
+                    sorted(used_indices),
+                )
+                return candidate
+        # Ningun bloque visible esta realmente vacio: no reutilizar, dejar que falle
+        logger.error(
+            "[terrassa-docs] sin bloques libres y ningun bloque vacio en DOM. "
             "visible=%s used=%s",
-            fallback_idx,
             last_visible,
             sorted(used_indices),
         )
-        return fallback_idx
 
     # Último intento anti-aleatorio: re-pulsar adjuntar y re-evaluar visibles.
     nudged_last = await _try_click_add_upload_block(page)
@@ -226,6 +227,22 @@ async def _resolve_upload_index(
         f"terrassa-docs: no hay bloques de subida libres para doc index={preferred_index}. "
         f"bloques_visibles={last_visible} bloques_ya_usados={sorted(used_indices)}"
     )
+
+
+async def _is_block_truly_empty(page: "Page", *, upload_index: int) -> bool:
+    """Devuelve True si el bloque no tiene un fichero activamente cargado en el input.
+    Solo comprueba fileCount == 0: los campos de texto (descripcion, fitxerPle) pueden
+    tener valores iniciales o residuales sin que haya riesgo real de sobrescritura."""
+    result = await evaluate_with_nav_retry(
+        page,
+        """({ uploadIndex }) => {
+            const fileInput = document.getElementById(`fileUpload${uploadIndex}`);
+            if (!fileInput) return true;
+            return (fileInput.files?.length ?? 0) === 0;
+        }""",
+        {"uploadIndex": upload_index},
+    )
+    return bool(result)
 
 
 async def _snapshot_upload_state(page: "Page", *, upload_index: int, file_name: str) -> dict[str, object]:
@@ -440,7 +457,7 @@ async def _wait_until_upload_committed(
     waited = 0
     step_ms = 500
     soft_candidate_hits = 0
-    soft_confirm_after_hits = 4
+    soft_confirm_after_hits = 6
     last_analysis: dict[str, object] = {}
 
     while waited <= timeout_ms:
@@ -603,6 +620,49 @@ async def _queue_upload_submission(
     return method
 
 
+async def _try_release_soft_confirmed_block(
+    page: "Page",
+    *,
+    upload_index: int,
+    file_name: str,
+) -> bool:
+    file_sel = f"input#fileUpload{upload_index}"
+    try:
+        file_input = page.locator(file_sel).first
+        await file_input.set_input_files([])
+        await file_input.evaluate(
+            """(el) => {
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            }"""
+        )
+        await page.wait_for_timeout(500)
+        released_state = await _snapshot_upload_state(page, upload_index=upload_index, file_name=file_name)
+        released = int(released_state.get("file_count") or 0) == 0
+        if released:
+            logger.warning(
+                "[terrassa-docs] soft-confirm: bloque %s liberado limpiando el file input. file=%s",
+                upload_index,
+                file_name,
+            )
+        else:
+            logger.warning(
+                "[terrassa-docs] soft-confirm: no se pudo liberar el bloque %s tras limpiar el file input. "
+                "estado=%s",
+                upload_index,
+                released_state,
+            )
+        return released
+    except Exception as exc:
+        logger.warning(
+            "[terrassa-docs] soft-confirm: error liberando bloque %s para file=%s: %s",
+            upload_index,
+            file_name,
+            exc,
+        )
+        return False
+
+
 async def run_documentos(page: "Page", config: "TerrassaConfig", datos: "TerrassaTarget") -> "Page":
     docs = list(datos.documentos or [])
     if not docs:
@@ -721,6 +781,38 @@ async def run_documentos(page: "Page", config: "TerrassaConfig", datos: "Terrass
             pass
         await page.wait_for_timeout(500)
 
+        # Guard anti-sobrescritura: verificar que el bloque esta vacio antes de cargar el fichero.
+        # Si no esta vacio, intentamos pulsar el boton de continuar/adjuntar para que la pagina
+        # avance el estado del bloque. Hasta 3 reintentos antes de cancelar.
+        block_empty = await _is_block_truly_empty(page, upload_index=upload_index)
+        if not block_empty:
+            _overwrite_guard_retries = 3
+            for _retry in range(_overwrite_guard_retries):
+                logger.warning(
+                    "[terrassa-docs] bloque %s no vacio antes de subir %s "
+                    "(reintento %s/%s), pulsando boton continuar para avanzar estado...",
+                    upload_index,
+                    file_path.name,
+                    _retry + 1,
+                    _overwrite_guard_retries,
+                )
+                await _try_click_add_upload_block(page)
+                await page.wait_for_timeout(2000)
+                block_empty = await _is_block_truly_empty(page, upload_index=upload_index)
+                if block_empty:
+                    logger.info(
+                        "[terrassa-docs] bloque %s vaciado tras reintento %s, continuando.",
+                        upload_index,
+                        _retry + 1,
+                    )
+                    break
+            if not block_empty:
+                raise RuntimeError(
+                    f"terrassa-docs: bloque {upload_index} no esta vacio antes de subir "
+                    f"{file_path.name} tras {_overwrite_guard_retries} reintentos. "
+                    f"Riesgo de sobrescritura detectado."
+                )
+
         before_upload_state = await _snapshot_upload_state(
             page,
             upload_index=upload_index,
@@ -750,7 +842,7 @@ async def run_documentos(page: "Page", config: "TerrassaConfig", datos: "Terrass
             expected_type=tipus,
             timeout_ms=min(int(config.timeouts.subida_archivo), 30000),
         )
-        if bool(confirmation.get("recycled_current_block")) or bool(confirmation.get("same_block_registered")):
+        if bool(confirmation.get("recycled_current_block")):
             used_upload_indices.discard(upload_index)
             logger.info(
                 "[terrassa-docs] upload confirmado y bloque reciclado para reuse index=%s file=%s",
@@ -758,13 +850,31 @@ async def run_documentos(page: "Page", config: "TerrassaConfig", datos: "Terrass
                 file_path.name,
             )
         else:
-            used_upload_indices.add(upload_index)
-            logger.info(
-                "[terrassa-docs] upload confirmado en bloque index=%s file=%s visible_indices=%s",
-                upload_index,
-                file_path.name,
-                confirmation.get("visible_indices"),
-            )
+            # same_block_registered (soft-confirm): el fichero sigue cargado en el input.
+            if bool(confirmation.get("same_block_registered")):
+                released = await _try_release_soft_confirmed_block(
+                    page,
+                    upload_index=upload_index,
+                    file_name=file_path.name,
+                )
+                if released:
+                    used_upload_indices.discard(upload_index)
+                else:
+                    used_upload_indices.add(upload_index)
+                    logger.warning(
+                        "[terrassa-docs] soft-confirm: bloque %s mantiene fichero cargado, "
+                        "marcado como usado para evitar sobrescritura. file=%s",
+                        upload_index,
+                        file_path.name,
+                    )
+            else:
+                used_upload_indices.add(upload_index)
+                logger.info(
+                    "[terrassa-docs] upload confirmado en bloque index=%s file=%s visible_indices=%s",
+                    upload_index,
+                    file_path.name,
+                    confirmation.get("visible_indices"),
+                )
 
         if index < (total_docs - 1):
             await page.wait_for_timeout(2000)

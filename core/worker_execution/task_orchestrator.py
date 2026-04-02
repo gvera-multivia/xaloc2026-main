@@ -553,6 +553,27 @@ async def _execute_redsara_upload_plan(
     last_outcome = ProcessOutcome(success=False, error="REDSARA: no se llego a ejecutar ningun lote.")
     for batch in upload_plan.batches:
         batch_index = int(batch.batch_index)
+
+        # Checkpoint anti-duplicado: si este batch ya fue enviado exitosamente en un intento
+        # anterior (el numero de registro esta guardado en el payload), lo saltamos para no
+        # duplicar asientos en Redsara durante reintentos.
+        already_done = dict(payload.get("redsara_registry_numbers_by_batch") or {})
+        if str(batch_index) in already_done:
+            previous_registry_number = already_done[str(batch_index)]
+            print(
+                f"[REDSARA] Lote {batch_index}/{total_batches} ya enviado en intento anterior "
+                f"(registro: {previous_registry_number}), se omite para evitar duplicado."
+            )
+            last_outcome = ProcessOutcome(success=True)
+            continue
+
+        batch_source_names = [Path(p).name for p in (batch.source_paths or batch.file_paths)]
+        print(
+            f"[REDSARA] Iniciando lote {batch_index}/{total_batches} — "
+            f"{len(batch.file_paths)} archivo(s), {batch.total_size_bytes} bytes. "
+            f"Documentos fuente: {batch_source_names}"
+        )
+
         if batch_index > 1:
             reference_text, reference_mode = build_followup_reference(
                 previous_registry_number=previous_registry_number,
@@ -630,6 +651,10 @@ async def _execute_redsara_upload_plan(
                 aggregate_updates["redsara_registry_numbers"] = registry_numbers
                 payload["redsara_registry_number"] = registry_number
                 previous_registry_number = registry_number
+                numbers_by_batch = dict(payload.get("redsara_registry_numbers_by_batch") or {})
+                numbers_by_batch[str(batch_index)] = registry_number
+                payload["redsara_registry_numbers_by_batch"] = numbers_by_batch
+                aggregate_updates["redsara_registry_numbers_by_batch"] = numbers_by_batch
 
             client_dir = resolve_redsara_receipt_dir(payload)
             if client_dir is not None:
@@ -658,6 +683,11 @@ async def _execute_redsara_upload_plan(
             aggregate_updates["redsara_justificante_paths"] = receipt_paths
 
         if not last_outcome.success:
+            print(
+                f"[REDSARA] Fallo en lote {batch_index}/{total_batches}. "
+                f"Documentos NO subidos: {batch_source_names}. "
+                f"Error: {last_outcome.error}"
+            )
             return ProcessOutcome(
                 success=False,
                 error=last_outcome.error,

@@ -6,6 +6,7 @@ from sites.terrassa.flows.documentos import (
     _analyze_upload_state,
     _resolve_upload_index,
     _submission_has_started,
+    _try_release_soft_confirmed_block,
     _wait_until_upload_committed,
 )
 
@@ -187,6 +188,28 @@ class _FakePage:
         return None
 
 
+class _FakeLocator:
+    def __init__(self) -> None:
+        self.cleared_to: list[object] = []
+        self.first = self
+
+    async def set_input_files(self, value) -> None:
+        self.cleared_to.append(value)
+
+    async def evaluate(self, _script: str) -> None:
+        return None
+
+
+class _FakePageWithLocator(_FakePage):
+    def __init__(self) -> None:
+        self.locator_calls: list[str] = []
+        self.file_locator = _FakeLocator()
+
+    def locator(self, selector: str):
+        self.locator_calls.append(selector)
+        return self.file_locator
+
+
 @pytest.mark.asyncio
 async def test_wait_until_upload_committed_accepts_stable_same_block_soft_candidate(monkeypatch) -> None:
     async def _soft_candidate_state(_page, *, upload_index: int, file_name: str):
@@ -222,6 +245,27 @@ async def test_wait_until_upload_committed_accepts_stable_same_block_soft_candid
 
 
 @pytest.mark.asyncio
+async def test_try_release_soft_confirmed_block_clears_file_input_and_confirms_release(monkeypatch) -> None:
+    async def _released_state(_page, *, upload_index: int, file_name: str):
+        assert upload_index == 1
+        assert file_name == "autorizacion.pdf"
+        return {"file_count": 0}
+
+    monkeypatch.setattr("sites.terrassa.flows.documentos._snapshot_upload_state", _released_state)
+
+    page = _FakePageWithLocator()
+    released = await _try_release_soft_confirmed_block(
+        page,
+        upload_index=1,
+        file_name="autorizacion.pdf",
+    )
+
+    assert released is True
+    assert page.locator_calls == ["input#fileUpload1"]
+    assert page.file_locator.cleared_to == [[]]
+
+
+@pytest.mark.asyncio
 async def test_resolve_upload_index_raises_if_only_used_blocks_remain(monkeypatch) -> None:
     async def _only_used_blocks(_page):
         return []
@@ -242,7 +286,11 @@ async def test_resolve_upload_index_reuses_visible_block_after_timeout(monkeypat
     async def _only_used_blocks(_page):
         return [1]
 
+    async def _empty_block(*_args, **_kwargs):
+        return True
+
     monkeypatch.setattr("sites.terrassa.flows.documentos._visible_upload_indices", _only_used_blocks)
+    monkeypatch.setattr("sites.terrassa.flows.documentos._is_block_truly_empty", _empty_block)
 
     upload_index = await _resolve_upload_index(
         _FakePage(),
@@ -259,7 +307,11 @@ async def test_resolve_upload_index_prefers_requested_visible_block_when_reusing
     async def _preferred_visible(_page):
         return [1, 2]
 
+    async def _empty_block(*_args, **_kwargs):
+        return True
+
     monkeypatch.setattr("sites.terrassa.flows.documentos._visible_upload_indices", _preferred_visible)
+    monkeypatch.setattr("sites.terrassa.flows.documentos._is_block_truly_empty", _empty_block)
 
     upload_index = await _resolve_upload_index(
         _FakePage(),

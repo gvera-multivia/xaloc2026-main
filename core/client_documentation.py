@@ -288,14 +288,15 @@ def select_required_client_documents(
     process_cats = ["AUT", "DNI"]
     if is_company: process_cats.extend(["CIF", "ESCR"])
 
-    # Escaneamos TODAS las subcarpetas relevantes del cliente para permitir Gap-Filling
-    all_files = [p for p in ruta_docu.rglob("*") if p.is_file()]
-    
-    # Filtro de ruido: Solo nos interesan archivos dentro de carpetas DOCUMENTACION
+    # Solo escaneamos archivos cuya carpeta INMEDIATA tenga "DOCUMENTA" en el nombre.
+    # Esto excluye archivos dentro de subcarpetas de DOCUMENTACION (ej: DOCUMENTACION/ANTIGUAS/...)
+    # para evitar arrastrar versiones antiguas, copias y documentos irrelevantes.
     # Se excluye la carpeta DOCUMENTACION PARA RECURSOS por posibles confusiones.
     all_files = [
-        f for f in all_files
-        if "DOCUMENTA" in str(f).upper() and "DOCUMENTACION PARA RECURSOS" not in str(f).upper()
+        f for f in ruta_docu.rglob("*")
+        if f.is_file()
+        and "DOCUMENTA" in f.parent.name.upper()
+        and "DOCUMENTACION PARA RECURSOS" not in f.parent.name.upper()
     ]
 
     buckets = defaultdict(list)
@@ -347,14 +348,24 @@ def select_required_client_documents(
         if not cands: continue
         best = cands[0]
 
-        # SELECCIÓN MULTI-SOCIO (Ventana 20 pts)
-        top_tier = [c["path"] for c in cands if c["score"] > (best["score"] - 20)]
-        final_files.extend(top_tier)
+        if cat == "ESCR":
+            # Para escrituras/poderes tomamos SOLO el mejor documento.
+            # Hay clientes con muchas escrituras repetidas/parciales y la ventana multi-socio
+            # arrastraría demasiados archivos haciendo el envio inviable.
+            # Si el mejor es un fragmento, cogemos también los fragmentos complementarios.
+            final_files.append(best["path"])
+            if best["is_fragment"]:
+                fragmentos = [c["path"] for c in cands if c["is_fragment"] and c["score"] > (best["score"] - 65) and c["path"] != best["path"]]
+                final_files.extend(fragmentos)
+        else:
+            # SELECCIÓN MULTI-SOCIO (Ventana 20 pts) — para AUT/DNI/CIF puede haber varios socios
+            top_tier = [c["path"] for c in cands if c["score"] > (best["score"] - 20)]
+            final_files.extend(top_tier)
 
-        # SELECCIÓN FRAGMENTOS (Ventana 65 pts)
-        if best["is_fragment"]:
-            fragmentos = [c["path"] for c in cands if c["is_fragment"] and c["score"] > (best["score"] - 65)]
-            final_files.extend(fragmentos)
+            # SELECCIÓN FRAGMENTOS (Ventana 65 pts)
+            if best["is_fragment"]:
+                fragmentos = [c["path"] for c in cands if c["is_fragment"] and c["score"] > (best["score"] - 65)]
+                final_files.extend(fragmentos)
 
         covered.append(cat)
 
