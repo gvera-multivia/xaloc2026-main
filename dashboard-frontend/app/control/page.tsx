@@ -18,6 +18,9 @@ function cn(...inputs: ClassValue[]) {
 }
 
 export default function ControlPage() {
+    const STATUS_REFRESH_MS = 4000;
+    const LOGS_REFRESH_MS = 15000;
+
     const [status, setStatus] = useState<{ worker: string; brain: string }>({ worker: 'stopped', brain: 'stopped' });
     const [logs, setLogs] = useState<{ worker: string[]; brain: string[] }>({ worker: [], brain: [] });
     const [busy, setBusy] = useState<string | null>(null);
@@ -25,33 +28,60 @@ export default function ControlPage() {
 
     const workerLogRef = useRef<HTMLDivElement>(null);
     const brainLogRef = useRef<HTMLDivElement>(null);
+    const statusRequestRef = useRef(false);
+    const logsRequestRef = useRef(false);
 
-
-    const refresh = async () => {
+    const refreshStatus = async () => {
+        if (statusRequestRef.current) return;
+        statusRequestRef.current = true;
         try {
-            const [statusRes, workerLogs, brainLogs] = await Promise.all([
-                controlApi.getStatus(),
-                controlApi.getLogs('worker', 100),
-                controlApi.getLogs('brain', 100),
-            ]);
+            const statusRes = await controlApi.getStatus();
             const nextStatus = statusRes?.status ?? statusRes ?? {};
             setStatus({
                 worker: String(nextStatus.worker || 'stopped').toLowerCase(),
                 brain: String(nextStatus.brain || 'stopped').toLowerCase(),
             });
+        } catch {
+            sileo.error({ title: 'Error de conexion', description: 'No se pudo consultar el estado de los procesos.' });
+        } finally {
+            statusRequestRef.current = false;
+        }
+    };
+
+    const refreshLogs = async () => {
+        if (logsRequestRef.current) return;
+        logsRequestRef.current = true;
+        try {
+            const [workerLogs, brainLogs] = await Promise.all([
+                controlApi.getLogs('worker', 100),
+                controlApi.getLogs('brain', 100),
+            ]);
             setLogs({
                 worker: workerLogs.stdout || [],
                 brain: brainLogs.stdout || [],
             });
         } catch {
-            sileo.error({ title: 'Error de conexión', description: 'No se pudo conectar con el servicio de control.' });
+            sileo.error({ title: 'Error de conexion', description: 'No se pudieron actualizar los logs.' });
+        } finally {
+            logsRequestRef.current = false;
         }
     };
 
     useEffect(() => {
-        refresh();
-        const id = setInterval(refresh, 4000);
-        return () => clearInterval(id);
+        void refreshStatus();
+        void refreshLogs();
+
+        const statusIntervalId = setInterval(() => {
+            void refreshStatus();
+        }, STATUS_REFRESH_MS);
+        const logsIntervalId = setInterval(() => {
+            void refreshLogs();
+        }, LOGS_REFRESH_MS);
+
+        return () => {
+            clearInterval(statusIntervalId);
+            clearInterval(logsIntervalId);
+        };
     }, []);
 
     useEffect(() => {
@@ -67,8 +97,8 @@ export default function ControlPage() {
             if (action === 'start') await controlApi.start(name);
             else if (action === 'stop') await controlApi.stop(name);
             else if (action === 'restart') await controlApi.restart(name);
-            sileo.success({ title: `Servicio ${name}`, description: `Acción [${action}] ejecutada correctamente.` });
-            await refresh();
+            sileo.success({ title: `Servicio ${name}`, description: `Accion [${action}] ejecutada correctamente.` });
+            await Promise.all([refreshStatus(), refreshLogs()]);
         } catch {
             sileo.error({ title: 'Error de control', description: `No se pudo ${action} el servicio ${name}.` });
         } finally {
@@ -176,7 +206,7 @@ export default function ControlPage() {
             <div className="flex items-end justify-between">
                 <div>
                     <h2 className="text-3xl font-black tracking-tighter">Control de Procesos</h2>
-                    <p className="text-muted-foreground">Orquestación de servicios y depuración en tiempo real.</p>
+                    <p className="text-muted-foreground">Orquestacion de servicios y depuracion en tiempo real.</p>
                 </div>
             </div>
 

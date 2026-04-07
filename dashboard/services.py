@@ -1119,7 +1119,15 @@ class DashboardService:
             reason=(reason or "").strip() or None,
             source=(source or "").strip() or "manual",
         )
-        return {"site_id": site, "resource_id": rid, "blocked": True}
+        
+        queue_removed = False
+        try:
+            res = self.remove_queue_item(site_id=site, resource_id=rid)
+            queue_removed = res.get("removed", False)
+        except Exception as exc:
+            self.logger.warning("No se pudo remover el recurso %s de las colas tras bloqueo: %s", rid, exc)
+            
+        return {"site_id": site, "resource_id": rid, "blocked": True, "queue_removed": queue_removed}
 
     def unblock_blacklist(self, *, site_id: str, resource_id: int) -> dict[str, Any]:
         site = (site_id or "").strip()

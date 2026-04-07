@@ -19,8 +19,8 @@ import QueueCard from '@/components/monitor/QueueCard';
 import { sileo } from 'sileo';
 
 export default function MonitorPage() {
-  const UI_REFRESH_MS = 1000;
-  const INCIDENT_MARKER_POLL_MS = 3000;
+  const QUEUE_REFRESH_MS = 3000;
+  const INCIDENT_MARKER_POLL_MS = 10000;
   const LIVE_STREAM_GRACE_MS = 8000;
 
   const [queue, setQueue] = useState<QueueItem[]>([]);
@@ -34,6 +34,9 @@ export default function MonitorPage() {
   const successCountRef = useRef<number>(-1);
   const monitorFailStreakRef = useRef<number>(0);
   const incidentsFailStreakRef = useRef<number>(0);
+  const queueRequestRef = useRef(false);
+  const markerRequestRef = useRef(false);
+  const incidentsRequestRef = useRef(false);
   const [recovering, setRecovering] = useState(false);
 
   const showTransientError = (message: string, ms = 5000) => {
@@ -47,24 +50,46 @@ export default function MonitorPage() {
   const today = useMemo(() => new Date().toISOString().split('T')[0], []);
 
   const refreshQueue = async () => {
-    const queueRes = await queueApi.getCurrent(1, 1000);
-    setQueue(queueRes.items || []);
+    if (queueRequestRef.current) return;
+    queueRequestRef.current = true;
+    try {
+      const queueRes = await queueApi.getCurrent(1, 1000);
+      setQueue(queueRes.items || []);
+    } finally {
+      queueRequestRef.current = false;
+    }
   };
 
   const refreshIncidents = async () => {
-    const incidentsRes = await historyApi.getIncidents(undefined, 1, 15);
-    setIncidents(incidentsRes.items || []);
-    incidentsFailStreakRef.current = 0;
+    if (incidentsRequestRef.current) return;
+    incidentsRequestRef.current = true;
+    try {
+      const incidentsRes = await historyApi.getIncidents(undefined, 1, 15);
+      setIncidents(incidentsRes.items || []);
+      incidentsFailStreakRef.current = 0;
+    } finally {
+      incidentsRequestRef.current = false;
+    }
+  };
+
+  const refreshMarker = async () => {
+    if (markerRequestRef.current) return null;
+    markerRequestRef.current = true;
+    try {
+      return await queueApi.getCompletionMarker(today);
+    } finally {
+      markerRequestRef.current = false;
+    }
   };
 
   const refresh = async () => {
     const [markerRes, queueRes, incidentsRes] = await Promise.allSettled([
-      queueApi.getCompletionMarker(today),
+      refreshMarker(),
       refreshQueue(),
       refreshIncidents(),
     ]);
 
-    if (markerRes.status === 'fulfilled') {
+    if (markerRes.status === 'fulfilled' && markerRes.value) {
       completionMarkerRef.current = markerRes.value.marker || '';
       monitorFailStreakRef.current = 0;
       // Seed success count on first load (no notification on initial load)
@@ -124,15 +149,16 @@ export default function MonitorPage() {
         monitorFailStreakRef.current += 1;
         // Silencioso en polling; evitar banner permanente por ruido de red.
       }
-    }, UI_REFRESH_MS);
+    }, QUEUE_REFRESH_MS);
 
     const markerPoll = setInterval(async () => {
       try {
-        const markerRes = await queueApi.getCompletionMarker(today) as any;
+        const markerRes = await refreshMarker() as any;
+        if (!markerRes) return;
         const marker = markerRes.marker || '';
         monitorFailStreakRef.current = 0;
         if (completionMarkerRef.current && completionMarkerRef.current !== marker) {
-          refreshIncidents().catch(() => {
+          void refreshIncidents().catch(() => {
             incidentsFailStreakRef.current += 1;
           });
         }

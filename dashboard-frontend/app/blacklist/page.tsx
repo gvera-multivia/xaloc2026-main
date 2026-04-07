@@ -30,7 +30,7 @@ export default function BlacklistPage() {
     const [error, setError] = useState('');
     const [busy, setBusy] = useState<string | null>(null);
     const [showAddForm, setShowAddForm] = useState(false);
-    const [newSiteId, setNewSiteId] = useState('ayunta_palma');
+
     const [newResourceId, setNewResourceId] = useState('');
     const [newReason, setNewReason] = useState('');
 
@@ -84,24 +84,21 @@ export default function BlacklistPage() {
 
     const handleBlock = async () => {
         const resourceId = Number(newResourceId);
-        if (!newSiteId.trim()) {
-            setError('Debes indicar un site.');
-            return;
-        }
         if (!Number.isInteger(resourceId) || resourceId <= 0) {
             setError('El ID de recurso debe ser un número entero positivo.');
             return;
         }
 
-        setBusy(`new-${newSiteId}-${resourceId}`);
+        setBusy(`new-global-${resourceId}`);
         try {
-            await blacklistApi.block(
-                newSiteId.trim(),
+            const res = await blacklistApi.block(
+                'global',
                 resourceId,
                 newReason.trim() || 'Bloqueo manual desde dashboard',
                 'manual'
             );
-            sileo.success({ title: 'Bloqueo creado', description: `${newSiteId} #${resourceId}` });
+            const extraMsg = res.queue_removed ? " y eliminado de la cola" : "";
+            sileo.success({ title: 'Bloqueo creado', description: `#${resourceId}${extraMsg}` });
             setShowAddForm(false);
             setNewResourceId('');
             setNewReason('');
@@ -138,19 +135,8 @@ export default function BlacklistPage() {
             {showAddForm && (
                 <div className="bg-card border border-border rounded-2xl p-5 space-y-4">
                     <h3 className="text-sm font-black uppercase tracking-wider">Nuevo bloqueo manual</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        <label className="text-xs text-muted-foreground space-y-1">
-                            <span>Site</span>
-                            <select
-                                value={newSiteId}
-                                onChange={(e) => setNewSiteId(e.target.value)}
-                                className="w-full bg-background border border-border rounded-xl px-3 py-2 text-sm"
-                            >
-                                {knownSites.map((site) => (
-                                    <option key={site} value={site}>{site}</option>
-                                ))}
-                            </select>
-                        </label>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+
                         <label className="text-xs text-muted-foreground space-y-1">
                             <span>ID Recurso</span>
                             <input
@@ -182,7 +168,7 @@ export default function BlacklistPage() {
                         </button>
                         <button
                             onClick={handleBlock}
-                            disabled={busy === `new-${newSiteId}-${Number(newResourceId)}`}
+                            disabled={busy === `new-global-${Number(newResourceId)}`}
                             className="px-4 py-2 bg-primary text-primary-foreground rounded-xl text-xs font-bold disabled:opacity-50"
                         >
                             Guardar Bloqueo

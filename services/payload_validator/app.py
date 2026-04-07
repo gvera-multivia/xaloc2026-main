@@ -292,6 +292,13 @@ class PayloadValidatorService:
             if requires_gesdoc:
                 reason_text = (gesdoc_reason or "").strip() or "Requiere autorizacion GESDOC"
                 incident_type = self._incident_type_for_gesdoc_reason(reason_text)
+                old_incident_type = str(item.get("incident_type") or "")
+                if old_incident_type and old_incident_type != incident_type:
+                    self.realtime_store.clear_incident(
+                        site_id=site_id,
+                        resource_id=resource_id,
+                        incident_type=old_incident_type,
+                    )
                 expediente = str(
                     normalized_payload.get("expediente")
                     or normalized_payload.get("expediente_num")
@@ -479,6 +486,11 @@ class PayloadValidatorService:
                     await self.streams.ack(stream=self.candidates_stream, group=self.group, message_id=msg.message_id)
                     return True
 
+            if rid_for_auth is not None:
+                self.realtime_store.clear_incident(
+                    site_id=organism_id,
+                    resource_id=rid_for_auth,
+                )
             draft = self.store.save_job_draft(
                 organism_id=organism_id,
                 external_resource_id=normalized_payload["external_resource_id"],

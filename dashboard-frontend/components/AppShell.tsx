@@ -7,7 +7,7 @@ import { useAuth } from '@/lib/AuthContext';
 import NotificationManager from '@/components/NotificationManager';
 
 
-const ADMIN_ROUTES = ['/users', '/control'];
+const ADMIN_ROUTES = ['/control'];
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();

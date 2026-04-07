@@ -269,9 +269,25 @@ def _tail_text_file(path: Path, lines: int) -> list[str]:
         return []
     safe_lines = min(max(int(lines), 1), 2000)
     try:
-        with path.open("r", encoding="utf-8", errors="replace") as fh:
-            all_lines = fh.readlines()
-        return [ln.rstrip("\n") for ln in all_lines[-safe_lines:]]
+        block_size = 64 * 1024
+        remaining = safe_lines
+        chunks: list[bytes] = []
+
+        with path.open("rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            position = fh.tell()
+
+            while position > 0 and remaining >= 0:
+                read_size = min(block_size, position)
+                position -= read_size
+                fh.seek(position)
+                chunk = fh.read(read_size)
+                chunks.append(chunk)
+                remaining -= chunk.count(b"\n")
+
+        data = b"".join(reversed(chunks))
+        text = data.decode("utf-8", errors="replace")
+        return [ln.rstrip("\r") for ln in text.splitlines()[-safe_lines:]]
     except Exception:
         return []
 
@@ -553,13 +569,33 @@ async def api_blacklist(site_id: str | None = Query(None), _user: dict = Depends
     return {"items": items, "total": len(items)}
 
 
+
+async def _background_deselect_xvia(id_recurso: int) -> None:
+    """Helper to deselect a resource from XVIA in the background."""
+    try:
+        email = (os.getenv("XVIA_EMAIL") or "").strip()
+        password = (os.getenv("XVIA_PASSWORD") or "").strip()
+        if not email or not password:
+            logger.warning("No credentials found for XVIA_EMAIL/XVIA_PASSWORD. Cannot deselect.")
+            return
+
+        async with aiohttp.ClientSession() as session:
+            await create_authenticated_session_in_place(session, email, password)
+            await deselect_resource(session, id_recurso)
+    except Exception as exc:
+        logger.error("Background XVIA deselect failed for resource %s: %s", id_recurso, exc)
+
 @app.post("/api/blacklist")
 async def api_blacklist_block(payload: dict[str, Any] = Body(...), _user: dict = Depends(require_user)) -> dict:
     try:
-        site_id = str(payload.get("site_id") or "").strip()
+        site_id = str(payload.get("site_id") or "global").strip()
         resource_id = int(payload.get("resource_id"))
         reason = payload.get("reason")
         source = payload.get("source") or "manual"
+        
+        # Fire background task to deselect from XVIA
+        asyncio.create_task(_background_deselect_xvia(resource_id))
+        
         return service.block_blacklist(
             site_id=site_id,
             resource_id=resource_id,

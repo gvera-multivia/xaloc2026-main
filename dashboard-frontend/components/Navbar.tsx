@@ -11,7 +11,6 @@ import {
   User,
   Terminal,
   LayoutDashboard,
-  Users,
   AlertCircle,
   FileText,
 } from "lucide-react";
@@ -49,7 +48,6 @@ export default function Navbar() {
     { href: "/history", label: "Historial", icon: History, adminOnly: false },
     { href: "/gestion", label: "Gestion", icon: Settings, adminOnly: false },
     { href: "/incidents", label: "Incidencias", icon: AlertCircle, adminOnly: false },
-    { href: "/users", label: "Usuarios", icon: Users, adminOnly: true },
     { href: "/control", label: "Control", icon: Terminal, adminOnly: true },
     { href: "/blacklist", label: "Bloqueos", icon: ShieldAlert, adminOnly: false },
     { href: "/documentos", label: "Documentos", icon: FileText, adminOnly: false },

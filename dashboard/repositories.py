@@ -1233,13 +1233,12 @@ class PostgresQueueRepository:
                     SELECT id, job_id, status
                     FROM jobs
                     WHERE status IN ({self.ACTIVE_STATES_SQL})
-                      AND {site_expr} = %s
                       AND {resource_expr} = %s
                     ORDER BY COALESCE(queued_at, started_at, created_at) DESC, id DESC
                     LIMIT 1
                     FOR UPDATE
                     """,
-                    (str(site_id), int(resource_id)),
+                    (int(resource_id),),
                 )
                 row = cur.fetchone()
                 if not row:

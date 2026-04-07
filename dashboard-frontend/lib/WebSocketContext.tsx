@@ -1,7 +1,6 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useRef, useState, ReactNode } from 'react';
-import { usePathname } from 'next/navigation';
 import { useAuth } from '@/lib/AuthContext';
 
 type WebSocketContextType = {
@@ -16,7 +15,6 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   const [lastMessage, setLastMessage] = useState<any>(null);
   const ws = useRef<WebSocket | null>(null);
   const reconnectTimeout = useRef<NodeJS.Timeout | null>(null);
-  const pathname = usePathname();
   const { isAuthenticated, loading } = useAuth();
 
   useEffect(() => {
@@ -27,10 +25,19 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (loading || !isAuthenticated || pathname === '/login') {
+    if (loading || !isAuthenticated) {
+      if (ws.current) {
+        ws.current.close();
+        ws.current = null;
+      }
+      setIsConnected(false);
       return;
     }
+
     const connect = () => {
+      if (ws.current && (ws.current.readyState === WebSocket.OPEN || ws.current.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const host = window.location.host;
       const baseWsUrl = process.env.NEXT_PUBLIC_WS_URL || `${protocol}//${host}/ws/dashboard`;
@@ -60,6 +67,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       socket.onclose = (event) => {
         console.log('WebSocket Disconnected');
         setIsConnected(false);
+        ws.current = null;
         // Do not retry when backend explicitly indicates service unavailable/auth required.
         if (event.code === 1013 || event.code === 4401) {
           if (event.code === 4401 && typeof window !== 'undefined') {
@@ -96,7 +104,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
           clearTimeout(reconnectTimeout.current);
       }
     };
-  }, [pathname, isAuthenticated, loading]);
+  }, [isAuthenticated, loading]);
 
   return (
     <WebSocketContext.Provider value={{ lastMessage, isConnected }}>

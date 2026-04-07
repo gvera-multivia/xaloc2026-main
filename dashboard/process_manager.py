@@ -424,9 +424,29 @@ class ProcessManager:
         if not path.exists():
             return []
         try:
-            with open(path, "r", encoding="utf-8", errors="replace") as f:
-                all_lines = f.readlines()
-            return [line.rstrip("\n") for line in all_lines[-lines:]]
+            if lines <= 0:
+                return []
+
+            block_size = 64 * 1024
+            remaining = int(lines)
+            chunks: list[bytes] = []
+
+            with open(path, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                file_size = f.tell()
+                position = file_size
+
+                while position > 0 and remaining >= 0:
+                    read_size = min(block_size, position)
+                    position -= read_size
+                    f.seek(position)
+                    chunk = f.read(read_size)
+                    chunks.append(chunk)
+                    remaining -= chunk.count(b"\n")
+
+            data = b"".join(reversed(chunks))
+            text = data.decode("utf-8", errors="replace")
+            return [line.rstrip("\r") for line in text.splitlines()[-lines:]]
         except Exception:
             return []
 

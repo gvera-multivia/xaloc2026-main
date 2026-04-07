@@ -255,7 +255,7 @@ class BaseOnlineAdapter(SiteAdapter):
 
     def _parse_expediente_base(self, expediente: str) -> dict:
         exp = self._clean_str(expediente).upper()
-        m_gim = re.match(r"^(?P<id_ens>\d{5})-(?P<any>\d{4})[/\-](?P<num>\d{4,5})-GIM$", exp)
+        m_gim = re.match(r"^(?P<id_ens>\d{5})-(?P<any>\d{4})[/\-](?P<num>\d{1,5})-GIM$", exp)
         if m_gim:
             return {
                 "expediente_id_ens": m_gim.group("id_ens"),

@@ -73,10 +73,10 @@ class PgAdminStore:
                     """
                     SELECT 1
                     FROM blocked_resources
-                    WHERE site_id = %s AND resource_id = %s
+                    WHERE resource_id = %s
                     LIMIT 1
                     """,
-                    (str(site_id), int(resource_id)),
+                    (int(resource_id),),
                 )
                 return cur.fetchone() is not None
 
@@ -90,10 +90,9 @@ class PgAdminStore:
                     """
                     SELECT resource_id
                     FROM blocked_resources
-                    WHERE site_id = %s
-                      AND resource_id = ANY(%s)
+                    WHERE resource_id = ANY(%s)
                     """,
-                    (str(site_id), ids),
+                    (ids,),
                 )
                 rows = cur.fetchall()
         return {int(row[0]) for row in rows if row and row[0] is not None}
@@ -152,8 +151,8 @@ class PgAdminStore:
         with self._conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "DELETE FROM blocked_resources WHERE site_id = %s AND resource_id = %s",
-                    (str(site_id), int(resource_id)),
+                    "DELETE FROM blocked_resources WHERE resource_id = %s",
+                    (int(resource_id),),
                 )
                 deleted = cur.rowcount > 0
             conn.commit()

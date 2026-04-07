@@ -416,7 +416,7 @@ async def api_incident_gesdoc_action(
     }
 
 
-@router.post("/api/incidents/{id}/claim")
+@router.post("/api/incidents/{id:path}/claim")
 async def api_claim_incident(id: str, user: dict = Depends(api.require_user)):
     user_id = str(user.get("sub", "unknown"))
     username = user.get("username", "Unknown")
@@ -443,7 +443,7 @@ async def api_claim_incident(id: str, user: dict = Depends(api.require_user)):
     }
 
 
-@router.post("/api/incidents/{id}/release")
+@router.post("/api/incidents/{id:path}/release")
 async def api_release_incident(id: str, user: dict = Depends(api.require_user)):
     user_id = str(user.get("sub", "unknown"))
     role = user.get("role", "user")

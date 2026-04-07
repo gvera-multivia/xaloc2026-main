@@ -1,5 +1,13 @@
 export const API_BASE = '/api';
 
+function resolveApiUrl(path: string): string {
+    if (typeof window === 'undefined') {
+        return `${API_BASE}${path}`;
+    }
+    const origin = `${window.location.protocol}//${window.location.host}`;
+    return `${origin}${API_BASE}${path}`;
+}
+
 function isJwtExpired(token: string): boolean {
     try {
         const payloadPart = token.split('.')[1];
@@ -38,7 +46,7 @@ async function fetcher<T>(path: string, options?: RequestInit): Promise<T> {
         headers.set('Authorization', `Bearer ${token}`);
     }
 
-    const res = await fetch(`${API_BASE}${path}`, {
+    const res = await fetch(resolveApiUrl(path), {
         credentials: 'include',
         ...options,
         headers,
