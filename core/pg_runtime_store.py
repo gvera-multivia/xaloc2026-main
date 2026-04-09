@@ -1013,8 +1013,8 @@ class PgRuntimeStore:
         return removed
 
     # Blacklist API
-    def block_resource(self, *, site_id: str, resource_id: int, reason: str | None = None, source: str | None = None) -> None:
-        self.admin_store.block_resource(site_id=site_id, resource_id=resource_id, reason=reason, source=source)
+    def block_resource(self, *, site_id: str, resource_id: int, reason: str | None = None, source: str | None = None, screenshot_url: str | None = None) -> None:
+        self.admin_store.block_resource(site_id=site_id, resource_id=resource_id, reason=reason, source=source, screenshot_url=screenshot_url)
 
     # Incident locks API
     def acquire_incident_lock(

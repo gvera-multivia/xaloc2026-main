@@ -16,4 +16,5 @@ websockets
 redis
 python-multipart
 Pillow
+boto3
 

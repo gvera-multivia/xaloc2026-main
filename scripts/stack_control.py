@@ -130,7 +130,11 @@ def _wait_for_start(env_file: Path, compose_file: Path, timeout: int, interval: 
             print("[TIMEOUT] No llegaron a estado listo dentro del tiempo limite.")
             print(f"[STATE] {_summarize_services(services)}")
             return 3
-        print(f"[WAIT] Esperando arranque... {_summarize_services(services)}")
+        summary = _summarize_services(services)
+        if "minio" in summary.lower():
+             print(f"[WAIT] Esperando arranque (MinIO integrado)... {summary}")
+        else:
+             print(f"[WAIT] Esperando arranque... {summary}")
         time.sleep(interval)
 
 

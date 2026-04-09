@@ -103,7 +103,7 @@ class PgAdminStore:
                 if site_id:
                     cur.execute(
                         """
-                        SELECT site_id, resource_id, reason, source, created_at, updated_at
+                        SELECT site_id, resource_id, reason, source, screenshot_url, created_at, updated_at
                         FROM blocked_resources
                         WHERE site_id = %s
                         ORDER BY created_at DESC
@@ -113,7 +113,7 @@ class PgAdminStore:
                 else:
                     cur.execute(
                         """
-                        SELECT site_id, resource_id, reason, source, created_at, updated_at
+                        SELECT site_id, resource_id, reason, source, screenshot_url, created_at, updated_at
                         FROM blocked_resources
                         ORDER BY created_at DESC
                         """
@@ -125,25 +125,27 @@ class PgAdminStore:
                 "resource_id": int(row[1]),
                 "reason": row[2],
                 "source": row[3],
-                "created_at": row[4].isoformat() if row[4] else None,
-                "updated_at": row[5].isoformat() if row[5] else None,
+                "screenshot_url": row[4],
+                "created_at": row[5].isoformat() if row[5] else None,
+                "updated_at": row[6].isoformat() if row[6] else None,
             }
             for row in rows
         ]
 
-    def block_resource(self, *, site_id: str, resource_id: int, reason: str | None = None, source: str | None = None) -> None:
+    def block_resource(self, *, site_id: str, resource_id: int, reason: str | None = None, source: str | None = None, screenshot_url: str | None = None) -> None:
         with self._conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO blocked_resources (site_id, resource_id, reason, source, created_at, updated_at)
-                    VALUES (%s, %s, %s, %s, NOW(), NOW())
+                    INSERT INTO blocked_resources (site_id, resource_id, reason, source, screenshot_url, created_at, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
                     ON CONFLICT (site_id, resource_id) DO UPDATE SET
                         reason = EXCLUDED.reason,
                         source = EXCLUDED.source,
+                        screenshot_url = EXCLUDED.screenshot_url,
                         updated_at = NOW()
                     """,
-                    (str(site_id), int(resource_id), reason, source),
+                    (str(site_id), int(resource_id), reason, source, screenshot_url),
                 )
             conn.commit()
 

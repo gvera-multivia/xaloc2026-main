@@ -20,6 +20,7 @@ interface BlacklistItem {
     resource_id: number;
     reason?: string;
     source?: string;
+    screenshot_url?: string;
     created_at: string;
 }
 
@@ -233,6 +234,20 @@ export default function BlacklistPage() {
                                         <FileText size={12} className="inline mr-2 opacity-50" />
                                         {item.reason || 'Sin motivo documentado'}
                                     </div>
+
+                                    {item.screenshot_url && (
+                                        <div className="mt-4 rounded-xl overflow-hidden border border-border bg-black/5 aspect-video relative group/img">
+                                            <img 
+                                                src={`/api/blacklist/${item.site_id}/${item.resource_id}/screenshot`} 
+                                                alt="Captura del error"
+                                                className="w-full h-full object-cover cursor-zoom-in hover:scale-110 transition-transform duration-500"
+                                                onClick={() => window.open(`/api/blacklist/${item.site_id}/${item.resource_id}/screenshot`, '_blank')}
+                                            />
+                                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                                                <span className="text-[10px] font-bold text-white uppercase tracking-widest">Click para ampliar</span>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="flex flex-col gap-2">

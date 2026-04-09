@@ -7,6 +7,7 @@ import contextlib
 import time
 import traceback
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 import aiohttp
@@ -327,11 +328,27 @@ async def run_worker_loop():
                                 if job.resource_id is not None:
                                     deselected = await deselect_resource(auth_session, int(job.resource_id))
                                     base_error = outcome.error or "non_retry"
+                                    screenshot_url = None
+                                    if outcome.screenshot:
+                                        try:
+                                            from core.screenshot_store import get_screenshot_store
+                                            store = get_screenshot_store()
+                                            screenshot_path = Path(outcome.screenshot)
+                                            if screenshot_path.exists():
+                                                screenshot_url = store.upload_screenshot(
+                                                    site_id=job.site_id,
+                                                    resource_id=int(job.resource_id),
+                                                    png_bytes=screenshot_path.read_bytes()
+                                                )
+                                        except Exception as e:
+                                            logger.warning("Fallo al subir screenshot en non_retry: %s", e)
+
                                     db.block_resource(
                                         site_id=job.site_id,
                                         resource_id=int(job.resource_id),
                                         reason=f"Non-retry validation failure. {base_error}",
                                         source="worker_non_retry_validation",
+                                        screenshot_url=screenshot_url,
                                     )
                                     realtime_store.record_task_failed_final(
                                         site_id=job.site_id,
@@ -383,11 +400,27 @@ async def run_worker_loop():
                                 else " No se pudo liberar recurso en XVIA."
                             )
                             base_error = outcome.error or "unknown_error"
+                            screenshot_url = None
+                            if outcome.screenshot:
+                                try:
+                                    from core.screenshot_store import get_screenshot_store
+                                    store = get_screenshot_store()
+                                    screenshot_path = Path(outcome.screenshot)
+                                    if screenshot_path.exists():
+                                        screenshot_url = store.upload_screenshot(
+                                            site_id=job.site_id,
+                                            resource_id=int(job.resource_id),
+                                            png_bytes=screenshot_path.read_bytes()
+                                        )
+                                except Exception as e:
+                                    logger.warning("Fallo al subir screenshot en exhausted: %s", e)
+
                             db.block_resource(
                                 site_id=job.site_id,
                                 resource_id=int(job.resource_id),
                                 reason=f"Final failure tras reintentos agotados. {base_error}",
                                 source="worker_retry_exhausted",
+                                screenshot_url=screenshot_url,
                             )
                             realtime_store.record_task_failed_final(
                                 site_id=job.site_id,

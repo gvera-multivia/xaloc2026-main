@@ -616,6 +616,23 @@ async def api_blacklist_unblock(site_id: str, resource_id: int, _user: dict = De
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.get("/api/blacklist/{site_id}/{resource_id}/screenshot")
+async def api_blacklist_screenshot(site_id: str, resource_id: int, _user: dict = Depends(require_user)):
+    """Proxies the screenshot from S3/MinIO to the client."""
+    try:
+        from core.screenshot_store import get_screenshot_store
+        store = get_screenshot_store()
+        data = store.get_screenshot_bytes(site_id=site_id, resource_id=resource_id)
+        if not data:
+            raise HTTPException(status_code=404, detail="Captura no encontrada.")
+        return Response(content=data, media_type="image/png")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Error al recuperar screenshot site=%s rid=%s: %s", site_id, resource_id, exc)
+        raise HTTPException(status_code=500, detail=f"Error recuperando captura: {exc}")
+
+
 @app.get("/api/config")
 async def api_config_list(_admin: dict = Depends(require_admin)) -> dict:
     items = service.list_organismo_configs()

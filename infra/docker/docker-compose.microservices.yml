@@ -99,6 +99,11 @@ services:
       REPORT_PG_DSN: ${REPORT_PG_DSN:-postgresql://xaloc:xaloc_dev_password@postgres:5432/xaloc}
       CLIENT_DOCS_BASE_PATH: /mnt/clientes
       GESDOC_TMP_PDF_PATH: /mnt/tmp_pdf
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_BUCKET: screenshots
+      S3_PUBLIC_URL_BASE: http://192.168.184.72:9000/screenshots
     volumes:
       - ../../:/app
       - clientes_smb:/mnt/clientes:rw
@@ -111,6 +116,8 @@ services:
     depends_on:
       auth-rbac-service:
         condition: service_started
+      minio:
+        condition: service_healthy
     labels:
       autoheal: "true"
     healthcheck:
@@ -292,6 +299,10 @@ services:
       QUEUE_STREAM_DLQ_KEY: dlq:jobs
       REPORT_PG_DSN: postgresql://xaloc:xaloc_dev_password@postgres:5432/xaloc
       CLIENT_DOCS_BASE_PATH: /mnt/clientes
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_BUCKET: screenshots
     volumes:
       - ../../:/app
       - artifacts_data:/data/artifacts
@@ -303,6 +314,8 @@ services:
         condition: service_healthy
       playwright-runner-service:
         condition: service_started
+      minio:
+        condition: service_healthy
 
   playwright-runner-service:
     build:
@@ -424,6 +437,25 @@ services:
       playwright-runner-service:
         condition: service_started
 
+  minio:
+    image: minio/minio:latest
+    container_name: xaloc-minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   xaloc-proxy:
     image: caddy:alpine
     container_name: xaloc-proxy
@@ -462,3 +494,4 @@ volumes:
         type: cifs
         o: "username=Guillem Vera,password=1234,vers=3.0,rw,iocharset=utf8"
         device: "//192.168.184.150/tmp_pdf"
+  minio_data:

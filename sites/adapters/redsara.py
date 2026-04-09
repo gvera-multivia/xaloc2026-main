@@ -191,6 +191,7 @@ class RedsaraAdapter(SiteAdapter):
                 r"^\d{3}-\d{2}-IG-\d{6}$",
                 r"^\d{2}/\d{6}$",
                 r"^\d{2}/\d{6}-\d{1,2}$",
+                r"^\d{2}-\d{6}-\d{1,2}$",
             ],
         },
         # Preparado para crecimiento posterior.

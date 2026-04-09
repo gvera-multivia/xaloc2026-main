@@ -220,9 +220,28 @@ async def execute_browser_flow(
                         payload_updates=payload,
                     )
                 except PlaywrightError as e:
+                    screenshot_path = None
+                    try:
+                        screenshot_path = await bot.capture_error_screenshot("playwright_error.png")
+                    except Exception:
+                        pass
                     return ProcessOutcome(
                         success=False,
                         error=f"Error de Playwright: {e}",
+                        screenshot=str(screenshot_path) if screenshot_path else None,
+                        payload_updates=payload,
+                    )
+                except Exception as e:
+                    screenshot_path = None
+                    try:
+                        screenshot_path = await bot.capture_error_screenshot("unexpected_error.png")
+                    except Exception:
+                        pass
+                    logger.error("Error inesperado en flujo site=%s: %s", site_id, e)
+                    return ProcessOutcome(
+                        success=False,
+                        error=f"Error inesperado: {e}",
+                        screenshot=str(screenshot_path) if screenshot_path else None,
                         payload_updates=payload,
                     )
                 else:

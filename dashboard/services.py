@@ -1139,6 +1139,15 @@ class DashboardService:
             raise ValueError("resource_id debe ser entero.") from exc
         removed = self.admin_store.unblock_resource(site_id=site, resource_id=rid)
         if removed:
+            # Delete from MinIO
+            try:
+                from core.screenshot_store import get_screenshot_store
+
+                store = get_screenshot_store()
+                store.delete_screenshot(site_id=site, resource_id=rid)
+            except Exception as e:
+                self.logger.warning("Fallo al borrar screenshot al desbloquear site=%s resource_id=%s: %s", site, rid, e)
+
             self._clear_resource_dedupe_keys(site_id=site, resource_id=rid)
             try:
                 # Al desbloquear, limpiar la incidencia operativa asociada para
