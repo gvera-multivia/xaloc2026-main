@@ -10,9 +10,13 @@ import {
   Calendar,
   RefreshCw,
   ZapOff,
+  ExternalLink,
+  Lock,
+  Unlock,
 } from 'lucide-react';
-import { queueApi, historyApi } from '@/lib/api';
-import { QueueItem, Incident } from '@/lib/types';
+import Link from 'next/link';
+import { queueApi, historyApi, incidentsApi } from '@/lib/api';
+import { QueueItem } from '@/lib/types';
 import LiveScreencast from '@/components/monitor/LiveScreencast';
 import SlaRing from '@/components/monitor/SlaRing';
 import QueueCard from '@/components/monitor/QueueCard';
@@ -24,7 +28,7 @@ export default function MonitorPage() {
   const LIVE_STREAM_GRACE_MS = 8000;
 
   const [queue, setQueue] = useState<QueueItem[]>([]);
-  const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [incidents, setIncidents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -64,7 +68,7 @@ export default function MonitorPage() {
     if (incidentsRequestRef.current) return;
     incidentsRequestRef.current = true;
     try {
-      const incidentsRes = await historyApi.getIncidents(undefined, 1, 15);
+      const incidentsRes = await incidentsApi.getPending(1, 10);
       setIncidents(incidentsRes.items || []);
       incidentsFailStreakRef.current = 0;
     } finally {
@@ -384,40 +388,64 @@ export default function MonitorPage() {
             </div>
           </div>
 
-          {/* Incidents */}
+          {/* Incidencias Pendientes (Preview) */}
           <div className="morr-card morr-edge rounded overflow-hidden">
-            <div className="p-5 border-b border-border/70 flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg border border-[color:rgba(255,60,80,0.25)] bg-[rgba(255,60,80,0.08)] flex items-center justify-center">
-                <AlertCircle size={18} className="text-[color:rgba(255,60,80,0.85)]" />
+            <div className="p-5 border-b border-border/70 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg border border-[color:rgba(255,60,80,0.25)] bg-[rgba(255,60,80,0.08)] flex items-center justify-center">
+                  <AlertCircle size={18} className="text-[color:rgba(255,60,80,0.85)]" />
+                </div>
+                <span className="font-black text-sm uppercase tracking-tight">Incidencias Pendientes</span>
               </div>
-              <span className="font-black text-sm uppercase tracking-tight">Incidencias Recientes</span>
+              
+              <Link
+                href="/incidents"
+                className="flex items-center gap-1 text-[9px] font-black uppercase tracking-[0.2em] text-muted-foreground/60 hover:text-[color:var(--morr-fate)] transition-colors group"
+              >
+                <span>Ver todas</span>
+                <ExternalLink size={10} className="group-hover:translate-x-0.5 transition-transform" />
+              </Link>
             </div>
 
             <div className="p-4 space-y-3">
               {incidents.length === 0 ? (
-                <p className="text-xs text-muted-foreground text-center py-6 italic">
-                  Sin registros de fallo hoy.
-                </p>
+                <div className="py-12 flex flex-col items-center justify-center text-center">
+                  <CheckCircle2 size={32} className="mb-3 opacity-10 text-emerald-500" />
+                  <p className="text-[10px] text-muted-foreground font-black uppercase tracking-widest">
+                    Sin incidencias pendientes
+                  </p>
+                </div>
               ) : (
-                incidents.slice(0, 3).map((inc, i) => (
+                incidents.slice(0, 4).map((inc, i) => (
                   <div
-                    key={i}
+                    key={inc.incident_id || i}
                     className={[
                       "p-4 rounded-xl border",
-                      "bg-[rgba(255,60,80,0.05)] border-[rgba(255,60,80,0.12)]",
-                      "hover:border-[rgba(108,77,255,0.22)] hover:bg-[rgba(255,60,80,0.07)]",
-                      "transition-colors",
+                      "bg-[rgba(255,255,255,0.02)] border-border/40",
+                      "hover:border-[color:var(--morr-fate-low)] hover:bg-[rgba(255,255,255,0.04)]",
+                      "transition-all duration-300",
                       "flex items-start gap-4",
                     ].join(" ")}
                   >
-                    <div className="w-10 h-10 rounded-xl border border-[rgba(255,60,80,0.18)] bg-[rgba(255,60,80,0.08)] flex items-center justify-center shrink-0">
-                      <AlertCircle size={18} className="text-[color:rgba(255,60,80,0.85)]" />
+                    <div className="w-10 h-10 rounded-xl border border-border/60 bg-black/20 flex items-center justify-center shrink-0">
+                      {inc.locked ? (
+                        <Lock size={16} className="text-amber-500/80" />
+                      ) : (
+                        <AlertCircle size={16} className="text-red-500/80" />
+                      )}
                     </div>
-                    <div className="min-w-0">
-                      <h5 className="text-xs font-black truncate text-foreground/90 uppercase">
-                        {inc.site_id} / #{formatResource(inc.resource_id)}
-                      </h5>
-                      <p className="text-[11px] text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between">
+                        <h5 className="text-[10px] font-black truncate text-foreground/90 uppercase tracking-wider">
+                          {inc.site_id} / #{formatResource(inc.resource_id)}
+                        </h5>
+                        {inc.locked && (
+                          <span className="text-[8px] font-black uppercase tracking-tighter text-amber-500/60 ml-2 truncate max-w-[80px]">
+                            {inc.lock_username || "BLOQUEADO"}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-muted-foreground/70 mt-1 line-clamp-1 leading-relaxed italic">
                         {inc.reason || "Error en flujo de automatización"}
                       </p>
                     </div>

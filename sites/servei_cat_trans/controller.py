@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import logging
@@ -18,10 +18,10 @@ from .data_models import ServeiCatTransTarget
 
 _NIF_LETTERS = "TRWAGMYFPDXBNJZSQVHLCKE"
 _CARTOCIUDAD_BASE_URLS = (
-    # Producción: endpoint principal de CartoCiudad (alineado con smoke).
-    "http://192.168.184.72:8020",
-    # Opcional por entorno para override puntual (permanece aunque esté vacío).
+    # Opcional por entorno para override puntual (permanece aunque este vacio).
     os.getenv("CARTOCIUDAD_API_URL", "").strip(),
+    # Produccion: endpoint principal publicado en .130 detras del proxy.
+    "http://192.168.184.130/cartociudad",
 )
 logger = logging.getLogger("servei_cat_trans.controller")
 
@@ -46,8 +46,8 @@ class ServeiCatTransController:
         raw = str(text or "")
         if not raw:
             return ""
-        # Corrige casos tipicos UTF-8 interpretado como latin-1/win-1252: "Ã¨", "Ã¡", etc.
-        if any(ch in raw for ch in ("Ã", "Â", "â")):
+        # Corrige casos tipicos UTF-8 interpretado como latin-1/win-1252: "ÃƒÂ¨", "ÃƒÂ¡", etc.
+        if any(ch in raw for ch in ("Ãƒ", "Ã‚", "Ã¢")):
             for enc in ("latin-1", "cp1252"):
                 try:
                     fixed = raw.encode(enc, errors="strict").decode("utf-8", errors="strict")
@@ -308,7 +308,7 @@ class ServeiCatTransController:
             piso=piso_raw,
             puerta=puerta_raw,
         )
-        query_parts = [direccion_raw, numero_raw, cp_raw, municipio_raw, provincia_raw, "España"]
+        query_parts = [direccion_raw, numero_raw, cp_raw, municipio_raw, provincia_raw, "EspaÃ±a"]
         query = ", ".join(part for part in query_parts if cls._clean(part))
         carto = cls._query_cartociudad(query=query)
         resolved_municipio = cls._clean(municipio_raw) or cls._clean(carto.get("municipio"))

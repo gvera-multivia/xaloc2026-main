@@ -94,7 +94,7 @@ def _sanitize_document(v: Any) -> str:
 async def _get_comarca(provincia: str, municipio: str) -> str:
     if not provincia or not municipio:
         return ""
-    url = "http://192.168.184.72:8020/location/comarca"
+    url = "http://192.168.184.130/cartociudad/location/comarca"
     params = {"provincia": provincia, "municipio": municipio}
     try:
         async with aiohttp.ClientSession() as session:

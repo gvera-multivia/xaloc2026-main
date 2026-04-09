@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import logging
@@ -13,6 +13,19 @@ if TYPE_CHECKING:
     from playwright.async_api import Page
     from ..config import DiputacioBcnConfig
     from ..data_models import DiputacioBcnTarget
+
+async def _dismiss_cookies(page: "Page"):
+    try:
+        cookie_btn = page.locator(
+            "button.cc-dismiss, button[aria-label='dismiss cookie message'], button:has-text('De acuerdo')"
+        ).first
+        if await cookie_btn.count() > 0:
+            if await cookie_btn.is_visible():
+                await cookie_btn.click(timeout=3000)
+                await page.wait_for_timeout(500)
+    except Exception:
+        pass
+
 
 logger = logging.getLogger("sites.diputacio_bcn.documentos")
 ALLOWED_DOC_EXTENSIONS = {
@@ -725,68 +738,101 @@ async def run_documentos(page: "Page", config: "DiputacioBcnConfig", datos: "Dip
     logger.info("Diputacio BCN docs: click en Continuar tras adjuntos")
     await submit.click()
 
-    # Paso /Home/dadesnotif
-    await page.wait_for_url("**/Home/dadesnotif**", timeout=25000)
-    representative_radios = [
-        page.locator("input[name='Secc1Radio'][value='R'], input[name='Secc1Radio'][data-radio='R1']").first,
-        page.locator("#uncheckNEPO2, input[name='NotifElecPuntualOP2'][value='R']").first,
-    ]
-    for radio in representative_radios:
-        if await radio.count() > 0:
+    # Paso /Home/dadesnotif o /Home/correuElectronic
+    logger.info("Diputacio BCN docs: detectando pantalla de datos de notificacion...")
+    await _dismiss_cookies(page)
+
+    deadline = time.monotonic() + 30
+    notif_page_type = None  # 'dadesnotif', 'correuElectronic'
+    while time.monotonic() < deadline:
+        url = str(page.url).lower()
+        if "/home/dadesnotif" in url:
+            notif_page_type = "dadesnotif"
+            break
+        if "/home/correuelectronic" in url:
+            notif_page_type = "correuElectronic"
+            break
+        if "/home/presentmul" in url:
+            # Ya saltó a la siguiente etapa?
+            logger.info("Diputacio BCN docs: saltamos directamente a presentmul")
+            return _pick_latest_open_page(page)
+        await page.wait_for_timeout(1000)
+
+    if not notif_page_type:
+        logger.warning("Diputacio BCN docs: no se detecto pantalla de notificacion esperada, se intenta continuar.")
+    else:
+        logger.info("Diputacio BCN docs: detectada pantalla '%s'", notif_page_type)
+
+    if notif_page_type == "dadesnotif":
+        representative_radios = [
+            page.locator("input[name='Secc1Radio'][value='R'], input[name='Secc1Radio'][data-radio='R1']").first,
+            page.locator("#uncheckNEPO2, input[name='NotifElecPuntualOP2'][value='R']").first,
+        ]
+        for radio in representative_radios:
+            if await radio.count() > 0:
+                try:
+                    if await radio.is_visible():
+                        await page.wait_for_timeout(2000)
+                        await radio.check(force=True)
+                except Exception:
+                    pass
+
+        phone_selectors = ["#InfoMobil1", "input[name='InfoMobil1']", "#InfoMobil2", "input[name='InfoMobil2']"]
+        email_selectors = ["#InfoMail1", "input[name='InfoMail1']", "#InfoMail2", "input[name='InfoMail2']"]
+
+        phone_filled = False
+        for selector in phone_selectors:
+            field = page.locator(selector).first
+            if await field.count() > 0 and await field.is_visible():
+                try:
+                    await field.fill(datos.telefon or "600000000")
+                    phone_filled = True
+                except Exception:
+                    pass
+
+        email_filled = False
+        for selector in email_selectors:
+            field = page.locator(selector).first
+            if await field.count() > 0 and await field.is_visible():
+                try:
+                    await field.fill(datos.email or "notificacions@example.com")
+                    email_filled = True
+                except Exception:
+                    pass
+
+        if not phone_filled or not email_filled:
+            logger.warning("No se pudieron rellenar todos los campos de notificacion en dadesnotif (phone=%s, email=%s)", phone_filled, email_filled)
+
+        await page.locator("input.btn.btn-info[name='accio'][value='Continuar']").first.click()
+        await _dismiss_cookies(page)
+        try:
+            await page.wait_for_url("**/Home/correuElectronic**", timeout=15000)
+            notif_page_type = "correuElectronic"
+        except Exception:
+            pass
+
+    if notif_page_type == "correuElectronic":
+        await _dismiss_cookies(page)
+        # Campo de email en correuElectronic (a veces diferente ID o via label)
+        email_field = page.locator("#MailPas3, #InfoMail1, #InfoMail2, #EmailConfirmacio, input[name='MailPas3'], input[name*='Mail']").first
+        if await email_field.count() == 0:
+            email_field = page.get_by_label(re.compile(r"correo electr", re.IGNORECASE)).first
+
+        if await email_field.count() > 0:
             try:
-                if await radio.is_visible():
-                    await page.wait_for_timeout(3000)
-                    await radio.check(force=True)
-            except Exception:
-                pass
+                await email_field.fill(datos.email or "notificacions@example.com")
+            except Exception as e:
+                logger.warning("Fallo al rellenar email en correuElectronic: %s", e)
 
-    phone_selectors = [
-        "#InfoMobil1",
-        "input[name='InfoMobil1']",
-        "#InfoMobil2",
-        "input[name='InfoMobil2']",
-    ]
-    email_selectors = [
-        "#InfoMail1",
-        "input[name='InfoMail1']",
-        "#InfoMail2",
-        "input[name='InfoMail2']",
-    ]
+        lopd = page.locator("#LOPD").first
+        if await lopd.count() > 0:
+            await _ensure_checked(page, lopd, label="LOPD")
 
-    phone_filled = False
-    for selector in phone_selectors:
-        field = page.locator(selector).first
-        if await field.count() == 0:
-            continue
-        try:
-            if await field.is_visible():
-                await field.fill(datos.telefon or "600000000")
-                phone_filled = True
-        except Exception:
-            continue
+        btn_acceder = page.locator("input.btn.btn-info[name='accio'][value='Acceder al trámite']").first
+        if await btn_acceder.count() > 0:
+            await btn_acceder.click()
+        else:
+            # Fallback por texto si el value es diferente
+            await page.get_by_role("button", name=re.compile(r"Acceder", re.IGNORECASE)).click()
 
-    email_filled = False
-    for selector in email_selectors:
-        field = page.locator(selector).first
-        if await field.count() == 0:
-            continue
-        try:
-            if await field.is_visible():
-                await field.fill(datos.email or "notificacions@example.com")
-                email_filled = True
-        except Exception:
-            continue
-
-    if not phone_filled or not email_filled:
-        raise RuntimeError(
-            f"No se pudieron rellenar los campos visibles de datos de notificacion. phone_filled={phone_filled} email_filled={email_filled}"
-        )
-
-    await page.locator("input.btn.btn-info[name='accio'][value='Continuar']").first.click()
-    await page.wait_for_url("**/Home/correuElectronic**", timeout=25000)
-
-    lopd = page.locator("#LOPD").first
-    await _ensure_checked(page, lopd, label="LOPD")
-
-    await page.locator("input.btn.btn-info[name='accio'][value='Acceder al trámite']").first.click()
     return _pick_latest_open_page(page)
