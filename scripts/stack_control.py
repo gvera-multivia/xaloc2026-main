@@ -105,7 +105,8 @@ def _compose_ps_json(env_file: Path, compose_file: Path) -> list[dict[str, Any]]
 
 def _is_bad_state(state: str) -> bool:
     s = (state or "").strip().lower()
-    return any(x in s for x in ("exited", "dead", "restart", "created"))
+    # "restarting" can be transient right after compose up; let timeout logic decide.
+    return any(x in s for x in ("exited", "dead", "created"))
 
 
 def _is_ready(service: dict[str, Any]) -> bool:
