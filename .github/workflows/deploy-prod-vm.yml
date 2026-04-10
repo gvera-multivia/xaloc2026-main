@@ -92,8 +92,26 @@ jobs:
         run: |
           set -euo pipefail
           docker compose --env-file "${DEPLOY_ENV_FILE}" -f "${DEPLOY_COMPOSE_FILE}" ps
-          curl --fail --silent --show-error http://127.0.0.1/health > /dev/null
-          curl --fail --silent --show-error http://127.0.0.1/cartociudad/openapi.json > /dev/null
+          for i in $(seq 1 24); do
+            if curl --fail --silent --show-error http://127.0.0.1/health > /dev/null; then
+              break
+            fi
+            if [ "$i" -eq 24 ]; then
+              echo "Gateway health check failed after retries"
+              exit 1
+            fi
+            sleep 5
+          done
+          for i in $(seq 1 24); do
+            if curl --fail --silent --show-error http://127.0.0.1/cartociudad/openapi.json > /dev/null; then
+              break
+            fi
+            if [ "$i" -eq 24 ]; then
+              echo "Cartociudad OpenAPI check failed after retries"
+              exit 1
+            fi
+            sleep 5
+          done
 
       - name: Collect diagnostics on failure
         if: failure()

@@ -117,12 +117,11 @@ def _is_ready(service: dict[str, Any]) -> bool:
     s = state.strip().lower()
     if not s.startswith("running"):
         return False
-    if health == "unhealthy":
-        return False
-    if health in {"healthy", "starting", ""}:
-        return True
+    # If the service exposes health, require healthy to avoid returning too early.
+    if health:
+        return health == "healthy"
     if "health" in status.lower():
-        return "healthy" in status.lower() or "starting" in status.lower()
+        return "healthy" in status.lower()
     return True
 
 
