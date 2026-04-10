@@ -394,7 +394,7 @@ services:
     volumes:
       - ../../:/app
       - artifacts_data:/data/artifacts
-      - ../../certificates:/data/certificates:ro
+      - ${CERTIFICATES_HOST_PATH:-../../certificates}:/data/certificates:ro
       - clientes_smb:/mnt/clientes:rw
     ports:
       - "127.0.0.1:8111:8111"
@@ -424,7 +424,7 @@ services:
       PYTHONUNBUFFERED: "1"
     volumes:
       - ../../:/app
-      - ../../certificates:/data/certificates:ro
+      - ${CERTIFICATES_HOST_PATH:-../../certificates}:/data/certificates:ro
     ports:
       - "127.0.0.1:8112:8112"
     labels:
