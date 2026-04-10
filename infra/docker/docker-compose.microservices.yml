@@ -302,6 +302,8 @@ services:
       REDIS_ENABLED: "1"
       REDIS_URL: redis://redis:6379/0
       QUEUE_MODE: redis_streams
+      XVIA_EMAIL: ${XVIA_EMAIL:-}
+      XVIA_PASSWORD: ${XVIA_PASSWORD:-}
       USE_PLAYWRIGHT_RUNNER_SERVICE: "1"
       PLAYWRIGHT_RUNNER_URL: http://playwright-runner-service:8111
       QUEUE_STREAM_JOBS_KEY: jobs
