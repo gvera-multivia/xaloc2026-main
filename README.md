@@ -1,177 +1,150 @@
-# Xaloc 2026 - Automatizacion web (Playwright + Python)
+# Xaloc 2026 - Plataforma de Automatización Distribuida (v2.0)
 
-Herramienta de automatizacion basada en **Playwright (async)** con una arquitectura **multi-sitio**. El proyecto arranco automatizando Xaloc Girona (STA) y ha evolucionado para soportar distintos portales bajo un nucleo comun.
+Xaloc es una plataforma de automatización de trámites administrativos basada en **Playwright** y **Python**, diseñada para operar a escala mediante una arquitectura de **microservicios distribuidos**. Evolucionada desde una herramienta CLI simple, la versión 2.0 ofrece un ecosistema completo con dashboard en tiempo real, validación de payloads y orquestación inteligente de tareas.
 
-## Que hay hoy (estado actual)
+## 🏗️ Arquitectura del Sistema
 
-Sitios registrados en `core/site_registry.py`:
-
-- `xaloc_girona`: login con certificado (VALID), rellenado STA, adjuntos, confirmacion y screenshot final **sin pulsar "Enviar"**.
-- `base_online`: login con certificado y ramificacion `P1`/`P2`/`P3` (rellena formularios + adjunta documentos), llega a pantalla "Signar i Presentar" **sin firmar/presentar**.
-- `madrid`: navegacion completa hasta el formulario + rellenado del formulario (pantalla de adjuntos alcanzada); **upload/envio pendientes**.
-
-## SQL Server (sync scripts)
-
-Para `sync_sqlserver_to_worker_queue.py`, la conexion a SQL Server puede venir por variables de entorno (recomendado si tu parser de `.env` se come `;`):
-
-- `SQLSERVER_DRIVER` (por defecto: `SQL Server`)
-- `SQLSERVER_SERVER`
-- `SQLSERVER_DATABASE`
-- `SQLSERVER_USERNAME`
-- `SQLSERVER_PASSWORD`
-- (opcional) `SQLSERVER_TRUSTED_CONNECTION=1`
-
-Alternativamente, puedes seguir usando `--connection-string` o `SQLSERVER_CONNECTION_STRING`.
-
-## Documentación obligatoria del cliente (AUT + identidad)
-
-El `worker.py` añade automáticamente la documentación del cliente a la lista de archivos a subir (para todos los sites). Busca los documentos en el servidor de documentación y, si es necesario, los sube como varios archivos o los fusiona en un único PDF.
-
-Reglas (por defecto):
-
-- Particular: `AUT` + (`DNI` o `NIE`)
-- Empresa: `AUT` + (`CIF` o `NIF`) + (`DNI` o `NIE`)
-  - `ESCR` es opcional (se puede forzar con `CLIENT_DOCS_REQUIRE_ESCR=1`)
-
-Variables de entorno (opcionales):
-
-- `REQUIRE_CLIENT_DOCS` (default `1`): `0/false` para desactivar.
-- `CLIENT_DOCS_BASE_PATH` (default `\\SERVER-DOC\clientes`): raíz de la carpeta de clientes.
-- `CLIENT_DOCS_MERGE` (default `0`): intenta fusionar varios documentos en un PDF.
-- `PDFTK_PATH` (default `C:\Program Files (x86)\PDFtk\bin\pdftk.exe`): ruta a PDFtk (si no existe, sube por separado).
-- `CLIENT_DOCS_OUTPUT_DIR` (default `tmp/client_docs`): salida de PDFs fusionados.
-- `CLIENT_DOCS_REQUIRE_ESCR` (default `0`): fuerza exigir `ESCR` para empresas.
-
-## Requisitos
-
-- Python **3.10+** (se usan type hints `str | None`).
-- Windows recomendado (Edge + políticas de autoselección de certificado).
-- Playwright + navegador `msedge` (por defecto se lanza canal `msedge` con perfil persistente).
-
-## Instalacion
-
-```powershell
-python -m venv venv
-venv\Scripts\activate
-pip install -r requirements.txt
-python -m playwright install msedge
-```
-
-## Uso (CLI)
-
-El entrypoint es `main.py`. Si no pasas `--site`, te pide uno por consola.
-
-```powershell
-# Modo interactivo (seleccion de site por prompt)
-python main.py
-
-# Ejecutar un site concreto
-python main.py --site xaloc_girona
-python main.py --site base_online --protocol P1
-python main.py --site madrid
-
-# Headless (flag; si no la pasas, abre navegador visible)
-python main.py --site madrid --headless
-```
-
-Parametros especificos disponibles hoy en `main.py` (BASE On-line):
-
-```powershell
-# P1 / P2 adjuntos
-python main.py --site base_online --protocol P1 --p1-file pdfs-prueba/test1.pdf
-python main.py --site base_online --protocol P2 --p2-file pdfs-prueba/test1.pdf
-
-# P3 (recurso reposicion)
-python main.py --site base_online --protocol P3 `
-  --p3-tipus-objecte IVTM `
-  --p3-dades "1234-ABC" `
-  --p3-tipus-solicitud 1 `
-  --p3-exposo "Texto de exposicion" `
-  --p3-solicito "Texto de solicitud" `
-  --p3-file pdfs-prueba/test3.pdf
-```
-
-Nota: los datos de ejecuciÃ³n deben venir de la cola (SQLite) o de un JSON (p.ej. encolado con `enqueue_task.py`). Los controladores no generan datos "demo" ni aplican valores por defecto.
-
-## Como funciona por dentro (arquitectura)
+La plataforma se compone de múltiples servicios especializados que interactúan mediante **Redis Streams** y **PostgreSQL**.
 
 ```mermaid
 flowchart TB
-  A[main.py] --> B[core.site_registry]
-  B --> C[sites/<site>/controller.py]
-  B --> D[sites/<site>/automation.py]
-  D --> E[sites/<site>/flows/*]
-  D --> F[core/base_automation.py]
-  F --> G[Playwright chromium.launch_persistent_context]
-  E --> H[logs/ + screenshots/]
+    User((Usuario/ERP)) --> Gateway[API Gateway]
+    Gateway --> Frontend[Dashboard Next.js]
+    Gateway --> Backend[FastAPI Backend]
+    
+    subgraph "Core Services"
+        Validator[Payload Validator]
+        Dispatcher[Batcher Dispatcher]
+        Jobs[Jobs Service]
+        Auth[Auth/RBAC Service]
+    end
+    
+    Backend --> Redis[(Redis Streams)]
+    Redis <--> Validator
+    Validator <--> Dispatcher
+    Dispatcher <--> Orchestrator[Worker Orchestrator]
+    
+    subgraph "Execution Layer"
+        Orchestrator --> Worker[Worker Consumer]
+        Worker --> Runner[Playwright Runner]
+        Runner --> Browser[msedge/chromium]
+    end
+    
+    subgraph "Persistence & Artifacts"
+        Postgres[(PostgreSQL)]
+        MinIO[(MinIO S3 / Screenshots)]
+    end
+    
+    Worker <--> Postgres
+    Backend <--> Postgres
+    Orchestrator --> MinIO
 ```
 
-Piezas:
+---
 
-- `core/base_automation.py`: context manager async que abre Playwright con **perfil persistente** (`profiles/...`), configura timeouts, logging y captura screenshots de error.
-- `core/base_config.py`: configuracion base (`BaseConfig`) + navegador (`BrowserConfig`) + `Timeouts`.
-- `core/site_registry.py`: "router" de sitios. Resuelve `site_id -> Automation class` y `site_id -> Controller`.
-- `sites/<site>/automation.py`: orquestador del flujo del sitio (fases) y manejo de errores/screenshot.
-- `sites/<site>/flows/*.py`: pasos concretos del portal (login, navegacion, formulario, adjuntos...).
-- `sites/<site>/data_models.py`: modelos de datos del tramite (lo que se rellena).
-- `sites/<site>/config.py`: selectores/URLs/timeouts especificos del portal.
+## 🌐 Portales Soportados (Multi-site)
 
-## Estructura de carpetas (lo importante)
+Xaloc utiliza un registro dinámico de automatizaciones en `core/site_registry.py`. Actualmente soporta:
 
+1.  **Xaloc Girona**: Tramitación completa de expedientes (STA).
+2.  **BASE On-line**: Protocolos P1, P2 y P3 (Recursos de reposición).
+3.  **Sede Madrid**: Presentación con formulario y adjuntos.
+4.  **Ayuntamiento de Palma**: Integración especializada con firma nativa.
+5.  **RedSara**: Registro electrónico general.
+6.  **Terrassa**: Portal ciudadano del Ayuntamiento de Terrassa.
+7.  **Valencia**: Sede electrónica del Ayuntamiento de Valencia.
+8.  **ATC**: Agència Tributària de Catalunya.
+9.  **Diputació de Barcelona**: Tramitaciones provinciales.
+10. **Servei Català de Tránsito**: Procesamiento de sanciones y alegaciones.
+
+---
+
+## 🚀 Guía de Inicio Rápido
+
+### Despliegue con Docker (Recomendado)
+
+La forma más rápida de levantar la plataforma completa (DBs, Redis, Dashboard y Servicios) es mediante Docker Compose:
+
+```bash
+# Navegar a la carpeta de infraestructura
+cd infra/docker
+
+# Levantar microservicios
+docker-compose --file docker-compose.microservices.yml up -d
 ```
-core/                 # nucleo comun (base automation/config + registry)
-sites/                # implementaciones por portal
-  xaloc_girona/
-  base_online/
-  madrid/
-flows/                # compat: redirige a sites/xaloc_girona/flows
-utils/                # utilidades (p.ej. popup nativo de Windows)
-explore-html/         # capturas/guias de reverse engineering por portal
-pdfs-prueba/          # PDFs de prueba para adjuntos
-profiles/             # perfiles persistentes del navegador (NO versionar)
-logs/                 # logs por site
-screenshots/          # evidencias (ok/error)
-main.py               # CLI/entrypoint
+
+### Configuración Local (Desarrollo)
+
+Si prefieres ejecutar los componentes manualmente para desarrollo:
+
+1.  **Entorno Virtual**:
+    ```powershell
+    python -m venv venv
+    venv\Scripts\activate
+    pip install -r requirements.txt
+    ```
+
+2.  **Variables de Entorno**:
+    Copia el `.env.example` a `.env` y configura las credenciales de XVIA y bases de datos.
+
+3.  **Lanzar Dashboard API**:
+    ```bash
+    python dashboard_api.py
+    ```
+
+---
+
+## 🛠️ Uso y Modos de Ejecución
+
+### 1. Modo Plataforma (Automatizado)
+El sistema escucha automáticamente las colas de Redis. El `worker.py` consume los jobs y utiliza el `Orchestrator` para ejecutar los flujos en el `Playwright Runner`.
+
+### 2. Modo CLI (Testing / Debug)
+Para pruebas rápidas de un flujo específico, puedes usar el entrypoint `main.py`:
+
+```powershell
+# Ejecutar un sitio concreto de forma interactiva
+python main.py --site redsara
+
+# Ejecutar con un protocolo específico y adjuntos
+python main.py --site base_online --protocol P1 --p1-file ruta/al/archivo.pdf
 ```
 
-## Certificado digital (puntos criticos)
+### 3. Dashboard Web
+Accede a `http://localhost:3000` (o el puerto configurado) para:
+- Monitorizar el estado de los workers en tiempo real.
+- Gestionar la lista negra de recursos bloqueados.
+- Aprobar o rechazar autorizaciones pendientes.
+- Visualizar evidencias (screenshots) de ejecuciones fallidas.
 
-- La autenticacion con certificado puede disparar un **popup nativo de Windows**. En modo worker se evita con políticas de Edge (`AutoSelectCertificateForUrls`).
-- Se usa **perfil persistente** (`profiles/...`) para reutilizar estado del navegador.
+---
 
-## Artefactos: logs y screenshots
+## 📁 Estructura del Proyecto
 
-- Logs: `logs/<site_id>.log` (tambien salen por consola).
-- Screenshots: `screenshots/`.
-- Screenshot en error: cada `Automation` captura uno especifico (p.ej. `madrid_error.png`, `base_online_error.png`, etc.).
+*   `core/`: Núcleo común, lógica de colas, persistencia y base de automatización.
+*   `sites/`: Implementaciones específicas por portal (flows, configs, data models).
+*   `services/`: Microservicios especializados (Auth, Jobs, Signing, etc.).
+*   `dashboard-frontend/`: Aplicación Next.js para el control operativo.
+*   `infra/`: Configuraciones de Docker, Caddy y scripts de sistema.
+*   `logs/` & `screenshots/`: Trazabilidad y evidencias de ejecución.
 
-## Seguridad / modo "demo" (para no registrar tramites)
+---
 
-- `xaloc_girona`: el flujo llega a la pantalla final y guarda evidencia, pero **no pulsa "Enviar"** (ver `sites/xaloc_girona/flows/confirmacion.py`).
-- `base_online`: el flujo llega a "Signar i Presentar", pero **no firma/presenta** (ver `sites/base_online/flows/p1.py`, `sites/base_online/flows/p2.py`, `sites/base_online/flows/reposicion.py`).
-- `madrid`: el envio esta pendiente; hoy llega y rellena hasta la pantalla posterior al formulario.
+## 🔐 Seguridad y Certificados
 
-## Anadir un nuevo sitio (guia rapida)
+- **Certificados Digitales**: Soportados mediante perfiles persistentes y políticas de autoselección en Edge/Chromium.
+- **AutoSelectCertificateForUrls**: En entornos Windows/Worker, se configuran políticas de registro para evitar popups nativos.
+- **RBAC**: El acceso al dashboard está protegido por un servicio de autenticación con roles diferenciados (Operador / Admin).
 
-1. Crear `sites/<nuevo_site>/` con:
-   - `config.py` (extiende `BaseConfig`)
-   - `data_models.py`
-   - `controller.py` con `get_controller()` y `site_id`
-   - `automation.py` (extiende `BaseAutomation`)
-   - `flows/` con los pasos
-2. Registrar el sitio en `core/site_registry.py` (automation + controller paths).
+---
 
-## Documentacion de apoyo
+## 📄 Documentación Adicional
 
-- `explore-html/base-guide.md`: notas y flujo de BASE On-line.
-- `explore-html/madrid-guide.md` y `explore-html/llenar formulario-madrid.md`: navegacion + campos del formulario de Madrid.
-- `xaloc-documentation.md` y `xaloc-action-plan.md`: documentacion tecnica del portal Xaloc y plan de trabajo.
+- `AGENTS.md`: Guía para el desarrollo con agentes IA (Claude Flow).
+- `SECURITY_AND_ACCESS_CONTROL.md`: Detalles sobre la seguridad de la plataforma.
+- `docs/`: Documentación técnica detallada de flujos específicos.
 
-## Compatibilidad (imports antiguos)
-
-Se mantienen wrappers para no romper scripts antiguos:
-
-- `xaloc_automation.py`: expone `XalocAsync` apuntando a `sites/xaloc_girona/automation.py`.
-- `config.py`: expone `Config` y `DatosMulta` apuntando a `sites/xaloc_girona/*`.
-- `flows/*`: reexporta los flujos de `sites/xaloc_girona/flows/*`.
+---
+*Co-Authored-By: Antigravity <google-deepmind>*
+/flows/*`.
 

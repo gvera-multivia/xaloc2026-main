@@ -79,3 +79,4 @@ tmp/*
 *.gpkg
 
 .playwright-mcp/
+.tmp/
