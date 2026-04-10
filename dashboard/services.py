@@ -30,6 +30,7 @@ from .repositories import (
 
 XVIA_HOME_URL = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/home"
 USER_RE = re.compile(r'<i class="fa fa-user-circle"[^>]*></i>\s*([^<]+)')
+DEFAULT_DASHBOARD_ASSIGNED_USER = "Guillen Vera"
 _AUTH_TOKEN_RE = re.compile(r"(autorizaci|authorization|autoritzaci|(?:^|[^a-z])aut(?:[^a-z]|$))", re.IGNORECASE)
 _AUTH_MISSING_RE = re.compile(
     r"(missing|falt(?:a|an|aba|ante)?|sin\s+aut|no\s+(?:se\s+)?(?:encuentra|encontro|existe)|ausent)",
@@ -99,11 +100,19 @@ def resolve_dashboard_assigned_user(logger: logging.Logger) -> Optional[str]:
     if not email or not password:
         logger.warning(
             "Sin DASHBOARD_ASSIGNED_USER/XVIA_ASSIGNED_USER ni credenciales XVIA; "
-            "el historico SQL Server no filtrara por UsuarioAsignado."
+            "se usa fallback fijo UsuarioAsignado=%s.",
+            DEFAULT_DASHBOARD_ASSIGNED_USER,
         )
-        return None
+        return DEFAULT_DASHBOARD_ASSIGNED_USER
 
-    return _run_fetch_user_sync(email, password, logger)
+    resolved = _run_fetch_user_sync(email, password, logger)
+    if resolved:
+        return resolved
+    logger.warning(
+        "No se pudo resolver UsuarioAsignado en XVIA; se usa fallback fijo=%s.",
+        DEFAULT_DASHBOARD_ASSIGNED_USER,
+    )
+    return DEFAULT_DASHBOARD_ASSIGNED_USER
 
 
 def resolve_dashboard_history_source() -> str:
