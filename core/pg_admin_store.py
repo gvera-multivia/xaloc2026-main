@@ -24,6 +24,7 @@ class PgAdminStore:
         self.dsn = dsn
         self.logger = logger or logging.getLogger("pg_admin_store")
         self._has_claim_limit_col_cache: Optional[bool] = None
+        self._has_blocked_resources_screenshot_url_cache: Optional[bool] = None
 
     @classmethod
     def from_env(cls, logger: Optional[logging.Logger] = None) -> "PgAdminStore":
@@ -54,6 +55,26 @@ class PgAdminStore:
         except Exception:
             self._has_claim_limit_col_cache = False
         return bool(self._has_claim_limit_col_cache)
+
+    def _has_blocked_resources_screenshot_url_column(self) -> bool:
+        if self._has_blocked_resources_screenshot_url_cache is not None:
+            return self._has_blocked_resources_screenshot_url_cache
+        try:
+            with self._conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE table_name = 'blocked_resources'
+                          AND column_name = 'screenshot_url'
+                        LIMIT 1
+                        """
+                    )
+                    self._has_blocked_resources_screenshot_url_cache = cur.fetchone() is not None
+        except Exception:
+            self._has_blocked_resources_screenshot_url_cache = False
+        return bool(self._has_blocked_resources_screenshot_url_cache)
 
     @staticmethod
     def _load_json_configs(json_path: str) -> list[dict[str, Any]]:
@@ -98,25 +119,27 @@ class PgAdminStore:
         return {int(row[0]) for row in rows if row and row[0] is not None}
 
     def list_blocked_resources(self, *, site_id: str | None = None) -> list[dict[str, Any]]:
+        has_screenshot_url = self._has_blocked_resources_screenshot_url_column()
+        screenshot_select = "screenshot_url" if has_screenshot_url else "NULL::text AS screenshot_url"
         with self._conn() as conn:
             with conn.cursor() as cur:
                 if site_id:
                     cur.execute(
                         """
-                        SELECT site_id, resource_id, reason, source, screenshot_url, created_at, updated_at
+                        SELECT site_id, resource_id, reason, source, {screenshot_select}, created_at, updated_at
                         FROM blocked_resources
                         WHERE site_id = %s
                         ORDER BY created_at DESC
-                        """,
+                        """.format(screenshot_select=screenshot_select),
                         (str(site_id),),
                     )
                 else:
                     cur.execute(
                         """
-                        SELECT site_id, resource_id, reason, source, screenshot_url, created_at, updated_at
+                        SELECT site_id, resource_id, reason, source, {screenshot_select}, created_at, updated_at
                         FROM blocked_resources
                         ORDER BY created_at DESC
-                        """
+                        """.format(screenshot_select=screenshot_select)
                     )
                 rows = cur.fetchall()
         return [
@@ -133,20 +156,34 @@ class PgAdminStore:
         ]
 
     def block_resource(self, *, site_id: str, resource_id: int, reason: str | None = None, source: str | None = None, screenshot_url: str | None = None) -> None:
+        has_screenshot_url = self._has_blocked_resources_screenshot_url_column()
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO blocked_resources (site_id, resource_id, reason, source, screenshot_url, created_at, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
-                    ON CONFLICT (site_id, resource_id) DO UPDATE SET
-                        reason = EXCLUDED.reason,
-                        source = EXCLUDED.source,
-                        screenshot_url = EXCLUDED.screenshot_url,
-                        updated_at = NOW()
-                    """,
-                    (str(site_id), int(resource_id), reason, source, screenshot_url),
-                )
+                if has_screenshot_url:
+                    cur.execute(
+                        """
+                        INSERT INTO blocked_resources (site_id, resource_id, reason, source, screenshot_url, created_at, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
+                        ON CONFLICT (site_id, resource_id) DO UPDATE SET
+                            reason = EXCLUDED.reason,
+                            source = EXCLUDED.source,
+                            screenshot_url = EXCLUDED.screenshot_url,
+                            updated_at = NOW()
+                        """,
+                        (str(site_id), int(resource_id), reason, source, screenshot_url),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        INSERT INTO blocked_resources (site_id, resource_id, reason, source, created_at, updated_at)
+                        VALUES (%s, %s, %s, %s, NOW(), NOW())
+                        ON CONFLICT (site_id, resource_id) DO UPDATE SET
+                            reason = EXCLUDED.reason,
+                            source = EXCLUDED.source,
+                            updated_at = NOW()
+                        """,
+                        (str(site_id), int(resource_id), reason, source),
+                    )
             conn.commit()
 
     def unblock_resource(self, *, site_id: str, resource_id: int) -> bool:

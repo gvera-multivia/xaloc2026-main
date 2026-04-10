@@ -1,0 +1,104 @@
+name: Deploy Prod VM
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-prod-main
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on:
+      - self-hosted
+      - linux
+      - xaloc-prod
+    timeout-minutes: 90
+    env:
+      DEPLOY_REPO_PATH: /opt/xaloc/xaloc2026-main
+      DEPLOY_ENV_FILE: /opt/xaloc/env/xaloc.env
+      DEPLOY_COMPOSE_FILE: /opt/xaloc/xaloc2026-main/infra/docker/docker-compose.microservices.yml
+      DEPLOY_TIMEOUT_SECONDS: "1800"
+      DEPLOY_INTERVAL_SECONDS: "5"
+    steps:
+      - name: Checkout workflow repository
+        uses: actions/checkout@v4
+
+      - name: Verify runner and deploy environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 "${GITHUB_WORKSPACE}/scripts/deploy_precheck.py" \
+            --repo-path "${DEPLOY_REPO_PATH}" \
+            --env-file "${DEPLOY_ENV_FILE}" \
+            --compose-file "${DEPLOY_COMPOSE_FILE}"
+
+      - name: Pre-deploy quick checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C "${DEPLOY_REPO_PATH}" status --short --branch
+          docker compose --env-file "${DEPLOY_ENV_FILE}" -f "${DEPLOY_COMPOSE_FILE}" ps || true
+
+      - name: Sync persistent checkout to origin/main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C "${DEPLOY_REPO_PATH}" fetch --prune origin main
+          git -C "${DEPLOY_REPO_PATH}" reset --hard origin/main
+          git -C "${DEPLOY_REPO_PATH}" clean -fdx
+          git -C "${DEPLOY_REPO_PATH}" rev-parse HEAD
+
+      - name: Re-run deploy prechecks after sync
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 "${DEPLOY_REPO_PATH}/scripts/deploy_precheck.py" \
+            --repo-path "${DEPLOY_REPO_PATH}" \
+            --env-file "${DEPLOY_ENV_FILE}" \
+            --compose-file "${DEPLOY_COMPOSE_FILE}"
+
+      - name: Restart and rebuild stack
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${DEPLOY_REPO_PATH}"
+          python3 scripts/stack_control.py \
+            --restart-rebuild \
+            --env-file "${DEPLOY_ENV_FILE}" \
+            --compose-file "${DEPLOY_COMPOSE_FILE}" \
+            --timeout "${DEPLOY_TIMEOUT_SECONDS}" \
+            --interval "${DEPLOY_INTERVAL_SECONDS}"
+
+      - name: Post-deploy smoke checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose --env-file "${DEPLOY_ENV_FILE}" -f "${DEPLOY_COMPOSE_FILE}" ps
+          curl --fail --silent --show-error http://127.0.0.1/health > /dev/null
+          curl --fail --silent --show-error http://127.0.0.1/cartociudad/openapi.json > /dev/null
+
+      - name: Collect diagnostics on failure
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 "${GITHUB_WORKSPACE}/scripts/collect_deploy_diagnostics.py" \
+            --repo-path "${DEPLOY_REPO_PATH}" \
+            --env-file "${DEPLOY_ENV_FILE}" \
+            --compose-file "${DEPLOY_COMPOSE_FILE}" \
+            --output-dir "${GITHUB_WORKSPACE}/deploy-diagnostics"
+
+      - name: Upload diagnostics artifact
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-diagnostics-${{ github.run_id }}
+          path: deploy-diagnostics
+          if-no-files-found: error

@@ -406,8 +406,32 @@ async def proxy_ws_novnc_websockify(websocket: WebSocket) -> None:
     )
 
 
+@app.websocket("/vnc/websockify")
+async def proxy_ws_novnc_websockify_under_vnc(websocket: WebSocket) -> None:
+    # noVNC served from /vnc/vnc.html resolves its websocket path relative to /vnc/.
+    # Mirror the proxy here so the public asset path and WS path stay aligned.
+    query = str(websocket.url.query or "")
+    await _proxy_websocket(
+        websocket,
+        _playwright_ws_url("/websockify", query),
+        include_auth_headers=False,
+        include_cookies=False,
+    )
+
+
 @app.websocket("/websockify/{rest_of_path:path}")
 async def proxy_ws_novnc_websockify_path(websocket: WebSocket, rest_of_path: str) -> None:
+    query = str(websocket.url.query or "")
+    await _proxy_websocket(
+        websocket,
+        _playwright_ws_url(f"/websockify/{rest_of_path}", query),
+        include_auth_headers=False,
+        include_cookies=False,
+    )
+
+
+@app.websocket("/vnc/websockify/{rest_of_path:path}")
+async def proxy_ws_novnc_websockify_under_vnc_path(websocket: WebSocket, rest_of_path: str) -> None:
     query = str(websocket.url.query or "")
     await _proxy_websocket(
         websocket,

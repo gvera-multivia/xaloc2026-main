@@ -1,0 +1,12 @@
+aiohttp
+boto3
+fastapi
+Pillow
+psycopg[binary]
+pypdf
+python-dotenv
+python-multipart
+redis
+requests
+uvicorn
+websockets

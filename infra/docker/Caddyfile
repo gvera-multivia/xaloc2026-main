@@ -1,7 +1,11 @@
 :80, :443 {
     tls internal
 
-    handle /cartociudad* {
+    handle /cartociudad {
+        redir /cartociudad/ 308
+    }
+
+    handle_path /cartociudad/* {
         reverse_proxy cartociudad-api:8000
     }
 

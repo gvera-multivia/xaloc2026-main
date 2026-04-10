@@ -5,6 +5,8 @@ services:
       dockerfile: Dockerfile
     container_name: cartociudad-api
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:8020:8000"
     volumes:
       - ../../cartociudad-api/MAPAS:/app/MAPAS:ro
 
@@ -490,18 +492,18 @@ volumes:
       driver: local
       driver_opts:
         type: cifs
-        o: "username=Guillem Vera,password=1234,vers=3.0,rw,iocharset=utf8"
+        o: "username=Administrador,password=NetMulti01,vers=3.0,rw,iocharset=utf8"
         device: "//192.168.184.150/clientes"
   dptos_smb:
       driver: local
       driver_opts:
         type: cifs
-        o: "username=Guillem Vera,password=1234,vers=3.0,rw,iocharset=utf8"
+        o: "username=Administrador,password=NetMulti01,vers=3.0,rw,iocharset=utf8"
         device: "//192.168.184.150/dptos multivia"
   tmp_pdf_smb:
       driver: local
       driver_opts:
         type: cifs
-        o: "username=Guillem Vera,password=1234,vers=3.0,rw,iocharset=utf8"
+        o: "username=Administrador,password=NetMulti01,vers=3.0,rw,iocharset=utf8"
         device: "//192.168.184.150/tmp_pdf"
   minio_data:

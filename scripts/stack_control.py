@@ -13,7 +13,6 @@ from typing import Any
 ROOT_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_ENV_FILE = ROOT_DIR / ".env"
 DEFAULT_COMPOSE_FILE = ROOT_DIR / "infra" / "docker" / "docker-compose.microservices.yml"
-DEFAULT_CARTOCIUDAD_COMPOSE_FILE = ROOT_DIR / "cartociudad-api" / "docker-compose.yml"
 
 
 def _compose_base_cmd(env_file: Path, compose_file: Path) -> list[str]:
@@ -34,6 +33,38 @@ def _run_cmd(cmd: list[str], *, check: bool = False) -> subprocess.CompletedProc
         capture_output=True,
         check=check,
     )
+
+
+def _check_docker_daemon() -> str | None:
+    """Devuelve un mensaje de error si Docker no esta disponible o el daemon no responde."""
+    try:
+        proc = _run_cmd(["docker", "info"])
+    except FileNotFoundError:
+        return "No se encontro el ejecutable 'docker' en PATH."
+    except subprocess.TimeoutExpired:
+        return "Docker no responde dentro del tiempo esperado."
+
+    if proc.returncode == 0:
+        return None
+
+    stderr = (proc.stderr or "").strip()
+    stdout = (proc.stdout or "").strip()
+    combined = "\n".join(part for part in (stderr, stdout) if part).strip()
+    lowered = combined.lower()
+
+    if "dockerdesktoplinuxengine" in lowered or "cannot connect to the docker daemon" in lowered:
+        return (
+            "Docker Desktop no esta arrancado o el daemon de Docker no responde. "
+            "Abre Docker Desktop y espera a que el motor Linux quede en estado Running."
+        )
+    if "the system cannot find the file specified" in lowered:
+        return (
+            "Docker Desktop no esta arrancado o el pipe del daemon no existe. "
+            "Abre Docker Desktop y espera a que el motor Linux arranque."
+        )
+    if combined:
+        return f"Docker no esta disponible: {combined}"
+    return "Docker no esta disponible."
 
 
 def _compose_ps_json(env_file: Path, compose_file: Path) -> list[dict[str, Any]]:
@@ -246,16 +277,6 @@ def main() -> int:
     parser.add_argument("--env-file", default=str(DEFAULT_ENV_FILE), help="Ruta a .env.")
     parser.add_argument("--compose-file", default=str(DEFAULT_COMPOSE_FILE), help="Ruta a docker-compose.")
     parser.add_argument(
-        "--cartociudad-compose-file",
-        default=str(DEFAULT_CARTOCIUDAD_COMPOSE_FILE),
-        help="Ruta al docker-compose de CartoCiudad.",
-    )
-    parser.add_argument(
-        "--skip-cartociudad",
-        action="store_true",
-        help="No incluye cartociudad-api en start/stop/restart.",
-    )
-    parser.add_argument(
         "--skip-client-docs-check",
         action="store_true",
         help="No valida montaje del compartido de clientes tras start/restart.",
@@ -274,7 +295,6 @@ def main() -> int:
 
     env_file = Path(args.env_file).resolve()
     compose_file = Path(args.compose_file).resolve()
-    cartociudad_compose_file = Path(args.cartociudad_compose_file).resolve()
     if not env_file.exists():
         print(f"[ERROR] No existe env file: {env_file}", file=sys.stderr)
         return 1
@@ -282,11 +302,11 @@ def main() -> int:
         print(f"[ERROR] No existe compose file: {compose_file}", file=sys.stderr)
         return 1
     compose_files: list[Path] = [compose_file]
-    if not args.skip_cartociudad:
-        if not cartociudad_compose_file.exists():
-            print(f"[ERROR] No existe compose file de CartoCiudad: {cartociudad_compose_file}", file=sys.stderr)
-            return 1
-        compose_files.append(cartociudad_compose_file)
+
+    docker_error = _check_docker_daemon()
+    if docker_error is not None:
+        print(f"[ERROR] {docker_error}", file=sys.stderr)
+        return 1
 
     try:
         if args.start:
