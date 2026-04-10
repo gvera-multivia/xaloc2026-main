@@ -145,5 +145,6 @@ Accede a `http://localhost:3000` (o el puerto configurado) para:
 - `docs/`: Documentación técnica detallada de flujos específicos.
 
 ---
-Ante cualquier push, habrá autodeploy en la rama main
+Ante cualquier push, habrá autodeploy en la rama main. Se conecta al 130 de proxmox con ssh y dentro se puede usar morrigan como usuario y morrigan como contraseña
+
 
