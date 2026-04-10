@@ -61,6 +61,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          sudo chown -R "$(id -u):$(id -g)" "${DEPLOY_REPO_PATH}" || true
           git -C "${DEPLOY_REPO_PATH}" fetch --prune origin main
           git -C "${DEPLOY_REPO_PATH}" reset --hard origin/main
           git -C "${DEPLOY_REPO_PATH}" clean -fdx
