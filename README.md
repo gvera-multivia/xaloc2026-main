@@ -145,6 +145,5 @@ Accede a `http://localhost:3000` (o el puerto configurado) para:
 - `docs/`: Documentación técnica detallada de flujos específicos.
 
 ---
-*Co-Authored-By: Antigravity <google-deepmind>*
-/flows/*`.
+Ante cualquier push, habrá autodeploy en la rama main
 
