@@ -29,6 +29,7 @@ export default function BlacklistPage() {
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
     const [error, setError] = useState('');
+    const [failedScreenshots, setFailedScreenshots] = useState<Set<string>>(new Set());
     const [busy, setBusy] = useState<string | null>(null);
     const [showAddForm, setShowAddForm] = useState(false);
 
@@ -235,12 +236,19 @@ export default function BlacklistPage() {
                                         {item.reason || 'Sin motivo documentado'}
                                     </div>
 
-                                    {item.screenshot_url && (
+                                    {!failedScreenshots.has(`${item.site_id}:${item.resource_id}`) && (
                                         <div className="mt-4 rounded-xl overflow-hidden border border-border bg-black/5 aspect-video relative group/img">
                                             <img 
                                                 src={`/api/blacklist/${item.site_id}/${item.resource_id}/screenshot`} 
                                                 alt="Captura del error"
                                                 className="w-full h-full object-cover cursor-zoom-in hover:scale-110 transition-transform duration-500"
+                                                onError={() => {
+                                                    setFailedScreenshots((prev) => {
+                                                        const next = new Set(prev);
+                                                        next.add(`${item.site_id}:${item.resource_id}`);
+                                                        return next;
+                                                    });
+                                                }}
                                                 onClick={() => window.open(`/api/blacklist/${item.site_id}/${item.resource_id}/screenshot`, '_blank')}
                                             />
                                             <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
