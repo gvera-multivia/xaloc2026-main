@@ -30,6 +30,17 @@ jobs:
       - name: Checkout workflow repository
         uses: actions/checkout@v4
 
+      - name: Ensure persistent checkout exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -d "${DEPLOY_REPO_PATH}/.git" ]; then
+            echo "Persistent repo not found at ${DEPLOY_REPO_PATH}, cloning..."
+            mkdir -p "$(dirname "${DEPLOY_REPO_PATH}")"
+            git clone "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" "${DEPLOY_REPO_PATH}"
+          fi
+          git -C "${DEPLOY_REPO_PATH}" rev-parse --is-inside-work-tree
+
       - name: Verify runner and deploy environment
         shell: bash
         run: |
