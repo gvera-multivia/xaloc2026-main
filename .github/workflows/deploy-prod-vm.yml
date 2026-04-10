@@ -11,7 +11,7 @@ permissions:
 
 concurrency:
   group: deploy-prod-main
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -19,7 +19,7 @@ jobs:
       - self-hosted
       - linux
       - xaloc-prod
-    timeout-minutes: 90
+    timeout-minutes: 150
     env:
       DEPLOY_REPO_PATH: /opt/xaloc/xaloc2026-main
       DEPLOY_ENV_FILE: /opt/xaloc/env/xaloc.env

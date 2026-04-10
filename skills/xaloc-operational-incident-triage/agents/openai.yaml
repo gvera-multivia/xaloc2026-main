@@ -1,0 +1,4 @@
+interface:
+  display_name: "Xaloc Operational Incident Triage"
+  short_description: "Clasificar jobs fallidos e incidencias con heuristicas por sede"
+  default_prompt: "Usa $xaloc-operational-incident-triage para decidir rapidamente por que ha fallado un job o una incidencia en Xaloc y si hay que reintentar, bloquear, corregir datos o escalar."

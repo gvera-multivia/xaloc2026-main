@@ -77,3 +77,5 @@ logs/*
 *.db
 tmp/*
 *.gpkg
+
+.playwright-mcp/

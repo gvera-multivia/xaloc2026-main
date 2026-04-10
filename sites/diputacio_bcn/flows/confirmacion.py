@@ -6,6 +6,8 @@ import time
 import unicodedata
 from typing import TYPE_CHECKING
 
+from ._sync import click_and_wait
+
 if TYPE_CHECKING:
     from playwright.async_api import Page
     from ..config import DiputacioBcnConfig
@@ -348,12 +350,16 @@ async def _resolve_preselector_screen(page: "Page", datos: "DiputacioBcnTarget")
             f"MunicipisList={state_muni} EnsList={state_ens} url={page.url}"
         )
 
-    await submit_btn.scroll_into_view_if_needed()
-    await submit_btn.click()
-    try:
-        await page.wait_for_load_state("networkidle", timeout=15000)
-    except Exception:
-        await page.wait_for_load_state("domcontentloaded", timeout=5000)
+    await click_and_wait(
+        page,
+        submit_btn,
+        url_patterns=[
+            "**/TramitsPagaments/Presentmul/presentmul**",
+            "**/RegistreElectronicMultes/presgenmul**",
+            "**/Home/Seleccio/Seleccio**",
+        ],
+        visible_selectors=["#ExpSancionador", "#MunicipisList", "#EnsList", "#FetsSolicitud"],
+    )
     return True
 
 
@@ -433,19 +439,31 @@ async def run_confirmacion(page: "Page", config: "DiputacioBcnConfig", datos: "D
             "input[type='submit'][name='idcondBtn'][value='Identificar conductor o poseedor del vehículo']"
         ).first
         if await identificacion_button.count() > 0:
-            await identificacion_button.wait_for(state="visible", timeout=15000)
-            await identificacion_button.click()
+            await click_and_wait(
+                page,
+                identificacion_button,
+                url_patterns=["**/TramitsPagaments/Presentmul/presentmulPas2**"],
+                visible_selectors=["#FetsSolicitud"],
+            )
     elif _is_apremio_embargo_phase(fase_raw):
         multas_link = page.locator(
             "a[href*='RegistreElectronicMultes'][href*='presgenmul']"
         ).first
         if await multas_link.count() > 0:
-            await multas_link.wait_for(state="visible", timeout=15000)
-            await multas_link.click()
+            await click_and_wait(
+                page,
+                multas_link,
+                url_patterns=["**/RegistreElectronicMultes/presgenmul**"],
+                visible_selectors=["#FetsSolicitud", "#MunicipisList"],
+            )
     elif _is_alegaciones_phase(fase_raw):
         alegaciones_button = page.locator("input[type='submit'][value='Presentar alegaciones o recurso']").first
         if await alegaciones_button.count() > 0:
-            await alegaciones_button.wait_for(state="visible", timeout=15000)
-            await alegaciones_button.click()
+            await click_and_wait(
+                page,
+                alegaciones_button,
+                url_patterns=["**/TramitsPagaments/Presentmul/presentmulPas2**"],
+                visible_selectors=["#FetsSolicitud"],
+            )
 
     return page

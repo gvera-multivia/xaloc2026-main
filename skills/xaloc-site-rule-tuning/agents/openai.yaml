@@ -1,0 +1,4 @@
+interface:
+  display_name: "Xaloc Site Rule Tuning"
+  short_description: "Ajustar expedientes validos y pequenos hotfixes por sede"
+  default_prompt: "Usa $xaloc-site-rule-tuning para ajustar expedientes validos, filtros de organismo, URLs o pequenos cambios operativos de una sede existente en Xaloc."

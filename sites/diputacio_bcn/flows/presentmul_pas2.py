@@ -13,6 +13,7 @@ from core.justificantes_storage import (
     save_receipt_from_tmp,
 )
 from .confirmacion import _resolve_preselector_screen
+from ._sync import click_and_wait
 
 from ..texts import build_fets_solicitud
 
@@ -413,21 +414,21 @@ async def run_presentmul_pas2(page: "Page", config: "DiputacioBcnConfig", datos:
         submit_btn = page.locator("input[type='submit'][value='Siguiente']").first
         if await submit_btn.count() == 0:
             raise RuntimeError("No se encontro el boton 'Siguiente' en presgenmul.")
-        await submit_btn.scroll_into_view_if_needed()
-        await submit_btn.click()
-        await page.wait_for_url(
-            "**/TramitsPagaments/RegistreElectronicMultes/presgenmulPresentacio**",
-            timeout=30000,
+        await click_and_wait(
+            page,
+            submit_btn,
+            url_patterns=["**/TramitsPagaments/RegistreElectronicMultes/presgenmulPresentacio**"],
+            visible_selectors=["#SignaturaDocument"],
         )
     else:
         continue_btn = page.locator("input[type='submit'][value='Continuar']").first
         if await continue_btn.count() == 0:
             raise RuntimeError("No se encontro el boton 'Continuar' en presentmulPas2.")
-        await continue_btn.scroll_into_view_if_needed()
-        await continue_btn.click()
-        await page.wait_for_url(
-            "**/TramitsPagaments/Presentmul/presentmulPresentacio**",
-            timeout=30000,
+        await click_and_wait(
+            page,
+            continue_btn,
+            url_patterns=["**/TramitsPagaments/Presentmul/presentmulPresentacio**"],
+            visible_selectors=["#SignaturaDocument"],
         )
 
     signature_checkbox = page.locator("#SignaturaDocument").first
@@ -435,8 +436,16 @@ async def run_presentmul_pas2(page: "Page", config: "DiputacioBcnConfig", datos:
         await _ensure_checked(page, signature_checkbox, label="SignaturaDocument")
     firmar_btn = page.locator("input.btn.btn-info[type='submit'][value*='Firmar y']").first
     if await firmar_btn.count() > 0:
-        await firmar_btn.wait_for(state="visible", timeout=30000)
-        await firmar_btn.click(timeout=90000)
+        await click_and_wait(
+            page,
+            firmar_btn,
+            visible_selectors=[
+                "button.btn.btn-info.pull-left",
+                "button:has-text('Recibo de presentaci')",
+            ],
+            timeout_ms=90000,
+            click_timeout_ms=90000,
+        )
     recibo_btn = page.locator("button.btn.btn-info.pull-left:has-text('Recibo de presentación')").first
     if await recibo_btn.count() > 0:
         await recibo_btn.wait_for(state="visible", timeout=15000)

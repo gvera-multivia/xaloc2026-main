@@ -12,6 +12,7 @@ from core.base_config import BaseConfig
 @dataclass
 class AyuntaPalmaSelectors:
     login_frame: str = "#ventanaModal"
+    login_option_clave_certificado: str = "#optClaveCertificado"
     login_option_rows: str = "#optSsl tr"
     login_option_cert_titulo: str = "#optSsl tr:first-child .titulo-opcion"
     btn_nueva_instancia: str = "button.redirect-url.stop-click-propagation.btn-icono"

@@ -3,6 +3,8 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
+from ._sync import click_and_wait
+
 if TYPE_CHECKING:
     from playwright.async_api import Page
     from ..config import DiputacioBcnConfig
@@ -73,7 +75,11 @@ async def _paso4_fisica(page: "Page", datos: "DiputacioBcnTarget") -> None:
     await page.locator("#nomcr4c").fill(datos.nom_cr4 or "Nom")
     await page.locator("#cognom1cr4c").fill(datos.cognom1 or "Cognom1")
     await page.locator("#cognom2cr4c").fill(datos.cognom2 or "Cognom2")
-    await page.locator("#collapseFour").get_by_role("button", name="Continuar").click()
+    await click_and_wait(
+        page,
+        page.locator("#collapseFour").get_by_role("button", name="Continuar"),
+        url_patterns=["**/Home/representacioPas3juridica**"],
+    )
 
 
 async def _paso4_juridica(page: "Page", datos: "DiputacioBcnTarget") -> None:
@@ -83,7 +89,11 @@ async def _paso4_juridica(page: "Page", datos: "DiputacioBcnTarget") -> None:
     ).click()
     await page.locator("#identificadorInteressatCR5Rep").fill((datos.nif_interessat or "").upper())
     await page.locator("#nomInteressatCR5Rep").fill(datos.nom_juridica or "Empresa SL")
-    await page.locator("#collapseFive").get_by_role("button", name="Continuar").click()
+    await click_and_wait(
+        page,
+        page.locator("#collapseFive").get_by_role("button", name="Continuar"),
+        url_patterns=["**/Home/representacioPas3juridica**"],
+    )
 
 
 async def run_formulario(page: "Page", config: "DiputacioBcnConfig", datos: "DiputacioBcnTarget") -> "Page":
@@ -105,15 +115,17 @@ async def run_formulario(page: "Page", config: "DiputacioBcnConfig", datos: "Dip
         page = await _pick_login_or_pas1_page(page)
 
     await page.get_by_role("radio", name="Representante legal").click()
-    await page.get_by_role("button", name="La entidad es representante de otra persona interesada").click()
-
-    await page.wait_for_url("**/Home/representacioPas2juridica**", timeout=120000)
+    await click_and_wait(
+        page,
+        page.get_by_role("button", name="La entidad es representante de otra persona interesada"),
+        url_patterns=["**/Home/representacioPas2juridica**"],
+        timeout_ms=120000,
+    )
     if (datos.tipo_representado or "fisica").strip().lower() == "juridica":
         await _paso4_juridica(page, datos)
     else:
         await _paso4_fisica(page, datos)
 
     # Dejamos la subida de documentos para run_documentos.
-    await page.wait_for_url("**/Home/representacioPas3juridica**", timeout=120000)
     await page.wait_for_load_state("networkidle", timeout=15000)
     return _pick_latest_open_page(page)

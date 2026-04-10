@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from core.client_paths import resolve_client_docs_base_path
+from ._sync import click_and_wait
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -736,7 +737,16 @@ async def run_documentos(page: "Page", config: "DiputacioBcnConfig", datos: "Dip
     if await submit.count() == 0:
         raise RuntimeError("No se encuentra el boton 'Continuar' tras subir documento/comentario.")
     logger.info("Diputacio BCN docs: click en Continuar tras adjuntos")
-    await submit.click()
+    await click_and_wait(
+        page,
+        submit,
+        url_patterns=[
+            "**/Home/dadesnotif**",
+            "**/Home/correuElectronic**",
+            "**/Home/presentmul**",
+        ],
+        visible_selectors=["#InfoMobil1", "#InfoMail1", "#MailPas3", "#ExpSancionador", "#MunicipisList"],
+    )
 
     # Paso /Home/dadesnotif o /Home/correuElectronic
     logger.info("Diputacio BCN docs: detectando pantalla de datos de notificacion...")
@@ -803,7 +813,12 @@ async def run_documentos(page: "Page", config: "DiputacioBcnConfig", datos: "Dip
         if not phone_filled or not email_filled:
             logger.warning("No se pudieron rellenar todos los campos de notificacion en dadesnotif (phone=%s, email=%s)", phone_filled, email_filled)
 
-        await page.locator("input.btn.btn-info[name='accio'][value='Continuar']").first.click()
+        await click_and_wait(
+            page,
+            page.locator("input.btn.btn-info[name='accio'][value='Continuar']").first,
+            url_patterns=["**/Home/correuElectronic**", "**/Home/presentmul**"],
+            visible_selectors=["#MailPas3", "#LOPD", "#ExpSancionador", "#MunicipisList"],
+        )
         await _dismiss_cookies(page)
         try:
             await page.wait_for_url("**/Home/correuElectronic**", timeout=15000)
@@ -830,9 +845,25 @@ async def run_documentos(page: "Page", config: "DiputacioBcnConfig", datos: "Dip
 
         btn_acceder = page.locator("input.btn.btn-info[name='accio'][value='Acceder al trámite']").first
         if await btn_acceder.count() > 0:
-            await btn_acceder.click()
+            await click_and_wait(
+                page,
+                btn_acceder,
+                url_patterns=[
+                    "**/TramitsPagaments/Presentmul/presentmul**",
+                    "**/RegistreElectronicMultes/presgenmul**",
+                ],
+                visible_selectors=["#ExpSancionador", "#MunicipisList", "#FetsSolicitud"],
+            )
         else:
             # Fallback por texto si el value es diferente
-            await page.get_by_role("button", name=re.compile(r"Acceder", re.IGNORECASE)).click()
+            await click_and_wait(
+                page,
+                page.get_by_role("button", name=re.compile(r"Acceder", re.IGNORECASE)).first,
+                url_patterns=[
+                    "**/TramitsPagaments/Presentmul/presentmul**",
+                    "**/RegistreElectronicMultes/presgenmul**",
+                ],
+                visible_selectors=["#ExpSancionador", "#MunicipisList", "#FetsSolicitud"],
+            )
 
     return _pick_latest_open_page(page)

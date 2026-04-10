@@ -1,0 +1,4 @@
+interface:
+  display_name: "Xaloc Playwright MCP Debug Discovery"
+  short_description: "Seguir una sede con Playwright MCP y localizar por que rompe"
+  default_prompt: "Usa $xaloc-playwright-mcp-debug-discovery para seguir el flujo de una sede con Playwright MCP, detectar donde falla y mapearlo al codigo correcto del repo."

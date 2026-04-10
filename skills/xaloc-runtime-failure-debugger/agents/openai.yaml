@@ -1,0 +1,4 @@
+interface:
+  display_name: "Xaloc Runtime Failure Debugger"
+  short_description: "Diagnosticar fallos reales con Postgres, jobs, logs y codigo"
+  default_prompt: "Usa $xaloc-runtime-failure-debugger para investigar por que esta fallando un recurso o job en Xaloc leyendo historico PostgreSQL, jobs, logs y codigo."
