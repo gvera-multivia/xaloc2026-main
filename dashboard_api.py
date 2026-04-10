@@ -617,7 +617,7 @@ async def api_blacklist_unblock(site_id: str, resource_id: int, _user: dict = De
 
 
 @app.get("/api/blacklist/{site_id}/{resource_id}/screenshot")
-async def api_blacklist_screenshot(site_id: str, resource_id: int, _user: dict = Depends(require_user)):
+async def api_blacklist_screenshot(site_id: str, resource_id: int):
     """Proxies the screenshot from S3/MinIO to the client."""
     try:
         from core.screenshot_store import get_screenshot_store
