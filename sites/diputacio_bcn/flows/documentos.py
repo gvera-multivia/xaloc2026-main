@@ -361,6 +361,71 @@ async def _select_notification_recipient_radio(page: "Page") -> bool:
                 exc_info=True,
             )
 
+    try:
+        selected_strategy = await page.evaluate(
+            """() => {
+                const normalize = (value) =>
+                    (value || "")
+                        .normalize("NFD")
+                        .replace(/[\\u0300-\\u036f]/g, "")
+                        .toLowerCase()
+                        .replace(/\\s+/g, " ")
+                        .trim();
+
+                const mark = (radio) => {
+                    if (!radio) return false;
+                    radio.checked = true;
+                    radio.dispatchEvent(new Event("input", { bubbles: true }));
+                    radio.dispatchEvent(new Event("change", { bubbles: true }));
+                    radio.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+                    return !!radio.checked;
+                };
+
+                const wantedTexts = [
+                    "el/la representante que efectua este tramite",
+                    "representante que efectua este tramite",
+                ];
+
+                const radios = Array.from(document.querySelectorAll("input[type='radio']"));
+                for (const radio of radios) {
+                    let current = radio;
+                    for (let depth = 0; current && depth < 6; depth += 1, current = current.parentElement) {
+                        const text = normalize(current.textContent || "");
+                        if (!text) continue;
+                        if (wantedTexts.some((wanted) => text.includes(wanted)) && mark(radio)) {
+                            return "text-container-match";
+                        }
+                    }
+                }
+
+                const containers = Array.from(document.querySelectorAll("div, fieldset, td, tr, section"));
+                for (const container of containers) {
+                    const text = normalize(container.textContent || "");
+                    if (!text.includes("los medios electronicos indicados son de")) continue;
+                    const visibleRadios = Array.from(container.querySelectorAll("input[type='radio']")).filter((radio) => {
+                        const style = window.getComputedStyle(radio);
+                        return style.display !== "none" && style.visibility !== "hidden";
+                    });
+                    if (visibleRadios.length >= 2 && mark(visibleRadios[1])) {
+                        return "second-radio-in-notification-block";
+                    }
+                }
+
+                return "";
+            }"""
+        )
+        if selected_strategy:
+            logger.info(
+                "Diputacio BCN docs: seleccionado radio de notificacion via estrategia DOM='%s'",
+                selected_strategy,
+            )
+            return True
+    except Exception:
+        logger.warning(
+            "Diputacio BCN docs: fallo seleccionando radio de notificacion via estrategia DOM",
+            exc_info=True,
+        )
+
     fallback_radios = [
         page.locator("input[name='Secc1Radio'][value='R'], input[name='Secc1Radio'][data-radio='R1']").first,
         page.locator("#uncheckNEPO2, input[name='NotifElecPuntualOP2'][value='R']").first,
