@@ -447,6 +447,31 @@ async def _select_notification_recipient_radio(page: "Page") -> bool:
     return False
 
 
+async def _notification_validation_messages(page: "Page") -> list[str]:
+    messages = await page.evaluate(
+        """() => {
+            const selectors = [
+                ".error",
+                ".text-danger",
+                ".field-validation-error",
+                ".validation-summary-errors",
+                ".alert",
+                ".alert-warning",
+                ".alert-danger",
+            ];
+            const out = [];
+            for (const selector of selectors) {
+                for (const el of document.querySelectorAll(selector)) {
+                    const text = (el.textContent || "").replace(/\\s+/g, " ").trim();
+                    if (text) out.push(text);
+                }
+            }
+            return Array.from(new Set(out));
+        }"""
+    )
+    return [str(msg).strip() for msg in (messages or []) if str(msg).strip()]
+
+
 async def _upload_single_document(page: "Page", doc_path: str) -> None:
     browse = page.locator("#fakeBrowse").first
     if await browse.count() == 0:
@@ -880,7 +905,11 @@ async def run_documentos(page: "Page", config: "DiputacioBcnConfig", datos: "Dip
         logger.info("Diputacio BCN docs: detectada pantalla '%s'", notif_page_type)
 
     if notif_page_type == "dadesnotif":
-        await _select_notification_recipient_radio(page)
+        radio_selected = await _select_notification_recipient_radio(page)
+        if not radio_selected:
+            raise RuntimeError(
+                "Diputacio BCN docs: no se pudo seleccionar el radio obligatorio de datos de notificacion."
+            )
 
         phone_selectors = ["#InfoMobil1", "input[name='InfoMobil1']", "#InfoMobil2", "input[name='InfoMobil2']"]
         email_selectors = ["#InfoMail1", "input[name='InfoMail1']", "#InfoMail2", "input[name='InfoMail2']"]
@@ -906,7 +935,11 @@ async def run_documentos(page: "Page", config: "DiputacioBcnConfig", datos: "Dip
                     pass
 
         if not phone_filled or not email_filled:
-            logger.warning("No se pudieron rellenar todos los campos de notificacion en dadesnotif (phone=%s, email=%s)", phone_filled, email_filled)
+            messages = await _notification_validation_messages(page)
+            raise RuntimeError(
+                "Diputacio BCN docs: no se pudieron rellenar todos los campos obligatorios de dadesnotif "
+                f"(phone={phone_filled}, email={email_filled}, mensajes={messages})."
+            )
 
         await click_and_wait(
             page,
@@ -915,6 +948,13 @@ async def run_documentos(page: "Page", config: "DiputacioBcnConfig", datos: "Dip
             visible_selectors=["#MailPas3", "#LOPD", "#ExpSancionador", "#MunicipisList"],
         )
         await _dismiss_cookies(page)
+        current_url = str(page.url).lower()
+        if "/home/dadesnotif" in current_url:
+            messages = await _notification_validation_messages(page)
+            raise RuntimeError(
+                "Diputacio BCN docs: seguimos en dadesnotif tras pulsar Continuar. "
+                f"url={page.url!r} mensajes={messages}"
+            )
         try:
             await page.wait_for_url("**/Home/correuElectronic**", timeout=15000)
             notif_page_type = "correuElectronic"
