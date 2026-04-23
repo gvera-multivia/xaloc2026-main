@@ -341,6 +341,47 @@ async def _ensure_checked(page: "Page", locator, *, label: str) -> None:
     raise RuntimeError(f"Diputacio BCN docs: no se pudo marcar checkbox '{label}' tras reintentos.")
 
 
+async def _select_notification_recipient_radio(page: "Page") -> bool:
+    preferred_labels = [
+        re.compile(r"el/la representante que efect[úu]a este tr[áa]mite", re.IGNORECASE),
+        re.compile(r"representante que efect[úu]a este tr[áa]mite", re.IGNORECASE),
+    ]
+
+    for pattern in preferred_labels:
+        radio = page.get_by_label(pattern).first
+        try:
+            if await radio.count() > 0 and await radio.is_visible():
+                await _ensure_checked(page, radio, label=f"radio notificacion: {pattern.pattern}")
+                logger.info("Diputacio BCN docs: seleccionado radio de notificacion por label='%s'", pattern.pattern)
+                return True
+        except Exception:
+            logger.warning(
+                "Diputacio BCN docs: fallo seleccionando radio de notificacion por label='%s'",
+                pattern.pattern,
+                exc_info=True,
+            )
+
+    fallback_radios = [
+        page.locator("input[name='Secc1Radio'][value='R'], input[name='Secc1Radio'][data-radio='R1']").first,
+        page.locator("#uncheckNEPO2, input[name='NotifElecPuntualOP2'][value='R']").first,
+    ]
+    for idx, radio in enumerate(fallback_radios, start=1):
+        try:
+            if await radio.count() > 0 and await radio.is_visible():
+                await _ensure_checked(page, radio, label=f"radio notificacion fallback {idx}")
+                logger.info("Diputacio BCN docs: seleccionado radio de notificacion fallback=%s", idx)
+                return True
+        except Exception:
+            logger.warning(
+                "Diputacio BCN docs: fallo seleccionando radio de notificacion fallback=%s",
+                idx,
+                exc_info=True,
+            )
+
+    logger.warning("Diputacio BCN docs: no se encontro radio de notificacion seleccionable.")
+    return False
+
+
 async def _upload_single_document(page: "Page", doc_path: str) -> None:
     browse = page.locator("#fakeBrowse").first
     if await browse.count() == 0:
@@ -774,18 +815,7 @@ async def run_documentos(page: "Page", config: "DiputacioBcnConfig", datos: "Dip
         logger.info("Diputacio BCN docs: detectada pantalla '%s'", notif_page_type)
 
     if notif_page_type == "dadesnotif":
-        representative_radios = [
-            page.locator("input[name='Secc1Radio'][value='R'], input[name='Secc1Radio'][data-radio='R1']").first,
-            page.locator("#uncheckNEPO2, input[name='NotifElecPuntualOP2'][value='R']").first,
-        ]
-        for radio in representative_radios:
-            if await radio.count() > 0:
-                try:
-                    if await radio.is_visible():
-                        await page.wait_for_timeout(2000)
-                        await radio.check(force=True)
-                except Exception:
-                    pass
+        await _select_notification_recipient_radio(page)
 
         phone_selectors = ["#InfoMobil1", "input[name='InfoMobil1']", "#InfoMobil2", "input[name='InfoMobil2']"]
         email_selectors = ["#InfoMail1", "input[name='InfoMail1']", "#InfoMail2", "input[name='InfoMail2']"]
