@@ -342,6 +342,81 @@ async def _ensure_checked(page: "Page", locator, *, label: str) -> None:
 
 
 async def _select_notification_recipient_radio(page: "Page") -> bool:
+    exact_radios = [
+        page.locator("#uncheckNEPO2").first,
+        page.locator("input[name='NotifElecPuntualOP2'][value='R']").first,
+    ]
+
+    for idx, radio in enumerate(exact_radios, start=1):
+        try:
+            if await radio.count() == 0:
+                continue
+
+            await radio.wait_for(state="attached", timeout=10000)
+            try:
+                await radio.scroll_into_view_if_needed(timeout=3000)
+            except Exception:
+                pass
+
+            await page.wait_for_timeout(300)
+
+            try:
+                await radio.check(force=True, timeout=3000)
+            except Exception:
+                pass
+
+            try:
+                if await radio.is_checked():
+                    logger.info("Diputacio BCN docs: seleccionado radio de notificacion exacto=%s via check()", idx)
+                    return True
+            except Exception:
+                pass
+
+            try:
+                await radio.click(force=True, timeout=3000)
+            except Exception:
+                pass
+
+            try:
+                if await radio.is_checked():
+                    logger.info("Diputacio BCN docs: seleccionado radio de notificacion exacto=%s via click()", idx)
+                    return True
+            except Exception:
+                pass
+
+            try:
+                checked = await radio.evaluate(
+                    """(el) => {
+                        if (!el) return false;
+                        const container = el.closest("label, div, td, tr, section") || el.parentElement;
+                        if (container instanceof HTMLElement) {
+                            container.scrollIntoView({ block: "center", inline: "nearest" });
+                        }
+                        el.click();
+                        if (el.checked) return true;
+                        el.checked = true;
+                        el.dispatchEvent(new Event("input", { bubbles: true }));
+                        el.dispatchEvent(new Event("change", { bubbles: true }));
+                        el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+                        return !!el.checked;
+                    }"""
+                )
+                if checked:
+                    logger.info("Diputacio BCN docs: seleccionado radio de notificacion exacto=%s via evaluate()", idx)
+                    return True
+            except Exception:
+                logger.warning(
+                    "Diputacio BCN docs: fallo seleccionando radio de notificacion exacto=%s",
+                    idx,
+                    exc_info=True,
+                )
+        except Exception:
+            logger.warning(
+                "Diputacio BCN docs: fallo preparando radio de notificacion exacto=%s",
+                idx,
+                exc_info=True,
+            )
+
     preferred_labels = [
         re.compile(r"el/la representante que efect[úu]a este tr[áa]mite", re.IGNORECASE),
         re.compile(r"representante que efect[úu]a este tr[áa]mite", re.IGNORECASE),
@@ -374,12 +449,23 @@ async def _select_notification_recipient_radio(page: "Page") -> bool:
 
                 const mark = (radio) => {
                     if (!radio) return false;
+                    const container = radio.closest("label, div, td, tr, section") || radio.parentElement;
+                    if (container instanceof HTMLElement) {
+                        container.scrollIntoView({ block: "center", inline: "nearest" });
+                    }
+                    radio.click();
+                    if (radio.checked) return true;
                     radio.checked = true;
                     radio.dispatchEvent(new Event("input", { bubbles: true }));
                     radio.dispatchEvent(new Event("change", { bubbles: true }));
                     radio.dispatchEvent(new MouseEvent("click", { bubbles: true }));
                     return !!radio.checked;
                 };
+
+                const exact = document.querySelector("#uncheckNEPO2, input[name='NotifElecPuntualOP2'][value='R']");
+                if (mark(exact)) {
+                    return "exact-notifelec-r";
+                }
 
                 const wantedTexts = [
                     "el/la representante que efectua este tramite",
@@ -427,8 +513,8 @@ async def _select_notification_recipient_radio(page: "Page") -> bool:
         )
 
     fallback_radios = [
-        page.locator("input[name='Secc1Radio'][value='R'], input[name='Secc1Radio'][data-radio='R1']").first,
         page.locator("#uncheckNEPO2, input[name='NotifElecPuntualOP2'][value='R']").first,
+        page.locator("input[name='Secc1Radio'][value='R'], input[name='Secc1Radio'][data-radio='R1']").first,
     ]
     for idx, radio in enumerate(fallback_radios, start=1):
         try:
