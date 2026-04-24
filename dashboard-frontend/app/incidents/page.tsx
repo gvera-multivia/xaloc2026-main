@@ -29,6 +29,13 @@ type Incident = {
     gesdoc_ui_variant?: 'purple' | 'default';
 };
 
+function incidentVariantLabel(inc: Incident): string {
+    const payload = inc.payload && typeof inc.payload === 'object' ? inc.payload : {};
+    const protocol = String(payload.protocol || payload.protocolo || payload.naturaleza || '').trim();
+    const fase = String(payload.fase_procedimiento || payload.FaseProcedimiento || '').trim();
+    return [protocol, fase].filter(Boolean).join(' | ');
+}
+
 type GesdocStatus = {
     ok: boolean;
     incident_id?: string;
@@ -340,6 +347,11 @@ export default function IncidentsPage() {
                                                 <div className="flex flex-col">
                                                     <span className={`text-xs font-black uppercase ${siteClass}`}>{inc.site_id}</span>
                                                     <span className="text-[10px] font-mono text-muted-foreground">#{fmtRid(inc.resource_id)}</span>
+                                                    {incidentVariantLabel(inc) && (
+                                                        <span className="mt-1 text-[9px] font-black uppercase tracking-[0.14em] text-muted-foreground/70">
+                                                            {incidentVariantLabel(inc)}
+                                                        </span>
+                                                    )}
                                                 </div>
                                             </div>
                                         </td>

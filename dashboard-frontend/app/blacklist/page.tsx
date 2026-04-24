@@ -18,10 +18,18 @@ import { sileo } from 'sileo';
 interface BlacklistItem {
     site_id: string;
     resource_id: number;
+    protocol?: string | null;
+    fase_procedimiento?: string | null;
     reason?: string;
     source?: string;
     screenshot_url?: string;
     created_at: string;
+}
+
+function buildVariantLabel(item: BlacklistItem): string {
+    const protocol = String(item.protocol || '').trim();
+    const fase = String(item.fase_procedimiento || '').trim();
+    return [protocol, fase].filter(Boolean).join(' | ');
 }
 
 export default function BlacklistPage() {
@@ -229,6 +237,11 @@ export default function BlacklistPage() {
                                     <div>
                                         <h4 className="font-bold text-lg leading-tight uppercase tracking-tight">{item.site_id}</h4>
                                         <p className="text-xl font-mono font-bold text-primary">#{item.resource_id}</p>
+                                        {buildVariantLabel(item) && (
+                                            <p className="mt-1 text-[10px] font-black uppercase tracking-[0.14em] text-muted-foreground">
+                                                {buildVariantLabel(item)}
+                                            </p>
+                                        )}
                                     </div>
 
                                     <div className="bg-secondary/50 p-4 rounded-2xl border border-border/50 text-xs leading-relaxed italic">

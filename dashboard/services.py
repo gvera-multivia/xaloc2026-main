@@ -879,6 +879,34 @@ class DashboardService:
             limit=safe_limit,
         )
 
+    @staticmethod
+    def _extract_variant_from_payload(payload: dict[str, Any] | None) -> tuple[str | None, str | None]:
+        data = payload if isinstance(payload, dict) else {}
+        protocol = (
+            data.get("protocol")
+            or data.get("protocolo")
+            or data.get("naturaleza")
+        )
+        fase = data.get("fase_procedimiento") or data.get("FaseProcedimiento")
+        protocol_text = str(protocol).strip() if protocol is not None else ""
+        fase_text = str(fase).strip() if fase is not None else ""
+        return (protocol_text or None, fase_text or None)
+
+    def _get_resource_variant(self, *, site_id: str, resource_id: int) -> tuple[str | None, str | None]:
+        try:
+            details = self.get_history_postgres_details(site_id=site_id, resource_id=resource_id, limit=25)
+        except Exception:
+            return (None, None)
+
+        for item in details.get("items") or []:
+            protocol, fase = self._extract_variant_from_payload(item.get("payload"))
+            if protocol or fase:
+                return (protocol, fase)
+            protocol_value = str(item.get("protocol") or "").strip() or None
+            if protocol_value:
+                return (protocol_value, None)
+        return (None, None)
+
     def list_queue_days(self, *, page: int, page_size: int) -> dict[str, Any]:
         days = self.queue_repo.list_days()
         return self._paginate(days, page, page_size)
@@ -1105,7 +1133,21 @@ class DashboardService:
         }
 
     def list_blacklist(self, *, site_id: str | None = None) -> list[dict[str, Any]]:
-        return self.admin_store.list_blocked_resources(site_id=site_id)
+        items = self.admin_store.list_blocked_resources(site_id=site_id)
+        for item in items:
+            site = str(item.get("site_id") or "").strip()
+            rid = item.get("resource_id")
+            if not site or rid is None:
+                item.setdefault("protocol", None)
+                item.setdefault("fase_procedimiento", None)
+                continue
+            try:
+                protocol, fase = self._get_resource_variant(site_id=site, resource_id=int(rid))
+            except Exception:
+                protocol, fase = (None, None)
+            item["protocol"] = protocol
+            item["fase_procedimiento"] = fase
+        return items
 
     def block_blacklist(
         self,
