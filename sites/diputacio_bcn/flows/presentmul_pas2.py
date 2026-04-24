@@ -20,7 +20,7 @@ from ..texts import build_fets_solicitud
 logger = logging.getLogger("sites.diputacio_bcn.presentmul_pas2")
 
 if TYPE_CHECKING:
-    from playwright.async_api import Page
+    from playwright.async_api import Locator, Page
     from ..config import DiputacioBcnConfig
     from ..data_models import DiputacioBcnTarget
 
@@ -41,6 +41,17 @@ def _is_orgt_diba_alias(value: str) -> bool:
     has_diba = "DIPUTAC" in norm or "DIBA" in norm
     has_bcn_hint = "BARCELONA" in norm or "OFICINA DE MULTES" in norm
     return bool(has_orgt and has_diba and has_bcn_hint)
+
+
+def _is_retryable_signature_error_text(value: str) -> bool:
+    norm = _norm(value)
+    if not norm:
+        return False
+    return (
+        "SE HA PRODUCIDO UN ERROR DURANTE EL PROCESO DE FIRMA" in norm
+        or "INTENTAR REPETIR LA FIRMA" in norm
+        or "SI PERSISTE EL ERROR" in norm
+    )
 
 
 def _extract_municipio_from_organismo(organismo_raw: str) -> str:
@@ -208,6 +219,98 @@ async def _wait_select_options_ready(
             return last_state
         await page.wait_for_timeout(250)
     return last_state
+
+
+async def _dismiss_cookie_banner_if_present(page: "Page") -> None:
+    selectors = [
+        "button:has-text('De acuerdo')",
+        "button:has-text('D'acord')",
+        "button:has-text('Aceptar')",
+    ]
+    for selector in selectors:
+        button = page.locator(selector).first
+        try:
+            if await button.count() > 0 and await button.is_visible():
+                await button.click(timeout=3000)
+                await page.wait_for_timeout(300)
+                return
+        except Exception:
+            continue
+
+
+async def _signature_page_messages(page: "Page") -> list[str]:
+    return await page.evaluate(
+        """() => {
+            const selectors = [
+                ".alert",
+                ".alert-warning",
+                ".alert-danger",
+                ".warning",
+                ".error",
+                ".text-danger",
+                ".validation-summary-errors",
+            ];
+            const out = [];
+            for (const selector of selectors) {
+                for (const el of document.querySelectorAll(selector)) {
+                    const text = (el.textContent || "").replace(/\\s+/g, " ").trim();
+                    if (text) out.push(text);
+                }
+            }
+            return Array.from(new Set(out));
+        }"""
+    )
+
+
+async def _click_sign_and_wait(page: "Page", firmar_btn: "Locator") -> None:
+    last_error: Exception | None = None
+    for attempt in range(1, 4):
+        await _dismiss_cookie_banner_if_present(page)
+        try:
+            await firmar_btn.scroll_into_view_if_needed()
+        except Exception:
+            pass
+
+        try:
+            await click_and_wait(
+                page,
+                firmar_btn,
+                visible_selectors=[
+                    "button.btn.btn-info.pull-left",
+                    "button:has-text('Recibo de presentaci')",
+                ],
+                timeout_ms=30000,
+                click_timeout_ms=15000,
+            )
+            return
+        except Exception as exc:
+            last_error = exc
+            messages = [str(msg).strip() for msg in (await _signature_page_messages(page) or []) if str(msg).strip()]
+            retryable = any(_is_retryable_signature_error_text(msg) for msg in messages)
+            still_visible = False
+            try:
+                still_visible = await firmar_btn.count() > 0 and await firmar_btn.is_visible()
+            except Exception:
+                pass
+
+            logger.warning(
+                "Diputacio BCN presentmulPas2: fallo al pulsar Firmar intento=%s retryable=%s still_visible=%s mensajes=%s",
+                attempt,
+                retryable,
+                still_visible,
+                messages,
+            )
+
+            if attempt >= 3 or not retryable or not still_visible:
+                raise RuntimeError(
+                    "Diputacio BCN presentmulPas2: no se pudo completar la firma. "
+                    f"intento={attempt} mensajes={messages} url={page.url!r}"
+                ) from exc
+
+            await page.wait_for_timeout(4000)
+
+    if last_error is not None:
+        raise last_error
 
 
 async def _select_municipio_if_present(page: "Page", datos: "DiputacioBcnTarget") -> None:
@@ -436,16 +539,7 @@ async def run_presentmul_pas2(page: "Page", config: "DiputacioBcnConfig", datos:
         await _ensure_checked(page, signature_checkbox, label="SignaturaDocument")
     firmar_btn = page.locator("input.btn.btn-info[type='submit'][value*='Firmar y']").first
     if await firmar_btn.count() > 0:
-        await click_and_wait(
-            page,
-            firmar_btn,
-            visible_selectors=[
-                "button.btn.btn-info.pull-left",
-                "button:has-text('Recibo de presentaci')",
-            ],
-            timeout_ms=90000,
-            click_timeout_ms=90000,
-        )
+        await _click_sign_and_wait(page, firmar_btn)
     recibo_btn = page.locator("button.btn.btn-info.pull-left:has-text('Recibo de presentación')").first
     if await recibo_btn.count() > 0:
         await recibo_btn.wait_for(state="visible", timeout=15000)
