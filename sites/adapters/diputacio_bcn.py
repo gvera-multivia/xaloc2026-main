@@ -236,11 +236,25 @@ class DiputacioBcnAdapter(SiteAdapter):
         return any(token in fase_norm for token in cls.BLOCKED_PHASE_TOKENS)
 
     @classmethod
+    def _extract_plate_from_publication_text(cls, publication_text: Any) -> str:
+        pub_text = cls._clean(publication_text).upper()
+        if not pub_text:
+            return ""
+        match = re.search(r"\b([0-9]{4}[\s-]*[A-Z]{3}|[A-Z]{1,2}[\s-]*[0-9]{4,6}(?:[\s-]*[A-Z]{1,3})?)\b", pub_text)
+        if not match:
+            return ""
+        normalized = normalize_plate_with_fallback(match.group(1))
+        return "" if normalized == "." else normalized
+
+    @classmethod
     def _resolve_plate(cls, item: dict[str, Any]) -> str:
         for key in ("rs_matricula", "exp_matricula", "pub_matricula", "matricula", "Matricula"):
             normalized = normalize_plate_with_fallback(item.get(key))
             if normalized != ".":
                 return normalized
+        publication_plate = cls._extract_plate_from_publication_text(item.get("pub_publicacion"))
+        if publication_plate:
+            return publication_plate
         return ""
 
     @classmethod

@@ -4,6 +4,7 @@ import asyncio
 from copy import deepcopy
 from typing import Any
 
+from core.consultor.normalizer import normalize_resource_row
 from core.consultor.service import ConsultorResourceRepositoryAdapter, ConsultorService
 from core.domain import ResourceDomain
 from sites.adapters.base import BaseOnlineAdapter
@@ -465,3 +466,23 @@ def test_valencia_payload_parity_legacy_vs_consultor(monkeypatch) -> None:
         config={},
         row=row,
     )
+
+
+def test_consultor_normalizer_resolves_plate_from_publication_text() -> None:
+    canonical = normalize_resource_row(
+        site_id="diputacio_bcn",
+        row={
+            "idRecurso": 1,
+            "Expedient": "542006/25",
+            "Organisme": "AJUNTAMENT DE BADALONA",
+            "FaseProcedimiento": "denuncia",
+            "pub_publicacion": "Matricula 1234BCD. Aviso de denuncia.",
+            "matricula": "",
+            "rs_matricula": "",
+            "exp_matricula": "",
+            "pub_matricula": "",
+        },
+    )
+
+    assert canonical.vehicle["plate"]["value"] == "1234BCD"
+    assert canonical.vehicle["plate"]["source"] == "pub_publicacion"

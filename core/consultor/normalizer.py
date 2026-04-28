@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 from typing import Any
 
 from core.address_defaults import get_default_country_es_ascii
@@ -18,6 +19,31 @@ def _first_non_empty(*values: Any) -> str:
         if text:
             return text
     return ""
+
+
+def _normalize_plate_candidate(value: Any) -> str:
+    raw = _clean(value)
+    if not raw or raw in {".", "-", "N/A", "NA", "NULL", "NONE"}:
+        return ""
+    normalized = normalize_plate_with_fallback(raw)
+    return "" if normalized == "." else normalized
+
+
+def _resolve_vehicle_plate(raw: dict[str, Any]) -> tuple[str, str]:
+    for key in ("rs_matricula", "exp_matricula", "pub_matricula", "matricula", "Matricula"):
+        normalized = _normalize_plate_candidate(raw.get(key))
+        if normalized:
+            return normalized, key
+
+    pub_text = _clean(raw.get("pub_publicacion")).upper()
+    if pub_text:
+        match = re.search(r"\b([0-9]{4}[\s-]*[A-Z]{3}|[A-Z]{1,2}[\s-]*[0-9]{4,6}(?:[\s-]*[A-Z]{1,3})?)\b", pub_text)
+        if match:
+            normalized = _normalize_plate_candidate(match.group(1))
+            if normalized:
+                return normalized, "pub_publicacion"
+
+    return ".", "none"
 
 
 def normalize_resource_row(*, site_id: str, row: dict[str, Any]) -> CanonicalResourceV1:
@@ -72,24 +98,7 @@ def normalize_resource_row(*, site_id: str, row: dict[str, Any]) -> CanonicalRes
         },
     }
 
-    vehicle_plate = _first_non_empty(
-        raw.get("rs_matricula"),
-        raw.get("exp_matricula"),
-        raw.get("pub_matricula"),
-        raw.get("matricula"),
-    )
-    normalized_plate = normalize_plate_with_fallback(vehicle_plate)
-
-    if _clean(raw.get("rs_matricula")):
-        plate_source = "rs_matricula"
-    elif _clean(raw.get("exp_matricula")):
-        plate_source = "exp_matricula"
-    elif _clean(raw.get("pub_matricula")):
-        plate_source = "pub_matricula"
-    elif _clean(raw.get("matricula")):
-        plate_source = "matricula"
-    else:
-        plate_source = "none"
+    normalized_plate, plate_source = _resolve_vehicle_plate(raw)
 
     vehicle = {
         "plate": {"value": normalized_plate, "source": plate_source},

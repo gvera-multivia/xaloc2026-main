@@ -507,3 +507,36 @@ def test_build_payloads_resolves_uppercase_matricula_fallback() -> None:
 
     assert len(payloads) == 1
     assert payloads[0]["matricula"] == "1234BCD"
+
+
+def test_build_payloads_resolves_matricula_from_pub_publicacion_text() -> None:
+    adapter = DiputacioBcnAdapter()
+    payloads = asyncio.run(
+        adapter.build_payloads(
+            [
+                {
+                    "idRecurso": 555008,
+                    "idExp": 777008,
+                    "numclient": 999008,
+                    "automatic_id": 12352,
+                    "Expedient": "542006/25",
+                    "Organisme": "AJUNTAMENT DE BADALONA",
+                    "FaseProcedimiento": "denuncia",
+                    "SujetoRecurso": "MARTA SERRA",
+                    "tipodecliente": "1",
+                    "nif": "12345678Z",
+                    "nifempresa": "",
+                    "Nombre": "MARTA",
+                    "Apellido1": "SERRA",
+                    "Apellido2": "",
+                    "Nombrefiscal": "",
+                    "municipio": "BADALONA",
+                    "pub_publicacion": "Sancion de trafico. Matricula 1234BCD. Notificacion.",
+                    "adjuntos": [],
+                }
+            ]
+        )
+    )
+
+    assert len(payloads) == 1
+    assert payloads[0]["matricula"] == "1234BCD"
