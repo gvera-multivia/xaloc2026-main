@@ -10,6 +10,7 @@ from sites.diputacio_bcn.flows.confirmacion import (
     _extract_municipio_from_organismo,
     _format_matricula_for_diputacio,
     _municipio_candidates,
+    _resolve_matricula_value,
 )
 
 
@@ -45,3 +46,23 @@ def test_municipio_candidates_orgt_diba_uses_payload_municipio() -> None:
 
 def test_format_matricula_for_diputacio_adds_hyphen_for_modern_plate() -> None:
     assert _format_matricula_for_diputacio("1234BCD") == "1234-BCD"
+
+
+class _DummyTarget:
+    def __init__(self, matricula: str = "", payload: dict | None = None) -> None:
+        self.matricula = matricula
+        self.payload = payload or {}
+
+
+def test_resolve_matricula_value_prefers_target_then_payload_fallbacks() -> None:
+    target = _DummyTarget(payload={"Matricula": "1234BCD"})
+    value, sources = _resolve_matricula_value(target)
+    assert value == "1234-BCD"
+    assert sources["payload.Matricula"] == "1234BCD"
+
+
+def test_resolve_matricula_value_returns_empty_when_all_sources_missing() -> None:
+    target = _DummyTarget(payload={"matricula": ".", "Matricula": "", "rs_matricula": ""})
+    value, sources = _resolve_matricula_value(target)
+    assert value == ""
+    assert sources["payload.matricula"] == "."

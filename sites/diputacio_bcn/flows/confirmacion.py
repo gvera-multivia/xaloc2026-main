@@ -87,6 +87,19 @@ def _format_matricula_for_diputacio(value: str) -> str:
     return raw
 
 
+def _resolve_matricula_value(datos: "DiputacioBcnTarget") -> tuple[str, dict[str, str]]:
+    raw_sources = {
+        "datos.matricula": str(getattr(datos, "matricula", "") or "").strip(),
+        "payload.matricula": str(datos.payload.get("matricula") or "").strip(),
+        "payload.Matricula": str(datos.payload.get("Matricula") or "").strip(),
+        "payload.rs_matricula": str(datos.payload.get("rs_matricula") or "").strip(),
+        "payload.exp_matricula": str(datos.payload.get("exp_matricula") or "").strip(),
+        "payload.pub_matricula": str(datos.payload.get("pub_matricula") or "").strip(),
+    }
+    raw_value = next((value for value in raw_sources.values() if value and value != "."), "")
+    return _format_matricula_for_diputacio(raw_value.upper()), raw_sources
+
+
 def _extract_municipio_from_organismo(organismo_raw: str) -> str:
     norm = _norm(organismo_raw)
     if not norm:
@@ -428,15 +441,27 @@ async def run_confirmacion(page: "Page", config: "DiputacioBcnConfig", datos: "D
     ).first
     if await matricula_field.count() > 0:
         await matricula_field.wait_for(state="visible", timeout=15000)
-        matricula_value = _format_matricula_for_diputacio(
-            str(
-                datos.matricula
-                or datos.payload.get("matricula")
-                or datos.payload.get("Matricula")
-                or ""
-            ).strip().upper()
+        matricula_value, matricula_sources = _resolve_matricula_value(datos)
+        logger.info(
+            "[diputacio_bcn] matricula resolution idRecurso=%s expediente=%s resolved=%r sources=%s",
+            getattr(datos, "idRecurso", None),
+            getattr(datos, "expediente", None),
+            matricula_value,
+            matricula_sources,
         )
+        if not matricula_value:
+            raise RuntimeError(
+                "diputacio_bcn: matricula ausente en payload antes de rellenar confirmacion "
+                f"(idRecurso={getattr(datos, 'idRecurso', None)} expediente={getattr(datos, 'expediente', None)})"
+            )
         await matricula_field.fill(matricula_value)
+        filled_matricula_value = str(await matricula_field.input_value()).strip()
+        if not filled_matricula_value:
+            raise RuntimeError(
+                "diputacio_bcn: no se pudo rellenar el campo Matricula en confirmacion "
+                f"(idRecurso={getattr(datos, 'idRecurso', None)} expediente={getattr(datos, 'expediente', None)} "
+                f"resolved={matricula_value!r})"
+            )
 
     fase_raw = str(datos.fase_procedimiento or datos.payload.get("fase_procedimiento") or "").strip()
     if _is_identificacion_phase(fase_raw):
