@@ -261,6 +261,21 @@ def _extract_aut_timestamp(path: Path) -> int:
     except Exception:
         return 0
 
+
+def _is_documentacion_recursos_folder(folder_name: str) -> bool:
+    name = str(folder_name or "").upper()
+    return "DOCUMENTA" in name and "RECURSOS" in name and "PARA RECURSOS" not in name
+
+
+def _is_supported_documentation_folder(folder_name: str) -> bool:
+    name = str(folder_name or "").upper()
+    return "DOCUMENTA" in name and "DOCUMENTACION PARA RECURSOS" not in name
+
+
+def _prioritize_documentacion_recursos_candidates(cands: list[dict]) -> list[dict]:
+    recursos = [c for c in cands if _is_documentacion_recursos_folder(c["path"].parent.name)]
+    return recursos or cands
+
 def select_required_client_documents(
     *,
     ruta_docu: Path,
@@ -295,8 +310,7 @@ def select_required_client_documents(
     all_files = [
         f for f in ruta_docu.rglob("*")
         if f.is_file()
-        and "DOCUMENTA" in f.parent.name.upper()
-        and "DOCUMENTACION PARA RECURSOS" not in f.parent.name.upper()
+        and _is_supported_documentation_folder(f.parent.name)
     ]
 
     buckets = defaultdict(list)
@@ -322,6 +336,8 @@ def select_required_client_documents(
         if not cands:
             missing.append(cat)
             continue
+
+        cands = _prioritize_documentacion_recursos_candidates(cands)
 
         if cat == "AUT" and len(cands) > 1:
             # Dedup de autorizaciones equivalentes (mismo nombre base, distinta fecha/lote).

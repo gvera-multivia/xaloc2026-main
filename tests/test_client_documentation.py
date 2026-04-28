@@ -92,3 +92,66 @@ def test_select_required_client_documents_ignores_fake_pdf_with_pdf_extension(tm
     selected_names = {p.name for p in selected.files_to_upload}
     assert "Escritura EMPRESA.pdf" not in selected_names
     assert "ESCR" not in selected.covered_terms
+
+
+def test_select_required_client_documents_prefers_documentacion_recursos_when_both_exist(tmp_path: Path) -> None:
+    def _make_pdf(path: Path) -> Path:
+        writer_cls = pdf_bundle._load_pdf_reader().__module__.split(".")[0]
+        if writer_cls == "pypdf":
+            from pypdf import PdfWriter  # type: ignore
+        else:
+            from PyPDF2 import PdfWriter  # type: ignore
+        writer = PdfWriter()
+        writer.add_blank_page(width=72, height=72)
+        with path.open("wb") as fh:
+            writer.write(fh)
+        return path
+
+    ruta_doc = tmp_path / "DOCUMENTACION"
+    ruta_rec = tmp_path / "DOCUMENTACION RECURSOS"
+    ruta_doc.mkdir()
+    ruta_rec.mkdir()
+
+    _make_pdf(ruta_doc / "AUTORIZACION cliente CF.pdf")
+    _make_pdf(ruta_doc / "DNI cliente.pdf")
+    _make_pdf(ruta_rec / "AUTORIZACION cliente SF.pdf")
+    _make_pdf(ruta_rec / "DNI cliente recursos.pdf")
+
+    selected = docs.select_required_client_documents(
+        ruta_docu=tmp_path,
+        is_company=False,
+        strict=True,
+        merge_if_multiple=False,
+    )
+
+    selected_paths = {p.parent.name for p in selected.files_to_upload}
+    assert selected_paths == {"DOCUMENTACION RECURSOS"}
+
+
+def test_select_required_client_documents_falls_back_to_documentacion_when_no_recursos(tmp_path: Path) -> None:
+    def _make_pdf(path: Path) -> Path:
+        writer_cls = pdf_bundle._load_pdf_reader().__module__.split(".")[0]
+        if writer_cls == "pypdf":
+            from pypdf import PdfWriter  # type: ignore
+        else:
+            from PyPDF2 import PdfWriter  # type: ignore
+        writer = PdfWriter()
+        writer.add_blank_page(width=72, height=72)
+        with path.open("wb") as fh:
+            writer.write(fh)
+        return path
+
+    ruta = tmp_path / "DOCUMENTACION"
+    ruta.mkdir()
+    _make_pdf(ruta / "AUTORIZACION cliente CF.pdf")
+    _make_pdf(ruta / "DNI cliente.pdf")
+
+    selected = docs.select_required_client_documents(
+        ruta_docu=tmp_path,
+        is_company=False,
+        strict=True,
+        merge_if_multiple=False,
+    )
+
+    selected_paths = {p.parent.name for p in selected.files_to_upload}
+    assert selected_paths == {"DOCUMENTACION"}
