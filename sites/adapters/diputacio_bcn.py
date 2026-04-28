@@ -237,7 +237,7 @@ class DiputacioBcnAdapter(SiteAdapter):
 
     @classmethod
     def _resolve_plate(cls, item: dict[str, Any]) -> str:
-        for key in ("rs_matricula", "exp_matricula", "pub_matricula", "matricula"):
+        for key in ("rs_matricula", "exp_matricula", "pub_matricula", "matricula", "Matricula"):
             normalized = normalize_plate_with_fallback(item.get(key))
             if normalized != ".":
                 return normalized

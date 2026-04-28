@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sites.diputacio_bcn.flows.confirmacion import (
     _ens_candidates,
     _extract_municipio_from_organismo,
+    _format_matricula_for_diputacio,
     _municipio_candidates,
 )
 
@@ -40,3 +41,7 @@ def test_municipio_candidates_orgt_diba_uses_payload_municipio() -> None:
         organismo_raw="ORGANISMO DE GESTION TRIBUTARIA (ORGT) DE LA DIPUTACION DE BARCELONA",
     )
     assert candidates == ["SABADELL"]
+
+
+def test_format_matricula_for_diputacio_adds_hyphen_for_modern_plate() -> None:
+    assert _format_matricula_for_diputacio("1234BCD") == "1234-BCD"

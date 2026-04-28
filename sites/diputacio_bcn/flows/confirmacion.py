@@ -429,7 +429,12 @@ async def run_confirmacion(page: "Page", config: "DiputacioBcnConfig", datos: "D
     if await matricula_field.count() > 0:
         await matricula_field.wait_for(state="visible", timeout=15000)
         matricula_value = _format_matricula_for_diputacio(
-            str(datos.matricula or datos.payload.get("matricula") or "").strip().upper()
+            str(
+                datos.matricula
+                or datos.payload.get("matricula")
+                or datos.payload.get("Matricula")
+                or ""
+            ).strip().upper()
         )
         await matricula_field.fill(matricula_value)
 
