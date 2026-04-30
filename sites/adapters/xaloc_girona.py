@@ -247,21 +247,11 @@ class XalocAdapter(SiteAdapter):
             usuario = self._clean_str(recurso.get("UsuarioAsignado"))
             fecha_completado = recurso.get("FUsuarioCompletado")
 
-            if fecha_completado is not None and str(fecha_completado).strip():
-                if on_discard:
-                    try:
-                        on_discard(
-                            {
-                                "site_id": self.site_id,
-                                "idRecurso": rid,
-                                "Expedient": expediente_raw,
-                                "tipo_incidencia": "COMPLETED_DISCARDED",
-                                "motivo": "Recurso descartado por FUsuarioCompletado informado.",
-                            }
-                        )
-                    except Exception:
-                        pass
-                continue
+            if fecha_completado is not None and str(fecha_completado).strip() and estado == 0:
+                # En XALOC hay recursos reabiertos o desasignados manualmente con
+                # FUsuarioCompletado histórico. La fuente de verdad para claim es
+                # Estado/UsuarioAsignado, así que no debemos descartarlos aquí.
+                pass
 
             expediente = expediente_raw
             is_valid = is_valid_format(expediente)

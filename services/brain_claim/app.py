@@ -416,6 +416,29 @@ class BrainClaimService:
             return True
         return False
 
+    async def _recover_claim_slot_for_reopened_resource(self, *, site_id: str, resource_id: int) -> bool:
+        """
+        Recupera de forma conservadora una key de dedupe cuando el recurso ya ha
+        vuelto a ser reclamable en SQL/XVIA pero no tiene job activo en runtime.
+        Esto cubre desasignaciones manuales sin depender de activar stale recovery
+        global para todos los casos.
+        """
+        if self.runtime_store.has_active_job_for_resource(site_id=site_id, resource_id=resource_id):
+            return False
+        if not self.is_still_claimable_in_db(resource_id):
+            return False
+
+        await self._release_claim_slot(site_id=site_id, resource_id=resource_id)
+        reserved_after_release = await self._reserve_claim_slot(site_id=site_id, resource_id=resource_id)
+        if reserved_after_release:
+            logger.warning(
+                "[%s] dedupe-claim reciclado para idRecurso=%s tras detectar recurso reclamable de nuevo en SQL/XVIA.",
+                site_id,
+                resource_id,
+            )
+            return True
+        return False
+
     async def _release_claim_slot(self, *, site_id: str, resource_id: int) -> None:
         key = self._claim_dedupe_key(site_id=site_id, resource_id=resource_id)
         try:
@@ -611,12 +634,15 @@ class BrainClaimService:
                         )
                         continue
                     if not await self._reserve_claim_slot_with_stale_recovery(site_id=site_id, resource_id=rid):
-                        logger.info(
-                            "[%s] dedupe-claim activo para idRecurso=%s; se omite republicacion.",
-                            site_id,
-                            rid,
-                        )
-                        continue
+                        if await self._recover_claim_slot_for_reopened_resource(site_id=site_id, resource_id=rid):
+                            pass
+                        else:
+                            logger.info(
+                                "[%s] dedupe-claim activo para idRecurso=%s; se omite republicacion.",
+                                site_id,
+                                rid,
+                            )
+                            continue
 
                     keep_claim_slot = False
                     try:
