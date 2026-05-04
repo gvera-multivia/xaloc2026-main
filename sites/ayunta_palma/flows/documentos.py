@@ -1017,15 +1017,144 @@ async def _click_modal_aceptar(page: Page, config: AyuntaPalmaConfig) -> None:
 
 
 async def _marcar_proteccion_datos(page: Page, config: AyuntaPalmaConfig) -> None:
-    chk = page.locator(config.selectors.chk_proteccion_datos).first
-    await chk.wait_for(state="visible", timeout=config.timeouts.general)
-    if not await chk.is_checked():
+    selectors = config.selectors
+    chk = page.locator(selectors.chk_proteccion_datos).first
+
+    async def _try_check_locator(locator: Locator, *, allow_hidden_force: bool = False) -> bool:
+        if await locator.count() <= 0:
+            return False
         try:
-            await chk.check()
+            await locator.wait_for(state="visible", timeout=2500)
         except Exception:
-            await chk.check(force=True)
-    await page.wait_for_timeout(config.delay_ms)
-    await _esperar_velo_oculto(page, config)
+            if not allow_hidden_force:
+                return False
+        try:
+            if await locator.is_checked():
+                return True
+        except Exception:
+            pass
+        try:
+            await locator.check(timeout=2500)
+            return True
+        except Exception:
+            pass
+        try:
+            await locator.check(force=True, timeout=2500)
+            return True
+        except Exception:
+            pass
+        try:
+            await locator.click(force=True, timeout=2500)
+            return True
+        except Exception:
+            return False
+
+    if await _try_check_locator(chk, allow_hidden_force=True):
+        await page.wait_for_timeout(config.delay_ms)
+        await _esperar_velo_oculto(page, config)
+        logger.info("[AP-DIAG] Checkbox de proteccion/interoperabilidad marcado via selector exacto.")
+        return
+
+    # Fallback robusto: algunas versiones de Sedipualba cambian el ID exacto o
+    # muestran el consentimiento con otro texto visible.
+    fallback_result = await page.evaluate(
+        """() => {
+            const normalize = (txt) => String(txt || "")
+                .normalize("NFD")
+                .replace(/[\\u0300-\\u036f]/g, "")
+                .replace(/\\s+/g, " ")
+                .trim()
+                .toLowerCase();
+            const keywords = [
+                "proteccion de datos",
+                "proteccio de dades",
+                "interoperabilidad entre administraciones",
+                "interoperabilitat entre administracions",
+                "acepta la interoperabilidad",
+                "accepta la interoperabilitat",
+                "rgpd",
+                "lopd"
+            ];
+            const textMatches = (txt) => {
+                const norm = normalize(txt);
+                return keywords.some((kw) => norm.includes(kw));
+            };
+            const clickCheckbox = (el, reason) => {
+                if (!el) return null;
+                try { el.scrollIntoView({ block: "center", inline: "center" }); } catch (e) {}
+                try { el.click(); } catch (e) {}
+                try {
+                    if (typeof el.checked === "boolean") {
+                        el.checked = true;
+                        el.dispatchEvent(new Event("input", { bubbles: true }));
+                        el.dispatchEvent(new Event("change", { bubbles: true }));
+                    }
+                } catch (e) {}
+                return {
+                    ok: !!el.checked || el.getAttribute("aria-checked") === "true",
+                    reason,
+                    id: el.id || "",
+                    name: el.name || ""
+                };
+            };
+
+            const byId = document.querySelector("#ctl00_ctl00_cphM_cph_chkProteccionDatos");
+            if (byId) {
+                const res = clickCheckbox(byId, "exact-dom");
+                if (res && res.ok) return res;
+            }
+
+            const checkboxes = Array.from(document.querySelectorAll("input[type='checkbox']"));
+            for (const cb of checkboxes) {
+                const idText = [cb.id, cb.name, cb.value].map(normalize).join(" ");
+                if (idText.includes("proteccion") || idText.includes("interoper")) {
+                    const res = clickCheckbox(cb, "checkbox-id-name-match");
+                    if (res && res.ok) return res;
+                }
+            }
+
+            const labels = Array.from(document.querySelectorAll("label"));
+            for (const label of labels) {
+                if (!textMatches(label.textContent || "")) continue;
+                const forId = label.getAttribute("for");
+                const linked = forId ? document.getElementById(forId) : label.querySelector("input[type='checkbox']");
+                const res = clickCheckbox(linked, "label-text-match");
+                if (res && res.ok) return res;
+            }
+
+            const containers = Array.from(document.querySelectorAll("div, td, span, li, p"));
+            for (const node of containers) {
+                if (!textMatches(node.textContent || "")) continue;
+                const cb = node.querySelector("input[type='checkbox']") || node.closest("tr, div, li, td")?.querySelector("input[type='checkbox']");
+                const res = clickCheckbox(cb, "container-text-match");
+                if (res && res.ok) return res;
+            }
+
+            const sample = checkboxes.slice(0, 12).map((cb) => ({
+                id: cb.id || "",
+                name: cb.name || "",
+                checked: !!cb.checked,
+                text: normalize(cb.closest("tr, div, li, td, fieldset")?.textContent || "").slice(0, 180)
+            }));
+            return { ok: false, reason: "not-found", sample };
+        }"""
+    )
+
+    if isinstance(fallback_result, dict) and fallback_result.get("ok"):
+        await page.wait_for_timeout(config.delay_ms)
+        await _esperar_velo_oculto(page, config)
+        logger.info(
+            "[AP-DIAG] Checkbox de proteccion/interoperabilidad marcado via fallback reason=%s id=%s name=%s",
+            fallback_result.get("reason"),
+            fallback_result.get("id"),
+            fallback_result.get("name"),
+        )
+        return
+
+    raise PlaywrightTimeoutError(
+        "Ayunta Palma: no se encontro el checkbox de proteccion/interoperabilidad. "
+        f"Diagnostico={fallback_result!r}"
+    )
 
 
 async def _click_firmar(page: Page, config: AyuntaPalmaConfig) -> None:
