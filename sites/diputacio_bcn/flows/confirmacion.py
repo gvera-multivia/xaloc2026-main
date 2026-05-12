@@ -65,6 +65,10 @@ def _is_identificacion_phase(value: str) -> bool:
     return "IDENTIFIC" in fase
 
 
+def _should_require_matricula_for_phase(value: str) -> bool:
+    return not _is_apremio_embargo_phase(value)
+
+
 def _format_matricula_for_diputacio(value: str) -> str:
     raw = re.sub(r"[^A-Z0-9]", "", str(value or "").upper())
     if not raw or raw == ".":
@@ -383,6 +387,8 @@ async def run_confirmacion(page: "Page", config: "DiputacioBcnConfig", datos: "D
         if not resolved:
             break
 
+    fase_raw = str(datos.fase_procedimiento or datos.payload.get("fase_procedimiento") or "").strip()
+
     await page.wait_for_url("**/TramitsPagaments/Presentmul/presentmul**", timeout=30000)
     municipio_select = page.locator("#MunicipisList").first
     if await municipio_select.count() > 0:
@@ -450,20 +456,28 @@ async def run_confirmacion(page: "Page", config: "DiputacioBcnConfig", datos: "D
             matricula_sources,
         )
         if not matricula_value:
-            raise RuntimeError(
-                "diputacio_bcn: matricula ausente en payload antes de rellenar confirmacion "
-                f"(idRecurso={getattr(datos, 'idRecurso', None)} expediente={getattr(datos, 'expediente', None)})"
+            if _should_require_matricula_for_phase(fase_raw):
+                raise RuntimeError(
+                    "diputacio_bcn: matricula ausente en payload antes de rellenar confirmacion "
+                    f"(idRecurso={getattr(datos, 'idRecurso', None)} expediente={getattr(datos, 'expediente', None)})"
+                )
+            logger.info(
+                "[diputacio_bcn] matricula ausente en apremio/embargo; se omite el rellenado "
+                "de presentmul y se continuara por la ruta generica presgenmul. "
+                "idRecurso=%s expediente=%s",
+                getattr(datos, "idRecurso", None),
+                getattr(datos, "expediente", None),
             )
-        await matricula_field.fill(matricula_value)
-        filled_matricula_value = str(await matricula_field.input_value()).strip()
-        if not filled_matricula_value:
-            raise RuntimeError(
-                "diputacio_bcn: no se pudo rellenar el campo Matricula en confirmacion "
-                f"(idRecurso={getattr(datos, 'idRecurso', None)} expediente={getattr(datos, 'expediente', None)} "
-                f"resolved={matricula_value!r})"
-            )
+        else:
+            await matricula_field.fill(matricula_value)
+            filled_matricula_value = str(await matricula_field.input_value()).strip()
+            if not filled_matricula_value:
+                raise RuntimeError(
+                    "diputacio_bcn: no se pudo rellenar el campo Matricula en confirmacion "
+                    f"(idRecurso={getattr(datos, 'idRecurso', None)} expediente={getattr(datos, 'expediente', None)} "
+                    f"resolved={matricula_value!r})"
+                )
 
-    fase_raw = str(datos.fase_procedimiento or datos.payload.get("fase_procedimiento") or "").strip()
     if _is_identificacion_phase(fase_raw):
         identificacion_button = page.locator(
             "input[type='submit'][name='idcondBtn'][value='Identificar conductor o poseedor del vehículo']"

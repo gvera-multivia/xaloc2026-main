@@ -11,6 +11,7 @@ from sites.diputacio_bcn.flows.confirmacion import (
     _format_matricula_for_diputacio,
     _municipio_candidates,
     _resolve_matricula_value,
+    _should_require_matricula_for_phase,
 )
 
 
@@ -66,3 +67,12 @@ def test_resolve_matricula_value_returns_empty_when_all_sources_missing() -> Non
     value, sources = _resolve_matricula_value(target)
     assert value == ""
     assert sources["payload.matricula"] == "."
+
+
+def test_should_require_matricula_for_phase_skips_apremio() -> None:
+    assert _should_require_matricula_for_phase("apremio") is False
+    assert _should_require_matricula_for_phase("embargo") is False
+
+
+def test_should_require_matricula_for_phase_keeps_denuncia() -> None:
+    assert _should_require_matricula_for_phase("denuncia") is True
