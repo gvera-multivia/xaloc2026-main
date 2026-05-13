@@ -5,7 +5,7 @@ import re
 # 2. YYYY/NNNNNN-APR o YYYY-NNNNNN-APR
 # 3. NNNNNNNNNN (10 dígitos exactos, como 1098266110)
 # 4. NNNNNNNNNNNN (12 dígitos exactos, como 000038101604, 000042269999)
-VALID_EXP_REGEX = re.compile(r'^(\d{4}/\d+(?:-(?:MUL|SAD|APR))?|\d{4}-\d+-APR|\d{10}|\d{12})$')
+VALID_EXP_REGEX = re.compile(r'^(\d{4}/\d+(?:-(?:MUL|SAD|APR))?|\d{4}-\d+-APR|\d{4}-\d+-\d|\d{10}|\d{12})$')
 
 def is_valid_format(expediente: str) -> bool:
     """Checks if the expediente matches the correct Xaloc format."""
@@ -30,7 +30,8 @@ def fix_format(expediente: str) -> str:
     # 2. Corregir guión por barra (solo si parece el formato YYYY-NNNN)
     # Ejemplo: 2026-11504-MUL -> 2026/11504-MUL
     # Si es 1098266110, esta regex no hará nada al no haber guion
-    fixed = re.sub(r'^(\d{4})-(\d+)', r'\1/\2', fixed)
+    if not re.match(r'^\d{4}-\d+-\d$', fixed):
+        fixed = re.sub(r'^(\d{4})-(\d+)', r'\1/\2', fixed)
     
     # 3. Corregir falta de L en sufijos
     if fixed.endswith("-MU"):

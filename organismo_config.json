@@ -4,7 +4,7 @@
                         "site_id":  "xaloc_girona",
                         "query_organisme":  "%XALOC%",
                         "filtro_texp":  "2,3",
-                        "regex_expediente":  "^(\\d{4}/\\d+(?:-(?:MUL|SAD|APR))?|\\d{4}-\\d+-APR|\\d{10})$",
+                        "regex_expediente":  "^(\\d{4}/\\d+(?:-(?:MUL|SAD|APR))?|\\d{4}-\\d+-APR|\\d{4}-\\d+-\\d|\\d{10}|\\d{12})$",
                         "claim_limit_per_tick":  null,
                         "login_url":  "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login",
                         "recursos_url":  "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos",
