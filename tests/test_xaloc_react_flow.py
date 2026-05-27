@@ -2,8 +2,9 @@ from pathlib import Path
 
 import pytest
 
-from sites.xaloc_girona.data_models import DatosMulta
+from sites.xaloc_girona.data_models import DatosMandatario, DatosMulta
 from sites.xaloc_girona.flows.react_flow import (
+    _interesado_doc_and_name_parts,
     select_mandate_file,
     select_notification_files,
     split_motivos_for_react,
@@ -59,3 +60,26 @@ def test_split_motivos_for_react_expone_solicita() -> None:
 
     assert expone == "hechos del recurso"
     assert solicita == "admision del recurso"
+
+
+def test_react_representation_prefers_physical_interested_party_over_company() -> None:
+    datos = DatosMulta(
+        email="info@xvia-serviciosjuridicos.com",
+        num_denuncia="2026/45261-MUL",
+        matricula="4694DWT",
+        num_expediente="2026/45261-MUL",
+        motivos="motivos",
+        archivos_adjuntos=[Path("RECURSO.pdf")],
+        mandatario=DatosMandatario(
+            tipo_persona="JURIDICA",
+            cif_documento="B0989925",
+            cif_control="3",
+            razon_social="CORP.PROJECTS HOLDING SOCIEDAD LIMITADA.",
+        ),
+        interesado_doc="40347979E",
+        interesado_nombre="ALFONSO",
+        interesado_apellido1="GALVEZ",
+        interesado_apellido2="CAMARA",
+    )
+
+    assert _interesado_doc_and_name_parts(datos) == ("40347979E", "ALFONSO", "GALVEZ", "CAMARA")

@@ -50,6 +50,17 @@ def _mandatario_name_parts(m: DatosMandatario | None) -> tuple[str, str, str]:
     return _norm(m.nombre), _norm(m.apellido1), _norm(m.apellido2)
 
 
+def _interesado_doc_and_name_parts(datos: DatosMulta) -> tuple[str, str, str, str]:
+    doc = _clean_doc(datos.interesado_doc or "")
+    nombre = _norm(datos.interesado_nombre)
+    apellido1 = _norm(datos.interesado_apellido1)
+    apellido2 = _norm(datos.interesado_apellido2)
+    if doc and nombre and apellido1:
+        return doc, nombre, apellido1, apellido2
+
+    return _mandatario_doc(datos.mandatario), *_mandatario_name_parts(datos.mandatario)
+
+
 def _path_key(path: Path) -> str:
     try:
         return str(path.resolve()).lower()
@@ -217,8 +228,13 @@ async def completar_representacion_react(page: Page, datos: DatosMulta) -> Path:
     await _wait_for_url_part(page, "/credentials/representacionjuridica", timeout_ms=30000)
 
     await _check_radio_or_checkbox(page, "#ungrouped-radio-text-radiogroup-representante")
-    doc = _mandatario_doc(datos.mandatario)
-    nombre, apellido1, apellido2 = _mandatario_name_parts(datos.mandatario)
+    doc, nombre, apellido1, apellido2 = _interesado_doc_and_name_parts(datos)
+    logger.info(
+        "XALOC React: interesado para representacion doc=%s nombre=%s apellido1=%s",
+        doc,
+        nombre,
+        apellido1,
+    )
     await _fill_text(page, "#id-number-for-ungrouped-value", doc)
     await _fill_text(page, "#name-of-natural-for-ungrouped-value", nombre)
     await _fill_text(page, "#firstSurname-of-natural-for-ungrouped-value", apellido1)
