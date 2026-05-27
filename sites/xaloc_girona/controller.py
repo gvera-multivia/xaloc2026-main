@@ -59,6 +59,9 @@ class XalocGironaController:
             "archivos_adjuntos": data.get("archivos_adjuntos") or data.get("archivos"),
             "mandatario": data.get("mandatario"),
             "fase_procedimiento": self._pick(data, "fase_procedimiento", canonical_path="resource.phase"),
+            "xvia_recurso_path": data.get("xvia_recurso_path"),
+            "xvia_attachment_paths": data.get("xvia_attachment_paths"),
+            "required_client_doc_paths": data.get("required_client_doc_paths"),
         }
 
     def create_target(
@@ -72,6 +75,9 @@ class XalocGironaController:
         archivos_adjuntos: list[Path] | list[str] | None,
         mandatario: dict | None = None,
         fase_procedimiento: str | None = None,
+        xvia_recurso_path: str | Path | None = None,
+        xvia_attachment_paths: list[Path] | list[str] | None = None,
+        required_client_doc_paths: list[Path] | list[str] | None = None,
         **kwargs,
     ) -> DatosMulta:
         def _require(name: str, value: str | None) -> str:
@@ -91,6 +97,11 @@ class XalocGironaController:
         if mandatario:
             datos_mandatario = DatosMandatario(**mandatario)
 
+        def _to_paths(values: list[Path] | list[str] | None) -> list[Path] | None:
+            if not values:
+                return None
+            return [Path(v) if isinstance(v, str) else v for v in values if v]
+
         return DatosMulta(
             email=_require("email", email),
             num_denuncia=_require("num_denuncia", num_denuncia),
@@ -100,6 +111,9 @@ class XalocGironaController:
             archivos_adjuntos=paths,
             mandatario=datos_mandatario,
             fase_procedimiento=fase_procedimiento,
+            xvia_recurso_path=Path(xvia_recurso_path) if xvia_recurso_path else None,
+            xvia_attachment_paths=_to_paths(xvia_attachment_paths),
+            required_client_doc_paths=_to_paths(required_client_doc_paths),
         )
 
 

@@ -34,6 +34,9 @@ class DatosMulta:
     archivos_adjuntos: Optional[List[Path]] = None
     mandatario: Optional[DatosMandatario] = None  # NUEVO: Datos del mandatario
     fase_procedimiento: Optional[str] = None  # NUEVO: Para organizar justificantes
+    xvia_recurso_path: Optional[Path] = None
+    xvia_attachment_paths: Optional[List[Path]] = None
+    required_client_doc_paths: Optional[List[Path]] = None
 
     @property
     def archivos_para_subir(self) -> List[Path]:

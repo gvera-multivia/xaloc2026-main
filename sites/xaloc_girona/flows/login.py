@@ -151,6 +151,17 @@ async def _is_sta_ready(page: Page, url_pattern: str) -> bool:
         return False
 
 
+async def _is_reg_ready(page: Page) -> bool:
+    try:
+        url = (page.url or "").lower()
+        if "seu.xalocgirona.cat/sta/reg/tramit/" not in url:
+            return False
+        await page.wait_for_selector("#root, body", state="attached", timeout=1200)
+        return True
+    except Exception:
+        return False
+
+
 async def _resolve_cert_button(page: Page, selector: str, timeout_ms: int):
     locator = page.locator(selector)
     deadline = time.monotonic() + (max(1, int(timeout_ms)) / 1000.0)
@@ -252,6 +263,9 @@ async def ejecutar_login(page: Page, config: XalocConfig) -> Page:
     if await _is_sta_ready(page, config.url_post_login):
         logging.info("Pestana ya esta en el formulario STA. Saltando login.")
         return page
+    if await _is_reg_ready(page):
+        logging.info("Pestana ya esta en la app REG. Saltando login.")
+        return page
 
     logging.info(f"Navegando a {config.url_base}")
     await page.goto(config.url_base, wait_until="networkidle")
@@ -260,6 +274,9 @@ async def ejecutar_login(page: Page, config: XalocConfig) -> Page:
     # 2. Tras el goto, puede que hayamos redirigido directamente al formulario si hay sesión activa
     if await _is_sta_ready(page, config.url_post_login):
         logging.info("Redireccion directa detectada (sesion activa). Saltando login.")
+        return page
+    if await _is_reg_ready(page):
+        logging.info("Redireccion directa a app REG detectada (sesion activa). Saltando login.")
         return page
 
     await _aceptar_cookies_si_aparece(page, config)
@@ -291,7 +308,7 @@ async def ejecutar_login(page: Page, config: XalocConfig) -> Page:
     )
     await valid_page.wait_for_timeout(config.delay_ms)
 
-    logging.info("Esperando retorno al formulario STA...")
+    logging.info("Esperando retorno a XALOC tras certificado...")
     if _cert_debug_enabled():
         logging.info(
             "[CERT-DBG] Modo diagnostico activo. En Chromium headless no se puede observar una ventana nativa de seleccion de certificado."
@@ -308,6 +325,9 @@ async def ejecutar_login(page: Page, config: XalocConfig) -> Page:
             if await _is_sta_ready(valid_page, config.url_post_login):
                 logging.info("Login completado con exito - Formulario STA cargado (pestana VALid)")
                 return valid_page
+            if await _is_reg_ready(valid_page):
+                logging.info("Login completado con exito - App REG cargada (pestana VALid)")
+                return valid_page
         except Exception:
             pass
 
@@ -316,6 +336,9 @@ async def ejecutar_login(page: Page, config: XalocConfig) -> Page:
             for p in valid_page.context.pages:
                 if await _is_sta_ready(p, config.url_post_login):
                     logging.info("Login completado con exito - Formulario STA cargado (pestana del contexto)")
+                    return p
+                if await _is_reg_ready(p):
+                    logging.info("Login completado con exito - App REG cargada (pestana del contexto)")
                     return p
         except Exception:
             pass

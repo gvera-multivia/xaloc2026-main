@@ -8,6 +8,7 @@ from sites.xaloc_girona.flows.documentos import subir_documento
 from sites.xaloc_girona.flows.login import ejecutar_login
 from sites.xaloc_girona.flows.formulario import rellenar_formulario
 from sites.xaloc_girona.flows.descarga_justificante import descargar_y_guardar_justificante
+from sites.xaloc_girona.flows.react_flow import ejecutar_flujo_react, is_react_reg_flow
 
 
 
@@ -27,6 +28,39 @@ class XalocGironaAutomation(BaseAutomation):
             self.logger.info("FASE 1: AUTENTICACION")
             self.logger.info("=" * 50)
             self.page = await ejecutar_login(self.page, self.config)
+
+            if await is_react_reg_flow(self.page):
+                self.logger.info("\n" + "=" * 50)
+                self.logger.info("FASE 2-4: FLUJO XALOC REG NUEVO")
+                self.logger.info("=" * 50)
+                await ejecutar_flujo_react(self.page, datos)
+
+                self.logger.info("\n" + "=" * 50)
+                self.logger.info("FASE 5: DESCARGA DEL JUSTIFICANTE")
+                self.logger.info("=" * 50)
+                payload_descarga = {
+                    "expediente_num": datos.num_expediente,
+                    "mandatario": datos.mandatario.__dict__ if datos.mandatario else None,
+                    "fase_procedimiento": datos.fase_procedimiento,
+                }
+                try:
+                    ruta_justificante = await descargar_y_guardar_justificante(
+                        self.page, payload_descarga
+                    )
+                    self.logger.info(f"OK Justificante guardado en: {ruta_justificante}")
+                    self.last_flow_metadata["xaloc_justificante_descargado"] = True
+                    self.last_flow_metadata["xaloc_justificante_path"] = str(ruta_justificante)
+                except Exception as e:
+                    self.logger.error(f"Error descargando justificante en flujo React: {e}")
+                    self.last_flow_metadata["xaloc_justificante_descargado"] = False
+                    raise RuntimeError(
+                        "xaloc_girona: tramite enviado en flujo nuevo pero no se pudo descargar justificante; "
+                        "se aborta el cierre."
+                    ) from e
+
+                screenshot_post = self.config.dir_screenshots / "xaloc_react_post_envio.png"
+                await self.page.screenshot(path=screenshot_post, full_page=True)
+                return str(screenshot_post)
 
             self.logger.info("\n" + "=" * 50)
             self.logger.info("FASE 2: RELLENADO DE FORMULARIO")
