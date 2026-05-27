@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 JUSTIFICANTE_TIMEOUT_MS = 120000
 IFRAME_LOAD_TIMEOUT_MS = 30000
+REG_DOWNLOAD_BUTTON_TIMEOUT_MS = 180000
 
 
 async def _esperar_iframe_cargado(page: Page) -> None:
@@ -125,6 +126,65 @@ async def _descargar_pdf_desde_url(page: Page, url: str, destino: Path) -> None:
         raise RuntimeError(f"No se pudo descargar el PDF por fetch: {e}") from e
 
 
+async def _buscar_boton_descarga_reg(page: Page):
+    selectors = (
+        'button:has-text("Descarregar")',
+        'a:has-text("Descarregar")',
+        '[role="button"]:has-text("Descarregar")',
+        'button:has-text("Descargar")',
+        'a:has-text("Descargar")',
+        '[role="button"]:has-text("Descargar")',
+    )
+    timeout_ms = REG_DOWNLOAD_BUTTON_TIMEOUT_MS
+    for selector in selectors:
+        loc = page.locator(selector).first
+        try:
+            await loc.wait_for(state="visible", timeout=timeout_ms)
+            return loc
+        except TimeoutError:
+            timeout_ms = 1000
+    raise RuntimeError("No se encontro boton Descarregar/Descargar del justificante REG.")
+
+
+async def _descargar_pdf_reg_desde_boton(page: Page, destino: Path) -> None:
+    logger.info("Esperando boton Descarregar del justificante REG...")
+    boton = await _buscar_boton_descarga_reg(page)
+    await boton.scroll_into_view_if_needed()
+    logger.info("Boton Descarregar detectado; iniciando descarga.")
+
+    try:
+        async with page.expect_download(timeout=90000) as download_info:
+            await boton.click(no_wait_after=True)
+        download = await download_info.value
+        await download.save_as(str(destino))
+    except Exception as event_error:
+        logger.warning("No se capturo evento download REG; probando URL del boton. error=%s", event_error)
+        url = ""
+        try:
+            url = (await boton.get_attribute("href")) or ""
+            if not url:
+                url = (await boton.get_attribute("data-url")) or ""
+            if not url:
+                onclick = (await boton.get_attribute("onclick")) or ""
+                import re as _re
+
+                match = _re.search(r"['\"]([^'\"]+\.pdf[^'\"]*)['\"]", onclick, _re.IGNORECASE)
+                if match:
+                    url = match.group(1)
+        except Exception:
+            url = ""
+        if not url:
+            raise RuntimeError("Boton Descarregar visible pero no se pudo capturar la descarga.") from event_error
+        if url.startswith("/"):
+            from urllib.parse import urljoin
+
+            url = urljoin(page.url, url)
+        await _descargar_pdf_desde_url(page, url, destino)
+
+    if not destino.exists() or destino.stat().st_size < 1000:
+        raise RuntimeError(f"Justificante REG descargado invalido o vacio: {destino}")
+
+
 def _construir_ruta_recursos_telematicos(payload: dict, fase_procedimiento: str | None = None) -> Path:
     """
     Construye la ruta a la subcarpeta específica dentro de RECURSOS TELEMATICOS.
@@ -197,7 +257,34 @@ async def descargar_y_guardar_justificante(page: Page, payload: dict) -> str:
         ValueError: Si faltan datos necesarios en el payload
         RuntimeError: Si falla la descarga o guardado del justificante
     """
-    logger.info("=== Iniciando descarga del justificante (MODO FETCH) ===")
+    logger.info("=== Iniciando descarga del justificante ===")
+
+    if "TramitaJustif" not in page.url:
+        raw_expediente_reg = payload.get("expediente_num") or payload.get("denuncia_num")
+        if not raw_expediente_reg:
+            raise ValueError("Falta 'expediente_num' o 'denuncia_num' en el payload")
+        num_expediente_reg = str(raw_expediente_reg).replace("/", "-").replace("\\", "-").strip()
+        fase_reg = payload.get("fase_procedimiento")
+        ruta_recursos_reg = _construir_ruta_recursos_telematicos(payload, fase_reg)
+        ts_reg = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        temporal_reg = Path("tmp") / f"temp_justif_{num_expediente_reg}_{ts_reg}.pdf"
+        temporal_reg.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            await _descargar_pdf_reg_desde_boton(page, temporal_reg)
+            ruta_final_reg = _renombrar_y_mover_justificante(
+                temporal_reg, num_expediente_reg, ruta_recursos_reg
+            )
+            logger.info(f"OK Proceso REG completado: {ruta_final_reg}")
+            return str(ruta_final_reg)
+        except Exception as e:
+            logger.error(f"Error descargando justificante REG: {e}")
+            try:
+                screenshot_path = Path("tmp") / f"error_justificante_reg_{num_expediente_reg}.png"
+                await page.screenshot(path=screenshot_path, full_page=True)
+                logger.error(f"Screenshot de error REG guardado en: {screenshot_path}")
+            except Exception:
+                pass
+            raise RuntimeError(f"Fallo en descarga del justificante REG: {e}") from e
     
     # Verificar que estamos en la página correcta
     if "TramitaJustif" not in page.url:

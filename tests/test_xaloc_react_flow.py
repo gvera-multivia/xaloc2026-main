@@ -63,7 +63,7 @@ def test_split_motivos_for_react_expone_solicita() -> None:
     assert solicita == "admision del recurso"
 
 
-def test_react_representation_prefers_physical_interested_party_over_company() -> None:
+def test_react_representation_keeps_company_even_with_physical_contact_data() -> None:
     datos = DatosMulta(
         email="info@xvia-serviciosjuridicos.com",
         num_denuncia="2026/45261-MUL",
@@ -83,7 +83,12 @@ def test_react_representation_prefers_physical_interested_party_over_company() -
         interesado_apellido2="CAMARA",
     )
 
-    assert _interesado_doc_and_name_parts(datos) == ("40347979E", "ALFONSO", "GALVEZ", "CAMARA")
+    assert _interesado_doc_and_name_parts(datos) == (
+        "B09899253",
+        "CORP.PROJECTS HOLDING SOCIEDAD LIMITADA.",
+        "",
+        "",
+    )
 
 
 def test_react_representation_keeps_company_when_no_physical_interested_party() -> None:

@@ -14,7 +14,7 @@ from sites.xaloc_girona.data_models import DatosMandatario, DatosMulta
 
 logger = logging.getLogger("xaloc_automation.xaloc_girona.react")
 
-DELAY_MS = 500
+DELAY_MS = int((os.getenv("XALOC_REACT_STEP_DELAY_MS") or "500").strip() or "500")
 REG_URL_MARKER = "seu.xalocgirona.cat/sta/reg/tramit/"
 AUTH_FILE_TOKENS = ("autoriz", "autoriza", "acredit", "mandat", "represent")
 NATURAL_NAME_SELECTOR = "#name-of-natural-for-ungrouped-value"
@@ -62,6 +62,9 @@ def _mandatario_name_parts(m: DatosMandatario | None) -> tuple[str, str, str]:
 
 
 def _interesado_doc_and_name_parts(datos: DatosMulta) -> tuple[str, str, str, str]:
+    if datos.mandatario and datos.mandatario.tipo_persona == "JURIDICA":
+        return _mandatario_doc(datos.mandatario), *_mandatario_name_parts(datos.mandatario)
+
     doc = _clean_doc(datos.interesado_doc or "")
     nombre = _norm(datos.interesado_nombre)
     apellido1 = _norm(datos.interesado_apellido1)
