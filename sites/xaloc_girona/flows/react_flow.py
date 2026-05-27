@@ -196,9 +196,18 @@ async def _is_visible(page: Page, selector: str, *, timeout_ms: int = 800) -> bo
         return False
 
 
+async def _is_enabled_visible(page: Page, selector: str, *, timeout_ms: int = 800) -> bool:
+    try:
+        loc = page.locator(selector).first
+        await loc.wait_for(state="visible", timeout=timeout_ms)
+        return await loc.is_enabled()
+    except Exception:
+        return False
+
+
 async def _find_legal_name_selector(page: Page) -> str:
     for selector in LEGAL_NAME_CANDIDATES:
-        if await _is_visible(page, selector, timeout_ms=500):
+        if await _is_enabled_visible(page, selector, timeout_ms=500):
             return selector
 
     selector = await page.evaluate(
@@ -207,12 +216,11 @@ async def _find_legal_name_selector(page: Page) -> str:
             const inputs = Array.from(document.querySelectorAll('input:not([type="hidden"]), textarea'));
             for (const input of inputs) {
                 const id = input.id || '';
+                if (id === 'id-number-for-ungrouped-value' || input.disabled) continue;
                 const label = id ? document.querySelector(`label[for="${CSS.escape(id)}"]`) : null;
                 let text = label ? label.innerText || '' : '';
-                let node = input.parentElement;
-                for (let depth = 0; node && depth < 5; depth += 1, node = node.parentElement) {
-                    text += ' ' + (node.innerText || '');
-                }
+                const field = input.closest('.MuiTextField-root, fieldset, .MuiFormControl-root');
+                if (field) text += ' ' + (field.innerText || '');
                 if (labelRe.test(text)) {
                     if (id) return `#${CSS.escape(id)}`;
                     if (input.name) return `[name="${CSS.escape(input.name)}"]`;
@@ -226,6 +234,25 @@ async def _find_legal_name_selector(page: Page) -> str:
     raise RuntimeError("xaloc_girona/react: no se encontro campo de razon social para interesado juridico.")
 
 
+async def _wait_for_legal_name_selector(page: Page, *, timeout_ms: int = 12000) -> str:
+    import time
+
+    deadline = time.monotonic() + (timeout_ms / 1000)
+    last_error: Exception | None = None
+    while time.monotonic() < deadline:
+        try:
+            selector = await _find_legal_name_selector(page)
+            if selector == "#id-number-for-ungrouped-value":
+                raise RuntimeError("selector de razon social resolvio al campo fiscal")
+            return selector
+        except Exception as exc:
+            last_error = exc
+            await page.wait_for_timeout(500)
+    raise RuntimeError(
+        "xaloc_girona/react: no aparecio campo habilitado de razon social tras introducir el NIF/CIF."
+    ) from last_error
+
+
 async def _fill_rendered_interested_variant(
     page: Page,
     *,
@@ -234,7 +261,7 @@ async def _fill_rendered_interested_variant(
     natural_last_surname: str,
     legal_name: str,
 ) -> None:
-    if await _is_visible(page, NATURAL_NAME_SELECTOR, timeout_ms=2500):
+    if await _is_enabled_visible(page, NATURAL_NAME_SELECTOR, timeout_ms=2500):
         logger.info("XALOC React: formulario de interesado detectado como persona fisica.")
         await _fill_text(page, NATURAL_NAME_SELECTOR, natural_name)
         await _fill_text(page, NATURAL_FIRST_SURNAME_SELECTOR, natural_first_surname)
@@ -242,7 +269,7 @@ async def _fill_rendered_interested_variant(
         return
 
     logger.info("XALOC React: formulario de interesado detectado como persona juridica.")
-    selector = await _find_legal_name_selector(page)
+    selector = await _wait_for_legal_name_selector(page)
     await _fill_text(page, selector, legal_name)
 
 
