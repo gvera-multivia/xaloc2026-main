@@ -127,23 +127,35 @@ async def _descargar_pdf_desde_url(page: Page, url: str, destino: Path) -> None:
 
 
 async def _buscar_boton_descarga_reg(page: Page):
-    selectors = (
+    selector = ", ".join((
         'button:has-text("Descarregar")',
         'a:has-text("Descarregar")',
         '[role="button"]:has-text("Descarregar")',
         'button:has-text("Descargar")',
         'a:has-text("Descargar")',
         '[role="button"]:has-text("Descargar")',
-    )
-    timeout_ms = REG_DOWNLOAD_BUTTON_TIMEOUT_MS
-    for selector in selectors:
-        loc = page.locator(selector).first
-        try:
-            await loc.wait_for(state="visible", timeout=timeout_ms)
-            return loc
-        except TimeoutError:
-            timeout_ms = 1000
-    raise RuntimeError("No se encontro boton Descarregar/Descargar del justificante REG.")
+    ))
+    loc = page.locator(selector).first
+    await loc.wait_for(state="visible", timeout=REG_DOWNLOAD_BUTTON_TIMEOUT_MS)
+    return loc
+
+
+async def _extraer_url_descarga_boton(boton) -> str:
+    url = ""
+    try:
+        url = (await boton.get_attribute("href")) or ""
+        if not url:
+            url = (await boton.get_attribute("data-url")) or ""
+        if not url:
+            onclick = (await boton.get_attribute("onclick")) or ""
+            import re as _re
+
+            match = _re.search(r"['\"]([^'\"]+\.pdf[^'\"]*)['\"]", onclick, _re.IGNORECASE)
+            if match:
+                url = match.group(1)
+    except Exception:
+        url = ""
+    return url
 
 
 async def _descargar_pdf_reg_desde_boton(page: Page, destino: Path) -> None:
@@ -152,6 +164,17 @@ async def _descargar_pdf_reg_desde_boton(page: Page, destino: Path) -> None:
     await boton.scroll_into_view_if_needed()
     logger.info("Boton Descarregar detectado; iniciando descarga.")
 
+    direct_url = await _extraer_url_descarga_boton(boton)
+    if direct_url:
+        if direct_url.startswith("/"):
+            from urllib.parse import urljoin
+
+            direct_url = urljoin(page.url, direct_url)
+        await _descargar_pdf_desde_url(page, direct_url, destino)
+        if not destino.exists() or destino.stat().st_size < 1000:
+            raise RuntimeError(f"Justificante REG descargado invalido o vacio: {destino}")
+        return
+
     try:
         async with page.expect_download(timeout=90000) as download_info:
             await boton.click(no_wait_after=True)
@@ -159,20 +182,7 @@ async def _descargar_pdf_reg_desde_boton(page: Page, destino: Path) -> None:
         await download.save_as(str(destino))
     except Exception as event_error:
         logger.warning("No se capturo evento download REG; probando URL del boton. error=%s", event_error)
-        url = ""
-        try:
-            url = (await boton.get_attribute("href")) or ""
-            if not url:
-                url = (await boton.get_attribute("data-url")) or ""
-            if not url:
-                onclick = (await boton.get_attribute("onclick")) or ""
-                import re as _re
-
-                match = _re.search(r"['\"]([^'\"]+\.pdf[^'\"]*)['\"]", onclick, _re.IGNORECASE)
-                if match:
-                    url = match.group(1)
-        except Exception:
-            url = ""
+        url = await _extraer_url_descarga_boton(boton)
         if not url:
             raise RuntimeError("Boton Descarregar visible pero no se pudo capturar la descarga.") from event_error
         if url.startswith("/"):

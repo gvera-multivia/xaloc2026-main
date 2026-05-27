@@ -122,14 +122,13 @@ def select_mandate_file(datos: DatosMulta) -> Path:
 
 
 def select_notification_files(datos: DatosMulta, mandate_file: Path | None) -> list[Path]:
-    mandate_key = _path_key(mandate_file) if mandate_file else ""
     selected: list[Path] = []
     seen: set[str] = set()
     for p in datos.archivos_para_subir:
         if not p:
             continue
         key = _path_key(p)
-        if key == mandate_key or key in seen:
+        if key in seen:
             continue
         seen.add(key)
         selected.append(p)
@@ -300,13 +299,21 @@ async def _upload_files(page: Page, selector: str, files: Iterable[Path]) -> Non
 async def _get_file_input_for_card(page: Page, label_pattern: str) -> str:
     input_id = await page.evaluate(
         """({ pattern }) => {
-            const re = new RegExp(pattern, 'i');
+            const normalize = (value) => (value || '')
+                .normalize('NFD')
+                .replace(/[\\u0300-\\u036f]/g, '')
+                .replace(/\\s+/g, ' ')
+                .trim()
+                .toLowerCase();
+            const wanted = normalize(pattern);
             const inputs = Array.from(document.querySelectorAll('input[type="file"]'));
             for (const input of inputs) {
                 let node = input.parentElement;
-                for (let depth = 0; node && depth < 8; depth += 1, node = node.parentElement) {
-                    const text = (node.innerText || '').replace(/\\s+/g, ' ').trim();
-                    if (re.test(text)) return input.id || '';
+                for (let depth = 0; node && depth < 5; depth += 1, node = node.parentElement) {
+                    const text = normalize(node.innerText || '');
+                    if (!text) continue;
+                    const isCard = text.includes('seleccioneu el fitxer') || text.includes('arrossegueu-lo aqui');
+                    if (isCard && text.includes(wanted)) return input.id || '';
                 }
             }
             return '';
@@ -384,7 +391,7 @@ async def subir_documentos_react(page: Page, datos: DatosMulta, mandate_file: Pa
     logger.info("XALOC React: subiendo documentos en Notificacio.")
     await _wait_for_url_part(page, "/formulari/documents", timeout_ms=30000)
     files = select_notification_files(datos, mandate_file)
-    selector = await _get_file_input_for_card(page, r"Notificaci[oó]")
+    selector = await _get_file_input_for_card(page, "notificacio")
     logger.info("XALOC React: subiendo %s archivo(s) en Notificacio: %s", len(files), files)
     await _upload_files(page, selector, files)
     await page.locator('[data-testid="next-step-button"]').first.click(no_wait_after=True)

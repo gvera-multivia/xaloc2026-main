@@ -32,7 +32,7 @@ def test_select_mandate_prefers_required_client_authorization(tmp_path: Path) ->
     datos = _target([recurso, aut], required_docs=[aut])
 
     assert select_mandate_file(datos) == aut
-    assert select_notification_files(datos, aut) == [recurso]
+    assert select_notification_files(datos, aut) == [recurso, aut]
 
 
 def test_select_mandate_falls_back_to_authorization_filename(tmp_path: Path) -> None:
