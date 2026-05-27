@@ -17,6 +17,17 @@ logger = logging.getLogger("xaloc_automation.xaloc_girona.react")
 DELAY_MS = 500
 REG_URL_MARKER = "seu.xalocgirona.cat/sta/reg/tramit/"
 AUTH_FILE_TOKENS = ("autoriz", "autoriza", "acredit", "mandat", "represent")
+NATURAL_NAME_SELECTOR = "#name-of-natural-for-ungrouped-value"
+NATURAL_FIRST_SURNAME_SELECTOR = "#firstSurname-of-natural-for-ungrouped-value"
+NATURAL_LAST_SURNAME_SELECTOR = "#lastSurname-of-natural-for-ungrouped-value"
+LEGAL_NAME_CANDIDATES = (
+    "#name-of-legal-for-ungrouped-value",
+    "#businessName-of-legal-for-ungrouped-value",
+    "#business-name-for-ungrouped-value",
+    'input[id*="legal"][id*="name"]',
+    'input[id*="juridic"][id*="name"]',
+    'input[id*="business"]',
+)
 
 
 async def is_react_reg_flow(page: Page) -> bool:
@@ -59,6 +70,14 @@ def _interesado_doc_and_name_parts(datos: DatosMulta) -> tuple[str, str, str, st
         return doc, nombre, apellido1, apellido2
 
     return _mandatario_doc(datos.mandatario), *_mandatario_name_parts(datos.mandatario)
+
+
+def _interesado_legal_name(datos: DatosMulta) -> str:
+    m = datos.mandatario
+    if m and m.tipo_persona == "JURIDICA":
+        return _norm(m.razon_social)
+    parts = [datos.interesado_nombre, datos.interesado_apellido1, datos.interesado_apellido2]
+    return " ".join(_norm(part) for part in parts if _norm(part))
 
 
 def _path_key(path: Path) -> str:
@@ -166,6 +185,64 @@ async def _fill_text(page: Page, selector: str, value: object, *, required: bool
     await page.wait_for_timeout(150)
 
 
+async def _is_visible(page: Page, selector: str, *, timeout_ms: int = 800) -> bool:
+    try:
+        await page.locator(selector).first.wait_for(state="visible", timeout=timeout_ms)
+        return True
+    except Exception:
+        return False
+
+
+async def _find_legal_name_selector(page: Page) -> str:
+    for selector in LEGAL_NAME_CANDIDATES:
+        if await _is_visible(page, selector, timeout_ms=500):
+            return selector
+
+    selector = await page.evaluate(
+        """() => {
+            const labelRe = /ra[oóò]\\s*social|raz[oó]n\\s*social|denominaci[oó]|nom\\s+social/i;
+            const inputs = Array.from(document.querySelectorAll('input:not([type="hidden"]), textarea'));
+            for (const input of inputs) {
+                const id = input.id || '';
+                const label = id ? document.querySelector(`label[for="${CSS.escape(id)}"]`) : null;
+                let text = label ? label.innerText || '' : '';
+                let node = input.parentElement;
+                for (let depth = 0; node && depth < 5; depth += 1, node = node.parentElement) {
+                    text += ' ' + (node.innerText || '');
+                }
+                if (labelRe.test(text)) {
+                    if (id) return `#${CSS.escape(id)}`;
+                    if (input.name) return `[name="${CSS.escape(input.name)}"]`;
+                }
+            }
+            return '';
+        }"""
+    )
+    if selector:
+        return str(selector)
+    raise RuntimeError("xaloc_girona/react: no se encontro campo de razon social para interesado juridico.")
+
+
+async def _fill_rendered_interested_variant(
+    page: Page,
+    *,
+    natural_name: str,
+    natural_first_surname: str,
+    natural_last_surname: str,
+    legal_name: str,
+) -> None:
+    if await _is_visible(page, NATURAL_NAME_SELECTOR, timeout_ms=2500):
+        logger.info("XALOC React: formulario de interesado detectado como persona fisica.")
+        await _fill_text(page, NATURAL_NAME_SELECTOR, natural_name)
+        await _fill_text(page, NATURAL_FIRST_SURNAME_SELECTOR, natural_first_surname)
+        await _fill_text(page, NATURAL_LAST_SURNAME_SELECTOR, natural_last_surname, required=False)
+        return
+
+    logger.info("XALOC React: formulario de interesado detectado como persona juridica.")
+    selector = await _find_legal_name_selector(page)
+    await _fill_text(page, selector, legal_name)
+
+
 async def _check_radio_or_checkbox(page: Page, selector: str) -> None:
     loc = page.locator(selector).first
     await loc.wait_for(state="attached", timeout=20000)
@@ -236,9 +313,14 @@ async def completar_representacion_react(page: Page, datos: DatosMulta) -> Path:
         apellido1,
     )
     await _fill_text(page, "#id-number-for-ungrouped-value", doc)
-    await _fill_text(page, "#name-of-natural-for-ungrouped-value", nombre)
-    await _fill_text(page, "#firstSurname-of-natural-for-ungrouped-value", apellido1)
-    await _fill_text(page, "#lastSurname-of-natural-for-ungrouped-value", apellido2, required=False)
+    await page.wait_for_timeout(1200)
+    await _fill_rendered_interested_variant(
+        page,
+        natural_name=nombre,
+        natural_first_surname=apellido1,
+        natural_last_surname=apellido2,
+        legal_name=_interesado_legal_name(datos),
+    )
     await _check_radio_or_checkbox(page, "#ungrouped-radio-text-radiogroup-MANDATE")
 
     mandate = select_mandate_file(datos)

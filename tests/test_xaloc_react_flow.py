@@ -5,6 +5,7 @@ import pytest
 from sites.xaloc_girona.data_models import DatosMandatario, DatosMulta
 from sites.xaloc_girona.flows.react_flow import (
     _interesado_doc_and_name_parts,
+    _interesado_legal_name,
     select_mandate_file,
     select_notification_files,
     split_motivos_for_react,
@@ -83,3 +84,28 @@ def test_react_representation_prefers_physical_interested_party_over_company() -
     )
 
     assert _interesado_doc_and_name_parts(datos) == ("40347979E", "ALFONSO", "GALVEZ", "CAMARA")
+
+
+def test_react_representation_keeps_company_when_no_physical_interested_party() -> None:
+    datos = DatosMulta(
+        email="info@xvia-serviciosjuridicos.com",
+        num_denuncia="2026/1-MUL",
+        matricula="4694DWT",
+        num_expediente="2026/1-MUL",
+        motivos="motivos",
+        archivos_adjuntos=[Path("RECURSO.pdf")],
+        mandatario=DatosMandatario(
+            tipo_persona="JURIDICA",
+            cif_documento="B0989925",
+            cif_control="3",
+            razon_social="CORP.PROJECTS HOLDING SOCIEDAD LIMITADA.",
+        ),
+    )
+
+    assert _interesado_doc_and_name_parts(datos) == (
+        "B09899253",
+        "CORP.PROJECTS HOLDING SOCIEDAD LIMITADA.",
+        "",
+        "",
+    )
+    assert _interesado_legal_name(datos) == "CORP.PROJECTS HOLDING SOCIEDAD LIMITADA."
