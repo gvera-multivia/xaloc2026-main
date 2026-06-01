@@ -26,6 +26,7 @@ def fix_format(expediente: str) -> str:
     
     # 1. Limpiar espacios y pasar a mayúsculas
     fixed = expediente.strip().upper()
+    fixed = re.sub(r"[.\s]+$", "", fixed)
     
     # 2. Corregir guión por barra (solo si parece el formato YYYY-NNNN)
     # Ejemplo: 2026-11504-MUL -> 2026/11504-MUL
