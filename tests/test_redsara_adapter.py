@@ -12,6 +12,24 @@ def test_resolve_rule_and_destination_code_barcelona() -> None:
     assert rule["destination_code"] == "LA0006797"
 
 
+def test_resolve_rule_and_destination_code_atib_variants() -> None:
+    adapter = RedsaraAdapter()
+    variants = [
+        "AGENCIA TRIBUTARIA ILLES BALEARS -ATIB",
+        "AGENCIA TRIBUTARIA ILLES BALEARS - ATIB",
+        "AGENCIA TRIBUTARIA ILLES BALEARS-ATIB",
+        "AGENCIA TRIBUTARIA ILLES BALEARS (ATIB)",
+        "AGENCIA TRIBUTARIA ILLES BALEARS ATIB",
+        "AGENCIA TRIBUTARIA ISLAS BALEARES (ATIB)",
+    ]
+
+    for organisme in variants:
+        rule = adapter.resolve_rule_by_organisme(organisme)
+        assert rule is not None, organisme
+        assert rule["destination_code"] == "A04013587"
+        assert adapter.validate_expediente_for_organisme(organisme, "25/088283-3")
+
+
 def test_validate_expediente_by_official_patterns() -> None:
     adapter = RedsaraAdapter()
     assert adapter.validate_expediente_for_organisme("AJUNTAMENT DE BARCELONA", "2026SACR0141800")
@@ -31,6 +49,7 @@ def test_validate_expediente_by_official_patterns() -> None:
     assert adapter.validate_expediente_for_organisme(
         "AGENCIA TRIBUTARIA MUNICIPAL DE ISLAS BALEARES", "23/044727-31"
     )
+    assert adapter.validate_expediente_for_organisme("AGENCIA TRIBUTARIA ILLES BALEARS -ATIB", "23-016775")
     assert adapter.validate_expediente_for_organisme("AJUNTAMENT MIGJORN GRAN", "2025013916")
     assert adapter.validate_expediente_for_organisme("AYUNTAMIENTO DE MOSTOLES", "888249540")
     assert adapter.validate_expediente_for_organisme("AYUNTAMIENTO DE MOSTOLES", "550/2026/MUL")

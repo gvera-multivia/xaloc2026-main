@@ -30,7 +30,7 @@ from .repositories import (
 
 XVIA_HOME_URL = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/home"
 USER_RE = re.compile(r'<i class="fa fa-user-circle"[^>]*></i>\s*([^<]+)')
-DEFAULT_DASHBOARD_ASSIGNED_USER = "Guillen Vera"
+DEFAULT_DASHBOARD_ASSIGNED_USER = "Daniel Gonzalez"
 _AUTH_TOKEN_RE = re.compile(r"(autorizaci|authorization|autoritzaci|(?:^|[^a-z])aut(?:[^a-z]|$))", re.IGNORECASE)
 _AUTH_MISSING_RE = re.compile(
     r"(missing|falt(?:a|an|aba|ante)?|sin\s+aut|no\s+(?:se\s+)?(?:encuentra|encontro|existe)|ausent)",
