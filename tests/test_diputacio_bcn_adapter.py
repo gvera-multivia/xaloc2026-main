@@ -119,7 +119,7 @@ def test_fetch_candidates_allows_orgt_alias_even_if_not_in_allowed_catalog() -> 
     candidates = adapter.fetch_candidates(
         config={"query_organisme": "%AJUNTAMENT DE SABADELL%"},
         conn_str="dummy",
-        authenticated_user="Daniel Gonzalez",
+        authenticated_user="Guillen Vera",
         limit=50,
         resource_repo=repo,
     )
@@ -148,7 +148,7 @@ def test_fetch_candidates_allows_organisme_from_query_when_catalog_empty() -> No
     candidates = adapter.fetch_candidates(
         config={"query_organisme": "%AJUNTAMENT  L´HOSPITALET DE LLOBREGAT%"},
         conn_str="dummy",
-        authenticated_user="Daniel Gonzalez",
+        authenticated_user="Guillen Vera",
         limit=50,
         resource_repo=repo,
     )
@@ -259,7 +259,7 @@ def test_fetch_candidates_discards_when_assigned_to_other_user() -> None:
     candidates = adapter.fetch_candidates(
         config={"query_organisme": "%AYUNTAMIENTO DE IGUALADA%"},
         conn_str="dummy",
-        authenticated_user="Daniel Gonzalez",
+        authenticated_user="Guillen Vera",
         limit=50,
         resource_repo=repo,
         on_discard=lambda d: discards.append(d),
