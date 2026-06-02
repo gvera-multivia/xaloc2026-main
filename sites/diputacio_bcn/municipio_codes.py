@@ -92,6 +92,7 @@ MUNICIPIO_TO_CODE: dict[str, str] = {
     "ARENYS DE MUNT": "007",
     "BADIA DEL VALLES": "312",
     "MANLLEU": "111",
+    "MANRESA": "113",
     "PIERA": "160",
     "LLINARS DEL VALLES": "105",
     "GIRONELLA": "091",

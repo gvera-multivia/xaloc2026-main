@@ -369,6 +369,39 @@ def test_build_payloads_prefers_organisme_hospitalet_over_wrong_client_municipio
     assert payloads[0]["codmuni"] == "100"
 
 
+def test_build_payloads_prefers_organisme_manresa_over_client_badalona() -> None:
+    adapter = DiputacioBcnAdapter()
+    payloads = asyncio.run(
+        adapter.build_payloads(
+            [
+                {
+                    "idRecurso": 555009,
+                    "idExp": 777009,
+                    "numclient": 999009,
+                    "automatic_id": 12353,
+                    "Expedient": "542007/25",
+                    "Organisme": "AJUNTAMENT DE MANRESA",
+                    "FaseProcedimiento": "denuncia",
+                    "SujetoRecurso": "CARLA SERRA",
+                    "tipodecliente": "1",
+                    "nif": "12345678Z",
+                    "nifempresa": "",
+                    "Nombre": "CARLA",
+                    "Apellido1": "SERRA",
+                    "Apellido2": "PUJOL",
+                    "Nombrefiscal": "",
+                    "cliente_municipio": "BADALONA",
+                    "adjuntos": [],
+                }
+            ]
+        )
+    )
+
+    assert len(payloads) == 1
+    assert payloads[0]["municipio"] == "MANRESA"
+    assert payloads[0]["codmuni"] == "113"
+
+
 def test_build_payloads_uses_client_municipio_for_orgt_alias() -> None:
     adapter = DiputacioBcnAdapter()
     payloads = asyncio.run(

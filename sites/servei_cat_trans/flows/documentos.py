@@ -65,6 +65,21 @@ async def _upload_to_input(scope: "Page | Frame", input_id: str, file_path: Path
     selector = f'[id="{input_id}"]'
     await scope.locator(selector).set_input_files(str(file_path))
     await scope.wait_for_timeout(700)
+    names = await _read_input_file_names(scope, input_id)
+    if not names:
+        return False
+    expected = file_path.name.strip().lower()
+    if expected and expected not in names:
+        logger.warning(
+            "servei_cat_trans.documentos: upload input=%s cargado con nombre distinto. expected=%s got=%s",
+            input_id,
+            expected,
+            names,
+        )
+    return True
+
+
+async def _read_input_file_names(scope: "Page | Frame", input_id: str) -> list[str]:
     try:
         state = await scope.evaluate(
             """(id) => {
@@ -76,21 +91,33 @@ async def _upload_to_input(scope: "Page | Frame", input_id: str, file_path: Path
             input_id,
         )
     except Exception:
-        return False
+        return []
 
     count = int((state or {}).get("count") or 0)
     if count <= 0:
-        return False
-    names = [str(n or "").strip().lower() for n in (state or {}).get("names") or []]
-    expected = file_path.name.strip().lower()
-    if expected and names and expected not in names:
-        logger.warning(
-            "servei_cat_trans.documentos: upload input=%s cargado con nombre distinto. expected=%s got=%s",
-            input_id,
-            expected,
-            names,
+        return []
+    return [str(n or "").strip().lower() for n in (state or {}).get("names") or []]
+
+
+async def _assert_expected_uploads_present(
+    scope: "Page | Frame",
+    *,
+    expected_by_slot: dict[str, str],
+) -> None:
+    missing: list[str] = []
+    mismatched: list[str] = []
+    for input_id, expected_name in expected_by_slot.items():
+        names = await _read_input_file_names(scope, input_id)
+        if not names:
+            missing.append(f"{input_id}:{expected_name}")
+            continue
+        if expected_name.strip().lower() not in names:
+            mismatched.append(f"{input_id}:{expected_name}->{names}")
+    if missing or mismatched:
+        raise RuntimeError(
+            "servei_cat_trans.documentos: verificacion final de adjuntos fallida. "
+            f"missing={missing} mismatched={mismatched}"
         )
-    return True
 
 
 def _is_within_size_limit(file_path: Path) -> bool:
@@ -291,11 +318,16 @@ async def run_documentos(page: "Page", config: "ServeiCatTransConfig", datos: "S
     await dismiss_cookie_banner_if_present(page)
     files = [Path(p) for p in (datos.archivos_para_subir or []) if Path(p).exists()]
     if not files:
-        logger.warning("servei_cat_trans.documentos: no hay archivos para subir.")
-        return page
+        raise RuntimeError("servei_cat_trans.documentos: no hay archivos para subir.")
 
     payload = datos.payload if isinstance(datos.payload, dict) else {}
     recurso, autorizacion, rest = _select_files_by_origin(files, payload)
+    logger.info(
+        "servei_cat_trans.documentos: seleccion origen recurso=%s autorizacion=%s extras=%s",
+        recurso.name if recurso else "N/A",
+        autorizacion.name if autorizacion else "N/A",
+        [p.name for p in rest],
+    )
 
     run_dir = UPLOAD_PREP_DIR / str(datos.idRecurso or "unknown")
     prepared_recurso: Path | None = None
@@ -329,14 +361,21 @@ async def run_documentos(page: "Page", config: "ServeiCatTransConfig", datos: "S
             "o no cumplen limite de 1MB tras compresion."
         )
 
+    max_middle = MAX_DOC_SLOTS - (1 if prepared_recurso else 0) - (1 if prepared_autorizacion else 0)
+    omitted_by_slot_limit = [p.name for p in rest[max_middle:] if p.exists()]
+    if omitted_by_slot_limit:
+        raise RuntimeError(
+            "servei_cat_trans.documentos: hay mas adjuntos que slots disponibles; "
+            f"omitidos={omitted_by_slot_limit}"
+        )
+
     form_scope = await wait_form_scope(page, timeout_ms=config.upload_inputs_timeout_ms)
     input_ids = await _wait_file_input_ids(form_scope, timeout_ms=config.upload_inputs_timeout_ms)
     if len(input_ids) < 2:
-        logger.warning(
-            "servei_cat_trans.documentos: no se detectaron inputs file suficientes tras espera (%sms).",
-            config.upload_inputs_timeout_ms,
+        raise RuntimeError(
+            "servei_cat_trans.documentos: no se detectaron inputs file suficientes "
+            f"tras espera ({config.upload_inputs_timeout_ms}ms)."
         )
-        return page
 
     # Orden observado en este formulario:
     # [0]=uploader interno (no usar), [1..5]=docs opcionales, [6]=acreditacion.
@@ -345,7 +384,6 @@ async def run_documentos(page: "Page", config: "ServeiCatTransConfig", datos: "S
 
     # Montar extras intermedios (la autorizacion SIEMPRE se asigna al ultimo slot).
     prepared_middle: list[Path] = []
-    max_middle = MAX_DOC_SLOTS - (1 if prepared_recurso else 0) - (1 if prepared_autorizacion else 0)
     for idx, mid in enumerate(rest[:max_middle], start=1):
         if not mid.exists():
             continue
@@ -372,6 +410,7 @@ async def run_documentos(page: "Page", config: "ServeiCatTransConfig", datos: "S
         middle_files=prepared_middle,
         autorizacion=prepared_autorizacion,
     )
+    expected_by_slot: dict[str, str] = {}
     recurso_uploaded = False
     autorizacion_uploaded = False
     for file_path, slot_id in upload_plan:
@@ -382,6 +421,7 @@ async def run_documentos(page: "Page", config: "ServeiCatTransConfig", datos: "S
             raise RuntimeError(
                 f"servei_cat_trans.documentos: no se pudo confirmar upload en slot={slot_id} archivo={file_path.name}."
             )
+        expected_by_slot[slot_id] = file_path.name
         if prepared_recurso and file_path == prepared_recurso:
             recurso_uploaded = True
         if prepared_autorizacion and file_path == prepared_autorizacion:
@@ -396,6 +436,7 @@ async def run_documentos(page: "Page", config: "ServeiCatTransConfig", datos: "S
             raise RuntimeError(
                 "servei_cat_trans.documentos: no se pudo confirmar upload de acreditacion en slot especial."
             )
+        expected_by_slot[acreditacion_slot] = prepared_autorizacion.name
         autorizacion_uploaded = True
 
     if datos.tipo_persona == "juridica" and not acreditacion_slot:
@@ -408,5 +449,7 @@ async def run_documentos(page: "Page", config: "ServeiCatTransConfig", datos: "S
         raise RuntimeError("servei_cat_trans.documentos: el recurso obligatorio no quedo adjuntado.")
     if not autorizacion_uploaded:
         raise RuntimeError("servei_cat_trans.documentos: la autorizacion/acreditacion obligatoria no quedo adjuntada.")
+
+    await _assert_expected_uploads_present(form_scope, expected_by_slot=expected_by_slot)
 
     return page

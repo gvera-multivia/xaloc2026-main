@@ -12,6 +12,17 @@ def test_resolve_rule_and_destination_code_barcelona() -> None:
     assert rule["destination_code"] == "LA0006797"
 
 
+def test_resolve_rule_and_destination_code_ctda_leon() -> None:
+    adapter = RedsaraAdapter()
+    rule = adapter.resolve_rule_by_organisme("CENTRO DE TRATAMIENTO DE DENUNCIAS AUTOMATIZADAS DE LEON")
+    assert rule is not None
+    assert rule["destination_code"] == "E04753204"
+    assert adapter.validate_expediente_for_organisme(
+        "CENTRO DE TRATAMIENTO DE DENUNCIAS AUTOMATIZADAS DE LEON",
+        "29-048-030.715-7",
+    )
+
+
 def test_resolve_rule_and_destination_code_atib_variants() -> None:
     adapter = RedsaraAdapter()
     variants = [

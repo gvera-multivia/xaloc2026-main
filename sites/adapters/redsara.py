@@ -146,7 +146,7 @@ class RedsaraAdapter(SiteAdapter):
         {
             "name": "CTDA LEON",
             "like_patterns": ["%CENTRO DE TRATAMIENTO DE DENUNCIAS AUTOMATIZADAS DE LEON%"],
-            "destination_code": "E00130201",
+            "destination_code": "E04753204",
             "regex_list": [
                 r"^\d{2}-\d{3}-\d{3}\.\d{3}-\d$",
                 r"^\d{2}-\d{3}-\d{3}-\d{3}-\d$",
