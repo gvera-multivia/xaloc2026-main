@@ -32,7 +32,29 @@ def test_select_mandate_prefers_required_client_authorization(tmp_path: Path) ->
     datos = _target([recurso, aut], required_docs=[aut])
 
     assert select_mandate_file(datos) == aut
-    assert select_notification_files(datos, aut) == [recurso, aut]
+    assert select_notification_files(datos, aut) == [recurso]
+
+
+def test_select_mandate_falls_back_to_first_required_client_doc_when_name_is_not_obvious(tmp_path: Path) -> None:
+    recurso = tmp_path / "RECURSO.pdf"
+    recurso.write_text("x")
+    client_doc = tmp_path / "PODER_CLIENTE.pdf"
+    client_doc.write_text("x")
+    datos = _target([recurso, client_doc], required_docs=[client_doc])
+
+    assert select_mandate_file(datos) == client_doc
+
+
+def test_select_notification_files_excludes_mandate_file(tmp_path: Path) -> None:
+    recurso = tmp_path / "RECURSO.pdf"
+    recurso.write_text("x")
+    aut = tmp_path / "AUTORIZACION cliente CF.pdf"
+    aut.write_text("x")
+    datos = _target([recurso, aut], required_docs=[aut])
+
+    files = select_notification_files(datos, aut)
+    assert recurso in files
+    assert aut not in files
 
 
 def test_select_mandate_falls_back_to_authorization_filename(tmp_path: Path) -> None:

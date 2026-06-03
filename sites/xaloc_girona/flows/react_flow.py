@@ -114,6 +114,14 @@ def select_mandate_file(datos: DatosMulta) -> Path:
         unique.append(p)
 
     if not unique:
+        # Los documentos obligatorios del cliente se construyen con AUT primero.
+        # Si la autorizacion llega con un nombre poco reconocible, usar este fallback
+        # es mas seguro que bloquear el flujo aunque la ruta correcta ya exista.
+        required_docs = [Path(p) for p in (datos.required_client_doc_paths or []) if p]
+        if required_docs:
+            return required_docs[0]
+
+    if not unique:
         raise RuntimeError(
             "xaloc_girona/react: no se encontro autorizacion/mandato entre los archivos. "
             "La nueva sede exige subir 'Mandat de representacio' antes del formulario."
@@ -124,11 +132,14 @@ def select_mandate_file(datos: DatosMulta) -> Path:
 def select_notification_files(datos: DatosMulta, mandate_file: Path | None) -> list[Path]:
     selected: list[Path] = []
     seen: set[str] = set()
+    mandate_key = _path_key(mandate_file) if mandate_file else ""
     for p in datos.archivos_para_subir:
         if not p:
             continue
         key = _path_key(p)
         if key in seen:
+            continue
+        if mandate_key and key == mandate_key:
             continue
         seen.add(key)
         selected.append(p)
