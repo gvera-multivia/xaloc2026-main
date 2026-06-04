@@ -1,41 +1,51 @@
 import re
 
 # Formatos aceptados:
-# 1. YYYY/NNNNNN-MUL o YYYY/NNNNNN-SAD
-# 2. YYYY/NNNNNN-APR o YYYY-NNNNNN-APR
-# 3. NNNNNNNNNN (10 dígitos exactos, como 1098266110)
-# 4. NNNNNNNNNNNN (12 dígitos exactos, como 000038101604, 000042269999)
-VALID_EXP_REGEX = re.compile(r'^(\d{4}/\d+(?:-(?:MUL|SAD|APR))?|\d{4}-\d+-APR|\d{4}-\d+-\d|\d{10}|\d{12})$')
+# 1. YY/NNNNNNNN-D
+# 2. YYYY/NNNNNN-MUL o YYYY/NNNNNN-SAD
+# 3. YYYY/NNNNNN-APR o YYYY-NNNNNN-APR
+# 4. NNNNNNNNNN (10 digitos exactos, como 1098266110)
+# 5. NNNNNNNNNNNN (12 digitos exactos, como 000038101604, 000042269999)
+VALID_EXP_REGEX = re.compile(
+    r"^(?:"
+    r"\d{2}/\d{8}-\d|"
+    r"\d{4}/\d+(?:-(?:MUL|SAD|APR))?|"
+    r"\d{4}-\d+-APR|"
+    r"\d{4}-\d+-\d|"
+    r"\d{10}|"
+    r"\d{12}"
+    r")$"
+)
+
 
 def is_valid_format(expediente: str) -> bool:
     """Checks if the expediente matches the correct Xaloc format."""
     if not expediente:
         return False
-    # El .strip() elimina posibles espacios accidentales antes de validar
     return bool(VALID_EXP_REGEX.match(expediente.strip()))
+
 
 def fix_format(expediente: str) -> str:
     """
     Applies corrections to malformed expedientes:
+    - Reconstructs compact YYNNNNNNNND -> YY/NNNNNNNN-D.
     - Replaces '-' with '/' after the year.
     - Adds 'L' if it ends in '-MU'.
-    - Removes whitespace.
+    - Removes whitespace and trailing punctuation.
     """
     if not expediente:
         return ""
-    
-    # 1. Limpiar espacios y pasar a mayúsculas
+
     fixed = expediente.strip().upper()
     fixed = re.sub(r"[.\s]+$", "", fixed)
-    
-    # 2. Corregir guión por barra (solo si parece el formato YYYY-NNNN)
-    # Ejemplo: 2026-11504-MUL -> 2026/11504-MUL
-    # Si es 1098266110, esta regex no hará nada al no haber guion
-    if not re.match(r'^\d{4}-\d+-\d$', fixed):
-        fixed = re.sub(r'^(\d{4})-(\d+)', r'\1/\2', fixed)
-    
-    # 3. Corregir falta de L en sufijos
+
+    if re.fullmatch(r"\d{11}", fixed):
+        return f"{fixed[:2]}/{fixed[2:10]}-{fixed[10]}"
+
+    if not re.match(r"^\d{4}-\d+-\d$", fixed):
+        fixed = re.sub(r"^(\d{4})-(\d+)", r"\1/\2", fixed)
+
     if fixed.endswith("-MU"):
         fixed = fixed + "L"
-        
+
     return fixed

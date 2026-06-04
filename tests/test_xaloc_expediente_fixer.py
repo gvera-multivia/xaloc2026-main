@@ -14,6 +14,7 @@ from core.xaloc_expediente_utils import fix_format, is_valid_format
         ("2026-1531-MUL", "2026/1531-MUL", True),
         ("2026-24924-MUL.", "2026/24924-MUL", True),
         ("2026/24924-MUL.", "2026/24924-MUL", True),
+        ("17008774883", "17/00877488-3", True),
         ("2025-258060-MUL", "2025/258060-MUL", True),
         ("2025-257608-MUL", "2025/257608-MUL", True),
         ("2025-257339-MUL", "2025/257339-MUL", True),
