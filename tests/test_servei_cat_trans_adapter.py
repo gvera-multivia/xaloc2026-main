@@ -80,7 +80,7 @@ def test_fetch_candidates_discards_non_target_organisme() -> None:
     assert out == []
 
 
-def test_fetch_candidates_discards_invalid_expediente_shape() -> None:
+def test_fetch_candidates_normalizes_compact_expediente_shape() -> None:
     adapter = ServeiCatTransAdapter()
     row = _base_row()
     row["Expedient"] = "17203282983"
@@ -92,7 +92,8 @@ def test_fetch_candidates_discards_invalid_expediente_shape() -> None:
         limit=50,
         resource_repo=repo,
     )
-    assert out == []
+    assert len(out) == 1
+    assert out[0]["Expedient"] == "17/20328298-3"
 
 
 def test_fetch_candidates_accepts_identificacion_phase() -> None:
