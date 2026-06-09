@@ -1520,6 +1520,7 @@ async def _fill_expediente(page: "Page | Frame", datos: "ServeiCatTransTarget", 
 async def _fill_identificacion_conductor_direccion(
     page: "Page | Frame",
     *,
+    section_selector: str,
     tipo_via_id: str,
     nombre_via_id: str,
     numero_id: str,
@@ -1537,29 +1538,82 @@ async def _fill_identificacion_conductor_direccion(
     )
     ok_calle = await _fill_exact_input(page, f"#{nombre_via_id}", datos.identificado_nombre_via)
     ok_num = await _fill_exact_input(page, f"#{numero_id}", datos.identificado_numero)
-    ok_cp = await _fill_exact_input(page, f"#{cp_id}", datos.identificado_cp)
-    if ok_cp and _clean(datos.identificado_cp):
-        try:
-            await page.locator(f"#{cp_id}").first.press("Tab", timeout=5000)
-        except Exception:
-            pass
-        await page.wait_for_timeout(1000)
 
     ok_provincia = True
     if _clean(datos.identificado_provincia):
         await _wait_select_options(page, provincia_id, timeout_ms=5000)
         ok_provincia = await _safe_select_via_id(page, provincia_id, datos.identificado_provincia)
+    if not ok_provincia:
+        ok_provincia = await _select_label_in_section(
+            page,
+            section_selector,
+            ["provincia"],
+            datos.identificado_provincia,
+        )
+    if ok_provincia and _clean(datos.identificado_provincia):
+        await page.wait_for_timeout(500)
+
+    ok_cp = await _fill_exact_input(page, f"#{cp_id}", datos.identificado_cp)
+    if not ok_cp:
+        ok_cp = await _fill_input_by_label_in_section(
+            page,
+            section_selector,
+            ["codigo postal", "codi postal"],
+            datos.identificado_cp,
+        )
+    if ok_cp and _clean(datos.identificado_cp):
+        try:
+            await page.locator(f"#{cp_id}").first.press("Tab", timeout=5000)
+        except Exception:
+            pass
+        await page.wait_for_timeout(1200)
 
     ok_comarca = True
     if _clean(datos.identificado_comarca):
         await _wait_select_options(page, comarca_id)
         ok_comarca = await _safe_select_via_id(page, comarca_id, datos.identificado_comarca)
+        if not ok_comarca:
+            ok_comarca = await _select_label_in_section(
+                page,
+                section_selector,
+                ["comarca"],
+                datos.identificado_comarca,
+            )
         await page.wait_for_timeout(500)
 
     ok_municipio = True
     if _clean(datos.identificado_municipio):
         await _wait_select_options(page, municipio_id)
         ok_municipio = await _safe_select_via_id(page, municipio_id, datos.identificado_municipio)
+        if not ok_municipio:
+            ok_municipio = await _select_label_in_section(
+                page,
+                section_selector,
+                ["municipio", "municipi"],
+                datos.identificado_municipio,
+            )
+
+    if not ok_tipo:
+        ok_tipo = await _select_label_in_section(
+            page,
+            section_selector,
+            ["tipo de via", "tipus de via"],
+            _tipo_via_candidates(datos.identificado_tipo_via, datos.identificado_nombre_via)[0],
+        )
+    if not ok_calle:
+        ok_calle = await _fill_input_by_label_in_section(
+            page,
+            section_selector,
+            ["nombre de la via", "nom de la via"],
+            datos.identificado_nombre_via,
+        )
+    if not ok_num:
+        ok_num = await _fill_input_by_label_in_section(
+            page,
+            section_selector,
+            ["numero"],
+            datos.identificado_numero,
+        )
 
     if not (ok_tipo and ok_calle and ok_num and ok_cp and ok_provincia and ok_comarca and ok_municipio):
         logger.warning(
@@ -1711,6 +1765,7 @@ async def _fill_identificacion_conductor(page: "Page | Frame", datos: "ServeiCat
             )
         await _fill_identificacion_conductor_direccion(
             page,
+            section_selector=identificado_section,
             tipo_via_id="guideContainer-rootPanel-seccio_dadesParticulars-panel-personaJuridica-ADRECA_PJ_PANEL-ADRECA_LOCALITAT_PJ_PANEL-panel_298747259-guidedropdownlist___widget",
             nombre_via_id="guideContainer-rootPanel-seccio_dadesParticulars-panel-personaJuridica-ADRECA_PJ_PANEL-ADRECA_LOCALITAT_PJ_PANEL-panel_298747259-guidetextbox___widget",
             numero_id="guideContainer-rootPanel-seccio_dadesParticulars-panel-personaJuridica-ADRECA_PJ_PANEL-ADRECA_LOCALITAT_PJ_PANEL-panel_298747259-panel-guidetextbox___widget",
@@ -1755,7 +1810,7 @@ async def _fill_identificacion_conductor(page: "Page | Frame", datos: "ServeiCat
             fallback_ap1_id = await _find_field_id_by_label(
                 page,
                 "#guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-PF__",
-                ["primer apellido"],
+                ["primer apellido", "primer cognom"],
                 field_kind="input",
             )
             if fallback_ap1_id:
@@ -1764,13 +1819,13 @@ async def _fill_identificacion_conductor(page: "Page | Frame", datos: "ServeiCat
             ok_ap1 = await _fill_input_by_label_in_section(
                 page,
                 identificado_section,
-                ["primer apellido"],
+                ["primer apellido", "primer cognom"],
                 datos.identificado_apellido1,
             )
         await _fill_input_by_label_in_section(
             page,
             identificado_section,
-            ["segundo apellido"],
+            ["segundo apellido", "segon cognom"],
             datos.identificado_apellido2,
         )
         if not ok_tipo_doc:
@@ -1807,6 +1862,7 @@ async def _fill_identificacion_conductor(page: "Page | Frame", datos: "ServeiCat
             )
         await _fill_identificacion_conductor_direccion(
             page,
+            section_selector=identificado_section,
             tipo_via_id="guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-ADRECA_PF-panel1662104193616-panel_298747259-guidedropdownlist___widget",
             nombre_via_id="guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-ADRECA_PF-panel1662104193616-panel_298747259-guidetextbox___widget",
             numero_id="guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-ADRECA_PF-panel1662104193616-panel_298747259-panel-guidetextbox___widget",
