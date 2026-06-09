@@ -933,6 +933,66 @@ async def _find_identificado_section_selector(page: "Page | Frame") -> str:
     return str(result or "").strip()
 
 
+async def _wait_expediente_verificado(
+    page: "Page | Frame",
+    *,
+    tramite_tipo: str,
+    timeout_ms: int = 15000,
+) -> None:
+    waited = 0
+    step_ms = 500
+    tramite = _clean(tramite_tipo).lower()
+    identified_heading = re.compile(
+        r"datos de identificacion del conductor|dades d identificacio del conductor",
+        re.IGNORECASE,
+    )
+
+    while waited <= timeout_ms:
+        try:
+            ok_text = page.get_by_text(
+                re.compile(
+                    r"los datos del expediente son correctos|dades de l'expedient.*correct",
+                    re.IGNORECASE,
+                )
+            ).first
+            if await ok_text.count() > 0:
+                try:
+                    await ok_text.wait_for(state="visible", timeout=500)
+                    return
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        if tramite == "identificacion":
+            try:
+                conductor_heading = page.get_by_text(identified_heading).first
+                if await conductor_heading.count() > 0:
+                    try:
+                        await conductor_heading.wait_for(state="visible", timeout=500)
+                        return
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            try:
+                identificado_section = await _find_identificado_section_selector(page)
+                if identificado_section:
+                    section = page.locator(identificado_section).first
+                    if await section.count() > 0 and await section.is_visible():
+                        return
+            except Exception:
+                pass
+
+        await page.wait_for_timeout(step_ms)
+        waited += step_ms
+
+    raise PlaywrightTimeoutError(
+        f"Timeout esperando validacion de expediente SCT (tramite={tramite or 'normal'})"
+    )
+
+
 async def _fill_input_by_label_in_section(
     page: "Page | Frame",
     section_selector: str,
@@ -1452,13 +1512,7 @@ async def _fill_expediente(page: "Page | Frame", datos: "ServeiCatTransTarget", 
             await fallback_btn.click(timeout=FAST_ACTION_TIMEOUT_MS)
             clicked = True
     if clicked:
-        ok_text = page.get_by_text(
-            re.compile(
-                rf"{re.escape(config.expediente_ok_pattern)}|dades de l'expedient.*correct",
-                re.IGNORECASE,
-            )
-        ).first
-        await ok_text.wait_for(timeout=15000)
+        await _wait_expediente_verificado(page, tramite_tipo=_clean(datos.tramite_tipo))
         if _clean(datos.tramite_tipo).lower() == "identificacion":
             await _fill_identificacion_conductor(page, datos)
 
