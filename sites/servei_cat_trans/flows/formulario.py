@@ -894,6 +894,73 @@ async def _find_field_id_by_label(
     return str(result or "").strip()
 
 
+async def _find_identificado_section_selector(page: "Page | Frame") -> str:
+    result = await page.evaluate(
+        """() => {
+            const normalize = (txt) => String(txt || "")
+                .normalize("NFD")
+                .replace(/[\\u0300-\\u036f]/g, "")
+                .replace(/\\s+/g, " ")
+                .trim()
+                .toLowerCase();
+
+            const targetTokens = [
+                "datos de identificacion del conductor",
+                "datos de identificacion del conductor / de la conductora",
+                "dades d identificacio del conductor",
+                "dades d identificacio del conductor / de la conductora",
+            ];
+            const hasInputs = (el) => (el?.querySelectorAll?.("input, select, textarea") || []).length >= 6;
+            const all = Array.from(document.querySelectorAll("h1,h2,h3,h4,h5,legend,label,div,span,p"));
+
+            for (const el of all) {
+                const txt = normalize(el.textContent || "");
+                if (!targetTokens.some((token) => txt.includes(token))) continue;
+
+                let scope = el;
+                for (let i = 0; i < 8 && scope; i++) {
+                    if (hasInputs(scope)) {
+                        if (scope.id) return "#" + CSS.escape(scope.id);
+                        scope.setAttribute("data-xaloc-identificado-scope", "1");
+                        return "[data-xaloc-identificado-scope='1']";
+                    }
+                    scope = scope.parentElement;
+                }
+            }
+            return "";
+        }"""
+    )
+    return str(result or "").strip()
+
+
+async def _fill_input_by_label_in_section(
+    page: "Page | Frame",
+    section_selector: str,
+    label_tokens: list[str],
+    value: str,
+) -> bool:
+    if not _clean(section_selector):
+        return False
+    field_id = await _find_field_id_by_label(page, section_selector, label_tokens, field_kind="input")
+    if not field_id:
+        return False
+    return await _fill_exact_input(page, f"#{field_id}", value)
+
+
+async def _select_label_in_section(
+    page: "Page | Frame",
+    section_selector: str,
+    label_tokens: list[str],
+    value: str,
+) -> bool:
+    if not _clean(section_selector):
+        return False
+    field_id = await _find_field_id_by_label(page, section_selector, label_tokens, field_kind="select")
+    if not field_id:
+        return False
+    return await _safe_select_label(page, f"#{field_id}", value)
+
+
 async def _fill_presentador_contacto_fallback(page: "Page | Frame", datos: "ServeiCatTransTarget") -> None:
     section = "[id^='guideContainer-rootPanel-seccio_presentador']"
     email_id = await _find_field_id_by_label(
@@ -1518,6 +1585,12 @@ async def _fill_identificacion_conductor(page: "Page | Frame", datos: "ServeiCat
     persona = _clean(datos.identificado_tipo_persona).lower() or "fisica"
     is_juridica = persona == "juridica"
     await _select_identificado_tipo_persona(page, is_juridica=is_juridica)
+    identificado_section = await _find_identificado_section_selector(page)
+    logger.info(
+        "servei_cat_trans identificado section selector=%r persona=%s",
+        identificado_section,
+        "juridica" if is_juridica else "fisica",
+    )
 
     if is_juridica:
         razon_id = "guideContainer-rootPanel-seccio_dadesParticulars-panel-personaJuridica-PJ-panel-guidetextbox___widget"
@@ -1543,6 +1616,13 @@ async def _fill_identificacion_conductor(page: "Page | Frame", datos: "ServeiCat
             )
             if fallback_razon_id:
                 await _fill_exact_input(page, f"#{fallback_razon_id}", datos.identificado_razon_social)
+        if not ok_razon:
+            ok_razon = await _fill_input_by_label_in_section(
+                page,
+                identificado_section,
+                ["razon social"],
+                datos.identificado_razon_social,
+            )
         if not ok_tipo_doc:
             fallback_tipo_id = await _find_field_id_by_label(
                 page,
@@ -1552,6 +1632,13 @@ async def _fill_identificacion_conductor(page: "Page | Frame", datos: "ServeiCat
             )
             if fallback_tipo_id:
                 await _safe_select_label(page, f"#{fallback_tipo_id}", _documento_empresa_label(datos.identificado_nif_empresa))
+        if not ok_tipo_doc:
+            ok_tipo_doc = await _select_label_in_section(
+                page,
+                identificado_section,
+                ["tipo de documento de identificacion"],
+                _documento_empresa_label(datos.identificado_nif_empresa),
+            )
         if not ok_doc:
             fallback_doc_id = await _find_field_id_by_label(
                 page,
@@ -1561,6 +1648,13 @@ async def _fill_identificacion_conductor(page: "Page | Frame", datos: "ServeiCat
             )
             if fallback_doc_id:
                 await _fill_exact_input(page, f"#{fallback_doc_id}", _sanitize_doc(datos.identificado_nif_empresa))
+        if not ok_doc:
+            ok_doc = await _fill_input_by_label_in_section(
+                page,
+                identificado_section,
+                ["numero de identificacion"],
+                _sanitize_doc(datos.identificado_nif_empresa),
+            )
         await _fill_identificacion_conductor_direccion(
             page,
             tipo_via_id="guideContainer-rootPanel-seccio_dadesParticulars-panel-personaJuridica-ADRECA_PJ_PANEL-ADRECA_LOCALITAT_PJ_PANEL-panel_298747259-guidedropdownlist___widget",
@@ -1596,6 +1690,13 @@ async def _fill_identificacion_conductor(page: "Page | Frame", datos: "ServeiCat
             )
             if fallback_nombre_id:
                 await _fill_exact_input(page, f"#{fallback_nombre_id}", datos.identificado_nombre)
+        if not ok_nombre:
+            ok_nombre = await _fill_input_by_label_in_section(
+                page,
+                identificado_section,
+                ["nombre"],
+                datos.identificado_nombre,
+            )
         if not ok_ap1:
             fallback_ap1_id = await _find_field_id_by_label(
                 page,
@@ -1605,6 +1706,19 @@ async def _fill_identificacion_conductor(page: "Page | Frame", datos: "ServeiCat
             )
             if fallback_ap1_id:
                 await _fill_exact_input(page, f"#{fallback_ap1_id}", datos.identificado_apellido1)
+        if not ok_ap1:
+            ok_ap1 = await _fill_input_by_label_in_section(
+                page,
+                identificado_section,
+                ["primer apellido"],
+                datos.identificado_apellido1,
+            )
+        await _fill_input_by_label_in_section(
+            page,
+            identificado_section,
+            ["segundo apellido"],
+            datos.identificado_apellido2,
+        )
         if not ok_tipo_doc:
             fallback_tipo_id = await _find_field_id_by_label(
                 page,
@@ -1614,6 +1728,13 @@ async def _fill_identificacion_conductor(page: "Page | Frame", datos: "ServeiCat
             )
             if fallback_tipo_id:
                 await _safe_select_label(page, f"#{fallback_tipo_id}", _documento_persona_label(datos.identificado_nif))
+        if not ok_tipo_doc:
+            ok_tipo_doc = await _select_label_in_section(
+                page,
+                identificado_section,
+                ["tipo de documento de identificacion"],
+                _documento_persona_label(datos.identificado_nif),
+            )
         if not ok_doc:
             fallback_doc_id = await _find_field_id_by_label(
                 page,
@@ -1623,6 +1744,13 @@ async def _fill_identificacion_conductor(page: "Page | Frame", datos: "ServeiCat
             )
             if fallback_doc_id:
                 await _fill_exact_input(page, f"#{fallback_doc_id}", _sanitize_doc(datos.identificado_nif))
+        if not ok_doc:
+            ok_doc = await _fill_input_by_label_in_section(
+                page,
+                identificado_section,
+                ["numero de identificacion"],
+                _sanitize_doc(datos.identificado_nif),
+            )
         await _fill_identificacion_conductor_direccion(
             page,
             tipo_via_id="guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-ADRECA_PF-panel1662104193616-panel_298747259-guidedropdownlist___widget",
