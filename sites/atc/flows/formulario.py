@@ -227,6 +227,19 @@ def _is_csv_result_ready(debug_state: dict | None) -> bool:
     return False
 
 
+async def _recover_csv_result_from_atencio_modal_if_needed(page: "Page", csv_state: dict | None) -> dict:
+    state = dict(csv_state or {})
+    if state.get("hasCsvRejectedModal") or state.get("continueEnabled"):
+        return state
+
+    dismissed = await _dismiss_atencio_continue_modal_if_present(page)
+    if not dismissed:
+        return state
+
+    refreshed = await _wait_csv_result_ready(page, timeout_ms=ATC_FORM_MEDIUM_TIMEOUT_MS)
+    return refreshed
+
+
 async def _collect_identification_debug_state(page: "Page") -> dict:
     return await page.evaluate(
         """() => {
@@ -972,6 +985,9 @@ async def _search_csv_and_continue(page: "Page", datos: "AtcTarget") -> None:
     ):
         csv_state = await _check_csv_result_checkbox_if_needed(page)
         csv_state = await _wait_csv_result_ready(page, timeout_ms=ATC_FORM_MEDIUM_TIMEOUT_MS)
+
+    if not csv_state.get("hasCsvRejectedModal") and not csv_state.get("continueEnabled"):
+        csv_state = await _recover_csv_result_from_atencio_modal_if_needed(page, csv_state)
 
     if not csv_state.get("hasCsvRejectedModal") and not csv_state.get("continueEnabled"):
         raise RuntimeError(
