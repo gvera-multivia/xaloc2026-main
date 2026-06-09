@@ -291,6 +291,7 @@ class ServeiCatTransController:
         numero_raw: str,
         municipio_raw: str,
         provincia_raw: str,
+        default_provincia: str = "Barcelona",
         piso_raw: str = "",
         puerta_raw: str = "",
         tipo_via_raw: str = "",
@@ -312,7 +313,7 @@ class ServeiCatTransController:
         query = ", ".join(part for part in query_parts if cls._clean(part))
         carto = cls._query_cartociudad(query=query)
         resolved_municipio = cls._clean(municipio_raw) or cls._clean(carto.get("municipio"))
-        resolved_provincia = cls._clean(provincia_raw) or cls._clean(carto.get("provincia")) or "Barcelona"
+        resolved_provincia = cls._clean(provincia_raw) or cls._clean(carto.get("provincia")) or cls._clean(default_provincia)
         resolved_comarca = cls._query_comarca_cartociudad(
             provincia=resolved_provincia,
             municipio=resolved_municipio,
@@ -567,6 +568,7 @@ class ServeiCatTransController:
             numero_raw=identificado_numero_raw,
             municipio_raw=identificado_municipio_raw,
             provincia_raw=identificado_provincia_raw,
+            default_provincia="",
             piso_raw=self._clean(src.get("identificado_piso")),
             puerta_raw=self._clean(src.get("identificado_puerta")),
             tipo_via_raw=self._clean(src.get("identificado_tipo_via")),

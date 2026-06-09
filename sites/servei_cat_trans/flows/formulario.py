@@ -1778,12 +1778,10 @@ async def _fill_identificacion_conductor(page: "Page | Frame", datos: "ServeiCat
     else:
         nombre_id = "guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-PF-panel-guidetextbox_897852897___widget"
         apellido1_id = "guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-PF-panel-guidetextbox_1197861190___widget"
-        apellido2_id = "guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-PF-panel-guidetextbox___widget"
         tipo_doc_id = "guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-PF-panel_1244233668-guidedropdownlist___widget"
         doc_id = "guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-PF-panel_1244233668-guidetextbox___widget"
         ok_nombre = await _fill_exact_input(page, f"#{nombre_id}", datos.identificado_nombre)
         ok_ap1 = await _fill_exact_input(page, f"#{apellido1_id}", datos.identificado_apellido1)
-        await _fill_exact_input(page, f"#{apellido2_id}", datos.identificado_apellido2)
         ok_tipo_doc = await _safe_select_label(
             page,
             f"#{tipo_doc_id}",
@@ -1885,8 +1883,28 @@ async def _fill_contenido(page: "Page | Frame", datos: "ServeiCatTransTarget") -
     await _safe_check(page, radio_sel)
 
     # Expongo / Solicito
-    await _safe_fill(page, f"div[id^='{base}'] [id$='-guidetextbox___widget']", datos.expongo)
-    await _safe_fill(page, f"div[id^='{base}'] [id$='-guidetextbox_641545334___widget']", datos.solicito)
+    content_section = "#guideContainer-rootPanel-seccio_dadesParticulars___guide-item"
+    expongo_id = await _find_field_id_by_label(
+        page,
+        content_section,
+        ["expongo", "exposo"],
+        field_kind="input",
+    )
+    if expongo_id:
+        await _fill_exact_input(page, f"#{expongo_id}", datos.expongo)
+    else:
+        logger.warning("servei_cat_trans contenido: no se localizo campo expongo/exposo por etiqueta.")
+
+    solicito_id = await _find_field_id_by_label(
+        page,
+        content_section,
+        ["solicito", "sol licito", "solicitud", "sol.licito"],
+        field_kind="input",
+    )
+    if solicito_id:
+        await _fill_exact_input(page, f"#{solicito_id}", datos.solicito)
+    else:
+        logger.warning("servei_cat_trans contenido: no se localizo campo solicito por etiqueta.")
 
 
 async def _aceptar_proteccion_datos(page: "Page | Frame") -> None:
