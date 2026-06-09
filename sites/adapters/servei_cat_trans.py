@@ -9,6 +9,7 @@ from typing import Any, Optional
 
 from core.contact_defaults import get_default_contact_email, get_default_contact_mobile
 from .site_adapter import SiteAdapter
+from sites.servei_cat_trans.controller import ServeiCatTransController
 
 
 class ServeiCatTransAdapter(SiteAdapter):
@@ -113,6 +114,20 @@ class ServeiCatTransAdapter(SiteAdapter):
         if re.fullmatch(r"\d{11}", exp):
             return f"{exp[:2]}/{exp[2:10]}-{exp[10]}"
         return exp
+
+    @classmethod
+    def _split_identificado_name_parts(
+        cls,
+        *,
+        nombre: Any,
+        apellido1: Any,
+        apellido2: Any,
+    ) -> tuple[str, str, str]:
+        return ServeiCatTransController._split_full_name_if_needed(
+            nombre=cls._clean(nombre),
+            apellido1=cls._clean(apellido1),
+            apellido2=cls._clean(apellido2),
+        )
 
     @classmethod
     def _is_identificacion_phase(cls, fase: Any, procedim: Any) -> bool:
@@ -295,6 +310,15 @@ class ServeiCatTransAdapter(SiteAdapter):
                 or r.get("ConducApellido2")
                 or r.get("conduc_apellido2")
             )
+            (
+                identificado_nombre,
+                identificado_apellido1,
+                identificado_apellido2,
+            ) = self._split_identificado_name_parts(
+                nombre=identificado_nombre,
+                apellido1=identificado_apellido1,
+                apellido2=identificado_apellido2,
+            )
             identificado_nif = self._normalize_document(
                 r.get("identificado_nif")
                 or r.get("ConducDni")
@@ -338,6 +362,18 @@ class ServeiCatTransAdapter(SiteAdapter):
                 r.get("identificado_provincia")
                 or r.get("ConducProv")
                 or r.get("conduc_prov")
+            )
+            identificado_ai = ServeiCatTransController._enrich_address_fields(
+                direccion_raw=identificado_calle_raw,
+                cp_raw=identificado_cp,
+                numero_raw=identificado_numero_raw,
+                municipio_raw=identificado_municipio,
+                provincia_raw=identificado_provincia,
+                default_provincia="",
+                piso_raw=self._clean(r.get("identificado_piso")),
+                puerta_raw=self._clean(r.get("identificado_puerta")),
+                tipo_via_raw=self._clean(r.get("identificado_tipo_via")),
+                nombre_via_raw=self._clean(r.get("identificado_nombre_via")),
             )
 
             tipo_identificado_raw = self._clean(
@@ -443,10 +479,13 @@ class ServeiCatTransAdapter(SiteAdapter):
                     "identificado_nif_empresa": identificado_nif_empresa,
                     "identificado_razon_social": identificado_razon_social,
                     "identificado_calle_raw": identificado_calle_raw,
-                    "identificado_numero_raw": identificado_numero_raw,
-                    "identificado_cp": identificado_cp,
-                    "identificado_municipio": identificado_municipio,
-                    "identificado_provincia": identificado_provincia,
+                    "identificado_numero_raw": identificado_ai.get("numero") or identificado_numero_raw,
+                    "identificado_cp": identificado_ai.get("cp") or identificado_cp,
+                    "identificado_tipo_via": identificado_ai.get("tipo_via") or self._clean(r.get("identificado_tipo_via")),
+                    "identificado_nombre_via": identificado_ai.get("nombre_via") or self._clean(r.get("identificado_nombre_via")),
+                    "identificado_municipio": identificado_ai.get("municipio") or identificado_municipio,
+                    "identificado_provincia": identificado_ai.get("provincia") or identificado_provincia,
+                    "identificado_comarca": identificado_ai.get("comarca") or self._clean(r.get("identificado_comarca")),
                     "expongo": expone,
                     "solicito": solicita,
                     "email": get_default_contact_email(),

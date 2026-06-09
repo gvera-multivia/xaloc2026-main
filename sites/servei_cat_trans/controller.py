@@ -139,6 +139,30 @@ class ServeiCatTransController:
         return doc
 
     @classmethod
+    def _split_full_name_if_needed(
+        cls,
+        *,
+        nombre: str,
+        apellido1: str,
+        apellido2: str,
+    ) -> tuple[str, str, str]:
+        clean_nombre = cls._clean(nombre)
+        clean_ap1 = cls._clean(apellido1)
+        clean_ap2 = cls._clean(apellido2)
+        if clean_ap1:
+            return clean_nombre, clean_ap1, clean_ap2
+
+        parts = [p for p in re.split(r"\s+", clean_nombre) if p]
+        if len(parts) < 2:
+            return clean_nombre, clean_ap1, clean_ap2
+
+        # Fallback conservador: si no hay apellidos separados, mover el ultimo token
+        # a primer apellido y dejar el resto como nombre.
+        inferred_ap1 = parts[-1]
+        inferred_nombre = " ".join(parts[:-1])
+        return inferred_nombre, inferred_ap1, clean_ap2
+
+    @classmethod
     def _classify_address_with_groq(
         cls,
         *,
@@ -238,6 +262,19 @@ class ServeiCatTransController:
         return {}
 
     @classmethod
+    def _query_cartociudad_by_cp(
+        cls,
+        *,
+        cp: str,
+        provincia: str = "",
+    ) -> dict[str, str]:
+        cp_txt = cls._clean(cp)
+        if not cp_txt:
+            return {}
+        query = ", ".join(part for part in (cp_txt, cls._clean(provincia), "Espana") if cls._clean(part))
+        return cls._query_cartociudad(query=query)
+
+    @classmethod
     def _query_comarca_cartociudad(
         cls,
         *,
@@ -312,6 +349,11 @@ class ServeiCatTransController:
         query_parts = [direccion_raw, numero_raw, cp_raw, municipio_raw, provincia_raw, "EspaÃ±a"]
         query = ", ".join(part for part in query_parts if cls._clean(part))
         carto = cls._query_cartociudad(query=query)
+        if not cls._clean(carto.get("municipio")) and cls._clean(cp_raw):
+            carto_cp = cls._query_cartociudad_by_cp(cp=cp_raw, provincia=provincia_raw or carto.get("provincia") or default_provincia)
+            if carto_cp:
+                carto = {**carto_cp, **carto}
+
         resolved_municipio = cls._clean(municipio_raw) or cls._clean(carto.get("municipio"))
         resolved_provincia = cls._clean(provincia_raw) or cls._clean(carto.get("provincia")) or cls._clean(default_provincia)
         resolved_comarca = cls._query_comarca_cartociudad(
@@ -522,6 +564,15 @@ class ServeiCatTransController:
         identificado_nombre = self._clean(src.get("identificado_nombre") or src.get("ConducNom") or src.get("conduc_nom"))
         identificado_apellido1 = self._clean(src.get("identificado_apellido1") or src.get("ConducApellido1") or src.get("conduc_apellido1"))
         identificado_apellido2 = self._clean(src.get("identificado_apellido2") or src.get("ConducApellido2") or src.get("conduc_apellido2"))
+        (
+            identificado_nombre,
+            identificado_apellido1,
+            identificado_apellido2,
+        ) = self._split_full_name_if_needed(
+            nombre=identificado_nombre,
+            apellido1=identificado_apellido1,
+            apellido2=identificado_apellido2,
+        )
         identificado_razon_social = self._clean(
             src.get("identificado_razon_social")
             or src.get("ConducRazonSocial")

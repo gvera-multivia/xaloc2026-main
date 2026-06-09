@@ -173,6 +173,24 @@ def test_build_payloads_identificacion_sets_tramite_and_identificado_fields() ->
     assert payload["identificado_numero_raw"] == "12"
 
 
+def test_build_payloads_identificacion_splits_last_token_into_apellido1_when_missing() -> None:
+    adapter = ServeiCatTransAdapter()
+    row = _base_row()
+    row["FaseProcedimiento"] = "IdentificaciÃƒÂ³ del conductor"
+    row["ConducNom"] = "NICOLAS ARIEL EZEQUIEL RUIZ"
+    row["ConducApellido1"] = ""
+    row["ConducApellido2"] = ""
+    row["ConducDni"] = "12345678Z"
+
+    payloads = asyncio.run(adapter.build_payloads([row]))
+
+    assert len(payloads) == 1
+    payload = payloads[0]
+    assert payload["identificado_nombre"] == "NICOLAS ARIEL EZEQUIEL"
+    assert payload["identificado_apellido1"] == "RUIZ"
+    assert payload["identificado_apellido2"] == ""
+
+
 def test_build_payloads_identificacion_pf_requires_document_and_name() -> None:
     adapter = ServeiCatTransAdapter()
     row = _base_row()
