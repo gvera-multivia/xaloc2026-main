@@ -310,6 +310,8 @@ class ServeiCatTransAdapter(SiteAdapter):
                 or r.get("ConducApellido2")
                 or r.get("conduc_apellido2")
             )
+            identificado_apellido1_raw = identificado_apellido1
+            identificado_apellido2_raw = identificado_apellido2
             (
                 identificado_nombre,
                 identificado_apellido1,
@@ -363,6 +365,54 @@ class ServeiCatTransAdapter(SiteAdapter):
                 or r.get("ConducProv")
                 or r.get("conduc_prov")
             )
+            same_identificado_as_solicitante = bool(
+                identificado_nif and nif_persona and identificado_nif == nif_persona
+            )
+            identified_matches_client_identity = (
+                same_identificado_as_solicitante
+                and (
+                    not apellido1
+                    or self._norm(identificado_apellido1) == self._norm(apellido1)
+                )
+                and (
+                    not nombre
+                    or self._norm(identificado_nombre).startswith(self._norm(nombre))
+                    or self._norm(nombre).startswith(self._norm(identificado_nombre))
+                )
+            )
+            if identified_matches_client_identity and not identificado_apellido1_raw:
+                identificado_apellido1 = apellido1
+            if identified_matches_client_identity and not identificado_apellido2_raw:
+                if apellido2:
+                    identificado_apellido2 = apellido2
+            if same_identificado_as_solicitante:
+                if not identificado_calle_raw:
+                    identificado_calle_raw = self._clean(
+                        r.get("cl_calle")
+                        or r.get("cliente_domicilio")
+                        or r.get("calle")
+                    )
+                if not identificado_numero_raw:
+                    identificado_numero_raw = self._clean(
+                        r.get("cl_numero")
+                        or r.get("cliente_numero")
+                        or r.get("numero")
+                    )
+                if not identificado_cp:
+                    identificado_cp = self._clean(
+                        r.get("cl_cp")
+                        or r.get("cliente_cp")
+                    )
+                if not identificado_municipio:
+                    identificado_municipio = self._clean(
+                        r.get("cl_poblacion")
+                        or r.get("cliente_municipio")
+                    )
+                if not identificado_provincia:
+                    identificado_provincia = self._clean(
+                        r.get("cl_provincia")
+                        or r.get("cliente_provincia")
+                    )
             identificado_ai = ServeiCatTransController._enrich_address_fields(
                 direccion_raw=identificado_calle_raw,
                 cp_raw=identificado_cp,
@@ -486,6 +536,7 @@ class ServeiCatTransAdapter(SiteAdapter):
                     "identificado_municipio": identificado_ai.get("municipio") or identificado_municipio,
                     "identificado_provincia": identificado_ai.get("provincia") or identificado_provincia,
                     "identificado_comarca": identificado_ai.get("comarca") or self._clean(r.get("identificado_comarca")),
+                    "identificado_same_as_solicitante": same_identificado_as_solicitante,
                     "expongo": expone,
                     "solicito": solicita,
                     "email": get_default_contact_email(),

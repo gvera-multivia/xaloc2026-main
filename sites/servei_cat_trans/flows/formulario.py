@@ -1551,7 +1551,7 @@ async def _fill_identificacion_conductor_direccion(
             datos.identificado_provincia,
         )
     if ok_provincia and _clean(datos.identificado_provincia):
-        await page.wait_for_timeout(500)
+        await page.wait_for_timeout(1200)
 
     ok_cp = await _fill_exact_input(page, f"#{cp_id}", datos.identificado_cp)
     if not ok_cp:
@@ -1566,10 +1566,11 @@ async def _fill_identificacion_conductor_direccion(
             await page.locator(f"#{cp_id}").first.press("Tab", timeout=5000)
         except Exception:
             pass
-        await page.wait_for_timeout(1200)
+        await page.wait_for_timeout(1800)
 
     ok_comarca = True
     if _clean(datos.identificado_comarca):
+        await page.wait_for_timeout(1000)
         await _wait_select_options(page, comarca_id)
         ok_comarca = await _safe_select_via_id(page, comarca_id, datos.identificado_comarca)
         if not ok_comarca:
@@ -1579,10 +1580,11 @@ async def _fill_identificacion_conductor_direccion(
                 ["comarca"],
                 datos.identificado_comarca,
             )
-        await page.wait_for_timeout(500)
+        await page.wait_for_timeout(1000)
 
     ok_municipio = True
     if _clean(datos.identificado_municipio):
+        await page.wait_for_timeout(1000)
         await _wait_select_options(page, municipio_id)
         ok_municipio = await _safe_select_via_id(page, municipio_id, datos.identificado_municipio)
         if not ok_municipio:

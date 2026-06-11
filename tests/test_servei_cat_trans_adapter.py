@@ -191,6 +191,41 @@ def test_build_payloads_identificacion_splits_last_token_into_apellido1_when_mis
     assert payload["identificado_apellido2"] == ""
 
 
+def test_build_payloads_identificacion_same_person_inherits_client_identity_and_address_when_sparse() -> None:
+    adapter = ServeiCatTransAdapter()
+    row = _base_row()
+    row["FaseProcedimiento"] = "IdentificaciÃƒÂ³ del conductor"
+    row["cliente_nombre"] = "MARTA CINTA"
+    row["cliente_apellido1"] = "ORTEGA"
+    row["cliente_apellido2"] = "GUIMONS"
+    row["cliente_nif"] = "40947574X"
+    row["cl_calle"] = "SANT RAMON DE PENYAFORT"
+    row["cl_numero"] = "124-1"
+    row["cl_cp"] = "08031"
+    row["cl_poblacion"] = "Barcelona"
+    row["cl_provincia"] = "Barcelona"
+    row["ConducNom"] = "MARTA CINTA ORTEGA"
+    row["ConducApellido1"] = ""
+    row["ConducApellido2"] = ""
+    row["ConducDni"] = "40947574X"
+    row["ConducAdr"] = ""
+    row["ConducNumero"] = ""
+    row["ConducCodpost"] = ""
+    row["ConducPobl"] = ""
+    row["ConducProv"] = ""
+
+    payloads = asyncio.run(adapter.build_payloads([row]))
+
+    assert len(payloads) == 1
+    payload = payloads[0]
+    assert payload["identificado_nombre"] == "MARTA CINTA"
+    assert payload["identificado_apellido1"] == "ORTEGA"
+    assert payload["identificado_apellido2"] == "GUIMONS"
+    assert payload["identificado_cp"] == "08031"
+    assert payload["identificado_municipio"] == "Barcelona"
+    assert payload["identificado_provincia"] == "Barcelona"
+
+
 def test_build_payloads_identificacion_pf_requires_document_and_name() -> None:
     adapter = ServeiCatTransAdapter()
     row = _base_row()
