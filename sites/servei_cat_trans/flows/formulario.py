@@ -1601,7 +1601,9 @@ async def _fill_identificacion_conductor_direccion(
     ok_provincia = True
     if _clean(datos.identificado_provincia):
         await _wait_select_options(page, provincia_id, timeout_ms=5000)
-        ok_provincia = await _safe_select_via_id(page, provincia_id, datos.identificado_provincia)
+        ok_provincia = await _retry_select_via_id(page, provincia_id, datos.identificado_provincia)
+        if not ok_provincia:
+            ok_provincia = await _auto_select_single_nonempty_option(page, provincia_id)
     if not ok_provincia:
         ok_provincia = await _select_label_in_section(
             page,
@@ -1631,7 +1633,9 @@ async def _fill_identificacion_conductor_direccion(
     if _clean(datos.identificado_comarca):
         await page.wait_for_timeout(1000)
         await _wait_select_options(page, comarca_id)
-        ok_comarca = await _safe_select_via_id(page, comarca_id, datos.identificado_comarca)
+        ok_comarca = await _retry_select_via_id(page, comarca_id, datos.identificado_comarca)
+        if not ok_comarca:
+            ok_comarca = await _auto_select_single_nonempty_option(page, comarca_id)
         if not ok_comarca:
             ok_comarca = await _select_label_in_section(
                 page,
@@ -1645,7 +1649,9 @@ async def _fill_identificacion_conductor_direccion(
     if _clean(datos.identificado_municipio):
         await page.wait_for_timeout(1000)
         await _wait_select_options(page, municipio_id)
-        ok_municipio = await _safe_select_via_id(page, municipio_id, datos.identificado_municipio)
+        ok_municipio = await _retry_select_via_id(page, municipio_id, datos.identificado_municipio)
+        if not ok_municipio:
+            ok_municipio = await _auto_select_single_nonempty_option(page, municipio_id)
         if not ok_municipio:
             ok_municipio = await _select_label_in_section(
                 page,
