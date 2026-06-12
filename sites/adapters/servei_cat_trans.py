@@ -381,6 +381,7 @@ class ServeiCatTransAdapter(SiteAdapter):
                 )
             )
             if identified_matches_client_identity and not identificado_apellido1_raw:
+                identificado_nombre = nombre
                 identificado_apellido1 = apellido1
             if identified_matches_client_identity and not identificado_apellido2_raw:
                 if apellido2:

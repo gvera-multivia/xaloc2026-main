@@ -13,6 +13,7 @@ from groq import Groq
 
 from core.address_classifier import classify_address_fallback
 from core.contact_defaults import get_default_contact_email, get_default_contact_mobile
+from sites.adapters.base import BaseOnlineAdapter
 from .config import ServeiCatTransConfig
 from .data_models import ServeiCatTransTarget
 
@@ -156,8 +157,6 @@ class ServeiCatTransController:
         if len(parts) < 2:
             return clean_nombre, clean_ap1, clean_ap2
 
-        # Fallback conservador: si no hay apellidos separados, mover el ultimo token
-        # a primer apellido y dejar el resto como nombre.
         inferred_ap1 = parts[-1]
         inferred_nombre = " ".join(parts[:-1])
         return inferred_nombre, inferred_ap1, clean_ap2
@@ -355,7 +354,12 @@ class ServeiCatTransController:
                 carto = {**carto_cp, **carto}
 
         resolved_municipio = cls._clean(municipio_raw) or cls._clean(carto.get("municipio"))
-        resolved_provincia = cls._clean(provincia_raw) or cls._clean(carto.get("provincia")) or cls._clean(default_provincia)
+        resolved_provincia = (
+            cls._clean(provincia_raw)
+            or cls._clean(carto.get("provincia"))
+            or BaseOnlineAdapter._infer_provincia_from_cp(cls._clean(cp_raw))
+            or cls._clean(default_provincia)
+        )
         resolved_comarca = cls._query_comarca_cartociudad(
             provincia=resolved_provincia,
             municipio=resolved_municipio,
