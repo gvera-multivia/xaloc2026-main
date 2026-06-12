@@ -13,9 +13,11 @@ import sites.servei_cat_trans.flows.documentos as documentos_mod
 from sites.servei_cat_trans.flows.documentos import (
     _assert_expected_uploads_present,
     _build_slot_upload_plan,
+    _find_special_upload_slot,
     _read_input_file_names,
     _sanitize_upload_filename,
     _select_files_by_origin,
+    _upload_with_retry,
     run_documentos,
 )
 
@@ -116,6 +118,46 @@ async def test_assert_expected_uploads_present_raises_when_slot_missing() -> Non
                 "slot_missing": "autorizacion.pdf",
             },
         )
+
+
+@pytest.mark.asyncio
+async def test_find_special_upload_slot_detects_acreditacion_by_container_text() -> None:
+    class _Scope:
+        async def evaluate(self, _script, payload):
+            assert payload["inputIds"] == ["slot0", "slot1", "slot2"]
+            assert "acredit" in payload["tokens"]
+            return "slot2"
+
+    found = await _find_special_upload_slot(
+        _Scope(),
+        input_ids=["slot0", "slot1", "slot2"],
+        label_tokens=["acredit", "represent"],
+    )
+
+    assert found == "slot2"
+
+
+@pytest.mark.asyncio
+async def test_upload_with_retry_retries_until_success(monkeypatch, tmp_path: Path) -> None:
+    file_path = _mk(tmp_path / "autorizacion.pdf")
+    calls: list[int] = []
+
+    async def _fake_upload(_scope, input_id, target_path):
+        calls.append(len(calls) + 1)
+        assert input_id == "slot-special"
+        assert target_path == file_path
+        return len(calls) >= 2
+
+    monkeypatch.setattr(documentos_mod, "_upload_to_input", _fake_upload)
+
+    class _Scope:
+        async def wait_for_timeout(self, _ms):
+            return None
+
+    ok = await _upload_with_retry(_Scope(), "slot-special", file_path, attempts=3)
+
+    assert ok is True
+    assert len(calls) == 2
 
 
 @pytest.mark.asyncio

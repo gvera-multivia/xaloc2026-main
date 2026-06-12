@@ -515,6 +515,53 @@ async def _safe_select_via_id(page: "Page | Frame", element_id: str, label: str)
     )
 
 
+async def _auto_select_single_nonempty_option(page: "Page | Frame", element_id: str) -> bool:
+    await dismiss_cookie_banner_if_present(page)
+    return bool(
+        await page.evaluate(
+            """({ elementId }) => {
+                const normalize = (txt) => String(txt || "").trim();
+                const el = document.getElementById(elementId);
+                if (!el || !el.options) return false;
+                const options = Array.from(el.options).filter((opt) => {
+                    const value = normalize(opt.value || "");
+                    const text = normalize(opt.textContent || "");
+                    if (!value || !text) return false;
+                    if (/seleccion/i.test(text)) return false;
+                    return true;
+                });
+                if (options.length !== 1) return false;
+                el.value = String(options[0].value || "");
+                el.dispatchEvent(new Event("input", { bubbles: true }));
+                el.dispatchEvent(new Event("change", { bubbles: true }));
+                return true;
+            }""",
+            {"elementId": element_id},
+        )
+    )
+
+
+async def _retry_select_via_id(
+    page: "Page | Frame",
+    element_id: str,
+    label: str,
+    *,
+    attempts: int = 3,
+    wait_ms: int = 900,
+) -> bool:
+    wanted = _clean(label)
+    if not wanted:
+        return False
+    for attempt in range(1, max(1, attempts) + 1):
+        await _wait_select_options(page, element_id, timeout_ms=max(3000, wait_ms * 4))
+        ok = await _safe_select_via_id(page, element_id, wanted)
+        if ok:
+            return True
+        if attempt < attempts:
+            await page.wait_for_timeout(wait_ms)
+    return False
+
+
 async def _fill_exact_input(page: "Page | Frame", selector: str, value: str) -> bool:
     await dismiss_cookie_banner_if_present(page)
     text = _clean(value)
@@ -719,8 +766,11 @@ async def _fill_cp_comarca_municipio_smoke(
     comarca_id = f"{cp_panel_id}-guidedropdownlist_2056216251___widget"
     ok_comarca = True
     if _clean(comarca):
+        await page.wait_for_timeout(800)
         await _wait_select_options(page, comarca_id)
-        ok_comarca = await _safe_select_via_id(page, comarca_id, comarca)
+        ok_comarca = await _retry_select_via_id(page, comarca_id, comarca)
+        if not ok_comarca:
+            ok_comarca = await _auto_select_single_nonempty_option(page, comarca_id)
         logger.info(
             "servei_cat_trans representado-comarca result element_id=%s wanted=%r ok=%s",
             comarca_id,
@@ -728,13 +778,16 @@ async def _fill_cp_comarca_municipio_smoke(
             ok_comarca,
         )
         await _log_select_state(page, comarca_id, "representado-comarca-after-select")
-        await page.wait_for_timeout(500)
+        await page.wait_for_timeout(900)
 
     municipio_id = f"{cp_panel_id}-guidedropdownlist_988023112___widget"
     ok_municipio = True
     if _clean(municipio):
+        await page.wait_for_timeout(800)
         await _wait_select_options(page, municipio_id)
-        ok_municipio = await _safe_select_via_id(page, municipio_id, municipio)
+        ok_municipio = await _retry_select_via_id(page, municipio_id, municipio)
+        if not ok_municipio:
+            ok_municipio = await _auto_select_single_nonempty_option(page, municipio_id)
         logger.info(
             "servei_cat_trans representado-municipio result element_id=%s wanted=%r ok=%s",
             municipio_id,
@@ -1118,14 +1171,17 @@ async def _fill_direccion(page: "Page | Frame", panel_id: str, cp_panel_id: str,
         f"{cp_panel_id}-guidedropdownlist___widget",
         datos.direccion_provincia or "Barcelona",
     )
+    await page.wait_for_timeout(900)
     # 2. Esperar a que Comarca cargue opciones (dependiente de Provincia)
     comarca_id = f"{cp_panel_id}-guidedropdownlist_2056216251___widget"
     await _wait_select_options(page, comarca_id)
-    ok_comarca = await _safe_select_via_id(
+    ok_comarca = await _retry_select_via_id(
         page,
         comarca_id,
         datos.direccion_comarca,
     )
+    if not ok_comarca:
+        ok_comarca = await _auto_select_single_nonempty_option(page, comarca_id)
     if datos.direccion_comarca and not ok_comarca:
         raise RuntimeError(
             f"servei_cat_trans.formulario: no se pudo seleccionar comarca '{datos.direccion_comarca}' en presentador."
@@ -1133,12 +1189,15 @@ async def _fill_direccion(page: "Page | Frame", panel_id: str, cp_panel_id: str,
 
     # 3. Esperar a que Municipio cargue opciones (dependiente de Comarca)
     municipio_id = f"{cp_panel_id}-guidedropdownlist_988023112___widget"
+    await page.wait_for_timeout(900)
     await _wait_select_options(page, municipio_id)
-    ok_municipio = await _safe_select_via_id(
+    ok_municipio = await _retry_select_via_id(
         page,
         municipio_id,
         datos.direccion_municipio,
     )
+    if not ok_municipio:
+        ok_municipio = await _auto_select_single_nonempty_option(page, municipio_id)
     if datos.direccion_municipio and not ok_municipio:
         raise RuntimeError(
             f"servei_cat_trans.formulario: no se pudo seleccionar municipio '{datos.direccion_municipio}' en presentador."

@@ -60,6 +60,51 @@ async def _wait_file_input_ids(scope: "Page | Frame", timeout_ms: int) -> list[s
     return last_ids
 
 
+async def _find_special_upload_slot(
+    scope: "Page | Frame",
+    *,
+    input_ids: list[str],
+    label_tokens: list[str],
+) -> str:
+    if not input_ids:
+        return ""
+    try:
+        result = await scope.evaluate(
+            """({ inputIds, tokens }) => {
+                const normalize = (txt) => String(txt || "")
+                    .normalize("NFD")
+                    .replace(/[\\u0300-\\u036f]/g, "")
+                    .replace(/\\s+/g, " ")
+                    .trim()
+                    .toLowerCase();
+                const wanted = (tokens || []).map((t) => normalize(t)).filter(Boolean);
+                const includesWanted = (txt) => {
+                    const n = normalize(txt);
+                    return wanted.some((token) => n.includes(token));
+                };
+                for (const inputId of inputIds) {
+                    const el = document.getElementById(inputId);
+                    if (!el) continue;
+                    let node = el;
+                    for (let depth = 0; depth < 6 && node; depth += 1) {
+                        const text = String(node.textContent || "");
+                        const aria = String(node.getAttribute?.("aria-label") || "");
+                        const title = String(node.getAttribute?.("title") || "");
+                        if (includesWanted(text) || includesWanted(aria) || includesWanted(title)) {
+                            return String(inputId);
+                        }
+                        node = node.parentElement;
+                    }
+                }
+                return "";
+            }""",
+            {"inputIds": input_ids, "tokens": label_tokens},
+        )
+    except Exception:
+        return ""
+    return str(result or "").strip()
+
+
 async def _upload_to_input(scope: "Page | Frame", input_id: str, file_path: Path) -> bool:
     await dismiss_cookie_banner_if_present(scope)
     selector = f'[id="{input_id}"]'
@@ -118,6 +163,16 @@ async def _assert_expected_uploads_present(
             "servei_cat_trans.documentos: verificacion final de adjuntos fallida. "
             f"missing={missing} mismatched={mismatched}"
         )
+
+
+async def _upload_with_retry(scope: "Page | Frame", input_id: str, file_path: Path, *, attempts: int = 3) -> bool:
+    for attempt in range(1, max(1, attempts) + 1):
+        ok = await _upload_to_input(scope, input_id, file_path)
+        if ok:
+            return True
+        if attempt < attempts:
+            await scope.wait_for_timeout(900)
+    return False
 
 
 def _is_within_size_limit(file_path: Path) -> bool:
@@ -380,7 +435,13 @@ async def run_documentos(page: "Page", config: "ServeiCatTransConfig", datos: "S
     # Orden observado en este formulario:
     # [0]=uploader interno (no usar), [1..5]=docs opcionales, [6]=acreditacion.
     doc_slots = input_ids[1:6]  # 5 slots maximo
-    acreditacion_slot = input_ids[6] if len(input_ids) > 6 else ""
+    acreditacion_slot = await _find_special_upload_slot(
+        form_scope,
+        input_ids=input_ids,
+        label_tokens=["acredit", "represent", "autoriza"],
+    )
+    if not acreditacion_slot and len(input_ids) > 6:
+        acreditacion_slot = input_ids[6]
 
     # Montar extras intermedios (la autorizacion SIEMPRE se asigna al ultimo slot).
     prepared_middle: list[Path] = []
@@ -416,7 +477,7 @@ async def run_documentos(page: "Page", config: "ServeiCatTransConfig", datos: "S
     for file_path, slot_id in upload_plan:
         await dismiss_cookie_banner_if_present(form_scope)
         logger.info("  -> subiendo %s (%.2f KB)", file_path.name, file_path.stat().st_size / 1024)
-        ok = await _upload_to_input(form_scope, slot_id, file_path)
+        ok = await _upload_with_retry(form_scope, slot_id, file_path)
         if not ok:
             raise RuntimeError(
                 f"servei_cat_trans.documentos: no se pudo confirmar upload en slot={slot_id} archivo={file_path.name}."
@@ -431,7 +492,7 @@ async def run_documentos(page: "Page", config: "ServeiCatTransConfig", datos: "S
     if datos.tipo_persona == "juridica" and acreditacion_slot and prepared_autorizacion:
         await dismiss_cookie_banner_if_present(form_scope)
         logger.info("  -> subiendo acreditacion (slot especial): %s", prepared_autorizacion.name)
-        ok = await _upload_to_input(form_scope, acreditacion_slot, prepared_autorizacion)
+        ok = await _upload_with_retry(form_scope, acreditacion_slot, prepared_autorizacion)
         if not ok:
             raise RuntimeError(
                 "servei_cat_trans.documentos: no se pudo confirmar upload de acreditacion en slot especial."
