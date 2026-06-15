@@ -999,6 +999,11 @@ async def _wait_expediente_verificado(
         r"datos de identificacion del conductor|dades d identificacio del conductor",
         re.IGNORECASE,
     )
+    pending_warning = re.compile(
+        r"(confirmar|confirma).*(datos|dades).*(expedient|expediente)|"
+        r"(datos|dades).*(expedient|expediente).*(correct|correctes|correctos)",
+        re.IGNORECASE,
+    )
 
     while waited <= timeout_ms:
         try:
@@ -1023,7 +1028,15 @@ async def _wait_expediente_verificado(
                 if await conductor_heading.count() > 0:
                     try:
                         await conductor_heading.wait_for(state="visible", timeout=500)
-                        return
+                        warning_visible = False
+                        try:
+                            warning = page.get_by_text(pending_warning).first
+                            if await warning.count() > 0:
+                                warning_visible = await warning.is_visible()
+                        except Exception:
+                            warning_visible = False
+                        if not warning_visible:
+                            return
                     except Exception:
                         pass
             except Exception:
@@ -1034,7 +1047,15 @@ async def _wait_expediente_verificado(
                 if identificado_section:
                     section = page.locator(identificado_section).first
                     if await section.count() > 0 and await section.is_visible():
-                        return
+                        warning_visible = False
+                        try:
+                            warning = page.get_by_text(pending_warning).first
+                            if await warning.count() > 0:
+                                warning_visible = await warning.is_visible()
+                        except Exception:
+                            warning_visible = False
+                        if not warning_visible:
+                            return
             except Exception:
                 pass
 
@@ -1566,7 +1587,9 @@ async def _fill_expediente(page: "Page | Frame", datos: "ServeiCatTransTarget", 
 
     clicked = await _safe_click(page, "button:has-text('Comprobar datos expediente')")
     if not clicked:
-        fallback_btn = page.get_by_role("button", name=re.compile(r"comprobar|comprovar", re.IGNORECASE)).first
+        clicked = await _safe_click(page, "button:has-text('Comparar dades expedient')")
+    if not clicked:
+        fallback_btn = page.get_by_role("button", name=re.compile(r"comprobar|comprovar|comparar", re.IGNORECASE)).first
         if await fallback_btn.count() > 0:
             await fallback_btn.click(timeout=FAST_ACTION_TIMEOUT_MS)
             clicked = True

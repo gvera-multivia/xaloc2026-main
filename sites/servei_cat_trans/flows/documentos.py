@@ -241,6 +241,13 @@ def _is_authorization_doc(path: Path | None) -> bool:
     return any(token in n for token in ("autoriz", "autoriza", "acredit"))
 
 
+def _is_optional_overflow_doc(path: Path | None) -> bool:
+    if path is None:
+        return False
+    n = _norm_name(path.name)
+    return "escritura" in n or "escriptura" in n
+
+
 def _copy_with_safe_name(src: Path, *, output_dir: Path, prefix: str) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     safe_name = _sanitize_upload_filename(src.name)
@@ -417,11 +424,18 @@ async def run_documentos(page: "Page", config: "ServeiCatTransConfig", datos: "S
         )
 
     max_middle = MAX_DOC_SLOTS - (1 if prepared_recurso else 0) - (1 if prepared_autorizacion else 0)
-    omitted_by_slot_limit = [p.name for p in rest[max_middle:] if p.exists()]
-    if omitted_by_slot_limit:
+    overflow_files = [p for p in rest[max_middle:] if p.exists()]
+    blocking_overflow = [p.name for p in overflow_files if not _is_optional_overflow_doc(p)]
+    skipped_optional_overflow = [p.name for p in overflow_files if _is_optional_overflow_doc(p)]
+    if skipped_optional_overflow:
+        logger.warning(
+            "servei_cat_trans.documentos: extras opcionales omitidos por limite de slots: %s",
+            skipped_optional_overflow,
+        )
+    if blocking_overflow:
         raise RuntimeError(
             "servei_cat_trans.documentos: hay mas adjuntos que slots disponibles; "
-            f"omitidos={omitted_by_slot_limit}"
+            f"omitidos={blocking_overflow}"
         )
 
     form_scope = await wait_form_scope(page, timeout_ms=config.upload_inputs_timeout_ms)
