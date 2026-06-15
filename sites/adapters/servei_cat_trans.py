@@ -111,6 +111,7 @@ class ServeiCatTransAdapter(SiteAdapter):
     @classmethod
     def _normalize_expediente(cls, expediente: Any) -> str:
         exp = cls._clean(expediente).upper().replace(" ", "")
+        exp = re.sub(r"\.PDF$", "", exp, flags=re.IGNORECASE)
         if re.fullmatch(r"\d{11}", exp):
             return f"{exp[:2]}/{exp[2:10]}-{exp[10]}"
         return exp
