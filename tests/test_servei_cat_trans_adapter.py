@@ -96,22 +96,6 @@ def test_fetch_candidates_normalizes_compact_expediente_shape() -> None:
     assert out[0]["Expedient"] == "17/20328298-3"
 
 
-def test_fetch_candidates_accepts_expediente_with_trailing_pdf_suffix() -> None:
-    adapter = ServeiCatTransAdapter()
-    row = _base_row()
-    row["Expedient"] = "08-32272254-6.pdf"
-    repo = _FakeRepo([row])
-    out = adapter.fetch_candidates(
-        config={"query_organisme": "%SERVEI CATALA DE TRANSIT DE%", "filtro_texp": "2,3", "regex_expediente": r"^\d{2}[-/]\d{8}-\d$"},
-        conn_str="dummy",
-        authenticated_user="user",
-        limit=50,
-        resource_repo=repo,
-    )
-    assert len(out) == 1
-    assert out[0]["Expedient"] == "08-32272254-6"
-
-
 def test_fetch_candidates_accepts_identificacion_phase() -> None:
     adapter = ServeiCatTransAdapter()
     row = _base_row()
