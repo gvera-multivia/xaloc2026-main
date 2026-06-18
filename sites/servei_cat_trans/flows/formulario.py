@@ -541,6 +541,50 @@ async def _auto_select_single_nonempty_option(page: "Page | Frame", element_id: 
     )
 
 
+async def _selected_option_matches(page: "Page | Frame", element_id: str, label: str) -> bool:
+    wanted = _clean(label)
+    if not wanted:
+        return False
+    try:
+        return bool(
+            await page.evaluate(
+                """({ elementId, wantedLabel }) => {
+                    const normalize = (txt) => String(txt || "")
+                        .normalize("NFD")
+                        .replace(/[\\u0300-\\u036f]/g, "")
+                        .replace(/[^a-zA-Z0-9]+/g, " ")
+                        .replace(/\\s+/g, " ")
+                        .trim()
+                        .toLowerCase();
+                    const tokenSet = (txt) =>
+                        new Set(
+                            normalize(txt)
+                                .split(" ")
+                                .filter((t) => t.length >= 3)
+                        );
+                    const el = document.getElementById(elementId);
+                    if (!el || !el.options) return false;
+                    const current = Array.from(el.options).find((opt) => opt.selected);
+                    if (!current) return false;
+                    const currentText = normalize(current.textContent || "");
+                    const wanted = normalize(wantedLabel);
+                    if (currentText === wanted) return true;
+                    if (wanted.length >= 4 && currentText.includes(wanted)) return true;
+                    const currentTokens = tokenSet(current.textContent || "");
+                    const wantedTokens = tokenSet(wantedLabel);
+                    if (wantedTokens.size === 0 || currentTokens.size === 0) return false;
+                    for (const token of wantedTokens) {
+                        if (!currentTokens.has(token)) return false;
+                    }
+                    return true;
+                }""",
+                {"elementId": element_id, "wantedLabel": wanted},
+            )
+        )
+    except Exception:
+        return False
+
+
 async def _retry_select_via_id(
     page: "Page | Frame",
     element_id: str,
@@ -556,10 +600,53 @@ async def _retry_select_via_id(
         await _wait_select_options(page, element_id, timeout_ms=max(3000, wait_ms * 4))
         ok = await _safe_select_via_id(page, element_id, wanted)
         if ok:
-            return True
+            await page.wait_for_timeout(350)
+            if await _selected_option_matches(page, element_id, wanted):
+                return True
         if attempt < attempts:
             await page.wait_for_timeout(wait_ms)
-    return False
+    return await _selected_option_matches(page, element_id, wanted)
+
+
+async def _stabilize_identificado_cascade(
+    page: "Page | Frame",
+    *,
+    provincia_id: str,
+    comarca_id: str,
+    municipio_id: str,
+    datos: "ServeiCatTransTarget",
+) -> tuple[bool, bool, bool]:
+    ok_provincia = True
+    if _clean(datos.identificado_provincia):
+        await _wait_select_options(page, provincia_id, timeout_ms=6000)
+        ok_provincia = await _retry_select_via_id(page, provincia_id, datos.identificado_provincia, attempts=4, wait_ms=1100)
+        if not ok_provincia:
+            ok_provincia = await _auto_select_single_nonempty_option(page, provincia_id)
+    await page.wait_for_timeout(1400)
+    await _log_select_state(page, provincia_id, "identificado-provincia-stabilized")
+
+    ok_comarca = True
+    if _clean(datos.identificado_comarca):
+        await _wait_select_options(page, comarca_id, timeout_ms=9000)
+        ok_comarca = await _retry_select_via_id(page, comarca_id, datos.identificado_comarca, attempts=4, wait_ms=1200)
+        if not ok_comarca:
+            ok_comarca = await _auto_select_single_nonempty_option(page, comarca_id)
+        await page.wait_for_timeout(1400)
+        await _log_select_state(page, comarca_id, "identificado-comarca-stabilized")
+
+    ok_municipio = True
+    if _clean(datos.identificado_municipio):
+        await _wait_select_options(page, municipio_id, timeout_ms=12000)
+        ok_municipio = await _retry_select_via_id(page, municipio_id, datos.identificado_municipio, attempts=4, wait_ms=1400)
+        if not ok_municipio and _clean(datos.identificado_comarca):
+            await _retry_select_via_id(page, comarca_id, datos.identificado_comarca, attempts=2, wait_ms=900)
+            await page.wait_for_timeout(1600)
+            ok_municipio = await _retry_select_via_id(page, municipio_id, datos.identificado_municipio, attempts=3, wait_ms=1400)
+        if not ok_municipio:
+            ok_municipio = await _auto_select_single_nonempty_option(page, municipio_id)
+        await _log_select_state(page, municipio_id, "identificado-municipio-stabilized")
+
+    return ok_provincia, ok_comarca, ok_municipio
 
 
 async def _fill_exact_input(page: "Page | Frame", selector: str, value: str) -> bool:
@@ -1650,7 +1737,19 @@ async def _fill_identificacion_conductor_direccion(
             await page.locator(f"#{cp_id}").first.press("Tab", timeout=5000)
         except Exception:
             pass
-        await page.wait_for_timeout(1800)
+        await page.wait_for_timeout(2200)
+        await _log_input_state(page, f"#{cp_id}", "identificado-cp-after-tab")
+        restabilized_prov, restabilized_comarca, restabilized_municipio = await _stabilize_identificado_cascade(
+            page,
+            provincia_id=provincia_id,
+            comarca_id=comarca_id,
+            municipio_id=municipio_id,
+            datos=datos,
+        )
+        ok_provincia = ok_provincia and restabilized_prov
+    else:
+        restabilized_comarca = True
+        restabilized_municipio = True
 
     ok_comarca = True
     if _clean(datos.identificado_comarca):
@@ -1667,6 +1766,7 @@ async def _fill_identificacion_conductor_direccion(
                 datos.identificado_comarca,
             )
         await page.wait_for_timeout(1000)
+        ok_comarca = ok_comarca or restabilized_comarca
 
     ok_municipio = True
     if _clean(datos.identificado_municipio):
@@ -1682,6 +1782,7 @@ async def _fill_identificacion_conductor_direccion(
                 ["municipio", "municipi"],
                 datos.identificado_municipio,
             )
+        ok_municipio = ok_municipio or restabilized_municipio
 
     if not ok_tipo:
         ok_tipo = await _select_label_in_section(
