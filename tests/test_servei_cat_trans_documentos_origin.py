@@ -283,3 +283,112 @@ async def test_run_documentos_allows_optional_escritura_overflow(monkeypatch, tm
     result = await run_documentos(page, config, datos)
 
     assert result is page
+
+
+@pytest.mark.asyncio
+async def test_run_documentos_allows_optional_identity_overflow(monkeypatch, tmp_path: Path) -> None:
+    recurso = _mk(tmp_path / "recurso.pdf")
+    aut = _mk(tmp_path / "autorizacion.pdf")
+    extra1 = _mk(tmp_path / "extra1.pdf")
+    extra2 = _mk(tmp_path / "extra2.pdf")
+    extra3 = _mk(tmp_path / "extra3.pdf")
+    dni = _mk(tmp_path / "DNIJAIME.pdf")
+
+    async def _fake_dismiss(_scope) -> None:
+        return None
+
+    async def _fake_wait_form_scope(_page, timeout_ms):
+        return _Scope()
+
+    async def _fake_wait_file_input_ids(_scope, timeout_ms):
+        return ["uploader", "slot1", "slot2", "slot3", "slot4", "slot5", "slot_special"]
+
+    async def _fake_upload_with_retry(_scope, _input_id, _file_path, *, attempts=3):
+        return True
+
+    async def _fake_assert_expected(_scope, *, expected_by_slot):
+        return None
+
+    class _Scope:
+        async def evaluate(self, _script, payload):
+            if isinstance(payload, dict) and "inputIds" in payload:
+                return "slot_special"
+            return {"exists": True, "count": 1, "names": ["ok.pdf"]}
+
+    monkeypatch.setattr(documentos_mod, "dismiss_cookie_banner_if_present", _fake_dismiss)
+    monkeypatch.setattr(documentos_mod, "wait_form_scope", _fake_wait_form_scope)
+    monkeypatch.setattr(documentos_mod, "_wait_file_input_ids", _fake_wait_file_input_ids)
+    monkeypatch.setattr(documentos_mod, "_upload_with_retry", _fake_upload_with_retry)
+    monkeypatch.setattr(documentos_mod, "_assert_expected_uploads_present", _fake_assert_expected)
+
+    page = object()
+    config = SimpleNamespace(upload_inputs_timeout_ms=1000)
+    datos = SimpleNamespace(
+        archivos_para_subir=[recurso, extra1, extra2, extra3, dni, aut],
+        payload={
+            "xvia_recurso_path": str(recurso),
+            "acreditacion_path": str(aut),
+        },
+        idRecurso=791,
+        tipo_persona="fisica",
+    )
+
+    result = await run_documentos(page, config, datos)
+
+    assert result is page
+
+
+@pytest.mark.asyncio
+async def test_run_documentos_allows_multiple_optional_identity_company_overflow(monkeypatch, tmp_path: Path) -> None:
+    recurso = _mk(tmp_path / "recurso.pdf")
+    aut = _mk(tmp_path / "autorizacion.pdf")
+    extra1 = _mk(tmp_path / "extra1.pdf")
+    extra2 = _mk(tmp_path / "extra2.pdf")
+    extra3 = _mk(tmp_path / "extra3.pdf")
+    dni_gerente = _mk(tmp_path / "DNI GERENTE.pdf")
+    dni_ali = _mk(tmp_path / "DNI ALI.pdf")
+    cif = _mk(tmp_path / "CIF GRUP AMBASORI SL.pdf")
+    nif = _mk(tmp_path / "NIF DEFINITIU AMSO 2013.pdf")
+
+    async def _fake_dismiss(_scope) -> None:
+        return None
+
+    async def _fake_wait_form_scope(_page, timeout_ms):
+        return _Scope()
+
+    async def _fake_wait_file_input_ids(_scope, timeout_ms):
+        return ["uploader", "slot1", "slot2", "slot3", "slot4", "slot5", "slot_special"]
+
+    async def _fake_upload_with_retry(_scope, _input_id, _file_path, *, attempts=3):
+        return True
+
+    async def _fake_assert_expected(_scope, *, expected_by_slot):
+        return None
+
+    class _Scope:
+        async def evaluate(self, _script, payload):
+            if isinstance(payload, dict) and "inputIds" in payload:
+                return "slot_special"
+            return {"exists": True, "count": 1, "names": ["ok.pdf"]}
+
+    monkeypatch.setattr(documentos_mod, "dismiss_cookie_banner_if_present", _fake_dismiss)
+    monkeypatch.setattr(documentos_mod, "wait_form_scope", _fake_wait_form_scope)
+    monkeypatch.setattr(documentos_mod, "_wait_file_input_ids", _fake_wait_file_input_ids)
+    monkeypatch.setattr(documentos_mod, "_upload_with_retry", _fake_upload_with_retry)
+    monkeypatch.setattr(documentos_mod, "_assert_expected_uploads_present", _fake_assert_expected)
+
+    page = object()
+    config = SimpleNamespace(upload_inputs_timeout_ms=1000)
+    datos = SimpleNamespace(
+        archivos_para_subir=[recurso, extra1, extra2, extra3, dni_gerente, dni_ali, cif, nif, aut],
+        payload={
+            "xvia_recurso_path": str(recurso),
+            "acreditacion_path": str(aut),
+        },
+        idRecurso=792,
+        tipo_persona="fisica",
+    )
+
+    result = await run_documentos(page, config, datos)
+
+    assert result is page

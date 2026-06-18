@@ -245,7 +245,17 @@ def _is_optional_overflow_doc(path: Path | None) -> bool:
     if path is None:
         return False
     n = _norm_name(path.name)
-    return "escritura" in n or "escriptura" in n
+    optional_tokens = (
+        "escritura",
+        "escriptura",
+        "dni",
+        "nie",
+        "nif",
+        "cif",
+        "pasaporte",
+        "passport",
+    )
+    return any(token in n for token in optional_tokens)
 
 
 def _copy_with_safe_name(src: Path, *, output_dir: Path, prefix: str) -> Path:
