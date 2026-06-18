@@ -32,6 +32,7 @@ class TerrassaAdapter(SiteAdapter):
         "EC#V######",
         "C#########",
         "P########",
+        "P#########",
         "RJ########",
         "Q#T/####",
         "CJ########",
