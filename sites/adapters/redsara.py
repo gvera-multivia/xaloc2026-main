@@ -284,6 +284,7 @@ class RedsaraAdapter(SiteAdapter):
     @staticmethod
     def _normalize_expediente(expediente: Any) -> str:
         txt = str(expediente or "").strip().upper()
+        txt = re.sub(r"\.PDF$", "", txt, flags=re.IGNORECASE)
         return re.sub(r"\s+", "", txt)
 
     @classmethod

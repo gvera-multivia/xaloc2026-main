@@ -24,6 +24,11 @@ class XalocAdapter(SiteAdapter):
         return str(v).strip() if v is not None else ""
 
     @staticmethod
+    def _strip_trailing_pdf_suffix(text: Any) -> str:
+        value = str(text or "").strip()
+        return re.sub(r"\.PDF$", "", value, flags=re.IGNORECASE)
+
+    @staticmethod
     def _normalize_text(text: Any) -> str:
         import unicodedata
         if not text:
@@ -242,7 +247,7 @@ class XalocAdapter(SiteAdapter):
                 break
 
             rid = recurso.get("idRecurso")
-            expediente_raw = self._clean_str(recurso.get("Expedient"))
+            expediente_raw = self._strip_trailing_pdf_suffix(recurso.get("Expedient"))
             estado = int(recurso.get("Estado") or 0)
             usuario = self._clean_str(recurso.get("UsuarioAsignado"))
             fecha_completado = recurso.get("FUsuarioCompletado")
