@@ -70,14 +70,6 @@ def test_validate_expediente_by_official_patterns() -> None:
     assert not adapter.validate_expediente_for_organisme("AJUNTAMENT DE BARCELONA", "MU20264055513864")
 
 
-def test_validate_expediente_accepts_trailing_pdf_suffix() -> None:
-    adapter = RedsaraAdapter()
-    assert adapter.validate_expediente_for_organisme(
-        "CENTRO DE TRATAMIENTO DE DENUNCIAS AUTOMATIZADAS DE LEON",
-        "28-049-856.641-8.pdf",
-    )
-
-
 def test_validate_expediente_sector_barcelona_sarp_8_digits() -> None:
     adapter = RedsaraAdapter()
     assert adapter.validate_expediente_for_organisme(

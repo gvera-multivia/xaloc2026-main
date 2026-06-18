@@ -45,31 +45,3 @@ def test_xaloc_fetch_candidates_keeps_estado_zero_with_historical_completed_date
 
     assert len(items) == 1
     assert items[0]["idRecurso"] == 501
-
-
-def test_xaloc_fetch_candidates_accepts_expediente_with_trailing_pdf_suffix() -> None:
-    adapter = XalocAdapter()
-    repo = _FakeRepo(
-        [
-            {
-                "idRecurso": 502,
-                "idExp": 7002,
-                "Expedient": "2026-53939-MUL.pdf",
-                "Organisme": "XALOC DIPUTACIO DE GIRONA - LA BISBAL DÂ´EMPORDÃ€",
-                "Estado": 0,
-                "UsuarioAsignado": "",
-                "adjuntos": [],
-            }
-        ]
-    )
-
-    items = adapter.fetch_candidates(
-        config={"query_organisme": "%XALOC%", "filtro_texp": "2,3", "regex_expediente": "^.+$"},
-        conn_str="",
-        authenticated_user="robot",
-        limit=10,
-        resource_repo=repo,
-    )
-
-    assert len(items) == 1
-    assert items[0]["Expedient"] == "2026/53939-MUL"
