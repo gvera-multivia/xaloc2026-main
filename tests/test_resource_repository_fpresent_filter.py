@@ -12,7 +12,7 @@ def _repo() -> ResourceRepository:
     return ResourceRepository(conn_str="DRIVER=dummy;", logger=None)
 
 
-def test_full_query_requires_fpresentacion_within_seven_days() -> None:
+def test_full_query_requires_fpresentacion_within_fourteen_days() -> None:
     repo = _repo()
 
     query, params = repo._build_query(
@@ -21,12 +21,12 @@ def test_full_query_requires_fpresentacion_within_seven_days() -> None:
     )
 
     assert "e.fpresentacion IS NOT NULL" in query
-    assert "CAST(e.fpresentacion AS date) <= DATEADD(day, 7, CAST(GETDATE() AS date))" in query
+    assert "CAST(e.fpresentacion AS date) <= DATEADD(day, 14, CAST(GETDATE() AS date))" in query
     assert "LEFT JOIN expedientes e ON rs.idExp = e.idexpediente" in query
     assert params == ["%SERVEI CATALA%", 2, 3]
 
 
-def test_light_query_requires_fpresentacion_within_seven_days() -> None:
+def test_light_query_requires_fpresentacion_within_fourteen_days() -> None:
     repo = _repo()
 
     query, params = repo._build_light_query(
@@ -36,5 +36,5 @@ def test_light_query_requires_fpresentacion_within_seven_days() -> None:
 
     assert "LEFT JOIN expedientes e ON rs.idExp = e.idexpediente" in query
     assert "e.fpresentacion IS NOT NULL" in query
-    assert "CAST(e.fpresentacion AS date) <= DATEADD(day, 7, CAST(GETDATE() AS date))" in query
+    assert "CAST(e.fpresentacion AS date) <= DATEADD(day, 14, CAST(GETDATE() AS date))" in query
     assert params == ["%XALOC%", 2]

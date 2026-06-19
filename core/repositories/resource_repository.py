@@ -102,7 +102,7 @@ WHERE {organisme_like_clause}
   AND rs.Estado IN (0, 1)
   AND rs.Expedient IS NOT NULL
   AND e.fpresentacion IS NOT NULL
-  AND CAST(e.fpresentacion AS date) <= DATEADD(day, 7, CAST(GETDATE() AS date))
+  AND CAST(e.fpresentacion AS date) <= DATEADD(day, 14, CAST(GETDATE() AS date))
 
 ORDER BY rs.Estado ASC, rs.idRecurso ASC
 """
@@ -128,7 +128,7 @@ WHERE {organisme_like_clause}
   AND rs.Estado IN (0, 1)
   AND rs.Expedient IS NOT NULL
   AND e.fpresentacion IS NOT NULL
-  AND CAST(e.fpresentacion AS date) <= DATEADD(day, 7, CAST(GETDATE() AS date))
+  AND CAST(e.fpresentacion AS date) <= DATEADD(day, 14, CAST(GETDATE() AS date))
 ORDER BY rs.Estado ASC, rs.idRecurso ASC
 """
 
