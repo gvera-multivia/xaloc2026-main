@@ -7,12 +7,89 @@ from pathlib import Path
 import aiohttp
 
 from core.attachments import AttachmentDownloader, AttachmentInfo
+from core.xvia_auth import _reauth_xvia_session
 from .utils import extract_expediente_number, sanitize_filename_component
 
 DOCUMENT_URL_TEMPLATE = "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf/{idRecurso}"
 DOWNLOAD_DIR = Path("tmp/downloads")
 
 logger = logging.getLogger("worker.document_fetcher")
+
+
+def _looks_like_html_response(content: bytes) -> bool:
+    sample = content[:512].decode(errors="ignore").lstrip().lower()
+    return sample.startswith("<!doctype html") or sample.startswith("<html")
+
+
+def _looks_like_login_or_xvia_html(content: bytes) -> bool:
+    sample = content[:1500].decode(errors="ignore").lower()
+    return (
+        "xvia" in sample
+        or "grupoeuropa" in sample
+        or 'name="_token"' in sample
+        or "csrf-token" in sample
+        or "type=\"password\"" in sample
+        or "type='password'" in sample
+        or "iniciar sesion" in sample
+        or "inicia sesion" in sample
+    )
+
+
+async def _download_primary_pdf_bytes(
+    *,
+    target_url: str,
+    auth_session: aiohttp.ClientSession,
+) -> bytes:
+    last_error: RuntimeError | None = None
+
+    for attempt in (1, 2):
+        async with auth_session.get(target_url, allow_redirects=True) as resp:
+            final_url = str(resp.url)
+            content_type = str(resp.headers.get("content-type") or "")
+            content = await resp.read()
+
+        logger.info(
+            "document_fetcher: intento=%s status=%s final_url=%s content_type=%s prefix=%r",
+            attempt,
+            getattr(resp, "status", "unknown"),
+            final_url,
+            content_type,
+            content[:40],
+        )
+
+        if resp.status != 200:
+            raise RuntimeError(f"El servidor respondio con status {resp.status} al pedir el PDF.")
+
+        if content.startswith(b"%PDF"):
+            return content
+
+        login_redirect = "login" in final_url.lower()
+        html_like = _looks_like_html_response(content)
+        xvia_like = _looks_like_login_or_xvia_html(content)
+        if attempt == 1 and (login_redirect or (html_like and xvia_like)):
+            logger.warning(
+                "document_fetcher: respuesta no PDF con pinta de sesion expirada/login. "
+                "Reautenticando y reintentando una vez. final_url=%s content_type=%s",
+                final_url,
+                content_type,
+            )
+            if await _reauth_xvia_session(auth_session):
+                continue
+            raise RuntimeError("Sesion invalida o expirada (redirigido al login).")
+
+        sample = content[:200].decode(errors="ignore")
+        if login_redirect or (html_like and xvia_like):
+            raise RuntimeError("Sesion invalida o expirada (redirigido al login).")
+
+        last_error = RuntimeError(
+            "El archivo descargado no es un PDF valido. "
+            f"content_type={content_type or 'unknown'} final_url={final_url} sample={sample!r}"
+        )
+        break
+
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("El archivo descargado no es un PDF valido.")
 
 
 async def download_document_and_attachments(
@@ -50,18 +127,8 @@ async def download_document_and_attachments(
     local_pdf_path = DOWNLOAD_DIR / f"RECURSO exp - {n_expediente}.pdf"
     DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-    async with auth_session.get(target_url) as resp:
-        if resp.status != 200:
-            raise RuntimeError(f"El servidor respondio con status {resp.status} al pedir el PDF.")
-
-        content = await resp.read()
-        if content.startswith(b"%PDF"):
-            local_pdf_path.write_bytes(content)
-        else:
-            sample = content[:200].decode(errors="ignore")
-            if "login" in sample.lower() or "password" in sample.lower():
-                raise RuntimeError("Sesion invalida o expirada (redirigido al login).")
-            raise RuntimeError("El archivo descargado no es un PDF valido.")
+    content = await _download_primary_pdf_bytes(target_url=target_url, auth_session=auth_session)
+    local_pdf_path.write_bytes(content)
 
     archivos_para_subir: list[Path] = [local_pdf_path]
     payload["xvia_recurso_path"] = str(local_pdf_path)
