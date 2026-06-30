@@ -88,6 +88,9 @@ class BrainClaimService:
         updated_xaloc_regex = self.admin_store.upgrade_xaloc_regex_expediente()
         if updated_xaloc_regex:
             logger.info("[brain-claim] actualizado regex_expediente legacy de xaloc_girona en PG: %s", updated_xaloc_regex)
+        updated_madrid_regex = self.admin_store.upgrade_madrid_regex_expediente()
+        if updated_madrid_regex:
+            logger.info("[brain-claim] actualizado regex_expediente legacy de madrid en PG: %s", updated_madrid_regex)
         self.sqlserver_conn_str = build_sqlserver_connection_string()
         self.resource_repo = ResourceRepository(conn_str=self.sqlserver_conn_str, logger=logger)
         self.consultor = ConsultorService(conn_str=self.sqlserver_conn_str, logger=logger, repository=self.resource_repo)

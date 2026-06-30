@@ -19,6 +19,10 @@ class PgAdminStore:
         r"^\d{4}/\d+(?:-MUL)?$",
         r"^\d{4}/\d+(?:-(?:MUL|SAD))?$",
     )
+    MADRID_REGEX_EXPEDIENTE_CURRENT = r"^(\d{3}[/\-]\d{8,9}\.\d|\d{8,9}\.\d)$"
+    MADRID_REGEX_EXPEDIENTE_LEGACY = (
+        r"^(\d{3}/\d{8,9}\.\d|\d{8,9}\.\d)$",
+    )
 
     def __init__(self, dsn: str, logger: Optional[logging.Logger] = None):
         self.dsn = dsn
@@ -447,4 +451,25 @@ class PgAdminStore:
             return updated
         except Exception as exc:
             self.logger.warning("No se pudo actualizar regex_expediente de xaloc_girona en PG: %s", exc)
+            return 0
+
+    def upgrade_madrid_regex_expediente(self) -> int:
+        try:
+            with self._conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE organismo_config
+                           SET regex_expediente = %s,
+                               updated_at = NOW()
+                         WHERE site_id = 'madrid'
+                           AND regex_expediente = ANY(%s)
+                        """,
+                        (self.MADRID_REGEX_EXPEDIENTE_CURRENT, list(self.MADRID_REGEX_EXPEDIENTE_LEGACY)),
+                    )
+                    updated = int(cur.rowcount or 0)
+                conn.commit()
+            return updated
+        except Exception as exc:
+            self.logger.warning("No se pudo actualizar regex_expediente de madrid en PG: %s", exc)
             return 0

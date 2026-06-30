@@ -15,7 +15,7 @@
                         "site_id":  "madrid",
                         "query_organisme":  "%SUBDIRECCION GNAL GESTION MULTAS DE MADRID%",
                         "filtro_texp":  "2,3",
-                        "regex_expediente":  "^(\\d{3}/\\d{8,9}\\.\\d|\\d{8,9}\\.\\d)$",
+                        "regex_expediente":  "^(\\d{3}[/\\-]\\d{8,9}\\.\\d|\\d{8,9}\\.\\d)$",
                         "claim_limit_per_tick":  null,
                         "login_url":  "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/login",
                         "recursos_url":  "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/telematicos",
