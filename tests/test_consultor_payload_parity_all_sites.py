@@ -28,6 +28,15 @@ class _LegacyRepo:
         return [ResourceDomain.from_row(site_id=site_id, row=row) for row in self.rows[: int(limit)]]
 
 
+class _ConfigCaptureRepo:
+    def __init__(self):
+        self.last_config: dict[str, Any] | None = None
+
+    def get_pending_resources(self, *, site_id: str, config: dict, limit: int) -> list[ResourceDomain]:
+        self.last_config = dict(config or {})
+        return []
+
+
 async def _fake_classify_batch(*, items: list[dict], context_by_id: dict[str, Any]) -> dict[str, dict[str, str]]:
     out: dict[str, dict[str, str]] = {}
     for item in items:
@@ -179,6 +188,24 @@ def test_madrid_parse_expediente_normalizes_hyphen_prefix_to_canonical_slash() -
     assert parts["expediente_nnn"] == "935"
     assert parts["expediente_eeeeeeeee"] == "155334109"
     assert parts["expediente_d"] == "3"
+
+
+def test_madrid_fetch_candidates_expands_query_organisme_for_ayuntamiento() -> None:
+    adapter = MadridAdapter()
+    repo = _ConfigCaptureRepo()
+
+    adapter.fetch_candidates(
+        config={"query_organisme": "%SUBDIRECCION GNAL GESTION MULTAS DE MADRID%"},
+        conn_str="unused",
+        authenticated_user=None,
+        limit=10,
+        resource_repo=repo,
+    )
+
+    assert repo.last_config is not None
+    assert repo.last_config["query_organisme"] == (
+        "%SUBDIRECCION GNAL GESTION MULTAS DE MADRID%|%AYUNTAMIENTO DE MADRID%"
+    )
 
 
 def test_base_online_payload_parity_legacy_vs_consultor(monkeypatch) -> None:

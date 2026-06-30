@@ -29,6 +29,9 @@ class MadridAdapter(SiteAdapter):
         "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf-adjuntos/{id}"
     )
     DEFAULT_REGEX_EXPEDIENTE = r"^(\d{3}[/-]\d{8,9}\.\d|\d{8,9}\.\d)$"
+    DEFAULT_QUERY_ORGANISME = (
+        "%SUBDIRECCION GNAL GESTION MULTAS DE MADRID%|%AYUNTAMIENTO DE MADRID%"
+    )
 
     RE_DNI = re.compile(r"^\d{8}[A-Z]$")
     RE_NIE = re.compile(r"^[XYZ]\d{7}[A-Z]$")
@@ -53,18 +56,31 @@ class MadridAdapter(SiteAdapter):
         """
         raw = cls._clean_str(configured)
         if not raw:
-            return "%SUBDIRECCION GNAL GESTION MULTAS DE MADRID%"
+            return cls.DEFAULT_QUERY_ORGANISME
 
         tokens = [t.strip() for t in raw.split("|") if cls._clean_str(t)]
         filtered: list[str] = []
+        seen: set[str] = set()
         for token in tokens:
             norm = token.strip().upper()
             if norm == "%MADRID%":
                 continue
+            if norm in seen:
+                continue
+            seen.add(norm)
             filtered.append(token)
 
+        required_tokens = (
+            "%SUBDIRECCION GNAL GESTION MULTAS DE MADRID%",
+            "%AYUNTAMIENTO DE MADRID%",
+        )
+        for token in required_tokens:
+            if token not in seen:
+                filtered.append(token)
+                seen.add(token)
+
         if not filtered:
-            return "%SUBDIRECCION GNAL GESTION MULTAS DE MADRID%"
+            return cls.DEFAULT_QUERY_ORGANISME
         return "|".join(filtered)
 
     @staticmethod

@@ -23,6 +23,12 @@ class PgAdminStore:
     MADRID_REGEX_EXPEDIENTE_LEGACY = (
         r"^(\d{3}/\d{8,9}\.\d|\d{8,9}\.\d)$",
     )
+    MADRID_QUERY_ORGANISME_CURRENT = (
+        "%SUBDIRECCION GNAL GESTION MULTAS DE MADRID%|%AYUNTAMIENTO DE MADRID%"
+    )
+    MADRID_QUERY_ORGANISME_LEGACY = (
+        "%SUBDIRECCION GNAL GESTION MULTAS DE MADRID%",
+    )
 
     def __init__(self, dsn: str, logger: Optional[logging.Logger] = None):
         self.dsn = dsn
@@ -472,4 +478,25 @@ class PgAdminStore:
             return updated
         except Exception as exc:
             self.logger.warning("No se pudo actualizar regex_expediente de madrid en PG: %s", exc)
+            return 0
+
+    def upgrade_madrid_query_organisme(self) -> int:
+        try:
+            with self._conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE organismo_config
+                           SET query_organisme = %s,
+                               updated_at = NOW()
+                         WHERE site_id = 'madrid'
+                           AND query_organisme = ANY(%s)
+                        """,
+                        (self.MADRID_QUERY_ORGANISME_CURRENT, list(self.MADRID_QUERY_ORGANISME_LEGACY)),
+                    )
+                    updated = int(cur.rowcount or 0)
+                conn.commit()
+            return updated
+        except Exception as exc:
+            self.logger.warning("No se pudo actualizar query_organisme de madrid en PG: %s", exc)
             return 0

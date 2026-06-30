@@ -13,7 +13,7 @@
                     },
                     {
                         "site_id":  "madrid",
-                        "query_organisme":  "%SUBDIRECCION GNAL GESTION MULTAS DE MADRID%",
+                        "query_organisme":  "%SUBDIRECCION GNAL GESTION MULTAS DE MADRID%|%AYUNTAMIENTO DE MADRID%",
                         "filtro_texp":  "2,3",
                         "regex_expediente":  "^(\\d{3}[/\\-]\\d{8,9}\\.\\d|\\d{8,9}\\.\\d)$",
                         "claim_limit_per_tick":  null,
