@@ -139,6 +139,48 @@ def test_madrid_payload_parity_legacy_vs_consultor(monkeypatch) -> None:
     )
 
 
+def test_madrid_fetch_candidates_accepts_hyphen_prefixed_expediente() -> None:
+    adapter = MadridAdapter()
+    row = {
+        "idRecurso": 110493,
+        "idExp": 4002,
+        "Expedient": "935-155274083.6",
+        "Organisme": "SUBDIRECCION GNAL GESTION MULTAS DE MADRID",
+        "TExp": 2,
+        "Estado": 0,
+        "numclient": 9002,
+        "SujetoRecurso": "JUAN PEREZ",
+        "FaseProcedimiento": "Sancion",
+        "UsuarioAsignado": "",
+        "adjuntos": [],
+    }
+    legacy_repo = _LegacyRepo([row])
+    discarded: list[dict[str, Any]] = []
+
+    candidates = adapter.fetch_candidates(
+        config={"regex_expediente": MadridAdapter.DEFAULT_REGEX_EXPEDIENTE},
+        conn_str="unused",
+        authenticated_user=None,
+        limit=10,
+        resource_repo=legacy_repo,
+        on_discard=lambda item: discarded.append(item),
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0]["Expedient"] == "935-155274083.6"
+    assert discarded == []
+
+
+def test_madrid_parse_expediente_normalizes_hyphen_prefix_to_canonical_slash() -> None:
+    parts = MadridAdapter._parse_expediente("935-155334109.3", fase_raw="Sancion", es_empresa=False)
+
+    assert parts["expediente_completo"] == "935/155334109.3"
+    assert parts["expediente_tipo"] == "opcion1"
+    assert parts["expediente_nnn"] == "935"
+    assert parts["expediente_eeeeeeeee"] == "155334109"
+    assert parts["expediente_d"] == "3"
+
+
 def test_base_online_payload_parity_legacy_vs_consultor(monkeypatch) -> None:
     adapter = BaseOnlineAdapter()
     monkeypatch.setattr(adapter._groq_guardian, "classify_batch", _fake_classify_batch)

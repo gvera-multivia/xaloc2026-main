@@ -28,7 +28,7 @@ class MadridAdapter(SiteAdapter):
     ADJUNTO_URL_TEMPLATE = (
         "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf-adjuntos/{id}"
     )
-    DEFAULT_REGEX_EXPEDIENTE = r"^(\d{3}/\d{8,9}\.\d|\d{8,9}\.\d)$"
+    DEFAULT_REGEX_EXPEDIENTE = r"^(\d{3}[/-]\d{8,9}\.\d|\d{8,9}\.\d)$"
 
     RE_DNI = re.compile(r"^\d{8}[A-Z]$")
     RE_NIE = re.compile(r"^[XYZ]\d{7}[A-Z]$")
@@ -266,10 +266,11 @@ class MadridAdapter(SiteAdapter):
     def _parse_expediente(expediente: str, *, fase_raw: str = "", es_empresa: bool = False) -> dict:
         exp = MadridAdapter._clean_str(expediente).upper()
 
-        m1 = re.match(r"^(?P<nnn>\d{3})/(?P<exp>\d{8,9})\.(?P<d>\d)$", exp)
+        m1 = re.match(r"^(?P<nnn>\d{3})[/-](?P<exp>\d{8,9})\.(?P<d>\d)$", exp)
         if m1:
+            exp_reconstruido = f"{m1.group('nnn')}/{m1.group('exp')}.{m1.group('d')}"
             return {
-                "expediente_completo": exp,
+                "expediente_completo": exp_reconstruido,
                 "expediente_tipo": "opcion1",
                 "expediente_nnn": m1.group("nnn"),
                 "expediente_eeeeeeeee": m1.group("exp"),
