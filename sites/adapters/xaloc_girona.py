@@ -8,7 +8,7 @@ from typing import Any, Optional
 from core.contact_defaults import get_default_contact_email
 from core.validation.validators import normalize_plate_with_fallback
 from .site_adapter import SiteAdapter
-from core.xaloc_expediente_utils import is_valid_format, fix_format
+from core.xaloc_expediente_utils import extract_valid_expediente, is_valid_format
 
 
 class XalocAdapter(SiteAdapter):
@@ -253,14 +253,10 @@ class XalocAdapter(SiteAdapter):
                 # Estado/UsuarioAsignado, así que no debemos descartarlos aquí.
                 pass
 
-            expediente = expediente_raw
+            expediente = extract_valid_expediente(expediente_raw)
             is_valid = is_valid_format(expediente)
-            if not is_valid:
-                fixed = fix_format(expediente)
-                if fixed != expediente and is_valid_format(fixed):
-                    expediente = fixed
-                    recurso["Expedient"] = fixed
-                    is_valid = True
+            if is_valid and expediente != expediente_raw:
+                recurso["Expedient"] = expediente
 
             if not is_valid:
                 if on_discard:

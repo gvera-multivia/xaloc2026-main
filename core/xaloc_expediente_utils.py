@@ -21,6 +21,19 @@ VALID_EXP_REGEX = re.compile(
     r")$"
 )
 
+EMBEDDED_EXP_REGEX = re.compile(
+    r"(?:"
+    r"\d{2}/\d{8}-\d|"
+    r"\d{4}/\d+(?:-(?:MUL|SAD|APR))?|"
+    r"\d{4}-\d+-APR|"
+    r"\d{4}-\d+-\d|"
+    r"\d{10}|"
+    r"\d{12}|"
+    r"\d{13}|"
+    r"\d{4}-[A-Z]-\d{8}"
+    r")"
+)
+
 
 def is_valid_format(expediente: str) -> bool:
     """Checks if the expediente matches the correct Xaloc format."""
@@ -51,5 +64,46 @@ def fix_format(expediente: str) -> str:
 
     if fixed.endswith("-MU"):
         fixed = fixed + "L"
+
+    return fixed
+
+
+def extract_valid_expediente(expediente: str) -> str:
+    """
+    Extrae/normaliza el primer expediente valido de un texto libre.
+    Casos tipicos:
+    - "2026/25533-MUL 0448640179907" -> "2026/25533-MUL"
+    - "2026/43240-MUL 2026-O-00000141" -> "2026/43240-MUL"
+    """
+    if not expediente:
+        return ""
+
+    raw = expediente.strip()
+    if not raw:
+        return ""
+
+    if is_valid_format(raw):
+        return raw
+
+    fixed = fix_format(raw)
+    if is_valid_format(fixed):
+        return fixed
+
+    chunks = [chunk.strip() for chunk in raw.split() if chunk.strip()]
+    for chunk in chunks:
+        if is_valid_format(chunk):
+            return chunk
+        fixed_chunk = fix_format(chunk)
+        if is_valid_format(fixed_chunk):
+            return fixed_chunk
+
+    match = EMBEDDED_EXP_REGEX.search(raw.upper())
+    if match:
+        candidate = match.group(0).strip()
+        if is_valid_format(candidate):
+            return candidate
+        fixed_candidate = fix_format(candidate)
+        if is_valid_format(fixed_candidate):
+            return fixed_candidate
 
     return fixed

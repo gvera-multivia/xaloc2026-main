@@ -1,6 +1,6 @@
 import pytest
 
-from core.xaloc_expediente_utils import fix_format, is_valid_format
+from core.xaloc_expediente_utils import extract_valid_expediente, fix_format, is_valid_format
 
 
 @pytest.mark.parametrize(
@@ -35,3 +35,16 @@ def test_fix_format_and_validation(input_val: str, expected: str, should_be_vali
     fixed = fix_format(input_val)
     assert fixed == expected
     assert is_valid_format(fixed) == should_be_valid
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("2026/25533-MUL 0448640179907", "2026/25533-MUL"),
+        ("2026/43240-MUL 2026-O-00000141", "2026/43240-MUL"),
+        ("2026-Z-00464013", "2026-Z-00464013"),
+        (" 2026-24924-MUL. BLOQUE ", "2026/24924-MUL"),
+    ],
+)
+def test_extract_valid_expediente_prefers_first_valid_chunk(raw: str, expected: str) -> None:
+    assert extract_valid_expediente(raw) == expected
