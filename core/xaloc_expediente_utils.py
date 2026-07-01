@@ -6,6 +6,8 @@ import re
 # 3. YYYY/NNNNNN-APR o YYYY-NNNNNN-APR
 # 4. NNNNNNNNNN (10 digitos exactos, como 1098266110)
 # 5. NNNNNNNNNNNN (12 digitos exactos, como 000038101604, 000042269999)
+# 6. NNNNNNNNNNNNN (13 digitos exactos, como 0448640179907)
+# 7. YYYY-L-NNNNNNNN (nuevos expedientes alfanumericos de Xaloc, p.ej. 2026-Z-00464013)
 VALID_EXP_REGEX = re.compile(
     r"^(?:"
     r"\d{2}/\d{8}-\d|"
@@ -13,7 +15,9 @@ VALID_EXP_REGEX = re.compile(
     r"\d{4}-\d+-APR|"
     r"\d{4}-\d+-\d|"
     r"\d{10}|"
-    r"\d{12}"
+    r"\d{12}|"
+    r"\d{13}|"
+    r"\d{4}-[A-Z]-\d{8}"
     r")$"
 )
 

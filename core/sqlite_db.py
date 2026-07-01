@@ -135,17 +135,20 @@ class SQLiteDatabase:
                 """
             )
 
-        # Ampliar regex de Xaloc para aceptar expedientes con sufijo -SAD (y sin sufijo).
+        # Ampliar regex de Xaloc para aceptar sufijos modernos y formatos nuevos
+        # (13 digitos y YYYY-L-NNNNNNNN).
         cursor.execute(
             """
             UPDATE organismo_config
-            SET regex_expediente = '^\\d{4}/\\d+(?:-(?:MUL|SAD))?$',
+            SET regex_expediente = '^(\\d{4}/\\d+(?:-(?:MUL|SAD|APR))?|\\d{4}-\\d+-APR|\\d{4}-\\d+-\\d|\\d{10}|\\d{12}|\\d{13}|\\d{4}-[A-Z]-\\d{8})$',
                 updated_at = ?
             WHERE site_id = 'xaloc_girona'
               AND (
                     regex_expediente = '^\\d{4}/\\d{6}-MUL$'
                  OR regex_expediente = '^\\d{4}/\\d+-MUL$'
                  OR regex_expediente = '^\\d{4}/\\d+(?:-MUL)?$'
+                 OR regex_expediente = '^\\d{4}/\\d+(?:-(?:MUL|SAD))?$'
+                 OR regex_expediente = '^(\\d{4}/\\d+(?:-(?:MUL|SAD|APR))?|\\d{4}-\\d+-APR|\\d{4}-\\d+-\\d|\\d{10}|\\d{12})$'
               )
             """,
             (datetime.now().isoformat(),),

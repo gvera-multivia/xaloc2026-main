@@ -23,6 +23,9 @@ from core.xaloc_expediente_utils import fix_format, is_valid_format
         ("2025/733178-APR", "2025/733178-APR", True),
         ("2025-733178-APR", "2025/733178-APR", True),
         ("2020-506165-2", "2020-506165-2", True),
+        ("2026-O-00000141", "2026-O-00000141", True),
+        ("2026-Z-00464013", "2026-Z-00464013", True),
+        ("0448640179907", "0448640179907", True),
         ("  2026-123-MUL  ", "2026/123-MUL", True),
         # NT no se corrige con fix_format, se corrige con fix_nt_expediente
         ("NT/12345678/2024/000000000", "NT/12345678/2024/000000000", False),

@@ -12,12 +12,15 @@ from core.runtime_flags import get_report_pg_dsn
 
 
 class PgAdminStore:
-    XALOC_REGEX_EXPEDIENTE_CURRENT = r"^(\d{4}/\d+(?:-(?:MUL|SAD|APR))?|\d{4}-\d+-APR|\d{4}-\d+-\d|\d{10}|\d{12})$"
+    XALOC_REGEX_EXPEDIENTE_CURRENT = (
+        r"^(\d{4}/\d+(?:-(?:MUL|SAD|APR))?|\d{4}-\d+-APR|\d{4}-\d+-\d|\d{10}|\d{12}|\d{13}|\d{4}-[A-Z]-\d{8})$"
+    )
     XALOC_REGEX_EXPEDIENTE_LEGACY = (
         r"^\d{4}/\d{6}-MUL$",
         r"^\d{4}/\d+-MUL$",
         r"^\d{4}/\d+(?:-MUL)?$",
         r"^\d{4}/\d+(?:-(?:MUL|SAD))?$",
+        r"^(\d{4}/\d+(?:-(?:MUL|SAD|APR))?|\d{4}-\d+-APR|\d{4}-\d+-\d|\d{10}|\d{12})$",
     )
     MADRID_REGEX_EXPEDIENTE_CURRENT = r"^(\d{3}[/\-]\d{8,9}\.\d|\d{8,9}\.\d)$"
     MADRID_REGEX_EXPEDIENTE_LEGACY = (

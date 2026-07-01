@@ -496,6 +496,69 @@ def test_xaloc_girona_payload_parity_legacy_vs_consultor(monkeypatch) -> None:
     )
 
 
+def test_xaloc_girona_fetch_candidates_accepts_new_alphanumeric_and_13digit_formats() -> None:
+    adapter = XalocAdapter()
+    rows = [
+        {
+            "idRecurso": 3411,
+            "idExp": 4411,
+            "Expedient": "2026-O-00000141",
+            "Organisme": "XALOC GIRONA",
+            "TExp": 2,
+            "Estado": 0,
+            "numclient": 9411,
+            "SujetoRecurso": "CLIENTE A",
+            "FaseProcedimiento": "Alegaciones",
+            "FUsuarioCompletado": None,
+            "UsuarioAsignado": "",
+        },
+        {
+            "idRecurso": 3412,
+            "idExp": 4412,
+            "Expedient": "0448640179907",
+            "Organisme": "XALOC GIRONA",
+            "TExp": 2,
+            "Estado": 0,
+            "numclient": 9412,
+            "SujetoRecurso": "CLIENTE B",
+            "FaseProcedimiento": "Alegaciones",
+            "FUsuarioCompletado": None,
+            "UsuarioAsignado": "",
+        },
+        {
+            "idRecurso": 3413,
+            "idExp": 4413,
+            "Expedient": "2026-Z-00464013",
+            "Organisme": "XALOC GIRONA",
+            "TExp": 2,
+            "Estado": 0,
+            "numclient": 9413,
+            "SujetoRecurso": "CLIENTE C",
+            "FaseProcedimiento": "Alegaciones",
+            "FUsuarioCompletado": None,
+            "UsuarioAsignado": "",
+        },
+    ]
+    legacy_repo = _LegacyRepo(rows)
+    discarded: list[dict[str, Any]] = []
+
+    candidates = adapter.fetch_candidates(
+        config={"query_organisme": "%XALOC%"},
+        conn_str="unused",
+        authenticated_user=None,
+        limit=10,
+        resource_repo=legacy_repo,
+        on_discard=lambda item: discarded.append(item),
+    )
+
+    assert [item["Expedient"] for item in candidates] == [
+        "2026-O-00000141",
+        "0448640179907",
+        "2026-Z-00464013",
+    ]
+    assert discarded == []
+
+
 def test_valencia_payload_parity_legacy_vs_consultor(monkeypatch) -> None:
     adapter = ValenciaAdapter()
     monkeypatch.setattr(valencia_mod, "get_required_client_documents", _fake_docs_builder)
