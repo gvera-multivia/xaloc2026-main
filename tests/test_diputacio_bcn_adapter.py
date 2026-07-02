@@ -402,6 +402,35 @@ def test_build_payloads_prefers_organisme_manresa_over_client_badalona() -> None
     assert payloads[0]["codmuni"] == "113"
 
 
+def test_fetch_candidates_allows_manresa_when_explicitly_configured() -> None:
+    adapter = DiputacioBcnAdapter()
+    adapter._load_allowed_organismes = lambda _conn: set()  # type: ignore[method-assign]
+    adapter._load_organisme_urls = lambda _conn: {}  # type: ignore[method-assign]
+
+    repo = _FakeRepo(
+        [
+            {
+                "idRecurso": 200006,
+                "Expedient": "1751795",
+                "Organisme": "AJUNTAMENT DE MANRESA",
+                "FaseProcedimiento": "denuncia",
+                "Estado": 0,
+                "UsuarioAsignado": None,
+            }
+        ]
+    )
+    candidates = adapter.fetch_candidates(
+        config={"query_organisme": "%AJUNTAMENT DE MANRESA%"},
+        conn_str="dummy",
+        authenticated_user="Daniel Gonzalez",
+        limit=50,
+        resource_repo=repo,
+    )
+
+    assert len(candidates) == 1
+    assert int(candidates[0]["idRecurso"]) == 200006
+
+
 def test_build_payloads_uses_client_municipio_for_orgt_alias() -> None:
     adapter = DiputacioBcnAdapter()
     payloads = asyncio.run(
