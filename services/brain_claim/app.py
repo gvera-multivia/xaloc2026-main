@@ -97,6 +97,12 @@ class BrainClaimService:
                 "[brain-claim] actualizado query_organisme legacy de madrid en PG: %s",
                 updated_madrid_organisme,
             )
+        updated_diputacio_bcn_organisme = self.admin_store.upgrade_diputacio_bcn_query_organisme()
+        if updated_diputacio_bcn_organisme:
+            logger.info(
+                "[brain-claim] actualizado query_organisme legacy de diputacio_bcn en PG: %s",
+                updated_diputacio_bcn_organisme,
+            )
         self.sqlserver_conn_str = build_sqlserver_connection_string()
         self.resource_repo = ResourceRepository(conn_str=self.sqlserver_conn_str, logger=logger)
         self.consultor = ConsultorService(conn_str=self.sqlserver_conn_str, logger=logger, repository=self.resource_repo)

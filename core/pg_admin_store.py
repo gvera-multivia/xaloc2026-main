@@ -32,6 +32,7 @@ class PgAdminStore:
     MADRID_QUERY_ORGANISME_LEGACY = (
         "%SUBDIRECCION GNAL GESTION MULTAS DE MADRID%",
     )
+    DIPUTACIO_BCN_QUERY_ORGANISME_APPEND = "%AJUNTAMENT DE MANRESA%"
 
     def __init__(self, dsn: str, logger: Optional[logging.Logger] = None):
         self.dsn = dsn
@@ -502,4 +503,38 @@ class PgAdminStore:
             return updated
         except Exception as exc:
             self.logger.warning("No se pudo actualizar query_organisme de madrid en PG: %s", exc)
+            return 0
+
+    def upgrade_diputacio_bcn_query_organisme(self) -> int:
+        try:
+            with self._conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE organismo_config
+                           SET query_organisme = CASE
+                               WHEN query_organisme IS NULL OR BTRIM(query_organisme) = '' THEN %s
+                               WHEN query_organisme LIKE %s THEN query_organisme
+                               ELSE query_organisme || '|' || %s
+                           END,
+                               updated_at = NOW()
+                         WHERE site_id = 'diputacio_bcn'
+                           AND (
+                               query_organisme IS NULL
+                               OR BTRIM(query_organisme) = ''
+                               OR query_organisme NOT LIKE %s
+                           )
+                        """,
+                        (
+                            self.DIPUTACIO_BCN_QUERY_ORGANISME_APPEND,
+                            f"%{self.DIPUTACIO_BCN_QUERY_ORGANISME_APPEND}%",
+                            self.DIPUTACIO_BCN_QUERY_ORGANISME_APPEND,
+                            f"%{self.DIPUTACIO_BCN_QUERY_ORGANISME_APPEND}%",
+                        ),
+                    )
+                    updated = int(cur.rowcount or 0)
+                conn.commit()
+            return updated
+        except Exception as exc:
+            self.logger.warning("No se pudo actualizar query_organisme de diputacio_bcn en PG: %s", exc)
             return 0
