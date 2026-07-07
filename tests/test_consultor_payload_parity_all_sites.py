@@ -180,6 +180,39 @@ def test_madrid_fetch_candidates_accepts_hyphen_prefixed_expediente() -> None:
     assert discarded == []
 
 
+def test_madrid_fetch_candidates_reports_assigned_to_other_user() -> None:
+    adapter = MadridAdapter()
+    row = {
+        "idRecurso": 112368,
+        "idExp": 412368,
+        "Expedient": "911/ 58296171.3",
+        "Organisme": "SUBDIRECCION GNAL GESTION MULTAS DE MADRID",
+        "TExp": 2,
+        "Estado": 1,
+        "numclient": 912368,
+        "SujetoRecurso": "JUAN PEREZ",
+        "FaseProcedimiento": "Identificacion",
+        "UsuarioAsignado": "Usuario Antiguo",
+        "adjuntos": [],
+    }
+    legacy_repo = _LegacyRepo([row])
+    discarded: list[dict[str, Any]] = []
+
+    candidates = adapter.fetch_candidates(
+        config={"regex_expediente": MadridAdapter.DEFAULT_REGEX_EXPEDIENTE},
+        conn_str="unused",
+        authenticated_user="Daniel Gonzalez",
+        limit=10,
+        resource_repo=legacy_repo,
+        on_discard=lambda item: discarded.append(item),
+    )
+
+    assert candidates == []
+    assert len(discarded) == 1
+    assert discarded[0]["tipo_incidencia"] == "RESOURCE_ASSIGNED_TO_OTHER_USER"
+    assert discarded[0]["Expedient"] == "911/58296171.3"
+
+
 def test_madrid_parse_expediente_normalizes_hyphen_prefix_to_canonical_slash() -> None:
     parts = MadridAdapter._parse_expediente("935-155334109.3", fase_raw="Sancion", es_empresa=False)
 
@@ -188,6 +221,91 @@ def test_madrid_parse_expediente_normalizes_hyphen_prefix_to_canonical_slash() -
     assert parts["expediente_nnn"] == "935"
     assert parts["expediente_eeeeeeeee"] == "155334109"
     assert parts["expediente_d"] == "3"
+
+
+def test_madrid_build_payloads_normalizes_internal_expediente_whitespace(monkeypatch) -> None:
+    adapter = MadridAdapter()
+    monkeypatch.setattr(adapter._groq_guardian, "classify_batch", _fake_classify_batch)
+
+    payloads = asyncio.run(
+        adapter.build_payloads(
+            [
+                {
+                    "idRecurso": 112368,
+                    "idExp": 412368,
+                    "Expedient": "911/ 58296171.3",
+                    "Organisme": "SUBDIRECCION GNAL GESTION MULTAS DE MADRID",
+                    "TExp": 2,
+                    "Estado": 1,
+                    "numclient": 912368,
+                    "SujetoRecurso": "JUAN PEREZ",
+                    "FaseProcedimiento": "Identificacion",
+                    "UsuarioAsignado": "Daniel Gonzalez",
+                    "cliente_tipo": 1,
+                    "cliente_nif": "12345678Z",
+                    "cliente_nombre": "JUAN",
+                    "cliente_apellido1": "PEREZ",
+                    "cliente_apellido2": "LOPEZ",
+                    "cliente_provincia": "MADRID",
+                    "cliente_municipio": "MADRID",
+                    "cliente_domicilio": "CALLE MAYOR",
+                    "cliente_numero": "10",
+                    "cliente_cp": "28001",
+                    "cliente_email": "juan@example.com",
+                    "rs_matricula": "1234ABC",
+                    "adjuntos": [],
+                }
+            ]
+        )
+    )
+
+    assert len(payloads) == 1
+    assert payloads[0]["expediente"] == "911/58296171.3"
+    assert payloads[0]["exp_nnn"] == "911"
+    assert payloads[0]["exp_eeeeeeeee"] == "58296171"
+    assert payloads[0]["exp_d"] == "3"
+
+
+def test_madrid_build_payloads_reports_invalid_payload_discard(monkeypatch) -> None:
+    adapter = MadridAdapter()
+    monkeypatch.setattr(adapter._groq_guardian, "classify_batch", _fake_classify_batch)
+    discarded: list[dict[str, Any]] = []
+
+    payloads = asyncio.run(
+        adapter.build_payloads(
+            [
+                {
+                    "idRecurso": 112369,
+                    "idExp": 412369,
+                    "Expedient": "911/58296171.3",
+                    "Organisme": "SUBDIRECCION GNAL GESTION MULTAS DE MADRID",
+                    "TExp": 2,
+                    "Estado": 1,
+                    "numclient": 912369,
+                    "SujetoRecurso": "CLIENTE SIN NOMBRE",
+                    "FaseProcedimiento": "Identificacion",
+                    "UsuarioAsignado": "Daniel Gonzalez",
+                    "cliente_tipo": 1,
+                    "cliente_nif": "12345678Z",
+                    "cliente_nombre": "",
+                    "cliente_apellido1": "",
+                    "cliente_provincia": "MADRID",
+                    "cliente_municipio": "MADRID",
+                    "cliente_domicilio": "CALLE MAYOR",
+                    "cliente_numero": "10",
+                    "cliente_cp": "28001",
+                    "rs_matricula": "1234ABC",
+                    "adjuntos": [],
+                }
+            ],
+            on_discard=lambda item: discarded.append(item),
+        )
+    )
+
+    assert payloads == []
+    assert len(discarded) == 1
+    assert discarded[0]["tipo_incidencia"] == "PAYLOAD_INVALID"
+    assert discarded[0]["idRecurso"] == 112369
 
 
 def test_madrid_fetch_candidates_expands_query_organisme_for_ayuntamiento() -> None:

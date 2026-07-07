@@ -259,9 +259,32 @@ class MadridAdapter(SiteAdapter):
 
             estado = int(recurso.get("Estado") or 0)
             usuario = self._clean_str(recurso.get("UsuarioAsignado"))
-            if estado == 1 and authenticated_user and usuario != authenticated_user:
+            if estado == 1 and authenticated_user and not self._same_user_identity(usuario, authenticated_user):
+                if on_discard:
+                    on_discard(
+                        {
+                            "site_id": self.site_id,
+                            "idRecurso": recurso.get("idRecurso"),
+                            "Expedient": recurso.get("Expedient"),
+                            "tipo_incidencia": "RESOURCE_ASSIGNED_TO_OTHER_USER",
+                            "motivo": (
+                                "Recurso asignado a otro usuario en XVIA "
+                                f"(asignado={usuario!r}, actual={self._clean_str(authenticated_user)!r})."
+                            ),
+                        }
+                    )
                 continue
             if estado == 1 and not authenticated_user:
+                if on_discard:
+                    on_discard(
+                        {
+                            "site_id": self.site_id,
+                            "idRecurso": recurso.get("idRecurso"),
+                            "Expedient": recurso.get("Expedient"),
+                            "tipo_incidencia": "RESOURCE_ASSIGNED_WITHOUT_SESSION",
+                            "motivo": "Recurso ya asignado en XVIA y no hay usuario autenticado para validarlo.",
+                        }
+                    )
                 continue
 
             out.append(recurso)
@@ -576,7 +599,8 @@ class MadridAdapter(SiteAdapter):
 
         payloads: list[dict] = []
         for r in candidates:
-            expediente_raw = self._clean_str(r.get("Expedient")).upper()
+            expediente_original = self._clean_str(r.get("Expedient")).upper()
+            expediente_raw = re.sub(r"\s+", "", expediente_original)
             cif_recurso = self._clean_str(r.get("cif"))
             nif_individual = self._clean_str(r.get("cliente_nif"))
             nif_empresa = self._clean_str(r.get("cliente_nif_empresa"))
@@ -587,18 +611,43 @@ class MadridAdapter(SiteAdapter):
                 # Es empresa: Prioridad 1: nifempresa, Prioridad 2: rs.cif
                 nif = nif_empresa or cif_recurso
                 if not nif:
+                    motivo = (
+                        "Madrid: cliente empresa sin NIF de empresa ni CIF "
+                        f"(numclient={r.get('numclient')}, sujeto={r.get('SujetoRecurso')})."
+                    )
                     logger.warning(
                         "[MADRID] Cliente %s (%s) marcado como empresa (tipo 2) pero sin nifempresa ni cif. Saltando.",
                         r.get("numclient"),
                         r.get("SujetoRecurso"),
                     )
+                    if on_discard:
+                        on_discard(
+                            {
+                                "site_id": self.site_id,
+                                "idRecurso": r.get("idRecurso"),
+                                "Expedient": expediente_raw or expediente_original,
+                                "tipo_incidencia": "PAYLOAD_INVALID",
+                                "motivo": motivo,
+                            }
+                        )
                     continue
             else:
                 # Es fÃ­sica: Usar cliente_nif
                 nif = nif_individual
 
             if not nif:
+                motivo = "Madrid: recurso sin NIF valido para interesado/notificacion."
                 logger.warning("[MADRID] Recurso %s sin NIF valido. Saltando.", r.get("idRecurso"))
+                if on_discard:
+                    on_discard(
+                        {
+                            "site_id": self.site_id,
+                            "idRecurso": r.get("idRecurso"),
+                            "Expedient": expediente_raw or expediente_original,
+                            "tipo_incidencia": "PAYLOAD_INVALID",
+                            "motivo": motivo,
+                        }
+                    )
                 continue
 
             nif = self._normalize_document_id(nif)
@@ -731,11 +780,22 @@ class MadridAdapter(SiteAdapter):
             try:
                 self._prevalidate_required_fields(payload)
             except ValueError as e:
+                motivo = str(e)
                 logger.warning(
                     "[MADRID] Recurso %s descartado por payload invÃ¡lido: %s",
                     r.get("idRecurso"),
                     e,
                 )
+                if on_discard:
+                    on_discard(
+                        {
+                            "site_id": self.site_id,
+                            "idRecurso": r.get("idRecurso"),
+                            "Expedient": expediente_raw or expediente_original,
+                            "tipo_incidencia": "PAYLOAD_INVALID",
+                            "motivo": motivo,
+                        }
+                    )
                 continue
 
             payloads.append(payload)
