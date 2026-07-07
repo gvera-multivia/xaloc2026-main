@@ -197,6 +197,7 @@ class RedsaraAdapter(SiteAdapter):
                 r"^\d{3}-\d{2}-\d{6}$",
                 r"^\d{7}MU\d{11}$",
                 r"^MU\d{8}$",
+                r"^\d{8}$",
                 r"^\d{12}$",
                 r"^\d{3}-\d{2}-IG-\d{6}$",
                 r"^\d{2}/\d{6}$",

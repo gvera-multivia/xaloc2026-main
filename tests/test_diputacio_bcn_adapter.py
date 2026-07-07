@@ -402,6 +402,72 @@ def test_build_payloads_prefers_organisme_manresa_over_client_badalona() -> None
     assert payloads[0]["codmuni"] == "113"
 
 
+def test_build_payloads_prefers_organisme_caldes_de_estrac() -> None:
+    adapter = DiputacioBcnAdapter()
+    payloads = asyncio.run(
+        adapter.build_payloads(
+            [
+                {
+                    "idRecurso": 555010,
+                    "idExp": 777010,
+                    "numclient": 999010,
+                    "automatic_id": 12354,
+                    "Expedient": "2600000533",
+                    "Organisme": "AJUNTAMENT DE CALDES DE ESTRAC",
+                    "FaseProcedimiento": "denuncia",
+                    "SujetoRecurso": "CARLA SERRA",
+                    "tipodecliente": "1",
+                    "nif": "12345678Z",
+                    "nifempresa": "",
+                    "Nombre": "CARLA",
+                    "Apellido1": "SERRA",
+                    "Apellido2": "PUJOL",
+                    "Nombrefiscal": "",
+                    "cliente_municipio": "BADALONA",
+                    "adjuntos": [],
+                }
+            ]
+        )
+    )
+
+    assert len(payloads) == 1
+    assert payloads[0]["municipio"] == "CALDES DE ESTRAC"
+    assert payloads[0]["codmuni"] == "032"
+
+
+def test_build_payloads_prefers_organisme_santa_coloma_de_gramanet_typo() -> None:
+    adapter = DiputacioBcnAdapter()
+    payloads = asyncio.run(
+        adapter.build_payloads(
+            [
+                {
+                    "idRecurso": 555011,
+                    "idExp": 777011,
+                    "numclient": 999011,
+                    "automatic_id": 12355,
+                    "Expedient": "26015819",
+                    "Organisme": "AJUNTAMENT DE SANTA COLOMA DE GRAMANET",
+                    "FaseProcedimiento": "denuncia",
+                    "SujetoRecurso": "CARLA SERRA",
+                    "tipodecliente": "1",
+                    "nif": "12345678Z",
+                    "nifempresa": "",
+                    "Nombre": "CARLA",
+                    "Apellido1": "SERRA",
+                    "Apellido2": "PUJOL",
+                    "Nombrefiscal": "",
+                    "cliente_municipio": "BADALONA",
+                    "adjuntos": [],
+                }
+            ]
+        )
+    )
+
+    assert len(payloads) == 1
+    assert payloads[0]["municipio"] == "SANTA COLOMA DE GRAMANET"
+    assert payloads[0]["codmuni"] == "245"
+
+
 def test_fetch_candidates_allows_manresa_when_explicitly_configured() -> None:
     adapter = DiputacioBcnAdapter()
     adapter._load_allowed_organismes = lambda _conn: set()  # type: ignore[method-assign]
@@ -429,6 +495,64 @@ def test_fetch_candidates_allows_manresa_when_explicitly_configured() -> None:
 
     assert len(candidates) == 1
     assert int(candidates[0]["idRecurso"]) == 200006
+
+
+def test_fetch_candidates_allows_caldes_de_estrac_when_explicitly_configured() -> None:
+    adapter = DiputacioBcnAdapter()
+    adapter._load_allowed_organismes = lambda _conn: set()  # type: ignore[method-assign]
+    adapter._load_organisme_urls = lambda _conn: {}  # type: ignore[method-assign]
+
+    repo = _FakeRepo(
+        [
+            {
+                "idRecurso": 111622,
+                "Expedient": "2600000533",
+                "Organisme": "AJUNTAMENT DE CALDES DE ESTRAC",
+                "FaseProcedimiento": "denuncia",
+                "Estado": 0,
+                "UsuarioAsignado": None,
+            }
+        ]
+    )
+    candidates = adapter.fetch_candidates(
+        config={"query_organisme": "%AJUNTAMENT DE CALDES DE ESTRAC%"},
+        conn_str="dummy",
+        authenticated_user="Daniel Gonzalez",
+        limit=50,
+        resource_repo=repo,
+    )
+
+    assert len(candidates) == 1
+    assert int(candidates[0]["idRecurso"]) == 111622
+
+
+def test_fetch_candidates_allows_santa_coloma_de_gramanet_when_explicitly_configured() -> None:
+    adapter = DiputacioBcnAdapter()
+    adapter._load_allowed_organismes = lambda _conn: set()  # type: ignore[method-assign]
+    adapter._load_organisme_urls = lambda _conn: {}  # type: ignore[method-assign]
+
+    repo = _FakeRepo(
+        [
+            {
+                "idRecurso": 112415,
+                "Expedient": "26015819",
+                "Organisme": "AJUNTAMENT DE SANTA COLOMA DE GRAMANET",
+                "FaseProcedimiento": "denuncia",
+                "Estado": 0,
+                "UsuarioAsignado": None,
+            }
+        ]
+    )
+    candidates = adapter.fetch_candidates(
+        config={"query_organisme": "%AJUNTAMENT DE SANTA COLOMA DE GRAMANET%"},
+        conn_str="dummy",
+        authenticated_user="Daniel Gonzalez",
+        limit=50,
+        resource_repo=repo,
+    )
+
+    assert len(candidates) == 1
+    assert int(candidates[0]["idRecurso"]) == 112415
 
 
 def test_build_payloads_uses_client_municipio_for_orgt_alias() -> None:

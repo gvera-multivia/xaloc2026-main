@@ -143,3 +143,12 @@ npx @claude-flow/cli memory search \
 
 - Documentation: https://github.com/ruvnet/claude-flow
 - Issues: https://github.com/ruvnet/claude-flow/issues
+
+## RuFlo Low-Token Workflow
+
+- Prefer `ruflo` pattern search first for repo context, swarm behavior, memory behavior, and agent coordination questions.
+- Use the smallest read set possible: `AGENTS.md`, `sites/AGENTS.md`, the exact `sites/<site>/` subtree, `core/`, and the file requested by the task.
+- Avoid broad scans of `dashboard-frontend/node_modules/`, `.venv/`, `.playwright*`, or other generated trees unless the task explicitly requires them.
+- Store stable findings back into `ruflo` with short repo-scoped keys such as `xaloc2026-main:repo_overview` or `xaloc2026-main:workflow_rule`.
+- Do not stop at memory when implementing or debugging; once the site or subsystem is identified, inspect the exact `sites/<site>/`, `core/`, or `dashboard/` files and the associated tests.
+- Prefer `sites/<site>/` for site-specific flows, `core/` for shared runtime behavior, and `dashboard/` or `dashboard-frontend/` only when the task touches the admin UI.

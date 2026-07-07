@@ -32,7 +32,11 @@ class PgAdminStore:
     MADRID_QUERY_ORGANISME_LEGACY = (
         "%SUBDIRECCION GNAL GESTION MULTAS DE MADRID%",
     )
-    DIPUTACIO_BCN_QUERY_ORGANISME_APPEND = "%AJUNTAMENT DE MANRESA%"
+    DIPUTACIO_BCN_QUERY_ORGANISME_APPEND = (
+        "%AJUNTAMENT DE MANRESA%",
+        "%AJUNTAMENT DE CALDES DE ESTRAC%",
+        "%AJUNTAMENT DE SANTA COLOMA DE GRAMANET%",
+    )
 
     def __init__(self, dsn: str, logger: Optional[logging.Logger] = None):
         self.dsn = dsn
@@ -511,28 +515,32 @@ class PgAdminStore:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
-                        UPDATE organismo_config
-                           SET query_organisme = CASE
-                               WHEN query_organisme IS NULL OR BTRIM(query_organisme) = '' THEN %s
-                               WHEN query_organisme LIKE %s THEN query_organisme
-                               ELSE query_organisme || '|' || %s
-                           END,
-                               updated_at = NOW()
-                         WHERE site_id = 'diputacio_bcn'
-                           AND (
-                               query_organisme IS NULL
-                               OR BTRIM(query_organisme) = ''
-                               OR query_organisme NOT LIKE %s
-                           )
-                        """,
-                        (
-                            self.DIPUTACIO_BCN_QUERY_ORGANISME_APPEND,
-                            f"%{self.DIPUTACIO_BCN_QUERY_ORGANISME_APPEND}%",
-                            self.DIPUTACIO_BCN_QUERY_ORGANISME_APPEND,
-                            f"%{self.DIPUTACIO_BCN_QUERY_ORGANISME_APPEND}%",
-                        ),
+                        SELECT query_organisme
+                        FROM organismo_config
+                        WHERE site_id = 'diputacio_bcn'
+                        LIMIT 1
+                        """
                     )
-                    updated = int(cur.rowcount or 0)
+                    row = cur.fetchone()
+                    current = str(row[0] or "") if row else ""
+                    merged = current
+                    for token in self.DIPUTACIO_BCN_QUERY_ORGANISME_APPEND:
+                        if token in merged:
+                            continue
+                        merged = f"{merged}|{token}" if merged else token
+                    if merged != current:
+                        cur.execute(
+                            """
+                            UPDATE organismo_config
+                               SET query_organisme = %s,
+                                   updated_at = NOW()
+                             WHERE site_id = 'diputacio_bcn'
+                            """,
+                            (merged,),
+                        )
+                        updated = int(cur.rowcount or 0)
+                    else:
+                        updated = 0
                 conn.commit()
             return updated
         except Exception as exc:
