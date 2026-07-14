@@ -837,6 +837,42 @@ def _select_current_value_js() -> str:
     }"""
 
 
+def _filter_select_input_js() -> str:
+    return """({ sid, text }) => {
+        const escaped = sid.replace(/\\./g, '\\\\.')
+        const selectEl = document.querySelector(`dnt-select#${escaped}`)
+        const input = selectEl?.shadowRoot
+            ?.querySelector('dnt-input')
+            ?.shadowRoot
+            ?.querySelector('input.dnt-input__inner')
+        if (!input) return false
+
+        const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+        input.focus()
+        if (nativeSetter) {
+            nativeSetter.call(input, '')
+        } else {
+            input.value = ''
+        }
+        input.dispatchEvent(new Event('input', { bubbles: true, composed: true }))
+
+        if (nativeSetter) {
+            nativeSetter.call(input, text)
+        } else {
+            input.value = text
+        }
+        input.dispatchEvent(new InputEvent('input', {
+            bubbles: true,
+            composed: true,
+            inputType: 'insertText',
+            data: text
+        }))
+        input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, composed: true, key: String(text || '').slice(-1) || ' ' }))
+        input.dispatchEvent(new Event('change', { bubbles: true, composed: true }))
+        return true
+    }"""
+
+
 async def _select_dnt_option_by_id(
     page: Page, *, select_id: str, option_text: str, wait_for_options: bool = False
 ) -> None:
@@ -883,6 +919,10 @@ async def _select_dnt_option_by_id(
 
         try:
             if wait_for_options:
+                filtered = await page.evaluate(_filter_select_input_js(), {"sid": select_id, "text": option_text})
+                if not filtered:
+                    raise RuntimeError(f"No se pudo filtrar dnt-select#{select_id} con valor '{option_text}'")
+                await page.wait_for_timeout(450)
                 try:
                     await page.wait_for_function(
                         _select_has_target_option_js(HEURISTIC_MIN_SCORE),
@@ -1023,6 +1063,39 @@ async def _select_dnt_option_by_id(
 
     assert last_error is not None
     raise last_error
+
+
+async def _select_city_with_province_fallback(
+    page: Page,
+    *,
+    select_id: str,
+    city_text: str,
+    province_text: str,
+) -> None:
+    normalized_city = normalize_city_alias(city_text)
+    normalized_province = normalize_province_alias(province_text)
+    try:
+        await _select_dnt_option_by_id(
+            page,
+            select_id=select_id,
+            option_text=normalized_city,
+            wait_for_options=True,
+        )
+        return
+    except RuntimeError as city_error:
+        if not normalized_province or normalized_city.strip().lower() == normalized_province.strip().lower():
+            raise
+        print(
+            f"[REDSARA] Poblacion '{normalized_city}' no disponible en #{select_id}; "
+            f"probando provincia como poblacion: '{normalized_province}'. Error original: {city_error}"
+        )
+
+    await _select_dnt_option_by_id(
+        page,
+        select_id=select_id,
+        option_text=normalized_province,
+        wait_for_options=True,
+    )
 
 
 async def _select_destination_organism(page: Page, organism_code: str, select_id: str) -> None:
@@ -1223,6 +1296,14 @@ async def rellenar_formulario_redsara(
 async def rellenar_paso1_datos_solicitante_redsara(page: Page, config: RedsaraConfig, data: RedsaraTarget) -> None:
     await _wait_until_interactive(page)
     await _select_representante(page)
+    print(
+        "[REDSARA] Direccion representante: "
+        f"provincia='{data.represented_province}' poblacion='{data.represented_city}' cp='{data.represented_zip}'"
+    )
+    print(
+        "[REDSARA] Direccion interesado: "
+        f"provincia='{data.interested_province}' poblacion='{data.interested_city}' cp='{data.interested_zip}'"
+    )
 
     # 1) Representative postal address
     await _select_dnt_option_by_id(
@@ -1242,11 +1323,11 @@ async def rellenar_paso1_datos_solicitante_redsara(page: Page, config: RedsaraCo
         select_id=config.selectors.represented_province_id,
         option_text=normalize_province_alias(data.represented_province),
     )
-    await _select_dnt_option_by_id(
+    await _select_city_with_province_fallback(
         page,
         select_id=config.selectors.represented_city_id,
-        option_text=normalize_city_alias(data.represented_city),
-        wait_for_options=True,
+        city_text=data.represented_city,
+        province_text=data.represented_province,
     )
     await _fill_dnt_input(page, "represented", "zipCode", data.represented_zip)
     await _fill_dnt_input(page, "represented", "phone", data.represented_phone)
@@ -1284,11 +1365,11 @@ async def rellenar_paso1_datos_solicitante_redsara(page: Page, config: RedsaraCo
         select_id=config.selectors.interested_province_id,
         option_text=normalize_province_alias(data.interested_province),
     )
-    await _select_dnt_option_by_id(
+    await _select_city_with_province_fallback(
         page,
         select_id=config.selectors.interested_city_id,
-        option_text=normalize_city_alias(data.interested_city),
-        wait_for_options=True,
+        city_text=data.interested_city,
+        province_text=data.interested_province,
     )
     await _fill_dnt_input(page, "interested", "zipCode", data.interested_zip)
     await _fill_dnt_input(page, "interested", "phone", data.interested_phone)
