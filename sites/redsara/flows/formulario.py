@@ -810,6 +810,21 @@ async def _fill_dnt_input(page: Page, form_group_name: str, form_control_name: s
     print(f"[REDSARA] fill_dnt_input OK: {form_group_name}.{form_control_name}='{value}'")
 
 
+def _select_has_target_option_js(min_score: int = HEURISTIC_MIN_SCORE) -> str:
+    return f"""({{ sid, text }}) => {{
+        {select_option_heuristic_js.__globals__["_js_heuristic_core"]()}
+        const escaped = sid.replace(/\\./g, '\\\\.')
+        const selectEl = document.querySelector(`dnt-select#${{escaped}}`)
+        if (!selectEl) return false
+        const options = Array.from(selectEl.querySelectorAll('dnt-option'))
+        return options.some((opt) => {{
+            const optionDiv = opt.shadowRoot?.querySelector('[role="option"]')
+            const label = (optionDiv?.textContent || opt.textContent || '').replace(/\\s+/g, ' ').trim()
+            return score(label, text) >= {min_score}
+        }})
+    }}"""
+
+
 async def _select_dnt_option_by_id(
     page: Page, *, select_id: str, option_text: str, wait_for_options: bool = False
 ) -> None:
@@ -822,175 +837,187 @@ async def _select_dnt_option_by_id(
 
     if wait_for_options:
         await page.wait_for_function(
-            """({ sid }) => {
-                const escaped = sid.replace(/\\./g, '\\\\.')
-                const el = document.querySelector(`dnt-select#${escaped}`)
-                return !!el && el.querySelectorAll('dnt-option').length > 0
-            }""",
-            arg={"sid": select_id},
-            timeout=8000,
-        )
-
-    opened = await page.evaluate(
-        """({ sid }) => {
-            const escaped = sid.replace(/\\./g, '\\\\.')
-            const selectEl = document.querySelector(`dnt-select#${escaped}`)
-            if (!selectEl || !selectEl.shadowRoot) return false
-            const dntInput = selectEl.shadowRoot.querySelector('dnt-input')
-            const input = dntInput?.shadowRoot?.querySelector('input.dnt-input__inner')
-            if (!input) return false
-            input.click()
-            return true
-        }""",
-        {"sid": select_id},
-    )
-    if not opened:
-        raise RuntimeError(f"No se pudo abrir dnt-select#{select_id}")
-
-    await page.wait_for_function(
-        """({ sid }) => {
-            const escaped = sid.replace(/\\./g, '\\\\.')
-            const selectEl = document.querySelector(`dnt-select#${escaped}`)
-            const dropdown = selectEl?.shadowRoot?.querySelector('dnt-select-dropdown')
-            const popper = dropdown?.shadowRoot?.querySelector('dnt-popover .dnt-popover__popper')
-            return !!popper && !popper.classList.contains('is-hidden')
-        }""",
-        arg={"sid": select_id},
-        timeout=5000,
-    )
-
-    # Campo sensible: tipo de documento. Forzar selección exacta para no caer
-    # en fallback de "primera opción" (NIF) cuando el objetivo es NIE/CIF/etc.
-    if select_id == "tipoDoc":
-        clicked_exact = await page.evaluate(
-            """({ sid, text }) => {
-                const norm = (s) => String(s || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase().replace(/\\s+/g, ' ').trim()
-                const escaped = sid.replace(/\\./g, '\\\\.')
-                const selectEl = document.querySelector(`dnt-select#${escaped}`)
-                if (!selectEl) return false
-                const target = norm(text)
-                const options = Array.from(selectEl.querySelectorAll('dnt-option'))
-                const getLabel = (opt) => norm(opt.shadowRoot?.querySelector('[role="option"]')?.textContent || opt.textContent || '')
-                const exact = options.find((opt) => getLabel(opt) === target)
-                if (!exact) return false
-                const optionDiv = exact.shadowRoot?.querySelector('[role="option"]')
-                if (!optionDiv) return false
-                optionDiv.click()
-                return true
-            }""",
-            {"sid": select_id, "text": option_text},
-        )
-        if not clicked_exact:
-            raise RuntimeError(
-                f"No se encontró opción exacta para dnt-select#{select_id} con valor '{option_text}'."
-            )
-        await page.wait_for_timeout(FIELD_SETTLE_DELAY_MS)
-        return
-
-    if select_id in REDSARA_STREET_TYPE_SELECT_IDS:
-        resolved_option = _canonical_street_type(option_text)
-        clicked_street_type = await page.evaluate(
-            """({ sid, text }) => {
-                const norm = (s) => String(s || '')
-                    .normalize('NFD')
-                    .replace(/[\\u0300-\\u036f]/g, '')
-                    .toLowerCase()
-                    .replace(/[\\s\\.,;:/_\\-]+/g, ' ')
-                    .trim()
-                const escaped = sid.replace(/\\./g, '\\\\.')
-                const selectEl = document.querySelector(`dnt-select#${escaped}`)
-                if (!selectEl) return ''
-                const target = norm(text)
-                const options = Array.from(selectEl.querySelectorAll('dnt-option'))
-                const getOption = (opt) => opt?.shadowRoot?.querySelector('[role="option"]')
-                const getLabel = (opt) => norm(getOption(opt)?.textContent || opt?.textContent || '')
-                const exact = options.find((opt) => getLabel(opt) === target)
-                const fallbackOtros = options.find((opt) => getLabel(opt) === 'otros')
-                const chosen = exact || fallbackOtros
-                if (!chosen) return ''
-                const optionDiv = getOption(chosen)
-                if (!optionDiv) return ''
-                optionDiv.click()
-                return (optionDiv.textContent || '').replace(/\\s+/g, ' ').trim()
-            }""",
-            {"sid": select_id, "text": resolved_option},
-        )
-        if not str(clicked_street_type or "").strip():
-            raise RuntimeError(
-                f"No se encontró opción válida para dnt-select#{select_id} con valor '{resolved_option}'."
-            )
-        await page.wait_for_timeout(FIELD_SETTLE_DELAY_MS)
-        return
-
-    selection = await page.evaluate(select_option_heuristic_js(HEURISTIC_MIN_SCORE), {"sid": select_id, "text": option_text})
-
-    clicked = bool(selection and selection.get("clicked"))
-    best_score = int(selection.get("bestScore", -1)) if isinstance(selection, dict) else -1
-    used_fallback = False
-    if not clicked:
-        used_fallback = True
-        print(
-            f"[REDSARA] Heuristica sin click para #{select_id} (score={best_score}). "
-            "Aplicando fallback teclado."
-        )
-        typed = await page.evaluate(
-            """({ sid, text }) => {
-                const escaped = sid.replace(/\\./g, '\\\\.')
-                const selectEl = document.querySelector(`dnt-select#${escaped}`)
-                const input = selectEl?.shadowRoot
-                    ?.querySelector('dnt-input')
-                    ?.shadowRoot
-                    ?.querySelector('input.dnt-input__inner')
-                if (!input) return false
-                input.focus()
-                input.value = ''
-                input.dispatchEvent(new Event('input', { bubbles: true }))
-                input.value = text
-                input.dispatchEvent(new Event('input', { bubbles: true }))
-                return true
-            }""",
-            {"sid": select_id, "text": option_text},
-        )
-        if not typed:
-            raise RuntimeError(f"No se pudo preparar fallback en dnt-select#{select_id}")
-
-        input_loc = (
-            page.locator(f"dnt-select#{escaped_id}")
-            .first
-            .locator("dnt-input")
-            .first
-            .locator("input.dnt-input__inner")
-            .first
-        )
-        await input_loc.press("ArrowDown")
-        await input_loc.press("Enter")
-        await page.wait_for_timeout(FIELD_SETTLE_DELAY_MS)
-
-    try:
-        await page.wait_for_function(
-            verify_selected_input_js(HEURISTIC_MIN_SCORE),
+            _select_has_target_option_js(HEURISTIC_MIN_SCORE),
             arg={"sid": select_id, "text": option_text},
-            timeout=3000,
+            timeout=12000,
         )
-    except PlaywrightTimeoutError:
-        current = await page.evaluate(
+
+    last_error: RuntimeError | None = None
+    max_attempts = 3 if wait_for_options else 1
+    for attempt in range(1, max_attempts + 1):
+        if wait_for_options and attempt > 1:
+            await page.wait_for_timeout(350 * attempt)
+            await page.wait_for_function(
+                _select_has_target_option_js(HEURISTIC_MIN_SCORE),
+                arg={"sid": select_id, "text": option_text},
+                timeout=12000,
+            )
+
+        opened = await page.evaluate(
             """({ sid }) => {
                 const escaped = sid.replace(/\\./g, '\\\\.')
                 const selectEl = document.querySelector(`dnt-select#${escaped}`)
-                const input = selectEl?.shadowRoot
-                    ?.querySelector('dnt-input')
-                    ?.shadowRoot
-                    ?.querySelector('input.dnt-input__inner')
-                return (input?.value || '').trim()
+                if (!selectEl || !selectEl.shadowRoot) return false
+                const dntInput = selectEl.shadowRoot.querySelector('dnt-input')
+                const input = dntInput?.shadowRoot?.querySelector('input.dnt-input__inner')
+                if (!input) return false
+                input.click()
+                return true
             }""",
             {"sid": select_id},
         )
-        mode = "fallback" if used_fallback else "heuristica"
-        raise RuntimeError(
-            f"Seleccion no valida en dnt-select#{select_id} via {mode}. "
-            f"Objetivo='{option_text}' valor_actual='{current}'"
-        ) from None
-    await page.wait_for_timeout(FIELD_SETTLE_DELAY_MS)
+        if not opened:
+            raise RuntimeError(f"No se pudo abrir dnt-select#{select_id}")
+
+        await page.wait_for_function(
+            """({ sid }) => {
+                const escaped = sid.replace(/\\./g, '\\\\.')
+                const selectEl = document.querySelector(`dnt-select#${escaped}`)
+                const dropdown = selectEl?.shadowRoot?.querySelector('dnt-select-dropdown')
+                const popper = dropdown?.shadowRoot?.querySelector('dnt-popover .dnt-popover__popper')
+                return !!popper && !popper.classList.contains('is-hidden')
+            }""",
+            arg={"sid": select_id},
+            timeout=5000,
+        )
+
+        try:
+            if select_id == "tipoDoc":
+                clicked_exact = await page.evaluate(
+                    """({ sid, text }) => {
+                        const norm = (s) => String(s || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase().replace(/\\s+/g, ' ').trim()
+                        const escaped = sid.replace(/\\./g, '\\\\.')
+                        const selectEl = document.querySelector(`dnt-select#${escaped}`)
+                        if (!selectEl) return false
+                        const target = norm(text)
+                        const options = Array.from(selectEl.querySelectorAll('dnt-option'))
+                        const getLabel = (opt) => norm(opt.shadowRoot?.querySelector('[role="option"]')?.textContent || opt.textContent || '')
+                        const exact = options.find((opt) => getLabel(opt) === target)
+                        if (!exact) return false
+                        const optionDiv = exact.shadowRoot?.querySelector('[role="option"]')
+                        if (!optionDiv) return false
+                        optionDiv.click()
+                        return true
+                    }""",
+                    {"sid": select_id, "text": option_text},
+                )
+                if not clicked_exact:
+                    raise RuntimeError(
+                        f"No se encontró opción exacta para dnt-select#{select_id} con valor '{option_text}'."
+                    )
+                await page.wait_for_timeout(FIELD_SETTLE_DELAY_MS)
+                return
+
+            if select_id in REDSARA_STREET_TYPE_SELECT_IDS:
+                resolved_option = _canonical_street_type(option_text)
+                clicked_street_type = await page.evaluate(
+                    """({ sid, text }) => {
+                        const norm = (s) => String(s || '')
+                            .normalize('NFD')
+                            .replace(/[\\u0300-\\u036f]/g, '')
+                            .toLowerCase()
+                            .replace(/[\\s\\.,;:/_\\-]+/g, ' ')
+                            .trim()
+                        const escaped = sid.replace(/\\./g, '\\\\.')
+                        const selectEl = document.querySelector(`dnt-select#${escaped}`)
+                        if (!selectEl) return ''
+                        const target = norm(text)
+                        const options = Array.from(selectEl.querySelectorAll('dnt-option'))
+                        const getOption = (opt) => opt?.shadowRoot?.querySelector('[role="option"]')
+                        const getLabel = (opt) => norm(getOption(opt)?.textContent || opt?.textContent || '')
+                        const exact = options.find((opt) => getLabel(opt) === target)
+                        const fallbackOtros = options.find((opt) => getLabel(opt) === 'otros')
+                        const chosen = exact || fallbackOtros
+                        if (!chosen) return ''
+                        const optionDiv = getOption(chosen)
+                        if (!optionDiv) return ''
+                        optionDiv.click()
+                        return (optionDiv.textContent || '').replace(/\\s+/g, ' ').trim()
+                    }""",
+                    {"sid": select_id, "text": resolved_option},
+                )
+                if not str(clicked_street_type or "").strip():
+                    raise RuntimeError(
+                        f"No se encontró opción válida para dnt-select#{select_id} con valor '{resolved_option}'."
+                    )
+                await page.wait_for_timeout(FIELD_SETTLE_DELAY_MS)
+                return
+
+            selection = await page.evaluate(
+                select_option_heuristic_js(HEURISTIC_MIN_SCORE), {"sid": select_id, "text": option_text}
+            )
+
+            clicked = bool(selection and selection.get("clicked"))
+            best_score = int(selection.get("bestScore", -1)) if isinstance(selection, dict) else -1
+            used_fallback = False
+            if not clicked:
+                used_fallback = True
+                print(
+                    f"[REDSARA] Heuristica sin click para #{select_id} (score={best_score}) "
+                    f"intento={attempt}/{max_attempts}. Aplicando fallback teclado."
+                )
+                typed = await page.evaluate(
+                    """({ sid, text }) => {
+                        const escaped = sid.replace(/\\./g, '\\\\.')
+                        const selectEl = document.querySelector(`dnt-select#${escaped}`)
+                        const input = selectEl?.shadowRoot
+                            ?.querySelector('dnt-input')
+                            ?.shadowRoot
+                            ?.querySelector('input.dnt-input__inner')
+                        if (!input) return false
+                        input.focus()
+                        input.value = ''
+                        input.dispatchEvent(new Event('input', { bubbles: true }))
+                        input.value = text
+                        input.dispatchEvent(new Event('input', { bubbles: true }))
+                        return true
+                    }""",
+                    {"sid": select_id, "text": option_text},
+                )
+                if not typed:
+                    raise RuntimeError(f"No se pudo preparar fallback en dnt-select#{select_id}")
+
+                input_loc = (
+                    page.locator(f"dnt-select#{escaped_id}")
+                    .first
+                    .locator("dnt-input")
+                    .first
+                    .locator("input.dnt-input__inner")
+                    .first
+                )
+                await input_loc.press("ArrowDown")
+                await input_loc.press("Enter")
+                await page.wait_for_timeout(FIELD_SETTLE_DELAY_MS)
+
+            await page.wait_for_function(
+                verify_selected_input_js(HEURISTIC_MIN_SCORE),
+                arg={"sid": select_id, "text": option_text},
+                timeout=3000,
+            )
+            await page.wait_for_timeout(FIELD_SETTLE_DELAY_MS)
+            return
+        except PlaywrightTimeoutError:
+            current = await page.evaluate(
+                """({ sid }) => {
+                    const escaped = sid.replace(/\\./g, '\\\\.')
+                    const selectEl = document.querySelector(`dnt-select#${escaped}`)
+                    const input = selectEl?.shadowRoot
+                        ?.querySelector('dnt-input')
+                        ?.shadowRoot
+                        ?.querySelector('input.dnt-input__inner')
+                    return (input?.value || '').trim()
+                }""",
+                {"sid": select_id},
+            )
+            last_error = RuntimeError(
+                f"Seleccion no valida en dnt-select#{select_id}. "
+                f"Objetivo='{option_text}' valor_actual='{current}' intento={attempt}/{max_attempts}"
+            )
+        except RuntimeError as exc:
+            last_error = exc
+
+    assert last_error is not None
+    raise last_error
 
 
 async def _select_destination_organism(page: Page, organism_code: str, select_id: str) -> None:
