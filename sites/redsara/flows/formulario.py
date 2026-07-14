@@ -825,6 +825,18 @@ def _select_has_target_option_js(min_score: int = HEURISTIC_MIN_SCORE) -> str:
     }}"""
 
 
+def _select_current_value_js() -> str:
+    return """({ sid }) => {
+        const escaped = sid.replace(/\\./g, '\\\\.')
+        const selectEl = document.querySelector(`dnt-select#${escaped}`)
+        const input = selectEl?.shadowRoot
+            ?.querySelector('dnt-input')
+            ?.shadowRoot
+            ?.querySelector('input.dnt-input__inner')
+        return (input?.value || '').trim()
+    }"""
+
+
 async def _select_dnt_option_by_id(
     page: Page, *, select_id: str, option_text: str, wait_for_options: bool = False
 ) -> None:
@@ -835,23 +847,11 @@ async def _select_dnt_option_by_id(
     select_root = page.locator(f"dnt-select#{escaped_id}").first
     await select_root.wait_for(state="visible", timeout=10000)
 
-    if wait_for_options:
-        await page.wait_for_function(
-            _select_has_target_option_js(HEURISTIC_MIN_SCORE),
-            arg={"sid": select_id, "text": option_text},
-            timeout=12000,
-        )
-
     last_error: RuntimeError | None = None
     max_attempts = 3 if wait_for_options else 1
     for attempt in range(1, max_attempts + 1):
         if wait_for_options and attempt > 1:
             await page.wait_for_timeout(350 * attempt)
-            await page.wait_for_function(
-                _select_has_target_option_js(HEURISTIC_MIN_SCORE),
-                arg={"sid": select_id, "text": option_text},
-                timeout=12000,
-            )
 
         opened = await page.evaluate(
             """({ sid }) => {
@@ -882,6 +882,22 @@ async def _select_dnt_option_by_id(
         )
 
         try:
+            if wait_for_options:
+                try:
+                    await page.wait_for_function(
+                        _select_has_target_option_js(HEURISTIC_MIN_SCORE),
+                        arg={"sid": select_id, "text": option_text},
+                        timeout=6000,
+                    )
+                except PlaywrightTimeoutError:
+                    current = await page.evaluate(_select_current_value_js(), {"sid": select_id})
+                    print(
+                        f"[REDSARA] dnt-select#{select_id}: opcion objetivo no visible "
+                        f"intento={attempt}/{max_attempts} objetivo='{option_text}' actual='{current}'"
+                    )
+                    if attempt < max_attempts:
+                        continue
+
             if select_id == "tipoDoc":
                 clicked_exact = await page.evaluate(
                     """({ sid, text }) => {
@@ -997,18 +1013,7 @@ async def _select_dnt_option_by_id(
             await page.wait_for_timeout(FIELD_SETTLE_DELAY_MS)
             return
         except PlaywrightTimeoutError:
-            current = await page.evaluate(
-                """({ sid }) => {
-                    const escaped = sid.replace(/\\./g, '\\\\.')
-                    const selectEl = document.querySelector(`dnt-select#${escaped}`)
-                    const input = selectEl?.shadowRoot
-                        ?.querySelector('dnt-input')
-                        ?.shadowRoot
-                        ?.querySelector('input.dnt-input__inner')
-                    return (input?.value || '').trim()
-                }""",
-                {"sid": select_id},
-            )
+            current = await page.evaluate(_select_current_value_js(), {"sid": select_id})
             last_error = RuntimeError(
                 f"Seleccion no valida en dnt-select#{select_id}. "
                 f"Objetivo='{option_text}' valor_actual='{current}' intento={attempt}/{max_attempts}"
