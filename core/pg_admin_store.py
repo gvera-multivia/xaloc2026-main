@@ -36,6 +36,7 @@ class PgAdminStore:
         "%AJUNTAMENT DE MANRESA%",
         "%AJUNTAMENT DE CALDES DE ESTRAC%",
         "%AJUNTAMENT DE SANTA COLOMA DE GRAMANET%",
+        "%AJUNTAMENT DE GRANOLLERS%",
     )
 
     def __init__(self, dsn: str, logger: Optional[logging.Logger] = None):

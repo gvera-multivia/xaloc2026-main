@@ -149,6 +149,7 @@ class RedsaraAdapter(SiteAdapter):
             "destination_code": "E04753204",
             "regex_list": [
                 r"^\d{2}-\d{3}-\d{3}\.\d{3}-\d$",
+                r"^\d{2}-\d{3}-\d{3}\.\d{3}\.\d$",
                 r"^\d{2}-\d{3}-\d{3}-\d{3}-\d$",
             ],
         },

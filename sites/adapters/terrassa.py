@@ -114,7 +114,7 @@ class TerrassaAdapter(SiteAdapter):
         exp = self._clean(expediente).upper()
         if not exp:
             return ""
-        first_token = exp.split()[0]
+        first_token = exp.split()[0].strip(" ,.;")
         if first_token and self._is_valid_expediente(first_token):
             return first_token
         return exp

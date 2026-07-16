@@ -468,6 +468,39 @@ def test_build_payloads_prefers_organisme_santa_coloma_de_gramanet_typo() -> Non
     assert payloads[0]["codmuni"] == "245"
 
 
+def test_build_payloads_prefers_organisme_granollers() -> None:
+    adapter = DiputacioBcnAdapter()
+    payloads = asyncio.run(
+        adapter.build_payloads(
+            [
+                {
+                    "idRecurso": 555012,
+                    "idExp": 777012,
+                    "numclient": 999012,
+                    "automatic_id": 12356,
+                    "Expedient": "202600006564",
+                    "Organisme": "AJUNTAMENT DE GRANOLLERS",
+                    "FaseProcedimiento": "denuncia",
+                    "SujetoRecurso": "CARLA SERRA",
+                    "tipodecliente": "1",
+                    "nif": "12345678Z",
+                    "nifempresa": "",
+                    "Nombre": "CARLA",
+                    "Apellido1": "SERRA",
+                    "Apellido2": "PUJOL",
+                    "Nombrefiscal": "",
+                    "cliente_municipio": "BADALONA",
+                    "adjuntos": [],
+                }
+            ]
+        )
+    )
+
+    assert len(payloads) == 1
+    assert payloads[0]["municipio"] == "GRANOLLERS"
+    assert payloads[0]["codmuni"] == "096"
+
+
 def test_fetch_candidates_allows_manresa_when_explicitly_configured() -> None:
     adapter = DiputacioBcnAdapter()
     adapter._load_allowed_organismes = lambda _conn: set()  # type: ignore[method-assign]
@@ -553,6 +586,35 @@ def test_fetch_candidates_allows_santa_coloma_de_gramanet_when_explicitly_config
 
     assert len(candidates) == 1
     assert int(candidates[0]["idRecurso"]) == 112415
+
+
+def test_fetch_candidates_allows_granollers_when_explicitly_configured() -> None:
+    adapter = DiputacioBcnAdapter()
+    adapter._load_allowed_organismes = lambda _conn: set()  # type: ignore[method-assign]
+    adapter._load_organisme_urls = lambda _conn: {}  # type: ignore[method-assign]
+
+    repo = _FakeRepo(
+        [
+            {
+                "idRecurso": 123071,
+                "Expedient": "202600006564",
+                "Organisme": "AJUNTAMENT DE GRANOLLERS",
+                "FaseProcedimiento": "denuncia",
+                "Estado": 0,
+                "UsuarioAsignado": None,
+            }
+        ]
+    )
+    candidates = adapter.fetch_candidates(
+        config={"query_organisme": "%AJUNTAMENT DE GRANOLLERS%"},
+        conn_str="dummy",
+        authenticated_user="Daniel Gonzalez",
+        limit=50,
+        resource_repo=repo,
+    )
+
+    assert len(candidates) == 1
+    assert int(candidates[0]["idRecurso"]) == 123071
 
 
 def test_build_payloads_uses_client_municipio_for_orgt_alias() -> None:

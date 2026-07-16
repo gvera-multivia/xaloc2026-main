@@ -53,6 +53,9 @@ def test_validate_expediente_by_official_patterns() -> None:
     assert adapter.validate_expediente_for_organisme(
         "CENTRO DE TRATAMIENTO DE DENUNCIAS AUTOMATIZADAS DE LEON", "50-945-965.632-0"
     )
+    assert adapter.validate_expediente_for_organisme(
+        "CENTRO DE TRATAMIENTO DE DENUNCIAS AUTOMATIZADAS DE LEON", "28-049-987.915.5"
+    )
     assert adapter.validate_expediente_for_organisme("AYUNTAMIENTO DE PALMA DE MALLORCA", "MU 90046663")
     assert adapter.validate_expediente_for_organisme(
         "AGENCIA TRIBUTARIA MUNICIPAL DE ISLAS BALEARES", "25/088283-3"

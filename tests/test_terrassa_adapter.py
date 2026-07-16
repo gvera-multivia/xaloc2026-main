@@ -72,6 +72,29 @@ def test_terrassa_fetch_candidates_accepts_murc_shapes() -> None:
     assert discarded == []
 
 
+def test_terrassa_fetch_candidates_trims_comma_reference_after_murc() -> None:
+    adapter = TerrassaAdapter()
+    rows = [
+        {**_base_row(), "idRecurso": 108, "Expedient": "MURC-01391-2025, R250150704"},
+    ]
+    repo = _LegacyRepo(rows)
+    discarded: list[dict[str, Any]] = []
+
+    candidates = adapter.fetch_candidates(
+        config={},
+        conn_str="unused",
+        authenticated_user=None,
+        limit=10,
+        resource_repo=repo,
+        on_discard=lambda item: discarded.append(item),
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0]["idRecurso"] == 108
+    assert candidates[0]["Expedient"] == "MURC-01391-2025"
+    assert discarded == []
+
+
 def test_terrassa_fetch_candidates_accepts_sadm_shapes() -> None:
     adapter = TerrassaAdapter()
     rows = [
