@@ -75,17 +75,20 @@ def test_merge_query_organisme_adds_orgt_diba_patterns() -> None:
     assert "%AYUNTAMIENTO DE CASTELLDEFELS%" in merged
     assert "%ORGANISME DE GESTI%TRIBUT%ORGT%DIPUTACI%BARCELONA%" in merged
     assert "%ORGANISMO DE GESTION TRIBUT%ORGT%DIPUTACION DE BARCELONA%" in merged
+    assert "%AJUNTAMENT DE GRANOLLERS%" in merged
 
 
 def test_merge_query_organisme_does_not_duplicate_patterns() -> None:
     base = (
         "%AJUNTAMENT DE SABADELL%|"
         "%ORGANISME DE GESTI%TRIBUT%ORGT%DIPUTACI%BARCELONA%|"
-        "%ORGANISMO DE GESTION TRIBUT%ORGT%DIPUTACION DE BARCELONA%"
+        "%ORGANISMO DE GESTION TRIBUT%ORGT%DIPUTACION DE BARCELONA%|"
+        "%AJUNTAMENT DE GRANOLLERS%"
     )
     merged = DiputacioBcnAdapter._merge_query_organisme(base)
     assert merged.count("%ORGANISME DE GESTI%TRIBUT%ORGT%DIPUTACI%BARCELONA%") == 1
     assert merged.count("%ORGANISMO DE GESTION TRIBUT%ORGT%DIPUTACION DE BARCELONA%") == 1
+    assert merged.count("%AJUNTAMENT DE GRANOLLERS%") == 1
 
 
 def test_extract_explicit_organismes_from_query_ignores_internal_wildcards() -> None:
