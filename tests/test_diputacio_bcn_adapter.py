@@ -75,6 +75,7 @@ def test_merge_query_organisme_adds_orgt_diba_patterns() -> None:
     assert "%AYUNTAMIENTO DE CASTELLDEFELS%" in merged
     assert "%ORGANISME DE GESTI%TRIBUT%ORGT%DIPUTACI%BARCELONA%" in merged
     assert "%ORGANISMO DE GESTION TRIBUT%ORGT%DIPUTACION DE BARCELONA%" in merged
+    assert "%AJUNTAMENT DE BADALONA%" in merged
     assert "%AJUNTAMENT DE GRANOLLERS%" in merged
 
 
@@ -83,11 +84,13 @@ def test_merge_query_organisme_does_not_duplicate_patterns() -> None:
         "%AJUNTAMENT DE SABADELL%|"
         "%ORGANISME DE GESTI%TRIBUT%ORGT%DIPUTACI%BARCELONA%|"
         "%ORGANISMO DE GESTION TRIBUT%ORGT%DIPUTACION DE BARCELONA%|"
+        "%AJUNTAMENT DE BADALONA%|"
         "%AJUNTAMENT DE GRANOLLERS%"
     )
     merged = DiputacioBcnAdapter._merge_query_organisme(base)
     assert merged.count("%ORGANISME DE GESTI%TRIBUT%ORGT%DIPUTACI%BARCELONA%") == 1
     assert merged.count("%ORGANISMO DE GESTION TRIBUT%ORGT%DIPUTACION DE BARCELONA%") == 1
+    assert merged.count("%AJUNTAMENT DE BADALONA%") == 1
     assert merged.count("%AJUNTAMENT DE GRANOLLERS%") == 1
 
 
@@ -618,6 +621,35 @@ def test_fetch_candidates_allows_granollers_when_explicitly_configured() -> None
 
     assert len(candidates) == 1
     assert int(candidates[0]["idRecurso"]) == 123071
+
+
+def test_fetch_candidates_allows_badalona_when_config_is_stale() -> None:
+    adapter = DiputacioBcnAdapter()
+    adapter._load_allowed_organismes = lambda _conn: set()  # type: ignore[method-assign]
+    adapter._load_organisme_urls = lambda _conn: {}  # type: ignore[method-assign]
+
+    repo = _FakeRepo(
+        [
+            {
+                "idRecurso": 123591,
+                "Expedient": "0020421834",
+                "Organisme": "AJUNTAMENT DE BADALONA",
+                "FaseProcedimiento": "denuncia",
+                "Estado": 0,
+                "UsuarioAsignado": None,
+            }
+        ]
+    )
+    candidates = adapter.fetch_candidates(
+        config={"query_organisme": "%AJUNTAMENT DE SABADELL%"},
+        conn_str="dummy",
+        authenticated_user="Daniel Gonzalez",
+        limit=50,
+        resource_repo=repo,
+    )
+
+    assert len(candidates) == 1
+    assert int(candidates[0]["idRecurso"]) == 123591
 
 
 def test_build_payloads_uses_client_municipio_for_orgt_alias() -> None:
