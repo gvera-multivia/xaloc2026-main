@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import random
 import re
 import unicodedata
@@ -35,6 +36,9 @@ class DiputacioBcnAdapter(SiteAdapter):
         "%AJUNTAMENT DE BADALONA%",
         "%AJUNTAMENT DE GRANOLLERS%",
     )
+    FETCH_OVERSCAN_MULTIPLIER = 10
+    FETCH_OVERSCAN_MIN = 1000
+    FETCH_OVERSCAN_MAX = 5000
     ADJUNTO_URL_TEMPLATE = (
         "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf-adjuntos/{id}"
     )
@@ -238,6 +242,31 @@ class DiputacioBcnAdapter(SiteAdapter):
         return any(token in fase_norm for token in cls.BLOCKED_PHASE_TOKENS)
 
     @classmethod
+    def _fetch_scan_limit(cls, output_limit: int) -> int:
+        target_limit = max(0, int(output_limit or 0))
+        if target_limit <= 0:
+            return 0
+        try:
+            multiplier = int(
+                (os.getenv("DIPUTACIO_BCN_FETCH_OVERSCAN_MULTIPLIER") or str(cls.FETCH_OVERSCAN_MULTIPLIER)).strip()
+            )
+        except Exception:
+            multiplier = cls.FETCH_OVERSCAN_MULTIPLIER
+        try:
+            min_limit = int((os.getenv("DIPUTACIO_BCN_FETCH_OVERSCAN_MIN") or str(cls.FETCH_OVERSCAN_MIN)).strip())
+        except Exception:
+            min_limit = cls.FETCH_OVERSCAN_MIN
+        try:
+            max_limit = int((os.getenv("DIPUTACIO_BCN_FETCH_OVERSCAN_MAX") or str(cls.FETCH_OVERSCAN_MAX)).strip())
+        except Exception:
+            max_limit = cls.FETCH_OVERSCAN_MAX
+
+        multiplier = max(1, multiplier)
+        min_limit = max(target_limit, min_limit)
+        max_limit = max(target_limit, max_limit)
+        return min(max(target_limit * multiplier, min_limit), max_limit)
+
+    @classmethod
     def _extract_plate_from_publication_text(cls, publication_text: Any) -> str:
         pub_text = cls._clean(publication_text).upper()
         if not pub_text:
@@ -365,7 +394,8 @@ class DiputacioBcnAdapter(SiteAdapter):
             cfg["query_organisme"] = "%AJUNTAMENT%|%AYUNTAMIENTO%|%ORGT%|%DIPUTACIO DE BARCELONA%"
         cfg["query_organisme"] = self._merge_query_organisme(cfg.get("query_organisme"))
         configured_organismes = self._extract_explicit_organismes_from_query(cfg.get("query_organisme"))
-        resources = resource_repo.get_pending_resources(site_id=self.site_id, config=cfg, limit=limit)
+        scan_limit = self._fetch_scan_limit(limit)
+        resources = resource_repo.get_pending_resources(site_id=self.site_id, config=cfg, limit=scan_limit)
         allowed_organismes = self._load_allowed_organismes(conn_str) | configured_organismes
         organisme_urls = self._load_organisme_urls(conn_str)
 

@@ -14,10 +14,12 @@ class _FakeResource:
 class _FakeRepo:
     def __init__(self, rows: list[dict]) -> None:
         self._rows = rows
+        self.last_limit: int | None = None
 
     def get_pending_resources(self, *, site_id: str, config: dict, limit: int):
-        del site_id, config, limit
-        return [_FakeResource(metadata=row) for row in self._rows]
+        del site_id, config
+        self.last_limit = int(limit or 0)
+        return [_FakeResource(metadata=row) for row in self._rows[: self.last_limit]]
 
 
 def test_has_direct_non_orgt_route_for_barcelona() -> None:
@@ -648,6 +650,44 @@ def test_fetch_candidates_allows_badalona_when_config_is_stale() -> None:
         resource_repo=repo,
     )
 
+    assert len(candidates) == 1
+    assert int(candidates[0]["idRecurso"]) == 123591
+
+
+def test_fetch_candidates_overscans_before_applying_adapter_filters() -> None:
+    adapter = DiputacioBcnAdapter()
+    adapter._load_allowed_organismes = lambda _conn: set()  # type: ignore[method-assign]
+    adapter._load_organisme_urls = lambda _conn: {}  # type: ignore[method-assign]
+
+    repo = _FakeRepo(
+        [
+            {
+                "idRecurso": 100001,
+                "Expedient": "NO-SOPORTADO",
+                "Organisme": "AJUNTAMENT NO SUPORTAT",
+                "FaseProcedimiento": "denuncia",
+                "Estado": 0,
+                "UsuarioAsignado": None,
+            },
+            {
+                "idRecurso": 123591,
+                "Expedient": "0020421834",
+                "Organisme": "AJUNTAMENT DE BADALONA",
+                "FaseProcedimiento": "denuncia",
+                "Estado": 0,
+                "UsuarioAsignado": None,
+            },
+        ]
+    )
+    candidates = adapter.fetch_candidates(
+        config={"query_organisme": "%AJUNTAMENT%"},
+        conn_str="dummy",
+        authenticated_user="Daniel Gonzalez",
+        limit=1,
+        resource_repo=repo,
+    )
+
+    assert repo.last_limit and repo.last_limit > 1
     assert len(candidates) == 1
     assert int(candidates[0]["idRecurso"]) == 123591
 
