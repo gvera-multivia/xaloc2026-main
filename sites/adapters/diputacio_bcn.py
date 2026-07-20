@@ -29,7 +29,7 @@ class DiputacioBcnAdapter(SiteAdapter):
         "&concepteTramit=NO&codiError=WEB00011&parametre=V&keyModel=modelIDCONDUCTOR"
     )
     EXCLUDED_ORGANISMES = {"AJUNTAMENT DE RIPOLLET"}
-    BLOCKED_PHASE_TOKENS = ("IDENTIFIC",)
+    BLOCKED_PHASE_TOKENS: tuple[str, ...] = ()
     EXTRA_QUERY_ORGANISMES = (
         "%ORGANISME DE GESTI%TRIBUT%ORGT%DIPUTACI%BARCELONA%",
         "%ORGANISMO DE GESTION TRIBUT%ORGT%DIPUTACION DE BARCELONA%",

@@ -222,7 +222,7 @@ def test_fetch_candidates_allows_embargo_phase() -> None:
     assert int(candidates[0]["idRecurso"]) == 200002
 
 
-def test_fetch_candidates_still_blocks_identificacion_phase() -> None:
+def test_fetch_candidates_accepts_identificacion_phase() -> None:
     adapter = _make_adapter_with_allowed({"AJUNTAMENT DE SABADELL"})
     discards: list[dict] = []
     repo = _FakeRepo(
@@ -245,8 +245,9 @@ def test_fetch_candidates_still_blocks_identificacion_phase() -> None:
         resource_repo=repo,
         on_discard=lambda d: discards.append(d),
     )
-    assert len(candidates) == 0
-    assert len(discards) == 1
+    assert len(candidates) == 1
+    assert int(candidates[0]["idRecurso"]) == 200003
+    assert discards == []
 
 
 def test_fetch_candidates_discards_when_assigned_to_other_user() -> None:
@@ -652,6 +653,37 @@ def test_fetch_candidates_allows_badalona_when_config_is_stale() -> None:
 
     assert len(candidates) == 1
     assert int(candidates[0]["idRecurso"]) == 123591
+
+
+def test_fetch_candidates_allows_badalona_identificacion() -> None:
+    adapter = DiputacioBcnAdapter()
+    adapter._load_allowed_organismes = lambda _conn: set()  # type: ignore[method-assign]
+    adapter._load_organisme_urls = lambda _conn: {}  # type: ignore[method-assign]
+
+    repo = _FakeRepo(
+        [
+            {
+                "idRecurso": 123591,
+                "Expedient": "0020421834",
+                "Organisme": "AJUNTAMENT DE BADALONA",
+                "SujetoRecurso": "ABEL BERNALDEZ PERALTA",
+                "FaseProcedimiento": "identificacion",
+                "Estado": 0,
+                "UsuarioAsignado": None,
+            }
+        ]
+    )
+    candidates = adapter.fetch_candidates(
+        config={"query_organisme": "%AJUNTAMENT DE BADALONA%"},
+        conn_str="dummy",
+        authenticated_user="Daniel Gonzalez",
+        limit=50,
+        resource_repo=repo,
+    )
+
+    assert len(candidates) == 1
+    assert int(candidates[0]["idRecurso"]) == 123591
+    assert candidates[0]["FaseProcedimiento"] == "identificacion"
 
 
 def test_fetch_candidates_overscans_before_applying_adapter_filters() -> None:
