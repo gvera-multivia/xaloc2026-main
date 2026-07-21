@@ -117,6 +117,8 @@ async def execute_browser_flow(
             mapped_data["archivos"] = archivos_para_subir
         elif site_id == "valencia":
             mapped_data["archivos"] = archivos_para_subir
+        elif site_id == "terrassa":
+            mapped_data["archivos"] = archivos_para_subir
 
         datos = call_with_supported_kwargs(controller.create_target, **mapped_data)
         if site_id == "diputacio_bcn":

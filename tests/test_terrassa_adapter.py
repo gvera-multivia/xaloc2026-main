@@ -164,6 +164,29 @@ def test_terrassa_fetch_candidates_accepts_pc_plus_eight_digits() -> None:
     assert discarded == []
 
 
+def test_terrassa_fetch_candidates_accepts_rc_plus_eight_digits() -> None:
+    adapter = TerrassaAdapter()
+    rows = [
+        {**_base_row(), "idRecurso": 123764, "Expedient": "RC60323951"},
+    ]
+    repo = _LegacyRepo(rows)
+    discarded: list[dict[str, Any]] = []
+
+    candidates = adapter.fetch_candidates(
+        config={},
+        conn_str="unused",
+        authenticated_user=None,
+        limit=10,
+        resource_repo=repo,
+        on_discard=lambda item: discarded.append(item),
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0]["idRecurso"] == 123764
+    assert candidates[0]["Expedient"] == "RC60323951"
+    assert discarded == []
+
+
 def test_terrassa_fetch_candidates_trims_trailing_reference_expediente() -> None:
     adapter = TerrassaAdapter()
     row = {**_base_row(), "idRecurso": 103, "Expedient": "RD50285579 MURC-01271/2026"}
@@ -191,3 +214,32 @@ def test_terrassa_build_payloads_uses_normalized_expediente(monkeypatch) -> None
 
     assert len(payloads) == 1
     assert payloads[0]["expediente"] == "RD50285579"
+
+
+def test_terrassa_build_payloads_keeps_document_and_splits_subject_name(monkeypatch) -> None:
+    adapter = TerrassaAdapter()
+    monkeypatch.setattr(terrassa_mod, "get_required_client_documents", _fake_docs_builder)
+    monkeypatch.setattr(terrassa_mod, "build_sqlserver_connection_string", lambda: "unused")
+
+    candidate = {
+        **_base_row(),
+        "idRecurso": 123764,
+        "Expedient": "RC60323951",
+        "SujetoRecurso": "MERCEDES ZEGRI OTIN",
+        "FaseProcedimiento": "denuncia",
+        "cliente_nombre": "",
+        "cliente_apellido1": "",
+        "cliente_apellido2": "",
+        "cliente_nif": "",
+        "nif": "12345678Z",
+    }
+    payloads = asyncio.run(adapter.build_payloads([candidate]))
+
+    assert len(payloads) == 1
+    payload = payloads[0]
+    assert payload["expediente"] == "RC60323951"
+    assert payload["document_number"] == "12345678Z"
+    assert payload["document_type_value"] == "1"
+    assert payload["nombre"] == "MERCEDES"
+    assert payload["apellido1"] == "ZEGRI"
+    assert payload["apellido2"] == "OTIN"

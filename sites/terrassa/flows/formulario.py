@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
@@ -10,6 +11,8 @@ if TYPE_CHECKING:
     from playwright.async_api import Locator, Page
     from ..config import TerrassaConfig
     from ..data_models import TerrassaTarget
+
+logger = logging.getLogger("xaloc_automation.terrassa")
 
 
 async def _blur_field(page: "Page", field: "Locator") -> None:
@@ -61,14 +64,44 @@ async def _fill_and_blur(page: "Page", selector: str, value: str) -> None:
     await _blur_field(page, field)
 
 
+async def _fill_and_verify(page: "Page", selector: str, value: str, *, label: str) -> None:
+    expected = str(value or "").strip()
+    field = page.locator(selector).first
+    last_value = ""
+    for attempt in range(1, 4):
+        await field.wait_for(state="visible", timeout=15000)
+        await field.fill(expected)
+        await _blur_field(page, field)
+        await page.wait_for_timeout(500)
+        try:
+            last_value = str(await field.input_value()).strip()
+        except Exception:
+            last_value = ""
+        if last_value == expected:
+            return
+        logger.warning(
+            "terrassa.formulario: campo %s no conserva el valor esperado intento=%s expected=%r actual=%r",
+            label,
+            attempt,
+            expected,
+            last_value,
+        )
+
+    raise RuntimeError(
+        f"terrassa.formulario: el campo {label} no conserva el valor esperado "
+        f"(expected={expected!r}, actual={last_value!r})."
+    )
+
+
 async def run_formulario(page: "Page", config: "TerrassaConfig", datos: "TerrassaTarget") -> "Page":
     await page.locator(f"a[href='{config.href_actuar_representant}']").first.click()
     await page.wait_for_load_state("domcontentloaded")
 
     await page.select_option("select#IDPersona_TD", value=str(datos.document_type_value or "1"))
-    await _fill_and_blur(page, "input#IDPersona_ND", datos.document_number)
+    await page.wait_for_timeout(500)
+    await _fill_and_verify(page, "input#IDPersona_ND", datos.document_number, label="IDPersona_ND")
 
-    await _fill_and_blur(page, "input#nom", datos.nombre)
+    await _fill_and_verify(page, "input#nom", datos.nombre, label="nom")
 
     if not datos.is_company:
         await _fill_and_blur(page, "input#cognom1", datos.apellido1)

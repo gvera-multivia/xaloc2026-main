@@ -129,6 +129,52 @@ class TerrassaAdapter(SiteAdapter):
             doc = doc[2:]
         return re.sub(r"[^A-Z0-9]+", "", doc)
 
+    @classmethod
+    def _resolve_client_document(cls, row: dict[str, Any], *, is_company: bool) -> str:
+        keys = (
+            ("cliente_nif_empresa", "cif", "nifempresa", "document_number", "nif")
+            if is_company
+            else ("cliente_nif", "nif", "document_number", "interested_doc_number", "cliente_nif_empresa", "cif")
+        )
+        for key in keys:
+            doc = cls._normalize_doc(row.get(key))
+            if doc:
+                return doc
+        canonical = row.get("__canonical_v1")
+        if isinstance(canonical, dict):
+            client_doc = (canonical.get("client") or {}).get("document") or {}
+            doc = cls._normalize_doc(client_doc.get("cif") if is_company else client_doc.get("nif"))
+            if doc:
+                return doc
+            return cls._normalize_doc(client_doc.get("primary"))
+        return ""
+
+    @classmethod
+    def _split_person_name_if_needed(
+        cls,
+        *,
+        nombre: str,
+        apellido1: str,
+        apellido2: str,
+        sujeto: str,
+    ) -> tuple[str, str, str]:
+        if nombre and apellido1:
+            return nombre, apellido1, apellido2
+        source = cls._clean(sujeto)
+        parts = [p for p in source.split() if p]
+        if len(parts) < 2:
+            return nombre, apellido1, apellido2
+        if not nombre:
+            nombre = parts[0]
+            apellido1 = apellido1 or parts[1]
+            apellido2 = apellido2 or " ".join(parts[2:])
+            return nombre, apellido1, apellido2
+        if nombre == source and not apellido1:
+            nombre = parts[0]
+            apellido1 = parts[1]
+            apellido2 = apellido2 or " ".join(parts[2:])
+        return nombre, apellido1, apellido2
+
     @staticmethod
     def _format_date_ddmmyyyy(value: Any) -> str:
         if not value:
@@ -336,7 +382,7 @@ class TerrassaAdapter(SiteAdapter):
             rid = r.get("idRecurso")
             expediente = self._normalize_expediente(r.get("Expedient"))
             is_company = str(r.get("cliente_tipo") or "") == "2"
-            doc = self._normalize_doc(r.get("cliente_nif_empresa") if is_company else r.get("cliente_nif"))
+            doc = self._resolve_client_document(r, is_company=is_company)
 
             if not doc:
                 if on_discard:
@@ -363,9 +409,16 @@ class TerrassaAdapter(SiteAdapter):
                 apellido1 = ""
                 apellido2 = ""
             else:
-                nombre = self._clean(r.get("cliente_nombre") or r.get("SujetoRecurso"))
+                sujeto_raw = self._clean(r.get("SujetoRecurso"))
+                nombre = self._clean(r.get("cliente_nombre") or sujeto_raw)
                 apellido1 = self._clean(r.get("cliente_apellido1"))
                 apellido2 = self._clean(r.get("cliente_apellido2"))
+                nombre, apellido1, apellido2 = self._split_person_name_if_needed(
+                    nombre=nombre,
+                    apellido1=apellido1,
+                    apellido2=apellido2,
+                    sujeto=sujeto_raw,
+                )
 
             fecha_infraccion = self._format_date_ddmmyyyy(r.get("FAlta"))
             matricula_raw, matricula_source = self._resolve_plate(r)
