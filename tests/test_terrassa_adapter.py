@@ -187,6 +187,34 @@ def test_terrassa_fetch_candidates_accepts_rc_plus_eight_digits() -> None:
     assert discarded == []
 
 
+def test_terrassa_fetch_candidates_accepts_mu_year_is_shapes() -> None:
+    adapter = TerrassaAdapter()
+    expedientes = [
+        "MU2025IS0666864",
+        "MU2025IS0655537",
+        "MU2026IS0669560",
+        "MU2026IS0658497",
+    ]
+    rows = [
+        {**_base_row(), "idRecurso": 200 + idx, "Expedient": expediente}
+        for idx, expediente in enumerate(expedientes)
+    ]
+    repo = _LegacyRepo(rows)
+    discarded: list[dict[str, Any]] = []
+
+    candidates = adapter.fetch_candidates(
+        config={},
+        conn_str="unused",
+        authenticated_user=None,
+        limit=10,
+        resource_repo=repo,
+        on_discard=lambda item: discarded.append(item),
+    )
+
+    assert [c["Expedient"] for c in candidates] == expedientes
+    assert discarded == []
+
+
 def test_terrassa_fetch_candidates_trims_trailing_reference_expediente() -> None:
     adapter = TerrassaAdapter()
     row = {**_base_row(), "idRecurso": 103, "Expedient": "RD50285579 MURC-01271/2026"}
