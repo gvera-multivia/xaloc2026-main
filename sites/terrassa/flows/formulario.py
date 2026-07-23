@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import re
+import unicodedata
 from typing import TYPE_CHECKING
 
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
@@ -13,6 +15,19 @@ if TYPE_CHECKING:
     from ..data_models import TerrassaTarget
 
 logger = logging.getLogger("xaloc_automation.terrassa")
+
+
+def _norm_filled_value(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = "".join(ch for ch in unicodedata.normalize("NFD", text) if unicodedata.category(ch) != "Mn")
+    text = re.sub(r"\s+", " ", text)
+    return text.casefold().strip()
+
+
+def _field_value_matches(expected: object, actual: object) -> bool:
+    return bool(_norm_filled_value(expected)) and _norm_filled_value(expected) == _norm_filled_value(actual)
 
 
 async def _blur_field(page: "Page", field: "Locator") -> None:
@@ -77,7 +92,7 @@ async def _fill_and_verify(page: "Page", selector: str, value: str, *, label: st
             last_value = str(await field.input_value()).strip()
         except Exception:
             last_value = ""
-        if last_value == expected:
+        if _field_value_matches(expected, last_value):
             return
         logger.warning(
             "terrassa.formulario: campo %s no conserva el valor esperado intento=%s expected=%r actual=%r",
@@ -117,6 +132,11 @@ async def _fill_field_with_label_fallback(
                 .toLowerCase()
                 .replace(/[^a-z0-9]+/g, " ")
                 .trim();
+            const sameValue = (left, right) => {
+                const a = norm(left);
+                const b = norm(right);
+                return !!a && a === b;
+            };
             const wanted = (labelPatterns || []).map(norm).filter(Boolean);
             const isVisible = (el) => {
                 if (!el) return false;
@@ -147,7 +167,7 @@ async def _fill_field_with_label_fallback(
                 el.focus?.();
                 el.value = value;
                 dispatch(el);
-                return String(el.value || "").trim() === String(value || "").trim();
+                return sameValue(el.value, value);
             };
 
             const controls = Array.from(document.querySelectorAll(multiline ? "textarea" : "input"));
