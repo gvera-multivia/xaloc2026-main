@@ -111,6 +111,9 @@ class ServeiCatTransAdapter(SiteAdapter):
     @classmethod
     def _normalize_expediente(cls, expediente: Any) -> str:
         exp = cls._clean(expediente).upper().replace(" ", "")
+        single_digit_province = re.fullmatch(r"(\d)-(\d{8})-(\d)", exp)
+        if single_digit_province:
+            return f"0{single_digit_province.group(1)}-{single_digit_province.group(2)}-{single_digit_province.group(3)}"
         if re.fullmatch(r"\d{11}", exp):
             return f"{exp[:2]}/{exp[2:10]}-{exp[10]}"
         return exp

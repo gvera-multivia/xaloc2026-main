@@ -96,6 +96,23 @@ def test_fetch_candidates_normalizes_compact_expediente_shape() -> None:
     assert out[0]["Expedient"] == "17/20328298-3"
 
 
+def test_fetch_candidates_pads_single_digit_province_prefix() -> None:
+    adapter = ServeiCatTransAdapter()
+    row = _base_row()
+    row["idRecurso"] = 123851
+    row["Expedient"] = "8-32379028-0"
+    repo = _FakeRepo([row])
+    out = adapter.fetch_candidates(
+        config={"query_organisme": "%SERVEI CATALA DE TRANSIT DE%", "filtro_texp": "2,3", "regex_expediente": r"^\d{2}[-/]\d{8}-\d$"},
+        conn_str="dummy",
+        authenticated_user="user",
+        limit=50,
+        resource_repo=repo,
+    )
+    assert len(out) == 1
+    assert out[0]["Expedient"] == "08-32379028-0"
+
+
 def test_fetch_candidates_accepts_identificacion_phase() -> None:
     adapter = ServeiCatTransAdapter()
     row = _base_row()
@@ -124,6 +141,19 @@ def test_build_payloads_maps_expected_core_fields() -> None:
     assert payload["representado_numero_raw"] == "169"
     assert payload["expongo"] != ""
     assert payload["solicito"] != ""
+
+
+def test_build_payloads_uses_normalized_single_digit_province_prefix() -> None:
+    adapter = ServeiCatTransAdapter()
+    row = _base_row()
+    row["idRecurso"] = 123851
+    row["Expedient"] = "8-32379028-0"
+
+    payloads = asyncio.run(adapter.build_payloads([row]))
+
+    assert len(payloads) == 1
+    assert payloads[0]["expediente"] == "08-32379028-0"
+    assert payloads[0]["Expedient"] == "08-32379028-0"
 
 
 def test_build_payloads_representado_fallbacks_when_cl_fields_missing() -> None:
