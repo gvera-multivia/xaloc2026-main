@@ -208,6 +208,20 @@ _TIPO_VIA_EXTRA_LABELS: dict[str, list[str]] = {
     "PJ": ["Pasaje", "Passatge", "PASAJE", "PASSATGE"],
 }
 
+_KNOWN_MUNICIPIO_CODES: dict[str, tuple[str, str]] = {
+    "BADALONA": ("08015", "Badalona"),
+    "BARCELONA": ("08019", "Barcelona"),
+    "HOSPITALET DE LLOBREGAT": ("08101", "Hospitalet de Llobregat, l'"),
+    "L HOSPITALET DE LLOBREGAT": ("08101", "Hospitalet de Llobregat, l'"),
+    "LHOSPITALET DE LLOBREGAT": ("08101", "Hospitalet de Llobregat, l'"),
+    "HOSPITALET": ("08101", "Hospitalet de Llobregat, l'"),
+    "L HOSPITALET": ("08101", "Hospitalet de Llobregat, l'"),
+    "LHOSPITALET": ("08101", "Hospitalet de Llobregat, l'"),
+    "SANT ADRIA DE BESOS": ("08194", "Sant Adrià de Besòs"),
+    "SANTA COLOMA DE GRAMENET": ("08245", "Santa Coloma de Gramenet"),
+    "SANTA COLOMA DE GRAMANET": ("08245", "Santa Coloma de Gramenet"),
+}
+
 
 def _tipo_via_candidates(raw_tipo_via: str, raw_street: str = "") -> list[str]:
     candidates: list[str] = []
@@ -258,7 +272,7 @@ def _pais_emisor_candidates(pais: str) -> list[str]:
         "BR": ["Brasil"],
         "CL": ["Chile"],
         "CN": ["China"],
-        "CO": ["Colombia", "Colòmbia"],
+        "CO": ["CO", "COL", "170", "Colombia", "Colòmbia"],
         "CU": ["Cuba"],
         "DE": ["Alemania", "Alemanya", "Germany"],
         "DO": ["Republica Dominicana", "República Dominicana"],
@@ -300,6 +314,98 @@ def _pais_emisor_candidates(pais: str) -> list[str]:
             seen.add(key)
             out.append(candidate)
     return out
+
+
+def _pais_emisor_selector_js() -> str:
+    return """({ candidates }) => {
+        const normalize = (txt) => String(txt || "")
+            .normalize("NFD")
+            .replace(/[\\u0300-\\u036f]/g, "")
+            .replace(/[^a-zA-Z0-9]+/g, " ")
+            .replace(/\\s+/g, " ")
+            .trim()
+            .toLowerCase();
+        const labelMatches = (txt) => {
+            const n = normalize(txt);
+            return n.includes("pais emisor") || n.includes("pais expedidor") || n.includes("pais d expedicio");
+        };
+        const wanted = (candidates || []).map((item) => normalize(item)).filter(Boolean);
+        const optionMatches = (opt) => {
+            const value = normalize(opt.value || "");
+            const text = normalize(opt.textContent || "");
+            return wanted.some((item) => value === item || text === item || (item.length >= 4 && text.includes(item)));
+        };
+        const isVisible = (el) => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+        const choose = (selects) => {
+            for (const select of selects) {
+                if (!select || select.disabled || !isVisible(select)) continue;
+                const opt = Array.from(select.options || []).find(optionMatches);
+                if (!opt) continue;
+                select.value = String(opt.value || "");
+                select.dispatchEvent(new Event("input", { bubbles: true }));
+                select.dispatchEvent(new Event("change", { bubbles: true }));
+                select.dispatchEvent(new Event("blur", { bubbles: true }));
+                return {
+                    ok: true,
+                    id: String(select.id || ""),
+                    value: String(select.value || ""),
+                    text: String(opt.textContent || "").trim(),
+                    strategy: "label-near",
+                };
+            }
+            return { ok: false };
+        };
+
+        const directCountrySelects = Array.from(document.querySelectorAll(
+            "select[id^='guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-PF-panel_1244233668-guidedropdownlist_']"
+        ));
+        const directResult = choose(directCountrySelects);
+        if (directResult.ok) {
+            directResult.strategy = "persona-fisica-doc-panel";
+            return directResult;
+        }
+
+        const labels = Array.from(document.querySelectorAll("label, span, div"))
+            .filter((label) => {
+                const text = String(label.textContent || "").trim();
+                return text.length <= 180 && labelMatches(text);
+            });
+        for (const label of labels) {
+            let scope = label;
+            for (let i = 0; i < 8 && scope; i++) {
+                const direct = choose(Array.from(scope.querySelectorAll("select")));
+                if (direct.ok) return direct;
+                scope = scope.parentElement;
+            }
+            const rect = label.getBoundingClientRect();
+            const near = Array.from(document.querySelectorAll("select")).filter((select) => {
+                if (!isVisible(select)) return false;
+                const s = select.getBoundingClientRect();
+                return Math.abs(s.top - rect.top) < 80 && s.left >= rect.left - 20;
+            });
+            const nearResult = choose(near);
+            if (nearResult.ok) {
+                nearResult.strategy = "visual-near";
+                return nearResult;
+            }
+        }
+
+        const candidatesWithPais = Array.from(document.querySelectorAll("select")).filter((select) => {
+            const meta = normalize([
+                select.id || "",
+                select.name || "",
+                select.getAttribute("aria-label") || "",
+                select.getAttribute("title") || "",
+            ].join(" "));
+            return meta.includes("pais");
+        });
+        const metaResult = choose(candidatesWithPais);
+        if (metaResult.ok) {
+            metaResult.strategy = "select-meta";
+            return metaResult;
+        }
+        return { ok: false, visibleSelects: Array.from(document.querySelectorAll("select")).filter(isVisible).length };
+    }"""
 
 
 def _documento_empresa_label(document: str) -> str:
@@ -612,6 +718,41 @@ async def _auto_select_single_nonempty_option(page: "Page | Frame", element_id: 
             {"elementId": element_id},
         )
     )
+
+
+async def _force_select_known_municipio_if_empty(page: "Page | Frame", element_id: str, municipio: str) -> bool:
+    wanted_key = _norm_text(municipio)
+    code_label = _KNOWN_MUNICIPIO_CODES.get(wanted_key)
+    if not code_label:
+        return False
+    code, label = code_label
+    try:
+        return bool(
+            await page.evaluate(
+                """({ elementId, code, label }) => {
+                    const el = document.getElementById(elementId);
+                    if (!el || !el.options || el.disabled) return false;
+                    const nonEmpty = Array.from(el.options || []).filter((opt) => String(opt.value || "").trim());
+                    let opt = Array.from(el.options || []).find((item) => String(item.value || "") === String(code));
+                    if (!opt && nonEmpty.length <= 1) {
+                        opt = document.createElement("option");
+                        opt.value = String(code);
+                        opt.textContent = String(label);
+                        el.appendChild(opt);
+                    }
+                    if (!opt) return false;
+                    el.value = String(code);
+                    opt.selected = true;
+                    el.dispatchEvent(new Event("input", { bubbles: true }));
+                    el.dispatchEvent(new Event("change", { bubbles: true }));
+                    el.dispatchEvent(new Event("blur", { bubbles: true }));
+                    return true;
+                }""",
+                {"elementId": element_id, "code": code, "label": label},
+            )
+        )
+    except Exception:
+        return False
 
 
 async def _selected_option_matches(page: "Page | Frame", element_id: str, label: str) -> bool:
@@ -1265,6 +1406,18 @@ async def _fill_identificado_pais_emisor(
         return False
 
     for attempt in range(10):
+        try:
+            result = await page.evaluate(_pais_emisor_selector_js(), {"candidates": candidates})
+        except Exception:
+            result = {"ok": False}
+        if isinstance(result, dict) and result.get("ok"):
+            logger.info(
+                "servei_cat_trans identificado pais emisor seleccionado result=%s attempt=%s",
+                result,
+                attempt + 1,
+            )
+            return True
+
         field_id = await _find_field_id_by_label(
             page,
             section_selector,
@@ -1935,6 +2088,17 @@ async def _fill_identificacion_conductor_direccion(
         if not ok_municipio:
             ok_municipio = await _auto_select_single_nonempty_option(page, municipio_id)
         if not ok_municipio:
+            ok_municipio = await _force_select_known_municipio_if_empty(
+                page,
+                municipio_id,
+                datos.identificado_municipio,
+            )
+            if ok_municipio:
+                logger.warning(
+                    "servei_cat_trans identificado municipio seleccionado via known-code fallback value=%r",
+                    datos.identificado_municipio,
+                )
+        if not ok_municipio:
             ok_municipio = await _select_label_in_section(
                 page,
                 section_selector,
@@ -2193,13 +2357,6 @@ async def _fill_identificacion_conductor(page: "Page | Frame", datos: "ServeiCat
                 ["tipo de documento de identificacion"],
                 documento_label,
             )
-        ok_pais_emisor = True
-        if documento_label == "Pasaporte":
-            ok_pais_emisor = await _fill_identificado_pais_emisor(
-                page,
-                identificado_section,
-                datos.identificado_pais_emisor,
-            )
         if not ok_doc:
             fallback_doc_id = await _find_field_id_by_label(
                 page,
@@ -2215,6 +2372,14 @@ async def _fill_identificacion_conductor(page: "Page | Frame", datos: "ServeiCat
                 identificado_section,
                 ["numero de identificacion"],
                 _sanitize_doc(datos.identificado_nif),
+            )
+        ok_pais_emisor = True
+        if documento_label == "Pasaporte":
+            await page.wait_for_timeout(800)
+            ok_pais_emisor = await _fill_identificado_pais_emisor(
+                page,
+                identificado_section,
+                datos.identificado_pais_emisor,
             )
         await _fill_identificacion_conductor_direccion(
             page,
