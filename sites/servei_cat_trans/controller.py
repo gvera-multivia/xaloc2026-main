@@ -836,6 +836,19 @@ class ServeiCatTransController:
             target.representado_comarca,
             target.representado_municipio,
         )
+        if target.tramite_tipo == "identificacion":
+            logger.info(
+                "create_target identificado final: doc_tipo=%r pais_emisor=%r via=%r nombre_via=%r numero=%r cp=%r provincia=%r comarca=%r municipio=%r",
+                self._infer_document_type_persona(target.identificado_nif),
+                target.identificado_pais_emisor,
+                target.identificado_tipo_via,
+                target.identificado_nombre_via,
+                target.identificado_numero,
+                target.identificado_cp,
+                target.identificado_provincia,
+                target.identificado_comarca,
+                target.identificado_municipio,
+            )
         return target
 
 

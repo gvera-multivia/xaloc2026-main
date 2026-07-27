@@ -217,9 +217,22 @@ _KNOWN_MUNICIPIO_CODES: dict[str, tuple[str, str]] = {
     "HOSPITALET": ("08101", "Hospitalet de Llobregat, l'"),
     "L HOSPITALET": ("08101", "Hospitalet de Llobregat, l'"),
     "LHOSPITALET": ("08101", "Hospitalet de Llobregat, l'"),
+    "HOSPITALET DE LLOBREGAT L": ("08101", "Hospitalet de Llobregat, l'"),
+    "L HOSPITALET DE LLOBREGAT L": ("08101", "Hospitalet de Llobregat, l'"),
     "SANT ADRIA DE BESOS": ("08194", "Sant Adrià de Besòs"),
     "SANTA COLOMA DE GRAMENET": ("08245", "Santa Coloma de Gramenet"),
     "SANTA COLOMA DE GRAMANET": ("08245", "Santa Coloma de Gramenet"),
+}
+
+_KNOWN_CP_MUNICIPIO_CODES: dict[str, tuple[str, str]] = {
+    "08901": ("08101", "Hospitalet de Llobregat, l'"),
+    "08902": ("08101", "Hospitalet de Llobregat, l'"),
+    "08903": ("08101", "Hospitalet de Llobregat, l'"),
+    "08904": ("08101", "Hospitalet de Llobregat, l'"),
+    "08905": ("08101", "Hospitalet de Llobregat, l'"),
+    "08906": ("08101", "Hospitalet de Llobregat, l'"),
+    "08907": ("08101", "Hospitalet de Llobregat, l'"),
+    "08908": ("08101", "Hospitalet de Llobregat, l'"),
 }
 
 
@@ -406,6 +419,16 @@ def _pais_emisor_selector_js() -> str:
         }
         return { ok: false, visibleSelects: Array.from(document.querySelectorAll("select")).filter(isVisible).length };
     }"""
+
+
+def _known_municipio_code_label(municipio: str, cp: str = "") -> tuple[str, str] | None:
+    municipio_key = _norm_text(municipio)
+    if municipio_key in _KNOWN_MUNICIPIO_CODES:
+        return _KNOWN_MUNICIPIO_CODES[municipio_key]
+    cp_digits = re.sub(r"\D+", "", _clean(cp))
+    if cp_digits in _KNOWN_CP_MUNICIPIO_CODES:
+        return _KNOWN_CP_MUNICIPIO_CODES[cp_digits]
+    return None
 
 
 def _documento_empresa_label(document: str) -> str:
@@ -720,9 +743,14 @@ async def _auto_select_single_nonempty_option(page: "Page | Frame", element_id: 
     )
 
 
-async def _force_select_known_municipio_if_empty(page: "Page | Frame", element_id: str, municipio: str) -> bool:
-    wanted_key = _norm_text(municipio)
-    code_label = _KNOWN_MUNICIPIO_CODES.get(wanted_key)
+async def _force_select_known_municipio_if_empty(
+    page: "Page | Frame",
+    element_id: str,
+    municipio: str,
+    *,
+    cp: str = "",
+) -> bool:
+    code_label = _known_municipio_code_label(municipio, cp)
     if not code_label:
         return False
     code, label = code_label
@@ -858,6 +886,19 @@ async def _stabilize_identificado_cascade(
             ok_municipio = await _retry_select_via_id(page, municipio_id, datos.identificado_municipio, attempts=3, wait_ms=1400)
         if not ok_municipio:
             ok_municipio = await _auto_select_single_nonempty_option(page, municipio_id)
+        if not ok_municipio:
+            ok_municipio = await _force_select_known_municipio_if_empty(
+                page,
+                municipio_id,
+                datos.identificado_municipio,
+                cp=datos.identificado_cp,
+            )
+            if ok_municipio:
+                logger.warning(
+                    "servei_cat_trans identificado municipio seleccionado via early known-code fallback municipio=%r cp=%r",
+                    datos.identificado_municipio,
+                    datos.identificado_cp,
+                )
         await _log_select_state(page, municipio_id, "identificado-municipio-stabilized")
 
     return ok_provincia, ok_comarca, ok_municipio
@@ -2092,6 +2133,7 @@ async def _fill_identificacion_conductor_direccion(
                 page,
                 municipio_id,
                 datos.identificado_municipio,
+                cp=datos.identificado_cp,
             )
             if ok_municipio:
                 logger.warning(
