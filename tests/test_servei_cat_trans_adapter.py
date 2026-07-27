@@ -173,6 +173,42 @@ def test_build_payloads_identificacion_sets_tramite_and_identificado_fields() ->
     assert payload["identificado_numero_raw"] == "12"
 
 
+def test_build_payloads_identificacion_passport_sets_pais_emisor() -> None:
+    adapter = ServeiCatTransAdapter()
+    row = _base_row()
+    row["FaseProcedimiento"] = "IdentificaciÃƒÂ³ del conductor"
+    row["ConducNom"] = "MOHAMED"
+    row["ConducApellido1"] = "AIT"
+    row["ConducDni"] = "G1234567"
+    row["ConducPais"] = "Marruecos"
+
+    payloads = asyncio.run(adapter.build_payloads([row]))
+
+    assert len(payloads) == 1
+    assert payloads[0]["identificado_nif"] == "G1234567"
+    assert payloads[0]["identificado_pais_emisor"] == "Marruecos"
+
+
+def test_build_payloads_identificacion_passport_requires_pais_emisor() -> None:
+    adapter = ServeiCatTransAdapter()
+    row = _base_row()
+    row["FaseProcedimiento"] = "IdentificaciÃƒÂ³ del conductor"
+    row["ConducNom"] = "MOHAMED"
+    row["ConducApellido1"] = "AIT"
+    row["ConducDni"] = "G1234567"
+    row["ConducPais"] = ""
+    discards: list[dict] = []
+
+    payloads = asyncio.run(adapter.build_payloads([row], on_discard=discards.append))
+
+    assert payloads == []
+    assert any(
+        d.get("tipo_incidencia") == "SITE_RULE_DISCARDED"
+        and "pasaporte/documento extranjero sin ConducPais" in str(d.get("motivo"))
+        for d in discards
+    )
+
+
 def test_build_payloads_identificacion_splits_last_token_into_apellido1_when_missing() -> None:
     adapter = ServeiCatTransAdapter()
     row = _base_row()

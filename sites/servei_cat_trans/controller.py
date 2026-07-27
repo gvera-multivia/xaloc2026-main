@@ -589,6 +589,11 @@ class ServeiCatTransController:
             or src.get("ConducCif")
             or src.get("conduc_cif")
         )
+        identificado_pais_emisor = self._clean(
+            src.get("identificado_pais_emisor")
+            or src.get("ConducPais")
+            or src.get("conduc_pais")
+        )
         identificado_calle_raw = self._clean(
             src.get("identificado_calle_raw")
             or src.get("identificado_calle")
@@ -689,6 +694,7 @@ class ServeiCatTransController:
             "identificado_nif_empresa": identificado_nif_empresa,
             "identificado_documento_tipo": self._infer_document_type_persona(identificado_nif),
             "identificado_documento_empresa_tipo": self._infer_document_type_empresa(identificado_nif_empresa),
+            "identificado_pais_emisor": identificado_pais_emisor,
             "identificado_tipo_via": identificado_ai["tipo_via"],
             "identificado_nombre_via": identificado_ai["nombre_via"],
             "identificado_numero": identificado_ai["numero"],
@@ -740,6 +746,7 @@ class ServeiCatTransController:
         identificado_razon_social = self._clean(kwargs.get("identificado_razon_social"))
         identificado_nif = self._ensure_nif_nie_letter(kwargs.get("identificado_nif"))
         identificado_nif_empresa = self._sanitize_document(kwargs.get("identificado_nif_empresa"))
+        identificado_pais_emisor = self._clean(kwargs.get("identificado_pais_emisor"))
         identificado_tipo_via = self._clean(kwargs.get("identificado_tipo_via"))
         identificado_nombre_via = self._clean(kwargs.get("identificado_nombre_via"))
         identificado_numero = self._clean(kwargs.get("identificado_numero"))
@@ -758,6 +765,10 @@ class ServeiCatTransController:
                 if not identificado_nif or not identificado_nombre:
                     raise ValueError(
                         "servei_cat_trans: identificacion fisica requiere identificado_nif e identificado_nombre."
+                    )
+                if self._infer_document_type_persona(identificado_nif) == "Pasaporte" and not identificado_pais_emisor:
+                    raise ValueError(
+                        "servei_cat_trans: identificacion fisica con pasaporte requiere identificado_pais_emisor."
                     )
 
         target = ServeiCatTransTarget(
@@ -800,6 +811,7 @@ class ServeiCatTransController:
             identificado_razon_social=identificado_razon_social,
             identificado_nif=identificado_nif,
             identificado_nif_empresa=identificado_nif_empresa,
+            identificado_pais_emisor=identificado_pais_emisor,
             identificado_tipo_via=identificado_tipo_via,
             identificado_nombre_via=identificado_nombre_via,
             identificado_numero=identificado_numero,

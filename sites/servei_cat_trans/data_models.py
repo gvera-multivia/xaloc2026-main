@@ -46,6 +46,7 @@ class ServeiCatTransTarget:
     identificado_razon_social: str = ""
     identificado_nif: str = ""
     identificado_nif_empresa: str = ""
+    identificado_pais_emisor: str = ""
     identificado_tipo_via: str = ""
     identificado_nombre_via: str = ""
     identificado_numero: str = ""

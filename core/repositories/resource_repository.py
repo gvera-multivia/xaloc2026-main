@@ -86,6 +86,7 @@ SELECT
     COALESCE(NULLIF(LTRIM(RTRIM(rs.ConducCodpost)), ''), di.ConducCodpost) AS conduc_codpost,
     COALESCE(NULLIF(LTRIM(RTRIM(rs.ConducPobl)), ''), di.ConducPobl) AS conduc_pobl,
     NULLIF(LTRIM(RTRIM(rs.Conducprov)), '') AS conduc_prov,
+    NULLIF(LTRIM(RTRIM(di.ConducPais)), '') AS conduc_pais,
 
     att.id AS adjunto_id,
     att.Filename AS adjunto_filename

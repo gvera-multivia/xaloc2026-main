@@ -19,6 +19,7 @@ def test_build_query_uses_canonical_superset_for_all_supported_sites() -> None:
         assert "LEFT JOIN clientes c" in query
         assert "LEFT JOIN expedientes e" in query
         assert "LEFT JOIN DadesIdentif di" in query
+        assert "di.ConducPais" in query
         assert "LEFT JOIN attachments_resource_documents att" in query
         assert params == ["%TEST_A%", "%TEST_B%", 2, 3]
 

@@ -247,6 +247,29 @@ def _documento_persona_label(document: str) -> str:
     return "Pasaporte"
 
 
+def _pais_emisor_candidates(pais: str) -> list[str]:
+    raw = _clean(pais)
+    if not raw:
+        return []
+    candidates = [raw]
+    aliases = {
+        "MARRUECOS": ["Marruecos", "Marroc"],
+        "MARROC": ["Marroc", "Marruecos"],
+        "MOROCCO": ["Marruecos", "Marroc"],
+    }
+    for candidate in aliases.get(_norm_text(raw), []):
+        candidates.append(candidate)
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = _norm_text(candidate)
+        if key and key not in seen:
+            seen.add(key)
+            out.append(candidate)
+    return out
+
+
 def _documento_empresa_label(document: str) -> str:
     doc = _sanitize_doc(document)
     if re.fullmatch(r"[ABCDEFGHJNPQRSUVW]\d{7}[0-9A-J]", doc):
@@ -1182,6 +1205,40 @@ async def _select_label_in_section(
     return await _safe_select_label(page, f"#{field_id}", value)
 
 
+async def _fill_identificado_pais_emisor(
+    page: "Page | Frame",
+    section_selector: str,
+    pais_emisor: str,
+) -> bool:
+    candidates = _pais_emisor_candidates(pais_emisor)
+    if not candidates:
+        return False
+
+    for attempt in range(8):
+        for candidate in candidates:
+            ok = await _select_label_in_section(
+                page,
+                section_selector,
+                ["pais emisor", "pais expedidor", "pais d expedicio", "pais"],
+                candidate,
+            )
+            if ok:
+                logger.info(
+                    "servei_cat_trans identificado pais emisor seleccionado candidate=%r attempt=%s",
+                    candidate,
+                    attempt + 1,
+                )
+                return True
+        await page.wait_for_timeout(500)
+
+    logger.warning(
+        "servei_cat_trans identificado pais emisor no seleccionado pais=%r candidates=%s",
+        _clean(pais_emisor),
+        candidates,
+    )
+    return False
+
+
 async def _fill_presentador_contacto_fallback(page: "Page | Frame", datos: "ServeiCatTransTarget") -> None:
     section = "[id^='guideContainer-rootPanel-seccio_presentador']"
     email_id = await _find_field_id_by_label(
@@ -1971,12 +2028,13 @@ async def _fill_identificacion_conductor(page: "Page | Frame", datos: "ServeiCat
         apellido1_id = "guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-PF-panel-guidetextbox_1197861190___widget"
         tipo_doc_id = "guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-PF-panel_1244233668-guidedropdownlist___widget"
         doc_id = "guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-PF-panel_1244233668-guidetextbox___widget"
+        documento_label = _documento_persona_label(datos.identificado_nif)
         ok_nombre = await _fill_exact_input(page, f"#{nombre_id}", datos.identificado_nombre)
         ok_ap1 = await _fill_exact_input(page, f"#{apellido1_id}", datos.identificado_apellido1)
         ok_tipo_doc = await _safe_select_label(
             page,
             f"#{tipo_doc_id}",
-            _documento_persona_label(datos.identificado_nif),
+            documento_label,
         )
         ok_doc = await _fill_exact_input(page, f"#{doc_id}", _sanitize_doc(datos.identificado_nif))
         if not ok_nombre:
@@ -2025,14 +2083,24 @@ async def _fill_identificacion_conductor(page: "Page | Frame", datos: "ServeiCat
                 field_kind="select",
             )
             if fallback_tipo_id:
-                await _safe_select_label(page, f"#{fallback_tipo_id}", _documento_persona_label(datos.identificado_nif))
+                await _safe_select_label(page, f"#{fallback_tipo_id}", documento_label)
         if not ok_tipo_doc:
             ok_tipo_doc = await _select_label_in_section(
                 page,
                 identificado_section,
                 ["tipo de documento de identificacion"],
-                _documento_persona_label(datos.identificado_nif),
+                documento_label,
             )
+        if documento_label == "Pasaporte":
+            ok_pais = await _fill_identificado_pais_emisor(
+                page,
+                identificado_section,
+                datos.identificado_pais_emisor,
+            )
+            if not ok_pais:
+                raise RuntimeError(
+                    f"servei_cat_trans.identificacion: no se pudo seleccionar pais emisor para pasaporte ({datos.identificado_pais_emisor!r})."
+                )
         if not ok_doc:
             fallback_doc_id = await _find_field_id_by_label(
                 page,

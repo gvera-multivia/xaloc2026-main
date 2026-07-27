@@ -332,6 +332,11 @@ class ServeiCatTransAdapter(SiteAdapter):
                 or r.get("ConducCif")
                 or r.get("conduc_cif")
             )
+            identificado_pais_emisor = self._clean(
+                r.get("identificado_pais_emisor")
+                or r.get("ConducPais")
+                or r.get("conduc_pais")
+            )
             identificado_razon_social = self._clean(
                 r.get("identificado_razon_social")
                 or r.get("ConducRazonSocial")
@@ -478,6 +483,19 @@ class ServeiCatTransAdapter(SiteAdapter):
                                 }
                             )
                         continue
+                    if self._normalize_document(identificado_nif) and not re.fullmatch(r"(?:\d{8}|[XYZ]\d{7})[A-Z]", identificado_nif):
+                        if not identificado_pais_emisor:
+                            if on_discard:
+                                on_discard(
+                                    {
+                                        "site_id": self.site_id,
+                                        "idRecurso": rid,
+                                        "Expedient": expediente,
+                                        "tipo_incidencia": "SITE_RULE_DISCARDED",
+                                        "motivo": "Identificacion fisica con pasaporte/documento extranjero sin ConducPais.",
+                                    }
+                                )
+                            continue
 
             payloads.append(
                 {
@@ -528,6 +546,7 @@ class ServeiCatTransAdapter(SiteAdapter):
                     "identificado_apellido2": identificado_apellido2,
                     "identificado_nif": identificado_nif,
                     "identificado_nif_empresa": identificado_nif_empresa,
+                    "identificado_pais_emisor": identificado_pais_emisor,
                     "identificado_razon_social": identificado_razon_social,
                     "identificado_calle_raw": identificado_calle_raw,
                     "identificado_numero_raw": identificado_ai.get("numero") or identificado_numero_raw,
