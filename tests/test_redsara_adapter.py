@@ -21,6 +21,10 @@ def test_resolve_rule_and_destination_code_ctda_leon() -> None:
         "CENTRO DE TRATAMIENTO DE DENUNCIAS AUTOMATIZADAS DE LEON",
         "29-048-030.715-7",
     )
+    assert adapter.validate_expediente_for_organisme(
+        "CENTRO DE TRATAMIENTO DE DENUNCIAS AUTOMATIZADAS DE LEON",
+        "300464742986",
+    )
 
 
 def test_resolve_rule_and_destination_code_atib_variants() -> None:
@@ -126,6 +130,38 @@ def test_fetch_candidates_discards_invalid_by_pattern() -> None:
     assert out[0]["idRecurso"] == 1
     assert len(discards) == 1
     assert discards[0]["idRecurso"] == 2
+
+
+def test_fetch_candidates_normalizes_ctda_leon_compact_expediente() -> None:
+    adapter = RedsaraAdapter()
+
+    resources = [
+        SimpleNamespace(
+            metadata={
+                "idRecurso": 124166,
+                "Organisme": "CENTRO DE TRATAMIENTO DE DENUNCIAS AUTOMATIZADAS DE LEON",
+                "Expedient": "300464742986",
+                "Estado": 0,
+                "UsuarioAsignado": "",
+            }
+        )
+    ]
+
+    class _Repo:
+        def get_pending_resources(self, *, site_id: str, config: dict, limit: int):
+            return resources
+
+    out = adapter.fetch_candidates(
+        config={},
+        conn_str="",
+        authenticated_user=None,
+        limit=10,
+        resource_repo=_Repo(),
+    )
+
+    assert len(out) == 1
+    assert out[0]["idRecurso"] == 124166
+    assert out[0]["Expedient"] == "30-046-474.298-6"
 
 
 def test_subject_exposes_solicit_by_fase(monkeypatch) -> None:

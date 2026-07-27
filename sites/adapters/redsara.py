@@ -290,6 +290,13 @@ class RedsaraAdapter(SiteAdapter):
         return re.sub(r"\s+", "", txt)
 
     @classmethod
+    def _normalize_expediente_for_rule(cls, rule: Optional[dict[str, Any]], expediente: Any) -> str:
+        normalized = cls._normalize_expediente(expediente)
+        if (rule or {}).get("name") == "CTDA LEON" and re.fullmatch(r"\d{12}", normalized):
+            return f"{normalized[:2]}-{normalized[2:5]}-{normalized[5:8]}.{normalized[8:11]}-{normalized[11]}"
+        return normalized
+
+    @classmethod
     def _is_identificacion_phase(cls, fase_raw: Any) -> bool:
         return "IDENTIFIC" in cls._normalize_for_match(fase_raw)
 
@@ -446,9 +453,6 @@ class RedsaraAdapter(SiteAdapter):
         return self.resolve_rule_by_organisme(organisme)
 
     def validate_expediente_for_organisme(self, organisme_raw: Any, expediente: str) -> bool:
-        normalized = self._normalize_expediente(expediente)
-        if not normalized:
-            return False
         text = self._normalize_for_match(organisme_raw)
         for rule, compiled in self._compiled_rules:
             matched_rule = False
@@ -459,6 +463,9 @@ class RedsaraAdapter(SiteAdapter):
                     break
             if not matched_rule:
                 continue
+            normalized = self._normalize_expediente_for_rule(rule, expediente)
+            if not normalized:
+                return False
             return any(rx.match(normalized) for rx in compiled)
         return False
 
@@ -486,11 +493,11 @@ class RedsaraAdapter(SiteAdapter):
             if limit and len(out) >= limit:
                 break
             recurso = self._materialize_from_canonical_if_present(dict(resource.metadata or {}))
-            expediente = self._normalize_expediente(recurso.get("Expedient"))
-            recurso["Expedient"] = expediente
             organisme = self._clean_str(recurso.get("Organisme"))
-
             rule = self._resolve_rule_for_candidate(recurso)
+            expediente = self._normalize_expediente_for_rule(rule, recurso.get("Expedient"))
+            recurso["Expedient"] = expediente
+
             if not rule or not any(
                 rx.match(expediente)
                 for _rule, compiled in self._compiled_rules
@@ -547,7 +554,7 @@ class RedsaraAdapter(SiteAdapter):
                     )
                 continue
 
-            expediente = self._normalize_expediente(r.get("Expedient"))
+            expediente = self._normalize_expediente_for_rule(rule, r.get("Expedient"))
             fase = self._clean_str(r.get("FaseProcedimiento"))
             sujeto = self._clean_str(r.get("SujetoRecurso")).upper()
             subject, exposes, solicit = self._build_subject_exposes_solicit(
