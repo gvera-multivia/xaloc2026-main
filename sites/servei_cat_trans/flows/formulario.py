@@ -1214,21 +1214,57 @@ async def _fill_identificado_pais_emisor(
     if not candidates:
         return False
 
-    for attempt in range(8):
-        for candidate in candidates:
-            ok = await _select_label_in_section(
-                page,
-                section_selector,
-                ["pais emisor", "pais expedidor", "pais d expedicio", "pais"],
-                candidate,
-            )
-            if ok:
-                logger.info(
-                    "servei_cat_trans identificado pais emisor seleccionado candidate=%r attempt=%s",
-                    candidate,
-                    attempt + 1,
+    for attempt in range(10):
+        field_id = await _find_field_id_by_label(
+            page,
+            section_selector,
+            ["pais emisor", "pais expedidor", "pais d expedicio"],
+            field_kind="select",
+        )
+        if not field_id:
+            field_id = str(
+                await page.evaluate(
+                    """({ sectionSelector }) => {
+                        const normalize = (txt) => String(txt || "")
+                            .normalize("NFD")
+                            .replace(/[\\u0300-\\u036f]/g, "")
+                            .replace(/\\s+/g, " ")
+                            .trim()
+                            .toLowerCase();
+                        const section = document.querySelector(sectionSelector) || document;
+                        const labelMatches = (txt) => {
+                            const n = normalize(txt);
+                            return n.includes("pais emisor") || n.includes("pais expedidor") || n.includes("pais d expedicio");
+                        };
+                        const labels = Array.from(section.querySelectorAll("label, span, div"));
+                        for (const label of labels) {
+                            const labelText = String(label.textContent || "").trim();
+                            if (labelText.length > 180 || !labelMatches(labelText)) continue;
+                            let scope = label;
+                            for (let i = 0; i < 5 && scope; i++) {
+                                const selects = Array.from(scope.querySelectorAll("select"))
+                                    .filter((el) => el.id && !el.disabled);
+                                if (selects.length > 0) return String(selects[0].id);
+                                scope = scope.parentElement;
+                            }
+                        }
+                        return "";
+                    }""",
+                    {"sectionSelector": section_selector},
                 )
-                return True
+                or ""
+            ).strip()
+        if field_id:
+            for candidate in candidates:
+                ok = await _safe_select_label(page, f"#{field_id}", candidate)
+                if ok:
+                    logger.info(
+                        "servei_cat_trans identificado pais emisor seleccionado field_id=%s candidate=%r attempt=%s",
+                        field_id,
+                        candidate,
+                        attempt + 1,
+                    )
+                    return True
         await page.wait_for_timeout(500)
 
     logger.warning(
@@ -2091,16 +2127,13 @@ async def _fill_identificacion_conductor(page: "Page | Frame", datos: "ServeiCat
                 ["tipo de documento de identificacion"],
                 documento_label,
             )
+        ok_pais_emisor = True
         if documento_label == "Pasaporte":
-            ok_pais = await _fill_identificado_pais_emisor(
+            ok_pais_emisor = await _fill_identificado_pais_emisor(
                 page,
                 identificado_section,
                 datos.identificado_pais_emisor,
             )
-            if not ok_pais:
-                raise RuntimeError(
-                    f"servei_cat_trans.identificacion: no se pudo seleccionar pais emisor para pasaporte ({datos.identificado_pais_emisor!r})."
-                )
         if not ok_doc:
             fallback_doc_id = await _find_field_id_by_label(
                 page,
@@ -2129,6 +2162,16 @@ async def _fill_identificacion_conductor(page: "Page | Frame", datos: "ServeiCat
             municipio_id="guideContainer-rootPanel-seccio_dadesParticulars-panel-personaFisica-ADRECA_PF-panel1662104193616-panel_1697806457-guidedropdownlist_988023112___widget",
             datos=datos,
         )
+        if documento_label == "Pasaporte" and not ok_pais_emisor:
+            ok_pais_emisor = await _fill_identificado_pais_emisor(
+                page,
+                identificado_section,
+                datos.identificado_pais_emisor,
+            )
+            if not ok_pais_emisor:
+                raise RuntimeError(
+                    f"servei_cat_trans.identificacion: no se pudo seleccionar pais emisor para pasaporte ({datos.identificado_pais_emisor!r})."
+                )
 
 
 async def _fill_contenido(page: "Page | Frame", datos: "ServeiCatTransTarget") -> None:
