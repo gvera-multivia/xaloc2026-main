@@ -253,6 +253,38 @@ def _pais_emisor_candidates(pais: str) -> list[str]:
         return []
     candidates = [raw]
     aliases = {
+        "AR": ["Argentina"],
+        "BO": ["Bolivia"],
+        "BR": ["Brasil"],
+        "CL": ["Chile"],
+        "CN": ["China"],
+        "CO": ["Colombia", "Colòmbia"],
+        "CU": ["Cuba"],
+        "DE": ["Alemania", "Alemanya", "Germany"],
+        "DO": ["Republica Dominicana", "República Dominicana"],
+        "EC": ["Ecuador"],
+        "ES": ["España", "Espanya"],
+        "FR": ["Francia", "França", "France"],
+        "GB": ["Reino Unido", "Regne Unit", "United Kingdom"],
+        "GT": ["Guatemala"],
+        "HN": ["Honduras"],
+        "IT": ["Italia", "Itàlia"],
+        "MA": ["Marruecos", "Marroc"],
+        "MX": ["Mexico", "México", "Mexic", "Mèxic"],
+        "NI": ["Nicaragua"],
+        "PE": ["Peru", "Perú"],
+        "PK": ["Pakistan", "Pakistán"],
+        "PT": ["Portugal"],
+        "PY": ["Paraguay"],
+        "RO": ["Rumania", "Romania", "Romanía"],
+        "SN": ["Senegal"],
+        "UA": ["Ucrania", "Ucraïna"],
+        "US": ["Estados Unidos", "Estats Units", "United States"],
+        "UY": ["Uruguay"],
+        "VE": ["Venezuela"],
+        "COL": ["Colombia", "Colòmbia"],
+        "ESP": ["España", "Espanya"],
+        "MAR": ["Marruecos", "Marroc"],
         "MARRUECOS": ["Marruecos", "Marroc"],
         "MARROC": ["Marroc", "Marruecos"],
         "MOROCCO": ["Marruecos", "Marroc"],
@@ -442,6 +474,24 @@ async def _safe_select_label(page: "Page | Frame", selector: str, label: str) ->
             except Exception:
                 return False
     return False
+
+
+async def _redispatch_select_change(page: "Page | Frame", element_id: str) -> bool:
+    try:
+        changed = await page.evaluate(
+            """(id) => {
+                const el = document.getElementById(id);
+                if (!el || el.disabled || !String(el.value || "")) return false;
+                el.dispatchEvent(new Event("input", { bubbles: true }));
+                el.dispatchEvent(new Event("change", { bubbles: true }));
+                el.dispatchEvent(new Event("blur", { bubbles: true }));
+                return true;
+            }""",
+            element_id,
+        )
+        return bool(changed)
+    except Exception:
+        return False
 
 
 async def _safe_select_tipo_via(
@@ -1865,7 +1915,23 @@ async def _fill_identificacion_conductor_direccion(
     if _clean(datos.identificado_municipio):
         await page.wait_for_timeout(1000)
         await _wait_select_options(page, municipio_id)
+        await _redispatch_select_change(page, provincia_id)
+        await page.wait_for_timeout(500)
+        await _redispatch_select_change(page, comarca_id)
+        await page.wait_for_timeout(1200)
         ok_municipio = await _retry_select_via_id(page, municipio_id, datos.identificado_municipio)
+        if not ok_municipio:
+            for attempt in range(3):
+                await _redispatch_select_change(page, comarca_id)
+                await page.wait_for_timeout(1400)
+                ok_municipio = await _retry_select_via_id(page, municipio_id, datos.identificado_municipio)
+                if ok_municipio:
+                    logger.info(
+                        "servei_cat_trans identificado municipio seleccionado tras redispatch attempt=%s value=%r",
+                        attempt + 1,
+                        datos.identificado_municipio,
+                    )
+                    break
         if not ok_municipio:
             ok_municipio = await _auto_select_single_nonempty_option(page, municipio_id)
         if not ok_municipio:
