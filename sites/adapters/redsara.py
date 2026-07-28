@@ -201,6 +201,7 @@ class RedsaraAdapter(SiteAdapter):
                 r"^\d{8}$",
                 r"^\d{12}$",
                 r"^\d{12}[A-Z]$",
+                r"^K\d{16}$",
                 r"^\d{3}-\d{2}-IG-\d{6}$",
                 r"^\d{2}/\d{6}$",
                 r"^\d{2}-\d{6}$",
@@ -295,6 +296,23 @@ class RedsaraAdapter(SiteAdapter):
         if (rule or {}).get("name") == "CTDA LEON" and re.fullmatch(r"\d{12}", normalized):
             return f"{normalized[:2]}-{normalized[2:5]}-{normalized[5:8]}.{normalized[8:11]}-{normalized[11]}"
         return normalized
+
+    @classmethod
+    def _expediente_matches_rule(
+        cls,
+        rule: Optional[dict[str, Any]],
+        compiled: list[re.Pattern[str]],
+        expediente: str,
+    ) -> bool:
+        normalized = cls._normalize_expediente_for_rule(rule, expediente)
+        if not normalized:
+            return False
+        if any(rx.match(normalized) for rx in compiled):
+            return True
+        if (rule or {}).get("name") == "AJUNTAMENT DE BARCELONA" and re.search(r"[,;]", normalized):
+            parts = [part for part in re.split(r"[,;]+", normalized) if part]
+            return bool(parts) and all(any(rx.match(part) for rx in compiled) for part in parts)
+        return False
 
     @classmethod
     def _is_identificacion_phase(cls, fase_raw: Any) -> bool:
@@ -466,7 +484,7 @@ class RedsaraAdapter(SiteAdapter):
             normalized = self._normalize_expediente_for_rule(rule, expediente)
             if not normalized:
                 return False
-            return any(rx.match(normalized) for rx in compiled)
+            return self._expediente_matches_rule(rule, compiled, normalized)
         return False
 
     def fetch_candidates(
@@ -498,12 +516,11 @@ class RedsaraAdapter(SiteAdapter):
             expediente = self._normalize_expediente_for_rule(rule, recurso.get("Expedient"))
             recurso["Expedient"] = expediente
 
-            if not rule or not any(
-                rx.match(expediente)
-                for _rule, compiled in self._compiled_rules
-                if _rule.get("name") == rule.get("name")
-                for rx in compiled
-            ):
+            compiled_for_rule = next(
+                (compiled for _rule, compiled in self._compiled_rules if _rule.get("name") == rule.get("name")),
+                [],
+            )
+            if not rule or not self._expediente_matches_rule(rule, compiled_for_rule, expediente):
                 if on_discard:
                     on_discard(
                         {

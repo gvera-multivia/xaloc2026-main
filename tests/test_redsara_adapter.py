@@ -72,6 +72,7 @@ def test_validate_expediente_by_official_patterns() -> None:
     )
     assert adapter.validate_expediente_for_organisme("AGENCIA TRIBUTARIA ILLES BALEARS -ATIB", "23-016775")
     assert adapter.validate_expediente_for_organisme("AGENCIA TRIBUTARIA DE ILLES BALEARS", "072620106122P")
+    assert adapter.validate_expediente_for_organisme("AGENCIA TRIBUTARIA DE ILLES BALEARS", "K1610126341321003")
     assert adapter.validate_expediente_for_organisme("AJUNTAMENT MIGJORN GRAN", "2025013916")
     assert adapter.validate_expediente_for_organisme("AYUNTAMIENTO DE MOSTOLES", "888249540")
     assert adapter.validate_expediente_for_organisme("AYUNTAMIENTO DE MOSTOLES", "550/2026/MUL")
@@ -86,6 +87,19 @@ def test_validate_expediente_sector_barcelona_sarp_8_digits() -> None:
     assert adapter.validate_expediente_for_organisme(
         "SECTOR DE SEGURIDAD Y MOVILIDAD DEL AYUNTAMIENTO DE BARCELONA",
         "2026SARP90179573",
+    )
+
+
+def test_validate_expediente_barcelona_allows_multiple_valid_references() -> None:
+    adapter = RedsaraAdapter()
+
+    assert adapter.validate_expediente_for_organisme(
+        "AJUNTAMENT DE BARCELONA",
+        "2026EBVH0038524,EJ202661255378326",
+    )
+    assert not adapter.validate_expediente_for_organisme(
+        "AJUNTAMENT DE BARCELONA",
+        "2026EBVH0038524,INVALIDO",
     )
 
 
@@ -130,6 +144,37 @@ def test_fetch_candidates_discards_invalid_by_pattern() -> None:
     assert out[0]["idRecurso"] == 1
     assert len(discards) == 1
     assert discards[0]["idRecurso"] == 2
+
+
+def test_fetch_candidates_accepts_barcelona_multiple_valid_references() -> None:
+    adapter = RedsaraAdapter()
+
+    resources = [
+        SimpleNamespace(
+            metadata={
+                "idRecurso": 124167,
+                "Organisme": "AJUNTAMENT DE BARCELONA",
+                "Expedient": "2026EBVH0038524,EJ202661255378326",
+                "Estado": 0,
+                "UsuarioAsignado": "",
+            }
+        )
+    ]
+
+    class _Repo:
+        def get_pending_resources(self, *, site_id: str, config: dict, limit: int):
+            return resources
+
+    out = adapter.fetch_candidates(
+        config={},
+        conn_str="",
+        authenticated_user=None,
+        limit=10,
+        resource_repo=_Repo(),
+    )
+
+    assert len(out) == 1
+    assert out[0]["Expedient"] == "2026EBVH0038524,EJ202661255378326"
 
 
 def test_fetch_candidates_normalizes_ctda_leon_compact_expediente() -> None:
