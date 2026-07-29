@@ -157,6 +157,32 @@ def test_analyze_upload_state_accepts_registered_filename_with_truncated_descrip
     assert analysis["confirmed"] is False
 
 
+def test_analyze_upload_state_accepts_stable_registered_name_after_submit() -> None:
+    analysis = _analyze_upload_state(
+        before_state={"outside_mentions": 1},
+        current_state={
+            "outside_mentions": 1,
+            "visible_indices": [1],
+            "block_present": True,
+            "form_present": True,
+            "file_present": True,
+            "file_count": 1,
+            "desc_value": "Autoriza_Empresa",
+            "selected_type": "Autoritzaci?",
+        },
+        upload_index=1,
+        used_indices=set(),
+        expected_desc="Autoriza_Empresa",
+        expected_type="Autoritzacio",
+        submission_started=True,
+    )
+
+    assert analysis["has_name_outside_block"] is False
+    assert analysis["has_registered_name_outside_block"] is True
+    assert analysis["same_block_soft_candidate"] is True
+    assert analysis["confirmed"] is False
+
+
 def test_submission_has_started_detects_no_activity() -> None:
     started = _submission_has_started(
         before_state={

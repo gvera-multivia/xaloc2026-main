@@ -384,12 +384,14 @@ def _analyze_upload_state(
     used_indices: set[int],
     expected_desc: str,
     expected_type: str,
+    submission_started: bool = False,
 ) -> dict[str, object]:
     outside_before = int(before_state.get("outside_mentions") or 0)
     outside_now = int(current_state.get("outside_mentions") or 0)
     visible_now = [int(idx) for idx in (current_state.get("visible_indices") or [])]
 
     has_name_outside_block = outside_now > outside_before
+    has_registered_name_outside_block = outside_now > 0
     has_fresh_block = any(idx not in used_indices and idx != upload_index for idx in visible_now)
     block_missing = not bool(current_state.get("block_present"))
     form_missing = not bool(current_state.get("form_present"))
@@ -417,7 +419,7 @@ def _analyze_upload_state(
         and type_now != type_expected
     )
     same_block_soft_candidate = (
-        has_name_outside_block
+        (has_name_outside_block or (submission_started and has_registered_name_outside_block))
         and not has_fresh_block
         and not block_missing
         and not form_missing
@@ -426,7 +428,7 @@ def _analyze_upload_state(
         # Si el nombre exacto del fichero ya aparece fuera del bloque activo,
         # Terrassa lo ha registrado aunque mantenga el input cargado. La
         # descripcion/tipologia pueden normalizarse o truncarse en la UI.
-        and (desc_matches or has_name_outside_block)
+        and (desc_matches or has_name_outside_block or (submission_started and has_registered_name_outside_block))
         and type_strict_matches
     )
     # Regla estricta anti-sobrescritura:
@@ -442,7 +444,9 @@ def _analyze_upload_state(
         "same_block_registered": same_block_registered,
         "same_block_soft_candidate": same_block_soft_candidate,
         "has_name_outside_block": has_name_outside_block,
+        "has_registered_name_outside_block": has_registered_name_outside_block,
         "has_fresh_block": has_fresh_block,
+        "outside_mentions_before": outside_before,
         "visible_indices": visible_now,
         "outside_mentions": outside_now,
         "file_count": file_count,
@@ -461,6 +465,7 @@ async def _wait_until_upload_committed(
     expected_desc: str,
     expected_type: str,
     timeout_ms: int,
+    submission_started: bool = False,
 ) -> dict[str, object]:
     waited = 0
     step_ms = 500
@@ -477,6 +482,7 @@ async def _wait_until_upload_committed(
             used_indices=used_indices,
             expected_desc=expected_desc,
             expected_type=expected_type,
+            submission_started=submission_started,
         )
         if bool(last_analysis.get("confirmed")):
             return last_analysis
@@ -849,6 +855,7 @@ async def run_documentos(page: "Page", config: "TerrassaConfig", datos: "Terrass
             expected_desc=descripcio,
             expected_type=tipus,
             timeout_ms=min(int(config.timeouts.subida_archivo), 30000),
+            submission_started=("submit" in upload_method),
         )
         if bool(confirmation.get("recycled_current_block")):
             used_upload_indices.discard(upload_index)
