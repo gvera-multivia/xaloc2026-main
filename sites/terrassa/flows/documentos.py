@@ -401,7 +401,12 @@ def _analyze_upload_state(
     type_expected = _norm_text(expected_type)
     file_count = int(current_state.get("file_count") or 0)
     desc_matches = (not desc_expected) or (desc_now == desc_expected or desc_expected in desc_now or desc_now in desc_expected)
-    type_strict_matches = (not type_expected) or (type_now == type_expected)
+    type_strict_matches = (
+        (not type_expected)
+        or (type_now == type_expected)
+        or (len(type_now) >= 8 and type_expected.startswith(type_now))
+        or (len(type_expected) >= 8 and type_now.startswith(type_expected))
+    )
 
     block_recycled = (
         not block_missing
@@ -418,7 +423,10 @@ def _analyze_upload_state(
         and not form_missing
         and not file_missing
         and file_count > 0
-        and desc_matches
+        # Si el nombre exacto del fichero ya aparece fuera del bloque activo,
+        # Terrassa lo ha registrado aunque mantenga el input cargado. La
+        # descripcion/tipologia pueden normalizarse o truncarse en la UI.
+        and (desc_matches or has_name_outside_block)
         and type_strict_matches
     )
     # Regla estricta anti-sobrescritura:

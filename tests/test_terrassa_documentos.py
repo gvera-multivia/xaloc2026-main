@@ -133,6 +133,30 @@ def test_analyze_upload_state_does_not_confirm_same_block_if_type_differs_and_in
     assert analysis["confirmed"] is False
 
 
+def test_analyze_upload_state_accepts_registered_filename_with_truncated_description() -> None:
+    analysis = _analyze_upload_state(
+        before_state={"outside_mentions": 0},
+        current_state={
+            "outside_mentions": 1,
+            "visible_indices": [1],
+            "block_present": True,
+            "form_present": True,
+            "file_present": True,
+            "file_count": 1,
+            "desc_value": "Autoriza_Empresa",
+            "selected_type": "Autoritzaci?",
+        },
+        upload_index=1,
+        used_indices=set(),
+        expected_desc="Autoriza_Empresa_solo_20260721064927_44387",
+        expected_type="Autoritzacio",
+    )
+
+    assert analysis["has_name_outside_block"] is True
+    assert analysis["same_block_soft_candidate"] is True
+    assert analysis["confirmed"] is False
+
+
 def test_submission_has_started_detects_no_activity() -> None:
     started = _submission_has_started(
         before_state={
