@@ -27,7 +27,17 @@ def _norm_filled_value(value: object) -> str:
 
 
 def _field_value_matches(expected: object, actual: object) -> bool:
-    return bool(_norm_filled_value(expected)) and _norm_filled_value(expected) == _norm_filled_value(actual)
+    expected_norm = _norm_filled_value(expected)
+    actual_norm = _norm_filled_value(actual)
+    if not expected_norm or not actual_norm:
+        return False
+    if expected_norm == actual_norm:
+        return True
+    # Algunos campos de la sede autocapitalizan y recortan nombres largos por maxlength.
+    # Si lo visible es un prefijo suficientemente largo del valor esperado, lo aceptamos.
+    if len(expected_norm) > 30 and len(actual_norm) >= 20 and expected_norm.startswith(actual_norm):
+        return True
+    return False
 
 
 async def _blur_field(page: "Page", field: "Locator") -> None:

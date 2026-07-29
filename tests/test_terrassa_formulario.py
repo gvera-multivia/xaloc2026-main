@@ -12,3 +12,15 @@ def test_field_value_matches_ignores_case_and_accents() -> None:
     assert not _field_value_matches("RAUL", "")
     assert not _field_value_matches("RAUL", "PAUL")
     assert not _field_value_matches("34765386N", "34765386M")
+
+
+def test_field_value_matches_accepts_long_name_truncated_by_site() -> None:
+    assert _field_value_matches(
+        "AMAF CONSULTORES Y AUXILIARES COMERCIALES SL.",
+        "Amaf Consultores Y Auxiliares Comerciale",
+    )
+    assert _field_value_matches(
+        "CARPINTERIA METALICA Y REFORMAS VCF-2021 SL",
+        "Carpinteria Metalica Y Reformas Vcf-2021",
+    )
+    assert not _field_value_matches("RAUL", "Ra")

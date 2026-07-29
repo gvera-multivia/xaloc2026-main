@@ -587,7 +587,15 @@ async def _check_csv_result_checkbox_if_needed(page: "Page") -> dict:
                     }
                     if (items.length !== 1) return false;
                     const target = items[0];
-                    if (target.checked) return true;
+                    if (target.checked) {
+                        for (const node of [target.input, target.node, target.host]) {
+                            if (!node) continue;
+                            for (const name of ["input", "change"]) {
+                                try { node.dispatchEvent(new Event(name, { bubbles: true, cancelable: true })); } catch (_err) {}
+                            }
+                        }
+                        return true;
+                    }
                     for (const node of [target.input, target.labelNode, target.node, target.host]) {
                         clickNode(node);
                     }
@@ -611,6 +619,31 @@ async def _check_csv_result_checkbox_if_needed(page: "Page") -> dict:
     except Exception:
         pass
     return await _collect_csv_result_state(page)
+
+
+async def _nudge_csv_continue_if_selected(page: "Page") -> dict:
+    """Reemite eventos si ATC muestra una fila marcada pero deja Continuar deshabilitado."""
+    state = await _collect_csv_result_state(page)
+    if (
+        state.get("hasCsvRejectedModal")
+        or state.get("continueEnabled")
+        or int(state.get("checkedCheckboxCount") or 0) <= 0
+    ):
+        return state
+
+    for _ in range(4):
+        state = await _check_csv_result_checkbox_if_needed(page)
+        if state.get("continueEnabled"):
+            return state
+        try:
+            await page.keyboard.press("Tab")
+            await wait_after_action(page)
+        except Exception:
+            pass
+        state = await _collect_csv_result_state(page)
+        if state.get("continueEnabled"):
+            return state
+    return state
 
 
 async def _wait_for_first_ready_locator(
@@ -985,6 +1018,13 @@ async def _search_csv_and_continue(page: "Page", datos: "AtcTarget") -> None:
     ):
         csv_state = await _check_csv_result_checkbox_if_needed(page)
         csv_state = await _wait_csv_result_ready(page, timeout_ms=ATC_FORM_MEDIUM_TIMEOUT_MS)
+
+    if (
+        not csv_state.get("hasCsvRejectedModal")
+        and not csv_state.get("continueEnabled")
+        and int(csv_state.get("checkedCheckboxCount") or 0) > 0
+    ):
+        csv_state = await _nudge_csv_continue_if_selected(page)
 
     if not csv_state.get("hasCsvRejectedModal") and not csv_state.get("continueEnabled"):
         csv_state = await _recover_csv_result_from_atencio_modal_if_needed(page, csv_state)
