@@ -475,6 +475,17 @@ async def _safe_fill(page: "Page | Frame", selector: str, value: str) -> bool:
 
         try:
             await candidate.fill(text, timeout=FAST_ACTION_TIMEOUT_MS)
+            try:
+                await candidate.evaluate(
+                    """(el) => {
+                        el.dispatchEvent(new Event("input", { bubbles: true }));
+                        el.dispatchEvent(new Event("change", { bubbles: true }));
+                        if (typeof el.blur === "function") el.blur();
+                        el.dispatchEvent(new Event("blur", { bubbles: true }));
+                    }"""
+                )
+            except Exception:
+                pass
             return True
         except Exception:
             try:
@@ -486,6 +497,8 @@ async def _safe_fill(page: "Page | Frame", selector: str, value: str) -> bool:
                         el.value = String(val || "");
                         el.dispatchEvent(new Event("input", { bubbles: true }));
                         el.dispatchEvent(new Event("change", { bubbles: true }));
+                        if (typeof el.blur === "function") el.blur();
+                        el.dispatchEvent(new Event("blur", { bubbles: true }));
                     }""",
                     text,
                 )
@@ -528,7 +541,21 @@ async def _safe_click(page: "Page | Frame", selector: str) -> bool:
     try:
         await locator.click(timeout=FAST_ACTION_TIMEOUT_MS)
     except Exception:
-        return False
+        try:
+            await locator.click(timeout=FAST_ACTION_TIMEOUT_MS, force=True)
+        except Exception:
+            try:
+                await locator.evaluate(
+                    """(el) => {
+                        el.scrollIntoView({ block: "center", inline: "center" });
+                        el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+                        el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }));
+                        el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+                        if (typeof el.click === "function") el.click();
+                    }"""
+                )
+            except Exception:
+                return False
     return True
 
 
@@ -1332,7 +1359,7 @@ async def _wait_expediente_verificado(
     page: "Page | Frame",
     *,
     tramite_tipo: str,
-    timeout_ms: int = 15000,
+    timeout_ms: int = 45000,
 ) -> None:
     waited = 0
     step_ms = 500
@@ -1346,8 +1373,79 @@ async def _wait_expediente_verificado(
         r"(datos|dades).*(expedient|expediente).*(correct|correctes|correctos)",
         re.IGNORECASE,
     )
+    last_state: dict[str, object] = {}
 
     while waited <= timeout_ms:
+        try:
+            last_state = await page.evaluate(
+                """() => {
+                    const normalize = (txt) => String(txt || "")
+                        .normalize("NFD")
+                        .replace(/[\\u0300-\\u036f]/g, "")
+                        .replace(/\\s+/g, " ")
+                        .trim()
+                        .toLowerCase();
+                    const isVisible = (el) => {
+                        if (!el) return false;
+                        const st = window.getComputedStyle(el);
+                        const rect = el.getBoundingClientRect();
+                        return !!st && st.display !== "none" && st.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+                    };
+                    const body = normalize(document.body?.innerText || "");
+                    const successTokens = [
+                        "los datos del expediente son correctos",
+                        "datos del expediente son correctos",
+                        "les dades de l expedient son correctes",
+                        "dades de l expedient son correctes",
+                        "dades de l expedient correctes",
+                        "puedes completar la solicitud",
+                        "pots completar la sol licitud"
+                    ];
+                    const errorTokens = [
+                        "expediente no encontrado",
+                        "expedient no trobat",
+                        "no se ha encontrado",
+                        "no s ha trobat",
+                        "no se han encontrado",
+                        "no s han trobat",
+                        "expediente incorrecto",
+                        "expedient incorrecte",
+                        "datos del expediente no son correctos",
+                        "dades de l expedient no son correctes"
+                    ];
+                    const visibleInputs = Array.from(document.querySelectorAll("input, textarea, select"))
+                        .filter(isVisible)
+                        .map((el) => ({
+                            id: el.id || "",
+                            name: el.getAttribute("name") || "",
+                            value: el.value || "",
+                            label: el.getAttribute("aria-label") || el.getAttribute("title") || "",
+                        }))
+                        .slice(0, 40);
+                    const redOrAlertText = Array.from(document.querySelectorAll("[role='alert'], .guideFieldError, .guideError, .error, .alert, .text-danger, .guideHelpQuestionMark, span, div, p"))
+                        .filter(isVisible)
+                        .map((el) => String(el.textContent || "").replace(/\\s+/g, " ").trim())
+                        .filter(Boolean)
+                        .filter((txt) => /expedient|expediente|correct|incorrect|trobat|encontr/i.test(txt))
+                        .slice(0, 12);
+                    return {
+                        success: successTokens.some((token) => body.includes(token)),
+                        rejected: errorTokens.some((token) => body.includes(token)),
+                        hasIdentificadoHeading: /datos de identificacion del conductor|dades d identificacio del conductor/.test(body),
+                        visibleInputs,
+                        messages: redOrAlertText,
+                    };
+                }"""
+            )
+            if bool(last_state.get("success")):
+                return
+            if bool(last_state.get("rejected")):
+                raise RuntimeError(f"servei_cat_trans.expediente: expediente rechazado por la sede. state={last_state}")
+        except RuntimeError:
+            raise
+        except Exception:
+            pass
+
         try:
             ok_text = page.get_by_text(
                 re.compile(
@@ -1405,7 +1503,7 @@ async def _wait_expediente_verificado(
         waited += step_ms
 
     raise PlaywrightTimeoutError(
-        f"Timeout esperando validacion de expediente SCT (tramite={tramite or 'normal'})"
+        f"Timeout esperando validacion de expediente SCT (tramite={tramite or 'normal'}) state={last_state}"
     )
 
 
@@ -2004,19 +2102,80 @@ async def _fill_phone_input(page: "Page | Frame", selector: str, value: str) -> 
 
 async def _fill_expediente(page: "Page | Frame", datos: "ServeiCatTransTarget", config: "ServeiCatTransConfig") -> None:
     base = "guideContainer-rootPanel-seccio_dadesParticulars"
-    # Selectores robustos para datos del expediente
-    await _safe_fill(page, f"div[id^='{base}'] [id$='-guidetextbox___widget']", datos.servicio_territorial)
-    await _safe_fill(page, f"div[id^='{base}'] [id$='-guidetextbox_5569220___widget']", datos.expediente_numero)
-    await _safe_fill(page, f"div[id^='{base}'] [id$='-guidetextbox_1768694___widget']", datos.digito_control)
+    section = f"#{base}___guide-item"
+
+    servicio_id = await _find_field_id_by_label(
+        page,
+        section,
+        ["servicio territorial", "servei territorial", "servei"],
+        field_kind="input",
+    )
+    expediente_id = await _find_field_id_by_label(
+        page,
+        section,
+        ["expediente", "expedient"],
+        field_kind="input",
+    )
+    digito_id = await _find_field_id_by_label(
+        page,
+        section,
+        ["digito de control", "digit de control", "dígit de control", "control"],
+        field_kind="input",
+    )
+
+    ok_servicio = await _safe_fill(
+        page,
+        f"#{servicio_id}" if servicio_id else f"div[id^='{base}'] [id$='-guidetextbox___widget']",
+        datos.servicio_territorial,
+    )
+    ok_expediente = await _safe_fill(
+        page,
+        f"#{expediente_id}" if expediente_id else f"div[id^='{base}'] [id$='-guidetextbox_5569220___widget']",
+        datos.expediente_numero,
+    )
+    ok_digito = await _safe_fill(
+        page,
+        f"#{digito_id}" if digito_id else f"div[id^='{base}'] [id$='-guidetextbox_1768694___widget']",
+        datos.digito_control,
+    )
+    logger.info(
+        "servei_cat_trans expediente fill servicio=%r ok=%s field=%s expediente=%r ok=%s field=%s digito=%r ok=%s field=%s",
+        datos.servicio_territorial,
+        ok_servicio,
+        servicio_id or "suffix",
+        datos.expediente_numero,
+        ok_expediente,
+        expediente_id or "suffix",
+        datos.digito_control,
+        ok_digito,
+        digito_id or "suffix",
+    )
+    if not (ok_servicio and ok_expediente and ok_digito):
+        raise RuntimeError(
+            "servei_cat_trans.expediente: no se pudieron rellenar todos los campos "
+            f"(servicio={ok_servicio}, expediente={ok_expediente}, digito={ok_digito})."
+        )
+    await page.wait_for_timeout(800)
 
     clicked = await _safe_click(page, "button:has-text('Comprobar datos expediente')")
     if not clicked:
         clicked = await _safe_click(page, "button:has-text('Comparar dades expedient')")
     if not clicked:
+        clicked = await _safe_click(page, "button:has-text('Comprovar dades expedient')")
+    if not clicked:
         fallback_btn = page.get_by_role("button", name=re.compile(r"comprobar|comprovar|comparar", re.IGNORECASE)).first
         if await fallback_btn.count() > 0:
-            await fallback_btn.click(timeout=FAST_ACTION_TIMEOUT_MS)
-            clicked = True
+            try:
+                await fallback_btn.click(timeout=5000)
+                clicked = True
+            except Exception:
+                try:
+                    await fallback_btn.click(timeout=5000, force=True)
+                    clicked = True
+                except Exception:
+                    clicked = False
+    if not clicked:
+        raise RuntimeError("servei_cat_trans.expediente: no se pudo pulsar el boton de comprobacion del expediente.")
     if clicked:
         await _wait_expediente_verificado(page, tramite_tipo=_clean(datos.tramite_tipo))
         if _clean(datos.tramite_tipo).lower() == "identificacion":
