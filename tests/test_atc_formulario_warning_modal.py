@@ -8,7 +8,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from sites.atc.flows import formulario
-from sites.atc.flows.formulario import _is_atencio_continue_modal_text, _is_csv_rejected_modal_text
+from sites.atc.flows.formulario import (
+    _is_atencio_continue_modal_text,
+    _is_csv_rejected_modal_text,
+    _is_reposicio_choice_modal_text,
+)
 
 
 def test_is_atencio_continue_modal_text_detects_deadline_warning() -> None:
@@ -28,6 +32,15 @@ def test_is_atencio_continue_modal_text_ignores_csv_error_modal() -> None:
 def test_is_csv_rejected_modal_text_detects_csv_errors() -> None:
     text = "No identificamos el CSV que ha indicado. Compruebe el codigo."
     assert _is_csv_rejected_modal_text(text) is True
+
+
+def test_is_reposicio_choice_modal_text_detects_reclamation_choice() -> None:
+    text = (
+        "Informació sobre la presentació d'una reclamació. "
+        "Voleu continuar amb la reclamació economicoadministrativa o bé presentar un recurs de reposició? "
+        "Reclamació economicoadministrativa Recurs de reposició"
+    )
+    assert _is_reposicio_choice_modal_text(text) is True
 
 
 @pytest.mark.asyncio

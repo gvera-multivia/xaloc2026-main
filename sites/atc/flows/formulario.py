@@ -65,6 +65,89 @@ def _is_atencio_continue_modal_text(value: str) -> bool:
     return bool(has_term and has_economic and has_continue_question)
 
 
+def _is_reposicio_choice_modal_text(value: str) -> bool:
+    text = _normalize_modal_text(value)
+    if not text:
+        return False
+    return (
+        "recurs de reposicio" in text
+        and (
+            "reclamacio economicoadministrativa" in text
+            or "reclamacion economico administrativa" in text
+            or "reclamacion economico-administrativa" in text
+            or "reclamacio economico administrativa" in text
+        )
+    )
+
+
+async def _select_reposicio_choice_inside_dialog(dialog) -> bool:
+    radio = dialog.get_by_role("radio", name=re.compile(r"Recurs de reposici[oó]", re.IGNORECASE)).first
+    if await radio.count() > 0:
+        for kwargs in ({}, {"force": True}):
+            try:
+                await radio.click(timeout=ATC_FORM_SHORT_TIMEOUT_MS, **kwargs)
+                return True
+            except Exception:
+                continue
+
+    try:
+        return bool(
+            await dialog.evaluate(
+                """(root) => {
+                    const normalize = (value) => String(value || "")
+                        .normalize("NFD")
+                        .replace(/[\\u0300-\\u036f]/g, "")
+                        .replace(/\\s+/g, " ")
+                        .trim()
+                        .toLowerCase();
+                    const isVisible = (el) => {
+                        if (!el) return false;
+                        const st = window.getComputedStyle(el);
+                        const rect = el.getBoundingClientRect();
+                        return !!st && st.display !== "none" && st.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+                    };
+                    const clickNode = (el) => {
+                        if (!el) return false;
+                        try { el.scrollIntoView({ block: "center", inline: "center" }); } catch (_err) {}
+                        try { el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true })); } catch (_err) {}
+                        try { el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true })); } catch (_err) {}
+                        try { el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); } catch (_err) {}
+                        try { if (typeof el.click === "function") el.click(); } catch (_err) {}
+                        return true;
+                    };
+                    const labels = Array.from(root.querySelectorAll("label, se-radio, [role='radio'], div, span"))
+                        .filter(isVisible)
+                        .filter((el) => normalize(el.textContent || el.getAttribute("aria-label") || "").includes("recurs de reposicio"));
+                    for (const label of labels) {
+                        const forId = String(label.getAttribute("for") || "").trim();
+                        const byFor = forId ? root.querySelector("#" + CSS.escape(forId)) : null;
+                        const radio =
+                            byFor ||
+                            label.querySelector?.("input[type='radio']") ||
+                            label.closest?.("label, se-radio, [role='radio'], .radio-container, .form-check")?.querySelector?.("input[type='radio']") ||
+                            label.closest?.("label, se-radio, [role='radio'], .radio-container, .form-check") ||
+                            label;
+                        if (!radio) continue;
+                        clickNode(radio);
+                        const input = radio.matches?.("input[type='radio']")
+                            ? radio
+                            : radio.querySelector?.("input[type='radio']");
+                        if (input) {
+                            try { input.checked = true; } catch (_err) {}
+                            try { input.setAttribute("checked", "checked"); } catch (_err) {}
+                            try { input.dispatchEvent(new Event("input", { bubbles: true })); } catch (_err) {}
+                            try { input.dispatchEvent(new Event("change", { bubbles: true })); } catch (_err) {}
+                        }
+                        return true;
+                    }
+                    return false;
+                }"""
+            )
+        )
+    except Exception:
+        return False
+
+
 async def _click_continue_inside_dialog(dialog) -> bool:
     button = dialog.locator("button.se-button--primary, button").filter(
         has_text=re.compile(r"^\s*(Continuar|Continue)\s*$", re.IGNORECASE)
@@ -113,7 +196,13 @@ async def _dismiss_atencio_continue_modal_if_present(page: "Page") -> bool:
         if _is_csv_rejected_modal_text(text):
             continue
 
-        should_click_continue = _is_atencio_continue_modal_text(text)
+        should_select_reposicio = _is_reposicio_choice_modal_text(text)
+        if should_select_reposicio:
+            selected = await _select_reposicio_choice_inside_dialog(dialog)
+            if selected:
+                await wait_after_action(page)
+
+        should_click_continue = _is_atencio_continue_modal_text(text) or should_select_reposicio
         if not should_click_continue:
             text_norm = _normalize_modal_text(text)
             should_click_continue = "atencio" in text_norm or "atencion" in text_norm or "continuar" in text_norm
