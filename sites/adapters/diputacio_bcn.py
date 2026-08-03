@@ -39,6 +39,11 @@ class DiputacioBcnAdapter(SiteAdapter):
     FETCH_OVERSCAN_MULTIPLIER = 10
     FETCH_OVERSCAN_MIN = 1000
     FETCH_OVERSCAN_MAX = 5000
+    # Parche temporal por dato erróneo en BD/XVIA. Retirar al revertir este
+    # commit cuando el recurso 134740 ya se haya presentado correctamente.
+    TEMP_PLATE_OVERRIDES_BY_RESOURCE_ID = {
+        134740: "5954-JDG",
+    }
     ADJUNTO_URL_TEMPLATE = (
         "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf-adjuntos/{id}"
     )
@@ -279,6 +284,16 @@ class DiputacioBcnAdapter(SiteAdapter):
 
     @classmethod
     def _resolve_plate(cls, item: dict[str, Any]) -> str:
+        try:
+            rid = int(item.get("idRecurso") or 0)
+        except Exception:
+            rid = 0
+        override = cls.TEMP_PLATE_OVERRIDES_BY_RESOURCE_ID.get(rid)
+        if override:
+            normalized_override = normalize_plate_with_fallback(override)
+            if normalized_override != ".":
+                return normalized_override
+
         for key in ("rs_matricula", "exp_matricula", "pub_matricula", "matricula", "Matricula"):
             normalized = normalize_plate_with_fallback(item.get(key))
             if normalized != ".":
