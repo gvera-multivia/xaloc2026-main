@@ -32,6 +32,16 @@ _MUNICIPIO_EQUIVALENCE: dict[str, tuple[str, ...]] = {
     "bigues i riells del fai": ("Bigues i Riells",),
 }
 
+_CP_LOCATION_HINTS: dict[str, tuple[str, str]] = {
+    # CPs urbanos frecuentes en identificaciones SCT. Se usan como fallback
+    # cuando CartoCiudad no resuelve o la poblacion de BD contradice el CP.
+    **{f"080{i:02d}": ("BARCELONA", "Barcelonès") for i in range(1, 43)},
+    **{f"089{i:02d}": ("HOSPITALET DE LLOBREGAT", "Barcelonès") for i in range(1, 9)},
+    **{f"089{i:02d}": ("BADALONA", "Barcelonès") for i in range(10, 19)},
+    **{f"089{i:02d}": ("SANTA COLOMA DE GRAMENET", "Barcelonès") for i in range(21, 25)},
+    "08930": ("SANT ADRIA DE BESOS", "Barcelonès"),
+}
+
 
 class ServeiCatTransController:
     site_id = "servei_cat_trans"
@@ -92,6 +102,13 @@ class ServeiCatTransController:
         if " " not in shorter:
             return False
         return longer.startswith(shorter + " ")
+
+    @classmethod
+    def _cp_location_hint(cls, cp: str) -> tuple[str, str] | None:
+        cp_digits = re.sub(r"\D+", "", cls._clean(cp))
+        if len(cp_digits) != 5:
+            return None
+        return _CP_LOCATION_HINTS.get(cp_digits)
 
     @classmethod
     def _municipio_variants(cls, *, municipio: str, carto_municipio: str = "") -> list[str]:
@@ -360,11 +377,29 @@ class ServeiCatTransController:
             or BaseOnlineAdapter._infer_provincia_from_cp(cls._clean(cp_raw))
             or cls._clean(default_provincia)
         )
+        cp_hint = cls._cp_location_hint(cp_raw)
+        if cp_hint:
+            cp_municipio, _cp_comarca = cp_hint
+            if not resolved_municipio or not cls._same_municipio_family(resolved_municipio, cp_municipio):
+                logger.info(
+                    "Direccion: municipio ajustado por CP cp=%s original=%r resolved=%r",
+                    cls._clean(cp_raw),
+                    resolved_municipio,
+                    cp_municipio,
+                )
+                resolved_municipio = cp_municipio
         resolved_comarca = cls._query_comarca_cartociudad(
             provincia=resolved_provincia,
             municipio=resolved_municipio,
             carto_municipio=cls._clean(carto.get("municipio")),
         )
+        if not resolved_comarca and cp_hint:
+            resolved_comarca = cp_hint[1]
+            logger.info(
+                "Direccion: comarca resuelta por CP cp=%s comarca=%s",
+                cls._clean(cp_raw),
+                resolved_comarca,
+            )
         resolved = {
             "tipo_via": cls._clean(tipo_via_raw) or cls._clean(llm.get("tipo_via")) or "CALLE",
             "nombre_via": cls._clean(nombre_via_raw) or cls._clean(llm.get("calle")) or cls._clean(direccion_raw),

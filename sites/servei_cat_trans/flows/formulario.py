@@ -225,6 +225,7 @@ _KNOWN_MUNICIPIO_CODES: dict[str, tuple[str, str]] = {
 }
 
 _KNOWN_CP_MUNICIPIO_CODES: dict[str, tuple[str, str]] = {
+    **{f"080{i:02d}": ("08019", "Barcelona") for i in range(1, 43)},
     "08901": ("08101", "Hospitalet de Llobregat, l'"),
     "08902": ("08101", "Hospitalet de Llobregat, l'"),
     "08903": ("08101", "Hospitalet de Llobregat, l'"),
@@ -233,6 +234,9 @@ _KNOWN_CP_MUNICIPIO_CODES: dict[str, tuple[str, str]] = {
     "08906": ("08101", "Hospitalet de Llobregat, l'"),
     "08907": ("08101", "Hospitalet de Llobregat, l'"),
     "08908": ("08101", "Hospitalet de Llobregat, l'"),
+    **{f"089{i:02d}": ("08015", "Badalona") for i in range(10, 19)},
+    **{f"089{i:02d}": ("08245", "Santa Coloma de Gramenet") for i in range(21, 25)},
+    "08930": ("08194", "Sant Adrià de Besòs"),
 }
 
 
@@ -422,12 +426,14 @@ def _pais_emisor_selector_js() -> str:
 
 
 def _known_municipio_code_label(municipio: str, cp: str = "") -> tuple[str, str] | None:
-    municipio_key = _norm_text(municipio)
-    if municipio_key in _KNOWN_MUNICIPIO_CODES:
-        return _KNOWN_MUNICIPIO_CODES[municipio_key]
+    # El CP es mas fiable cuando la poblacion de BD llega generica/incorrecta
+    # (ej. CP 08902 con poblacion "Barcelona" debe ir a Hospitalet).
     cp_digits = re.sub(r"\D+", "", _clean(cp))
     if cp_digits in _KNOWN_CP_MUNICIPIO_CODES:
         return _KNOWN_CP_MUNICIPIO_CODES[cp_digits]
+    municipio_key = _norm_text(municipio)
+    if municipio_key in _KNOWN_MUNICIPIO_CODES:
+        return _KNOWN_MUNICIPIO_CODES[municipio_key]
     return None
 
 
