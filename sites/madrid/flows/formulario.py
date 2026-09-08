@@ -321,6 +321,122 @@ async def _seleccionar_por_indice_autocomplete(page: Page, indice: int) -> bool:
         return False
 
 
+async def _detectar_access_denied_formulario(page: Page) -> bool:
+    """Detecta la pagina de bloqueo de Akamai sin exponer datos sensibles."""
+
+    try:
+        url = page.url.lower()
+        if "errors.edgesuite.net" in url or "access denied" in url:
+            return True
+    except Exception:
+        pass
+
+    try:
+        texto = (await page.locator("body").inner_text(timeout=1000)).lower()
+        return "access denied" in texto or "you don't have permission to access" in texto
+    except Exception:
+        return False
+
+
+def _score_sugerencia_autocomplete(
+    texto: str,
+    valor_introducido: str,
+    tipo_via_preferida: str | None = None,
+) -> int:
+    objetivo = _normalizar_texto_autocomplete(valor_introducido)
+    tipo_norm = _normalizar_texto_autocomplete(tipo_via_preferida or "")
+    tnorm = _normalizar_texto_autocomplete(texto)
+
+    score = 0
+    if objetivo and objetivo in tnorm:
+        score += 20
+
+    objetivo_tokens = [t for t in objetivo.split(" ") if t]
+    if objetivo_tokens:
+        score += sum(2 for tok in objetivo_tokens if tok in tnorm)
+
+    if tipo_norm:
+        if f"[{tipo_norm}]" in tnorm:
+            score += 10
+        elif tipo_norm in tnorm:
+            score += 2
+
+    return score - int(len(tnorm) / 20)
+
+
+async def _click_sugerencia_autocomplete(items, indice: int) -> None:
+    target = items.nth(indice)
+    wrapper = target.locator(":scope >> *").first
+    if await wrapper.count() > 0:
+        await wrapper.click(timeout=1500)
+    else:
+        await target.click(timeout=1500)
+
+
+async def _seleccionar_sugerencia_jquery_ui_click_only(
+    page: Page,
+    valor_introducido: str,
+    nombre_campo: str = "",
+    sugerencia_objetivo: str | None = None,
+    tipo_via_preferida: str | None = None,
+    timeout_ms: int = 2500,
+) -> bool:
+    menu = page.locator("ul.ui-autocomplete")
+    try:
+        await menu.first.wait_for(state="attached", timeout=timeout_ms)
+    except PlaywrightTimeoutError:
+        logger.warning(f"  -> Autocomplete {nombre_campo or valor_introducido}: no aparecio menu")
+        return False
+
+    items = page.locator("ul.ui-autocomplete:visible li.ui-menu-item:visible")
+    try:
+        await items.first.wait_for(state="visible", timeout=timeout_ms)
+    except PlaywrightTimeoutError:
+        logger.warning(f"  -> Autocomplete {nombre_campo or valor_introducido}: sin sugerencias visibles")
+        return False
+
+    try:
+        textos = [t.strip() for t in await items.all_text_contents() if t and t.strip()]
+    except Exception:
+        textos = []
+
+    if not textos:
+        logger.warning(f"  -> Autocomplete {nombre_campo or valor_introducido}: sugerencias vacias")
+        return False
+
+    indice = -1
+    if sugerencia_objetivo:
+        objetivo_norm = _normalizar_texto_autocomplete(sugerencia_objetivo)
+        for idx, texto in enumerate(textos):
+            if _normalizar_texto_autocomplete(texto) == objetivo_norm:
+                indice = idx
+                break
+
+        if indice < 0:
+            logger.warning(
+                f"  -> Autocomplete {nombre_campo or valor_introducido}: "
+                f"no se encontro sugerencia objetivo={sugerencia_objetivo!r} opciones={textos[:5]!r}"
+            )
+            return False
+    else:
+        indice = max(
+            range(len(textos)),
+            key=lambda idx: _score_sugerencia_autocomplete(textos[idx], valor_introducido, tipo_via_preferida),
+        )
+
+    try:
+        await _click_sugerencia_autocomplete(items, indice)
+        try:
+            await menu.first.wait_for(state="hidden", timeout=1500)
+        except PlaywrightTimeoutError:
+            pass
+        await _delay_humano(page, 150, 300)
+        return True
+    except Exception as e:
+        logger.warning(f"  -> No se pudo clickar sugerencia en {nombre_campo or 'autocomplete'}: {e}")
+        return False
+
+
 async def _seleccionar_sugerencia_jquery_ui(
     page: Page,
     valor_introducido: str,
@@ -329,6 +445,15 @@ async def _seleccionar_sugerencia_jquery_ui(
     tipo_via_preferida: str | None = None,
     timeout_ms: int = 2500,
 ) -> bool:
+    return await _seleccionar_sugerencia_jquery_ui_click_only(
+        page,
+        valor_introducido,
+        nombre_campo=nombre_campo,
+        sugerencia_objetivo=sugerencia_objetivo,
+        tipo_via_preferida=tipo_via_preferida,
+        timeout_ms=timeout_ms,
+    )
+
     """
     Selecciona una sugerencia de jQuery UI Autocomplete (si aparece).
 
@@ -537,8 +662,11 @@ async def _rellenar_input_con_autocomplete(
         if sugerencia_objetivo and validar_sin_error and not seleccionado:
             raise ValueError(f"{nombre_campo}: no apareció/autoseleccionó el desplegable de sugerencias")
 
-        # Forzar blur para disparar validaciones server-side en algunos formularios
-        if seleccionado or not sugerencia_objetivo:
+        if await _detectar_access_denied_formulario(page):
+            raise RuntimeError(f"Madrid autocomplete {nombre_campo or selector}: Access Denied tras seleccionar sugerencia")
+
+        # Forzar blur para disparar validaciones server-side solo tras una seleccion valida.
+        if seleccionado:
             try:
                 await elemento.first.press("Tab")
             except Exception:
@@ -546,10 +674,16 @@ async def _rellenar_input_con_autocomplete(
 
         await _delay_humano(page, 300, 500)
 
+        if await _detectar_access_denied_formulario(page):
+            raise RuntimeError(f"Madrid autocomplete {nombre_campo or selector}: Access Denied tras estabilizar campo")
+
         if validar_sin_error:
             await _validar_campo_sin_error(page, selector, nombre_campo=nombre_campo)
 
-        return True
+        return seleccionado
+    except RuntimeError as e:
+        logger.error(f"  -> Error critico rellenando (autocomplete) {nombre_campo or selector}: {e}")
+        raise
     except Exception as e:
         logger.warning(f"  -> Error rellenando (autocomplete) {nombre_campo or selector}: {e}")
         return False
