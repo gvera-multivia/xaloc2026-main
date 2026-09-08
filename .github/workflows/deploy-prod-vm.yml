@@ -71,7 +71,14 @@ jobs:
           fi
           git -C "${DEPLOY_REPO_PATH}" fetch --prune origin main
           git -C "${DEPLOY_REPO_PATH}" reset --hard origin/main
-          git -C "${DEPLOY_REPO_PATH}" clean -fdx
+          # No limpiar artefactos runtime generados por contenedores/navegadores:
+          # pueden pertenecer a root u otros UIDs y bloquear el deploy aunque el
+          # codigo ya este sincronizado correctamente.
+          git -C "${DEPLOY_REPO_PATH}" clean -fdx \
+            -e profiles/ \
+            -e tmp/ \
+            -e screenshots/ \
+            -e logs/
           git -C "${DEPLOY_REPO_PATH}" rev-parse HEAD
 
       - name: Re-run deploy prechecks after sync
