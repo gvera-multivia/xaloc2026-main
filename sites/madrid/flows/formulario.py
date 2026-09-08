@@ -31,6 +31,10 @@ DELAY_DESPUES_SELECT = 1500    # 1.5s
 ACTION_TIMEOUT_MS = 5000
 
 
+class MadridFormularioAccessDenied(RuntimeError):
+    """Bloqueo Akamai detectado durante una transicion necesaria del formulario."""
+
+
 async def _delay_humano(page: Page, min_ms: int = DELAY_ENTRE_CAMPOS_MIN, max_ms: int = DELAY_ENTRE_CAMPOS_MAX) -> None:
     """Añade un pequeño delay aleatorio para simular comportamiento humano."""
     delay = random.randint(min_ms, max_ms)
@@ -758,6 +762,25 @@ async def _seleccionar_opcion(page: Page, selector: str, valor: str, nombre_camp
             if is_disabled:
                 logger.debug(f"  -> Select {nombre_campo or selector} deshabilitado, saltando")
                 return False
+
+            try:
+                estado = await elemento.first.evaluate(
+                    """el => {
+                        const opt = el.options && el.selectedIndex >= 0 ? el.options[el.selectedIndex] : null;
+                        return { value: el.value || "", label: opt ? (opt.textContent || "") : "" };
+                    }"""
+                )
+                valor_actual = str(estado.get("value") or "").strip()
+                label_actual = str(estado.get("label") or "").strip()
+                valor_esperado = str(valor or "").strip()
+                if (
+                    valor_actual == valor_esperado
+                    or _normalizar_texto_autocomplete(label_actual) == _normalizar_texto_autocomplete(valor_esperado)
+                ):
+                    logger.debug(f"  -> {nombre_campo or selector}: ya seleccionado, no se fuerza change")
+                    return True
+            except Exception:
+                pass
             
             # Intentar primero por label
             try:
@@ -842,6 +865,140 @@ async def _esperar_actualizacion_dom(page: Page, timeout_ms: int = 1000) -> None
         await page.wait_for_load_state("domcontentloaded", timeout=3000)
     except PlaywrightTimeoutError:
         pass
+
+
+async def _resumir_boton_submit_final(page: Page, selector: str) -> dict:
+    boton = page.locator(selector).first
+    try:
+        return await boton.evaluate(
+            """el => ({
+                tag: el.tagName,
+                id: el.id || "",
+                name: el.getAttribute("name") || "",
+                type: el.getAttribute("type") || "",
+                value: el.getAttribute("value") || "",
+                disabled: !!el.disabled,
+                onclick: el.getAttribute("onclick") || "",
+                form_id: el.form ? (el.form.id || "") : "",
+                form_action: el.form ? (el.form.action || "") : "",
+                form_method: el.form ? (el.form.method || "") : "",
+            })"""
+        )
+    except Exception as exc:
+        return {"error": repr(exc)}
+
+
+async def _esperar_formulario_estable_antes_submit(page: Page, config: "MadridConfig") -> None:
+    if await _detectar_access_denied_formulario(page):
+        raise MadridFormularioAccessDenied("Madrid formulario: Access Denied antes de pulsar Continuar")
+
+    await page.wait_for_selector(config.continuar_formulario_selector, state="visible", timeout=config.default_timeout)
+    boton = page.locator(config.continuar_formulario_selector).first
+    await boton.scroll_into_view_if_needed()
+
+    try:
+        await page.locator(".ui-autocomplete-loading").first.wait_for(state="hidden", timeout=2500)
+    except PlaywrightTimeoutError:
+        pass
+
+    try:
+        await page.locator("ul.ui-autocomplete:visible").first.wait_for(state="hidden", timeout=1500)
+    except PlaywrightTimeoutError:
+        pass
+
+    try:
+        await page.wait_for_load_state("networkidle", timeout=2500)
+    except PlaywrightTimeoutError:
+        pass
+
+    if await boton.is_disabled():
+        raise RuntimeError("Madrid formulario: boton Continuar visible pero deshabilitado antes del submit final")
+
+    page_state = await page.evaluate(
+        """() => {
+            const form = document.querySelector("form");
+            return {
+                href: document.location.href,
+                form_action: form ? form.action : "",
+                form_method: form ? form.method : "",
+                visible_autocomplete: !!document.querySelector("ul.ui-autocomplete:not([style*='display: none'])"),
+                loading_autocomplete: !!document.querySelector(".ui-autocomplete-loading"),
+            };
+        }"""
+    )
+    logger.info(
+        "Madrid formulario pre-submit estable href=%s action=%s method=%s autocomplete_visible=%s loading=%s",
+        page_state.get("href"),
+        page_state.get("form_action"),
+        page_state.get("form_method"),
+        page_state.get("visible_autocomplete"),
+        page_state.get("loading_autocomplete"),
+    )
+
+    if "WFORS_WBWFORS/servlet" not in str(page_state.get("form_action") or ""):
+        raise RuntimeError(f"Madrid formulario: action inesperado antes de Continuar: {page_state.get('form_action')}")
+
+
+async def _click_continuar_formulario_una_vez(page: Page, config: "MadridConfig", *, intento: int) -> Page:
+    selector = config.continuar_formulario_selector
+    boton = page.locator(selector).first
+    resumen = await _resumir_boton_submit_final(page, selector)
+    logger.info("Madrid formulario Continuar intento=%s boton=%s url=%s", intento, resumen, page.url)
+
+    try:
+        async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
+            await boton.click(timeout=ACTION_TIMEOUT_MS)
+    except PlaywrightTimeoutError:
+        logger.warning("Madrid formulario Continuar intento=%s sin navegacion completa dentro del timeout", intento)
+
+    try:
+        await page.wait_for_load_state("domcontentloaded", timeout=5000)
+    except PlaywrightTimeoutError:
+        pass
+
+    await page.wait_for_timeout(1500)
+    if await _detectar_access_denied_formulario(page):
+        raise MadridFormularioAccessDenied(f"Madrid formulario: Access Denied tras Continuar intento={intento}")
+
+    logger.info("Madrid formulario Continuar intento=%s completado url=%s", intento, page.url)
+    return page
+
+
+async def _recuperar_formulario_tras_access_denied(page: Page, config: "MadridConfig") -> bool:
+    logger.warning("Madrid formulario: intentando recuperar tras Access Denied del submit final")
+    try:
+        await page.go_back(wait_until="domcontentloaded", timeout=config.navigation_timeout)
+    except Exception as exc:
+        logger.warning("Madrid formulario: go_back tras Access Denied fallo: %s", exc)
+        return False
+
+    await page.wait_for_timeout(2500)
+    if await _detectar_access_denied_formulario(page):
+        logger.warning("Madrid formulario: go_back sigue en Access Denied; no se reintenta")
+        return False
+
+    try:
+        await page.wait_for_selector(config.continuar_formulario_selector, state="visible", timeout=5000)
+    except PlaywrightTimeoutError:
+        logger.warning("Madrid formulario: no se recupero el boton Continuar; no se reintenta")
+        return False
+
+    logger.info("Madrid formulario: formulario recuperado; se esperara antes de un unico retry")
+    await page.wait_for_timeout(8000)
+    return True
+
+
+async def _continuar_formulario_controlado(page: Page, config: "MadridConfig") -> Page:
+    for intento in (1, 2):
+        await _esperar_formulario_estable_antes_submit(page, config)
+        try:
+            return await _click_continuar_formulario_una_vez(page, config, intento=intento)
+        except MadridFormularioAccessDenied:
+            if intento == 1 and await _recuperar_formulario_tras_access_denied(page, config):
+                continue
+            raise
+
+    return page
 
 
 async def ejecutar_formulario_madrid(
@@ -1103,12 +1260,7 @@ async def ejecutar_formulario_madrid(
     # =========================================================================
     logger.info("SECCION 8: Pulsando Continuar")
     
-    # Esperar a que el botón esté visible
-    await page.wait_for_selector(config.continuar_formulario_selector, state="visible", timeout=config.default_timeout)
-    
-    # Click y esperar navegación
-    async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
-        await page.click(config.continuar_formulario_selector)
+    page = await _continuar_formulario_controlado(page, config)
     
     logger.info(f"  -> Navegado a pantalla de adjuntos: {page.url}")
     
