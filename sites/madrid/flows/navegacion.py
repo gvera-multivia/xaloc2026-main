@@ -134,6 +134,57 @@ async def _detectar_problema_autenticacion(page: Page) -> str | None:
     return None
 
 
+async def _detectar_access_denied_servcla(page: Page) -> str:
+    """
+    Detecta el bloqueo Akamai/EdgeSuite que Madrid devuelve a veces al saltar
+    desde la autenticacion hacia servcla por HTTP.
+    """
+    try:
+        titulo = (await page.title()).strip()
+    except Exception:
+        titulo = ""
+    try:
+        body = (await page.locator("body").inner_text(timeout=1200)).strip()
+    except Exception:
+        body = ""
+
+    text = f"{titulo}\n{body}"
+    if "Access Denied" not in text and "errors.edgesuite.net" not in text:
+        return ""
+    if "servcla.madrid.es" not in text and "servcla.madrid.es" not in (page.url or ""):
+        return ""
+
+    match = re.search(r"https?://servcla\.madrid\.es/[^\s\"']*", text, re.IGNORECASE)
+    if match:
+        return match.group(0)
+    return page.url or ""
+
+
+async def _recuperar_access_denied_servcla(page: Page, config: "MadridConfig", *, paso: str) -> bool:
+    denied_url = await _detectar_access_denied_servcla(page)
+    if not denied_url:
+        return False
+
+    if denied_url.lower().startswith("http://servcla.madrid.es/"):
+        retry_url = "https://" + denied_url[len("http://") :]
+        logger.warning(
+            "Madrid: Access Denied en servcla detectado en %s; reintentando por HTTPS: %s",
+            paso,
+            retry_url,
+        )
+        await page.goto(retry_url, wait_until="domcontentloaded", timeout=config.navigation_timeout)
+        await page.wait_for_timeout(1500)
+        if await _detectar_access_denied_servcla(page):
+            raise RuntimeError(
+                f"Madrid: Access Denied persiste tras reintentar servcla por HTTPS en {paso}. URL actual: {page.url}"
+            )
+        return True
+
+    raise RuntimeError(
+        f"Madrid: Access Denied en servcla no recuperable automaticamente en {paso}. URL actual: {page.url}"
+    )
+
+
 async def _recuperar_problema_autenticacion(page: Page, config: "MadridConfig", problema: str) -> bool:
     """
     Protocolo de recuperaciÃ³n:
@@ -584,6 +635,7 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
                 problema = await _detectar_problema_autenticacion(page)
                 if problema:
                     await _recuperar_problema_autenticacion(page, config, problema)
+                await _recuperar_access_denied_servcla(page, config, paso="post-auth")
         
         # ========================================================================
         # PASO 7: Click "Continuar" post-autenticaciÃ³n
@@ -602,10 +654,12 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
                 raise
 
             logger.info(f"  a Navegado a: {page.url}")
+            await _recuperar_access_denied_servcla(page, config, paso="PASO 7")
     
     # ========================================================================
     # PASO 8-9: Acceso al formulario (pantalla intermedia servcla o flujo antiguo)
     # ========================================================================
+    await _recuperar_access_denied_servcla(page, config, paso="PASO 8")
     if config.url_servcla_formulario_contains in page.url:
         logger.info("PASO 8-9: Ya estamos en el formulario (action=opcion), saltando selecciAn de acceso")
     else:
