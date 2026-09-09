@@ -32,6 +32,11 @@ class PgAdminStore:
     MADRID_QUERY_ORGANISME_LEGACY = (
         "%SUBDIRECCION GNAL GESTION MULTAS DE MADRID%",
     )
+    SERVEI_CAT_TRANS_REGEX_EXPEDIENTE_CURRENT = r"^\d{2}[-/]\d{7,8}(?:-\d?)?$"
+    SERVEI_CAT_TRANS_REGEX_EXPEDIENTE_LEGACY = (
+        r"^\d{2}[-/]\d{8}-\d$",
+        r"^\d{2}[-/]\d{7,8}-\d$",
+    )
     DIPUTACIO_BCN_QUERY_ORGANISME_APPEND = (
         "%AJUNTAMENT DE MANRESA%",
         "%AJUNTAMENT DE CALDES DE ESTRAC%",
@@ -488,6 +493,30 @@ class PgAdminStore:
             return updated
         except Exception as exc:
             self.logger.warning("No se pudo actualizar regex_expediente de madrid en PG: %s", exc)
+            return 0
+
+    def upgrade_servei_cat_trans_regex_expediente(self) -> int:
+        try:
+            with self._conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE organismo_config
+                           SET regex_expediente = %s,
+                               updated_at = NOW()
+                         WHERE site_id = 'servei_cat_trans'
+                           AND regex_expediente = ANY(%s)
+                        """,
+                        (
+                            self.SERVEI_CAT_TRANS_REGEX_EXPEDIENTE_CURRENT,
+                            list(self.SERVEI_CAT_TRANS_REGEX_EXPEDIENTE_LEGACY),
+                        ),
+                    )
+                    updated = int(cur.rowcount or 0)
+                conn.commit()
+            return updated
+        except Exception as exc:
+            self.logger.warning("No se pudo actualizar regex_expediente de servei_cat_trans en PG: %s", exc)
             return 0
 
     def upgrade_madrid_query_organisme(self) -> int:

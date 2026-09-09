@@ -18,6 +18,10 @@ class ServeiCatTransAdapter(SiteAdapter):
     )
     DEFAULT_QUERY_ORGANISME = "%SERVEI CATALA DE TRANSIT DE%"
     DEFAULT_REGEX_EXPEDIENTE = r"^\d{2}[-/]\d{7,8}(?:-\d?)?$"
+    LEGACY_REGEX_EXPEDIENTE_VARIANTS = (
+        r"^\d{2}[-/]\d{8}-\d$",
+        r"^\d{2}[-/]\d{7,8}-\d$",
+    )
     TARGET_ORGANISME_PREFIXES = (
         "SERVEI CATALA DE TRANSIT DE",
         "SERVEI CATALA DE TRANSIT",
@@ -46,6 +50,13 @@ class ServeiCatTransAdapter(SiteAdapter):
         if value.startswith("ES") and len(value) > 2:
             value = value[2:]
         return re.sub(r"[^A-Z0-9]+", "", value)
+
+    @classmethod
+    def _upgrade_legacy_regex_expediente(cls, pattern: str) -> str:
+        normalized = cls._clean(pattern)
+        if normalized in cls.LEGACY_REGEX_EXPEDIENTE_VARIANTS:
+            return cls.DEFAULT_REGEX_EXPEDIENTE
+        return normalized
 
     @classmethod
     def _load_motivos(cls) -> dict[str, dict[str, Any]]:
@@ -207,7 +218,9 @@ class ServeiCatTransAdapter(SiteAdapter):
         cfg = dict(config or {})
         cfg["query_organisme"] = self._merge_query_organisme(cfg.get("query_organisme"))
 
-        configured_regex = self._clean(cfg.get("regex_expediente")) or self.DEFAULT_REGEX_EXPEDIENTE
+        configured_regex = self._upgrade_legacy_regex_expediente(
+            self._clean(cfg.get("regex_expediente")) or self.DEFAULT_REGEX_EXPEDIENTE
+        )
         regex = self._regex_cache.get(configured_regex)
         if regex is None:
             try:

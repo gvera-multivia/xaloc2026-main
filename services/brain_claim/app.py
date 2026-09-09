@@ -91,6 +91,12 @@ class BrainClaimService:
         updated_madrid_regex = self.admin_store.upgrade_madrid_regex_expediente()
         if updated_madrid_regex:
             logger.info("[brain-claim] actualizado regex_expediente legacy de madrid en PG: %s", updated_madrid_regex)
+        updated_servei_regex = self.admin_store.upgrade_servei_cat_trans_regex_expediente()
+        if updated_servei_regex:
+            logger.info(
+                "[brain-claim] actualizado regex_expediente legacy de servei_cat_trans en PG: %s",
+                updated_servei_regex,
+            )
         updated_madrid_organisme = self.admin_store.upgrade_madrid_query_organisme()
         if updated_madrid_organisme:
             logger.info(
