@@ -28,19 +28,20 @@ def test_madrid_autocomplete_effective_helper_is_click_only():
     assert "_click_sugerencia_autocomplete" in source
 
 
-def test_madrid_autocomplete_wrapper_delegates_before_old_body():
+def test_madrid_autocomplete_wrapper_delegates_to_click_only():
     source = _function_source("_seleccionar_sugerencia_jquery_ui")
     first_return = "return await _seleccionar_sugerencia_jquery_ui_click_only"
 
     assert first_return in source
-    assert source.index(first_return) < source.index("ul.ui-autocomplete")
+    assert "ul.ui-autocomplete" not in source
+    assert "keyboard.press" not in source
 
 
-def test_madrid_autocomplete_tab_only_after_valid_selection():
+def test_madrid_autocomplete_does_not_force_tab_after_selection():
     source = _function_source("_rellenar_input_con_autocomplete")
 
-    assert "if seleccionado:" in source
-    assert "if seleccionado or not sugerencia_objetivo" not in source
+    assert 'press("Tab")' not in source
+    assert "keyboard.press" not in source
 
 
 def test_madrid_final_submit_uses_controlled_helper():
@@ -50,12 +51,12 @@ def test_madrid_final_submit_uses_controlled_helper():
     assert "page.click(config.continuar_formulario_selector)" not in source
 
 
-def test_madrid_final_submit_retry_is_single_and_recoverable():
+def test_madrid_final_submit_has_no_automatic_retry():
     source = _function_source("_continuar_formulario_controlado")
 
-    assert "for intento in (1, 2):" in source
-    assert "_recuperar_formulario_tras_access_denied" in source
-    assert "except MadridFormularioAccessDenied" in source
+    assert "for intento" not in source
+    assert "_recuperar_formulario_tras_access_denied" not in _source()
+    assert "intento=1" in source
 
 
 def test_madrid_select_does_not_reselect_current_value():

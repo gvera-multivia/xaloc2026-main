@@ -248,83 +248,6 @@ async def _esperar_items_autocomplete(page: Page, timeout_ms: int = 5000) -> Non
         await page.wait_for_timeout(100)
 
 
-async def _seleccionar_por_teclado_hasta_objetivo(
-    page: Page,
-    *,
-    objetivo: str,
-    max_pasos: int,
-    timeout_ms: int,
-) -> bool:
-    """
-    Usa ArrowDown/Enter y el aria-live region para garantizar que se selecciona
-    exactamente la sugerencia objetivo.
-    """
-
-    objetivo_norm = _normalizar_texto_autocomplete(objetivo)
-    if not objetivo_norm:
-        return False
-
-    deadline = time.monotonic() + (timeout_ms / 1000.0)
-
-    try:
-        await page.keyboard.press("ArrowDown")
-    except Exception:
-        return False
-
-    for _ in range(max(1, max_pasos)):
-        await page.wait_for_timeout(120)
-
-        actual = await _leer_sugerencia_actual_aria_live(page)
-        if actual and _normalizar_texto_autocomplete(actual) == objetivo_norm:
-            try:
-                await page.keyboard.press("Enter")
-                await page.wait_for_timeout(120)
-                return True
-            except Exception:
-                return False
-
-        if time.monotonic() > deadline:
-            break
-
-        try:
-            await page.keyboard.press("ArrowDown")
-        except Exception:
-            break
-
-    return False
-
-
-async def _seleccionar_por_indice_autocomplete(page: Page, indice: int) -> bool:
-    """
-    Selecciona el item del autocomplete por posición usando teclado.
-
-    jQuery UI: ArrowDown abre el menú y selecciona el primer item; para llegar al item N
-    se hace ArrowDown N veces adicionales y luego Enter.
-    """
-
-    if indice < 0:
-        return False
-
-    try:
-        await page.keyboard.press("ArrowDown")
-    except Exception:
-        return False
-
-    for _ in range(indice):
-        await page.wait_for_timeout(120)
-        try:
-            await page.keyboard.press("ArrowDown")
-        except Exception:
-            return False
-
-    await page.wait_for_timeout(120)
-    try:
-        await page.keyboard.press("Enter")
-        return True
-    except Exception:
-        return False
-
-
 async def _detectar_access_denied_formulario(page: Page) -> bool:
     """Detecta la pagina de bloqueo de Akamai sin exponer datos sensibles."""
 
@@ -458,136 +381,6 @@ async def _seleccionar_sugerencia_jquery_ui(
         timeout_ms=timeout_ms,
     )
 
-    """
-    Selecciona una sugerencia de jQuery UI Autocomplete (si aparece).
-
-    Nota: El HTML del desplegable no está en el formulario; se inyecta como:
-    `ul.ui-autocomplete li.ui-menu-item`.
-    """
-
-    # El UL suele existir aunque esté oculto (display:none). No esperes "visible" aquí.
-    menu = page.locator("ul.ui-autocomplete")
-    try:
-        await menu.first.wait_for(state="attached", timeout=timeout_ms)
-    except PlaywrightTimeoutError:
-        return False
-
-    items = page.locator("ul.ui-autocomplete li.ui-menu-item")
-
-    await _esperar_items_autocomplete(page, timeout_ms=timeout_ms)
-
-    # Si vamos a seleccionar una sugerencia concreta, abrimos el menú antes de clickar.
-    if sugerencia_objetivo:
-        try:
-            await page.keyboard.press("ArrowDown")
-        except Exception:
-            pass
-
-        try:
-            await items.first.wait_for(state="visible", timeout=timeout_ms)
-        except PlaywrightTimeoutError:
-            pass
-
-    try:
-        textos = [t.strip() for t in await items.all_text_contents() if t and t.strip()]
-    except Exception:
-        textos = []
-
-    if sugerencia_objetivo:
-        objetivo_norm = _normalizar_texto_autocomplete(sugerencia_objetivo)
-        if textos:
-            for idx, texto in enumerate(textos):
-                if _normalizar_texto_autocomplete(texto) == objetivo_norm:
-                    if await _seleccionar_por_indice_autocomplete(page, idx):
-                        return True
-                    break
-
-        # Fallback: intentar por aria-live (menos determinista).
-        pasos = (len(textos) + 2) if textos else 15
-        if await _seleccionar_por_teclado_hasta_objetivo(
-            page,
-            objetivo=sugerencia_objetivo,
-            max_pasos=pasos,
-            timeout_ms=timeout_ms,
-        ):
-            return True
-
-    if sugerencia_objetivo and textos:
-        objetivo_norm = _normalizar_texto_autocomplete(sugerencia_objetivo)
-        for idx, texto in enumerate(textos):
-            if _normalizar_texto_autocomplete(texto) == objetivo_norm:
-                try:
-                    target = items.nth(idx)
-                    wrapper = target.locator(":scope >> *").first
-                    if await wrapper.count() > 0:
-                        await wrapper.click(timeout=1000)
-                    else:
-                        await target.click(timeout=1000)
-
-                    try:
-                        await menu.first.wait_for(state="hidden", timeout=1500)
-                    except PlaywrightTimeoutError:
-                        pass
-                    await _delay_humano(page, 150, 300)
-                    return True
-                except Exception as e:
-                    logger.debug(f"  -> No se pudo clickar sugerencia objetivo en {nombre_campo or 'autocomplete'}: {e}")
-                    break
-
-    if not textos:
-        try:
-            await page.keyboard.press("ArrowDown")
-            await page.keyboard.press("Enter")
-            return True
-        except Exception:
-            return False
-
-    objetivo = _normalizar_texto_autocomplete(valor_introducido)
-    tipo_norm = _normalizar_texto_autocomplete(tipo_via_preferida or "")
-
-    mejor_idx = 0
-    mejor_score = -10_000
-    objetivo_tokens = [t for t in objetivo.split(" ") if t]
-
-    for idx, texto in enumerate(textos):
-        tnorm = _normalizar_texto_autocomplete(texto)
-        score = 0
-
-        if objetivo and objetivo in tnorm:
-            score += 20
-
-        if objetivo_tokens:
-            score += sum(2 for tok in objetivo_tokens if tok in tnorm)
-
-        # Preferir el tipo de vía si viene en la sugerencia: "CHAMBERI  [PLAZA]"
-        if tipo_norm:
-            if f"[{tipo_norm}]" in tnorm:
-                score += 10
-            elif tipo_norm in tnorm:
-                score += 2
-
-        # Preferir sugerencias más "limpias" (más cortas) si hay empate
-        score -= int(len(tnorm) / 20)
-
-        if score > mejor_score:
-            mejor_score = score
-            mejor_idx = idx
-
-    try:
-        await items.nth(mejor_idx).click(timeout=1000)
-        await _delay_humano(page, 150, 300)
-        return True
-    except Exception as e:
-        logger.debug(f"  -> No se pudo clickar sugerencia en {nombre_campo or 'autocomplete'}: {e}")
-
-    try:
-        await page.keyboard.press("ArrowDown")
-        await page.keyboard.press("Enter")
-        return True
-    except Exception:
-        return False
-
-
 async def _validar_campo_sin_error(
     page: Page,
     selector: str,
@@ -668,13 +461,6 @@ async def _rellenar_input_con_autocomplete(
 
         if await _detectar_access_denied_formulario(page):
             raise RuntimeError(f"Madrid autocomplete {nombre_campo or selector}: Access Denied tras seleccionar sugerencia")
-
-        # Forzar blur para disparar validaciones server-side solo tras una seleccion valida.
-        if seleccionado:
-            try:
-                await elemento.first.press("Tab")
-            except Exception:
-                pass
 
         await _delay_humano(page, 300, 500)
 
@@ -906,11 +692,6 @@ async def _esperar_formulario_estable_antes_submit(page: Page, config: "MadridCo
     except PlaywrightTimeoutError:
         pass
 
-    try:
-        await page.wait_for_load_state("networkidle", timeout=2500)
-    except PlaywrightTimeoutError:
-        pass
-
     if await boton.is_disabled():
         raise RuntimeError("Madrid formulario: boton Continuar visible pero deshabilitado antes del submit final")
 
@@ -964,42 +745,9 @@ async def _click_continuar_formulario_una_vez(page: Page, config: "MadridConfig"
     return page
 
 
-async def _recuperar_formulario_tras_access_denied(page: Page, config: "MadridConfig") -> bool:
-    logger.warning("Madrid formulario: intentando recuperar tras Access Denied del submit final")
-    try:
-        await page.go_back(wait_until="domcontentloaded", timeout=config.navigation_timeout)
-    except Exception as exc:
-        logger.warning("Madrid formulario: go_back tras Access Denied fallo: %s", exc)
-        return False
-
-    await page.wait_for_timeout(2500)
-    if await _detectar_access_denied_formulario(page):
-        logger.warning("Madrid formulario: go_back sigue en Access Denied; no se reintenta")
-        return False
-
-    try:
-        await page.wait_for_selector(config.continuar_formulario_selector, state="visible", timeout=5000)
-    except PlaywrightTimeoutError:
-        logger.warning("Madrid formulario: no se recupero el boton Continuar; no se reintenta")
-        return False
-
-    logger.info("Madrid formulario: formulario recuperado; se esperara antes de un unico retry")
-    await page.wait_for_timeout(8000)
-    return True
-
-
 async def _continuar_formulario_controlado(page: Page, config: "MadridConfig") -> Page:
-    for intento in (1, 2):
-        await _esperar_formulario_estable_antes_submit(page, config)
-        try:
-            return await _click_continuar_formulario_una_vez(page, config, intento=intento)
-        except MadridFormularioAccessDenied:
-            if intento == 1 and await _recuperar_formulario_tras_access_denied(page, config):
-                continue
-            raise
-
-    return page
-
+    await _esperar_formulario_estable_antes_submit(page, config)
+    return await _click_continuar_formulario_una_vez(page, config, intento=1)
 
 async def ejecutar_formulario_madrid(
     page: Page, 
