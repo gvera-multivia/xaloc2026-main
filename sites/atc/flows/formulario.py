@@ -65,6 +65,17 @@ def _is_atencio_continue_modal_text(value: str) -> bool:
     return bool(has_term and has_economic and has_continue_question)
 
 
+def _is_add_act_button_text(value: str) -> bool:
+    text = _normalize_modal_text(value)
+    return text in {
+        "afegir acte",
+        "anadir acto",
+        "añadir acto",
+        "add act",
+        "add action",
+    }
+
+
 def _is_reposicio_choice_modal_text(value: str) -> bool:
     text = _normalize_modal_text(value)
     if not text:
@@ -150,7 +161,7 @@ async def _select_reposicio_choice_inside_dialog(dialog) -> bool:
 
 async def _click_continue_inside_dialog(dialog) -> bool:
     button = dialog.locator("button.se-button--primary, button").filter(
-        has_text=re.compile(r"^\s*(Continuar|Continue)\s*$", re.IGNORECASE)
+        has_text=re.compile(r"^\s*(Continuar|Continue|Afegir acte|A(?:ñ|n)adir acto|Add act|Add action)\s*$", re.IGNORECASE)
     ).first
     if await button.count() <= 0:
         return False

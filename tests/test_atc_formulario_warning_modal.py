@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from sites.atc.flows import formulario
 from sites.atc.flows.formulario import (
+    _is_add_act_button_text,
     _is_atencio_continue_modal_text,
     _is_csv_rejected_modal_text,
     _is_reposicio_choice_modal_text,
@@ -32,6 +33,11 @@ def test_is_atencio_continue_modal_text_ignores_csv_error_modal() -> None:
 def test_is_csv_rejected_modal_text_detects_csv_errors() -> None:
     text = "No identificamos el CSV que ha indicado. Compruebe el codigo."
     assert _is_csv_rejected_modal_text(text) is True
+
+
+def test_is_add_act_button_text_detects_atc_modal_cta() -> None:
+    assert _is_add_act_button_text("Afegir acte") is True
+    assert _is_add_act_button_text("Añadir acto") is True
 
 
 def test_is_reposicio_choice_modal_text_detects_reclamation_choice() -> None:
