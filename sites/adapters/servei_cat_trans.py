@@ -17,7 +17,7 @@ class ServeiCatTransAdapter(SiteAdapter):
         "http://www.xvia-grupoeuropa.net/intranet/xvia-grupoeuropa/public/servicio/recursos/expedientes/pdf-adjuntos/{id}"
     )
     DEFAULT_QUERY_ORGANISME = "%SERVEI CATALA DE TRANSIT DE%"
-    DEFAULT_REGEX_EXPEDIENTE = r"^\d{2}[-/]\d{8}-\d$"
+    DEFAULT_REGEX_EXPEDIENTE = r"^\d{2}[-/]\d{7,8}(?:-\d?)?$"
     TARGET_ORGANISME_PREFIXES = (
         "SERVEI CATALA DE TRANSIT DE",
         "SERVEI CATALA DE TRANSIT",
@@ -113,6 +113,8 @@ class ServeiCatTransAdapter(SiteAdapter):
         exp = cls._clean(expediente).upper().replace(" ", "")
         if re.fullmatch(r"\d{11}", exp):
             return f"{exp[:2]}/{exp[2:10]}-{exp[10]}"
+        if re.fullmatch(r"\d{2}[-/]\d{7,8}-$", exp):
+            return exp[:-1]
         return exp
 
     @classmethod

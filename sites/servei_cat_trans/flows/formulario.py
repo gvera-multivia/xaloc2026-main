@@ -2156,7 +2156,7 @@ async def _fill_expediente(page: "Page | Frame", datos: "ServeiCatTransTarget", 
         ok_digito,
         digito_id or "suffix",
     )
-    if not (ok_servicio and ok_expediente and ok_digito):
+    if not (ok_servicio and ok_expediente and (ok_digito or not _clean(datos.digito_control))):
         raise RuntimeError(
             "servei_cat_trans.expediente: no se pudieron rellenar todos los campos "
             f"(servicio={ok_servicio}, expediente={ok_expediente}, digito={ok_digito})."

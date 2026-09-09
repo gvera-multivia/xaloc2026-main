@@ -121,9 +121,9 @@ def _split_expediente(expediente: str) -> tuple[str, str, str]:
     raw = _clean(expediente)
     if not raw:
         return "", "", ""
-    match = re.search(r"(\d{2})[/-](\d{7,10})-(\d{1,2})", raw)
+    match = re.search(r"(\d{2})[/-](\d{7,10})(?:-(\d{1,2})?)?", raw)
     if match:
-        return match.group(1), match.group(2), match.group(3)
+        return match.group(1), match.group(2), match.group(3) or ""
     digits = re.findall(r"\d+", raw)
     if len(digits) >= 3:
         return digits[0][-2:], digits[1], digits[2]

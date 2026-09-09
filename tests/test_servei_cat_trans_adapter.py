@@ -96,6 +96,25 @@ def test_fetch_candidates_normalizes_compact_expediente_shape() -> None:
     assert out[0]["Expedient"] == "17/20328298-3"
 
 
+def test_fetch_candidates_accepts_short_expediente_without_control_digit() -> None:
+    adapter = ServeiCatTransAdapter()
+    rows = [
+        {**_base_row(), "idRecurso": 137355, "Expedient": "43/8760773"},
+        {**_base_row(), "idRecurso": 137354, "Expedient": "43/8762638-"},
+    ]
+    repo = _FakeRepo(rows)
+
+    out = adapter.fetch_candidates(
+        config={"query_organisme": "%SERVEI CATALA DE TRANSIT DE%", "filtro_texp": "2,3"},
+        conn_str="dummy",
+        authenticated_user="user",
+        limit=50,
+        resource_repo=repo,
+    )
+
+    assert [item["Expedient"] for item in out] == ["43/8760773", "43/8762638"]
+
+
 def test_fetch_candidates_accepts_identificacion_phase() -> None:
     adapter = ServeiCatTransAdapter()
     row = _base_row()
