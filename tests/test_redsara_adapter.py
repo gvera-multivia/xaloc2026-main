@@ -73,6 +73,10 @@ def test_validate_expediente_by_official_patterns() -> None:
     assert adapter.validate_expediente_for_organisme("AGENCIA TRIBUTARIA ILLES BALEARS -ATIB", "23-016775")
     assert adapter.validate_expediente_for_organisme("AGENCIA TRIBUTARIA DE ILLES BALEARS", "072620106122P")
     assert adapter.validate_expediente_for_organisme("AGENCIA TRIBUTARIA DE ILLES BALEARS", "K1610126341321003")
+    assert adapter.validate_expediente_for_organisme(
+        "AGENCIA TRIBUTARIA ILLES BALEARS -ATIB",
+        "0402502MU00090008952, REC/107556/T",
+    )
     assert adapter.validate_expediente_for_organisme("AJUNTAMENT MIGJORN GRAN", "2025013916")
     assert adapter.validate_expediente_for_organisme("AYUNTAMIENTO DE MOSTOLES", "888249540")
     assert adapter.validate_expediente_for_organisme("AYUNTAMIENTO DE MOSTOLES", "550/2026/MUL")
