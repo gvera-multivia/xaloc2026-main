@@ -105,16 +105,79 @@ async def _select_tribunal_competent_if_present(page: "Page") -> bool:
 
     preferred = page.get_by_role(
         "radio",
-        name=re.compile(r"regional de Catalunya|regional de Catalu(?:n|ñ)a", re.IGNORECASE),
+        name=re.compile(r"regional de Catalu", re.IGNORECASE),
     ).first
     if await preferred.count() > 0:
-        await preferred.click(timeout=ATC_CONFIRM_SHORT_TIMEOUT_MS)
-        await wait_after_action(page)
-        return True
+        for kwargs in ({}, {"force": True}):
+            try:
+                await preferred.click(timeout=ATC_CONFIRM_SHORT_TIMEOUT_MS, **kwargs)
+                await wait_after_action(page)
+                return True
+            except Exception:
+                continue
 
     radios = page.locator("input[type='radio'], [role='radio']")
     if await radios.count() >= 2:
-        await radios.nth(1).click(timeout=ATC_CONFIRM_SHORT_TIMEOUT_MS)
+        middle = radios.nth(1)
+        for kwargs in ({}, {"force": True}):
+            try:
+                await middle.click(timeout=ATC_CONFIRM_SHORT_TIMEOUT_MS, **kwargs)
+                await wait_after_action(page)
+                return True
+            except Exception:
+                continue
+
+    selected = await page.evaluate(
+        """() => {
+            const normalize = (value) => String(value || "")
+                .normalize("NFD")
+                .replace(/[\\u0300-\\u036f]/g, "")
+                .replace(/\\s+/g, " ")
+                .trim()
+                .toLowerCase();
+            const isVisible = (el) => {
+                if (!el) return false;
+                const style = window.getComputedStyle(el);
+                const rect = el.getBoundingClientRect();
+                return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+            };
+            const clickNode = (el) => {
+                if (!el) return false;
+                try { el.scrollIntoView({ block: "center", inline: "center" }); } catch (_err) {}
+                try { el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true })); } catch (_err) {}
+                try { el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true })); } catch (_err) {}
+                try { el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); } catch (_err) {}
+                try { if (typeof el.click === "function") el.click(); } catch (_err) {}
+                return true;
+            };
+            const labels = Array.from(document.querySelectorAll("label, se-radio, [role='radio'], div, span"))
+                .filter(isVisible);
+            const preferredLabel = labels.find((el) => normalize(el.textContent || el.getAttribute("aria-label") || "").includes("regional de catalu"));
+            if (preferredLabel) {
+                const input = preferredLabel.querySelector?.("input[type='radio']") ||
+                    preferredLabel.closest?.("label, se-radio, [role='radio'], .radio-container, .form-check")?.querySelector?.("input[type='radio']");
+                clickNode(input || preferredLabel);
+                if (input) {
+                    try { input.checked = true; } catch (_err) {}
+                    try { input.dispatchEvent(new Event("input", { bubbles: true })); } catch (_err) {}
+                    try { input.dispatchEvent(new Event("change", { bubbles: true })); } catch (_err) {}
+                }
+                return true;
+            }
+            const radios = Array.from(document.querySelectorAll("input[type='radio'], [role='radio']")).filter(isVisible);
+            const middle = radios[1];
+            if (!middle) return false;
+            clickNode(middle);
+            const input = middle.matches?.("input[type='radio']") ? middle : middle.querySelector?.("input[type='radio']");
+            if (input) {
+                try { input.checked = true; } catch (_err) {}
+                try { input.dispatchEvent(new Event("input", { bubbles: true })); } catch (_err) {}
+                try { input.dispatchEvent(new Event("change", { bubbles: true })); } catch (_err) {}
+            }
+            return true;
+        }"""
+    )
+    if selected:
         await wait_after_action(page)
         return True
 
