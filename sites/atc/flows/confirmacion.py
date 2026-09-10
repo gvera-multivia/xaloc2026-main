@@ -97,6 +97,30 @@ async def _fill_confirmation_email_and_send(page: "Page", email: str) -> None:
         await wait_after_action(page)
 
 
+async def _select_tribunal_competent_if_present(page: "Page") -> bool:
+    """ATC can require choosing the destination tribunal before the summary step."""
+    marker = page.get_by_text(re.compile(r"Tribunal competent|Tribunal competente", re.IGNORECASE)).first
+    if await marker.count() <= 0:
+        return False
+
+    preferred = page.get_by_role(
+        "radio",
+        name=re.compile(r"regional de Catalunya|regional de Catalu(?:n|ñ)a", re.IGNORECASE),
+    ).first
+    if await preferred.count() > 0:
+        await preferred.click(timeout=ATC_CONFIRM_SHORT_TIMEOUT_MS)
+        await wait_after_action(page)
+        return True
+
+    radios = page.locator("input[type='radio'], [role='radio']")
+    if await radios.count() >= 2:
+        await radios.nth(1).click(timeout=ATC_CONFIRM_SHORT_TIMEOUT_MS)
+        await wait_after_action(page)
+        return True
+
+    return False
+
+
 async def _download_and_store_receipt(page: "Page", datos: "AtcTarget") -> Path:
     justificante_link = page.locator("a[aria-label*='Justificant'], a:has-text('Justificant')").first
     await justificante_link.wait_for(state="visible", timeout=ATC_CONFIRM_LONG_TIMEOUT_MS)
@@ -316,6 +340,7 @@ async def run_confirmacion(page: "Page", config: "AtcConfig", datos: "AtcTarget"
         return page
 
     # CA/ES: "Continuar" / EN: "Continue"
+    await _select_tribunal_competent_if_present(page)
     btn = page.get_by_role("button", name=re.compile(r"Continuar|Continue", re.IGNORECASE))
     await btn.first.click()
     await wait_after_action(page)
