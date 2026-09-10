@@ -4,8 +4,6 @@ AutomatizaciÃ³n principal para Madrid Ayuntamiento.
 
 from __future__ import annotations
 
-import asyncio
-import os
 from pathlib import Path
 
 from core.base_automation import BaseAutomation
@@ -60,12 +58,6 @@ class MadridAutomation(BaseAutomation):
                 self.logger.info("\n" + "=" * 80)
                 self.logger.info("NAVEGACIAN COMPLETADA - Formulario alcanzado")
                 self.logger.info("=" * 80)
-
-                if (os.getenv("XALOC_MADRID_PAUSE_AT_FORM") or "").strip().lower() in {"1", "true", "yes", "on"}:
-                    self.logger.warning(
-                        "Madrid modo diagnostico: formulario alcanzado; pausa indefinida antes de rellenar."
-                    )
-                    await asyncio.Event().wait()
 
                 # ================================================================
                 # FASE 2: RELLENADO DEL FORMULARIO
