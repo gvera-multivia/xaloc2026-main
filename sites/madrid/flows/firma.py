@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from playwright.async_api import Page, TimeoutError
 
 from core.errors import RestartWithProfileResetError, RetryWithoutAttemptError
+from sites.madrid.flows.sync import wait_madrid_requests
 
 if TYPE_CHECKING:
     from sites.madrid.config import MadridConfig
@@ -84,17 +85,33 @@ async def _entrar_en_signa_desde_prefirma(
     """Pulsa "Firma y registrar" y localiza SIGNA aunque abra popup o cambie en la misma page."""
     button = page.locator(config.firma_registrar_selector).first
     await button.wait_for(state="visible", timeout=config.default_timeout)
+    await wait_madrid_requests(
+        page,
+        label="antes de Firma y registrar",
+        timeout_ms=15_000,
+        quiet_ms=700,
+    )
 
     context = page.context
     pages_before = list(context.pages)
     new_pages: list[Page] = []
     network_events: list[str] = []
+    signa_responses: dict[str, int] = {}
+    signa_request_failures: dict[str, str] = {}
     dialogs: list[str] = []
     signa_url_token = config.url_signa_firma_contains.lower()
     signa_selector = config.verificar_documento_selector
 
     def _summarize_url(url: str) -> str:
         return (url or "")[:240]
+
+    def _signa_request_name(url: str) -> str | None:
+        lowered = (url or "").lower()
+        if "/wfors_wbfors/llamadafirma" in lowered:
+            return "llamadaFirma"
+        if "/wfors_wbfors/guardardocumentosigna" in lowered:
+            return "guardarDocumentoSigna"
+        return None
 
     def _on_page(new_page: Page) -> None:
         new_pages.append(new_page)
@@ -113,11 +130,21 @@ async def _entrar_en_signa_desde_prefirma(
         url = resp.url or ""
         if "SIGNA_WBFIRMAR" in url or "WFORS_WBWFORS" in url:
             network_events.append(f"RES {resp.status} {url[:220]}")
+        request_name = _signa_request_name(url)
+        if request_name:
+            signa_responses[request_name] = resp.status
+            logger.info("Madrid SIGNA: %s status=%s", request_name, resp.status)
+
+    def _on_request_failed(req) -> None:
+        request_name = _signa_request_name(req.url or "")
+        if request_name:
+            signa_request_failures[request_name] = str(req.failure or "request failed")
 
     context.on("page", _on_page)
     page.on("dialog", _on_dialog)
     page.on("request", _on_request)
     page.on("response", _on_response)
+    page.on("requestfailed", _on_request_failed)
 
     url_before = page.url
     logger.info(
@@ -130,7 +157,22 @@ async def _entrar_en_signa_desde_prefirma(
         await button.click()
         deadline = asyncio.get_running_loop().time() + (config.firma_navigation_timeout / 1000)
         last_state_log = 0.0
+        signa_page: Page | None = None
         while asyncio.get_running_loop().time() < deadline:
+            if signa_request_failures:
+                raise RuntimeError(
+                    f"Madrid SIGNA: fallo de red en transicion de firma: {signa_request_failures}"
+                )
+            failed_responses = {
+                name: status
+                for name, status in signa_responses.items()
+                if status >= 400
+            }
+            if failed_responses:
+                raise RuntimeError(
+                    f"Madrid SIGNA: respuesta HTTP invalida en transicion de firma: {failed_responses}"
+                )
+
             candidates = [p for p in [page, *new_pages, *context.pages] if not p.is_closed()]
             seen: set[int] = set()
             for candidate in candidates:
@@ -144,14 +186,14 @@ async def _entrar_en_signa_desde_prefirma(
                     except TimeoutError:
                         pass
                     logger.info("Madrid SIGNA detectada por URL en page url=%s", _summarize_url(candidate.url))
-                    return candidate
+                    signa_page = candidate
                 if await candidate.locator(signa_selector).count() > 0:
                     logger.info(
                         "Madrid SIGNA detectada por selector=%s page_url=%s",
                         signa_selector,
                         _summarize_url(candidate.url),
                     )
-                    return candidate
+                    signa_page = candidate
                 for frame in candidate.frames:
                     frame_url = frame.url or ""
                     if signa_url_token in frame_url.lower():
@@ -160,7 +202,18 @@ async def _entrar_en_signa_desde_prefirma(
                             _summarize_url(frame_url),
                             _summarize_url(candidate.url),
                         )
-                        return candidate
+                        signa_page = candidate
+
+            required_responses_ok = all(
+                signa_responses.get(name) == 200
+                for name in ("llamadaFirma", "guardarDocumentoSigna")
+            )
+            if signa_page is not None and required_responses_ok:
+                await signa_page.locator(signa_selector).wait_for(
+                    state="visible",
+                    timeout=config.default_timeout,
+                )
+                return signa_page
 
             now = asyncio.get_running_loop().time()
             if now - last_state_log > 10:
@@ -189,6 +242,7 @@ async def _entrar_en_signa_desde_prefirma(
             f"url_before={url_before!r} url_after={page.url!r} "
             f"pages={[p.url for p in context.pages if not p.is_closed()]} "
             f"network_tail={network_events[-10:]} dialogs={dialogs[-5:]} "
+            f"signa_responses={signa_responses} request_failures={signa_request_failures} "
             f"expected_selector={signa_selector!r} screenshot={blocked_path}"
         )
     finally:
@@ -196,6 +250,7 @@ async def _entrar_en_signa_desde_prefirma(
         page.remove_listener("dialog", _on_dialog)
         page.remove_listener("request", _on_request)
         page.remove_listener("response", _on_response)
+        page.remove_listener("requestfailed", _on_request_failed)
 
 
 def _construir_ruta_recursos_telematicos(payload: dict, fase_procedimiento: str | None = None) -> Path:
