@@ -71,3 +71,22 @@ def test_madrid_final_submit_stabilization_does_not_force_blur():
     source = _function_source("_esperar_formulario_estable_antes_submit")
 
     assert ".blur(" not in source
+
+
+def test_madrid_final_submit_requires_attachments_screen():
+    source = _function_source("_click_continuar_formulario_una_vez")
+
+    assert "_validar_salida_a_adjuntos(page, config, dialogs)" in source
+    assert "Madrid formulario Continuar intento=%s completado" in source
+    assert source.index("_validar_salida_a_adjuntos(page, config, dialogs)") < source.index(
+        "Madrid formulario Continuar intento=%s completado"
+    )
+
+
+def test_madrid_final_submit_captures_dialogs_and_validation_messages():
+    source = _source()
+
+    assert "MadridFormularioValidationError" in source
+    assert "page.on(\"dialog\", _on_dialog)" in source
+    assert "page.remove_listener(\"dialog\", _on_dialog)" in source
+    assert "madrid_formulario_validacion.png" in source

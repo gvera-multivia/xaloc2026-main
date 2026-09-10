@@ -39,6 +39,10 @@ class MadridFormularioAccessDenied(RuntimeError):
     """Bloqueo Akamai detectado durante una transicion necesaria del formulario."""
 
 
+class MadridFormularioValidationError(RuntimeError):
+    """El formulario no avanzo porque el portal mostro una validacion funcional."""
+
+
 async def _delay_humano(page: Page, min_ms: int = DELAY_ENTRE_CAMPOS_MIN, max_ms: int = DELAY_ENTRE_CAMPOS_MAX) -> None:
     """Espera determinista a que termine la actividad WFORS iniciada por el control."""
     quiet_ms = max(300, min(800, int(min_ms)))
@@ -730,6 +734,95 @@ async def _resumir_boton_submit_final(page: Page, selector: str) -> dict:
         return {"error": repr(exc)}
 
 
+async def _capturar_mensajes_validacion_formulario(page: Page) -> list[str]:
+    selectors = [
+        "[role='alert']",
+        ".textoError",
+        ".error",
+        ".warning",
+        ".alert",
+        ".ui-state-error",
+        ".modal:visible",
+        ".swal2-popup:visible",
+        ".sweet-alert:visible",
+    ]
+    mensajes: list[str] = []
+    for selector in selectors:
+        try:
+            loc = page.locator(selector)
+            for idx in range(min(await loc.count(), 8)):
+                item = loc.nth(idx)
+                if not await item.is_visible(timeout=200):
+                    continue
+                texto = " ".join((await item.inner_text(timeout=500)).split())
+                if texto and texto not in mensajes:
+                    mensajes.append(texto[:500])
+        except Exception:
+            continue
+    return mensajes
+
+
+async def _pantalla_adjuntos_alcanzada(page: Page, timeout_ms: int = 5000) -> bool:
+    checks = [
+        page.locator("input[type='file']").first,
+        page.get_by_text(re.compile(r"Adjuntar Documentaci[oó]n|DOCUMENTACI[OÓ]N A APORTAR", re.IGNORECASE)).first,
+    ]
+    deadline = time.monotonic() + (timeout_ms / 1000)
+    while time.monotonic() < deadline:
+        for check in checks:
+            try:
+                if await check.count() > 0 and await check.is_visible(timeout=300):
+                    return True
+            except Exception:
+                pass
+        await page.wait_for_timeout(200)
+    return False
+
+
+async def _aceptar_popup_direccion_si_aparece(page: Page) -> bool:
+    swal_button = page.get_by_role("button", name="Aceptar dirección y continuar")
+    try:
+        await swal_button.wait_for(state="visible", timeout=2000)
+    except PlaywrightTimeoutError:
+        return False
+
+    logger.info("Madrid formulario: popup de direccion no reconocida detectado")
+    await swal_button.click(timeout=ACTION_TIMEOUT_MS)
+    await wait_madrid_requests(page, label="popup direccion aceptado", timeout_ms=10_000, quiet_ms=500)
+    return True
+
+
+async def _guardar_captura_validacion_formulario(page: Page, config: "MadridConfig") -> None:
+    try:
+        path = config.dir_screenshots / "madrid_formulario_validacion.png"
+        await page.screenshot(path=path, full_page=True)
+        logger.warning("Madrid formulario: captura de validacion guardada en %s", path)
+    except Exception as exc:
+        logger.warning("Madrid formulario: no se pudo guardar captura de validacion: %s", exc)
+
+
+async def _validar_salida_a_adjuntos(page: Page, config: "MadridConfig", dialogs: list[dict]) -> None:
+    if await _pantalla_adjuntos_alcanzada(page, timeout_ms=5000):
+        return
+
+    if await _aceptar_popup_direccion_si_aparece(page):
+        if await _pantalla_adjuntos_alcanzada(page, timeout_ms=8000):
+            return
+
+    mensajes = await _capturar_mensajes_validacion_formulario(page)
+    await _guardar_captura_validacion_formulario(page, config)
+    detalles: list[str] = []
+    if dialogs:
+        detalles.append("dialogs=" + repr(dialogs[:3]))
+    if mensajes:
+        detalles.append("mensajes=" + repr(mensajes[:8]))
+    if not detalles:
+        detalles.append(f"sin mensajes visibles; url={page.url}")
+    raise MadridFormularioValidationError(
+        "Madrid formulario: Continuar no alcanzo la pantalla de adjuntos; " + "; ".join(detalles)
+    )
+
+
 async def _esperar_formulario_estable_antes_submit(page: Page, config: "MadridConfig") -> None:
     if await _detectar_access_denied_formulario(page):
         raise MadridFormularioAccessDenied("Madrid formulario: Access Denied antes de pulsar Continuar")
@@ -790,6 +883,15 @@ async def _click_continuar_formulario_una_vez(page: Page, config: "MadridConfig"
     resumen = await _resumir_boton_submit_final(page, selector)
     logger.info("Madrid formulario Continuar intento=%s boton=%s url=%s", intento, resumen, page.url)
 
+    dialogs: list[dict] = []
+
+    async def _on_dialog(dialog) -> None:
+        info = {"type": dialog.type, "message": dialog.message[:500]}
+        dialogs.append(info)
+        logger.warning("Madrid formulario dialog tras Continuar: %s", info)
+        await dialog.accept()
+
+    page.on("dialog", _on_dialog)
     response = None
     try:
         async with page.expect_response(
@@ -805,6 +907,8 @@ async def _click_continuar_formulario_una_vez(page: Page, config: "MadridConfig"
         response = await response_info.value
     except PlaywrightTimeoutError:
         logger.warning("Madrid formulario Continuar intento=%s sin respuesta POST observable", intento)
+    finally:
+        page.remove_listener("dialog", _on_dialog)
 
     try:
         await page.wait_for_load_state("domcontentloaded", timeout=5000)
@@ -821,6 +925,7 @@ async def _click_continuar_formulario_una_vez(page: Page, config: "MadridConfig"
     if await _detectar_access_denied_formulario(page):
         raise MadridFormularioAccessDenied(f"Madrid formulario: Access Denied tras Continuar intento={intento}")
 
+    await _validar_salida_a_adjuntos(page, config, dialogs)
     logger.info("Madrid formulario Continuar intento=%s completado url=%s", intento, page.url)
     return page
 
