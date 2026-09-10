@@ -103,6 +103,39 @@ async def _select_tribunal_competent_if_present(page: "Page") -> bool:
     if await marker.count() <= 0:
         return False
 
+    native_radios = page.locator("input[type='radio']")
+    if await native_radios.count() >= 2:
+        middle = native_radios.nth(1)
+        for kwargs in ({}, {"force": True}):
+            try:
+                await middle.click(timeout=ATC_CONFIRM_SHORT_TIMEOUT_MS, **kwargs)
+                await wait_after_action(page)
+                return True
+            except Exception:
+                continue
+
+    role_radios = page.get_by_role("radio")
+    if await role_radios.count() >= 2:
+        middle = role_radios.nth(1)
+        for kwargs in ({}, {"force": True}):
+            try:
+                await middle.click(timeout=ATC_CONFIRM_SHORT_TIMEOUT_MS, **kwargs)
+                await wait_after_action(page)
+                return True
+            except Exception:
+                continue
+
+    component_radios = page.locator("se-radio, [role='radio']")
+    if await component_radios.count() >= 2:
+        middle = component_radios.nth(1)
+        for kwargs in ({}, {"force": True}):
+            try:
+                await middle.click(timeout=ATC_CONFIRM_SHORT_TIMEOUT_MS, **kwargs)
+                await wait_after_action(page)
+                return True
+            except Exception:
+                continue
+
     preferred = page.get_by_role(
         "radio",
         name=re.compile(r"regional de Catalu", re.IGNORECASE),
