@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
 from core.errors import RestartWithProfileResetError
+from sites.madrid.flows.sync import install_madrid_request_sync, wait_madrid_requests
 
 if TYPE_CHECKING:
     from sites.madrid.config import MadridConfig
@@ -165,23 +166,8 @@ async def _recuperar_access_denied_servcla(page: Page, config: "MadridConfig", *
     if not denied_url:
         return False
 
-    if denied_url.lower().startswith("http://servcla.madrid.es/"):
-        retry_url = "https://" + denied_url[len("http://") :]
-        logger.warning(
-            "Madrid: Access Denied en servcla detectado en %s; reintentando por HTTPS: %s",
-            paso,
-            retry_url,
-        )
-        await page.goto(retry_url, wait_until="domcontentloaded", timeout=config.navigation_timeout)
-        await page.wait_for_timeout(1500)
-        if await _detectar_access_denied_servcla(page):
-            raise RuntimeError(
-                f"Madrid: Access Denied persiste tras reintentar servcla por HTTPS en {paso}. URL actual: {page.url}"
-            )
-        return True
-
     raise RuntimeError(
-        f"Madrid: Access Denied en servcla no recuperable automaticamente en {paso}. URL actual: {page.url}"
+        f"Madrid: Access Denied en servcla durante {paso}. URL actual: {page.url}"
     )
 
 
@@ -253,23 +239,30 @@ async def _manejar_pantalla_servcla_inicial(page: Page, config: "MadridConfig") 
     # Esto dispara cargarOpciones() y el DOM se actualiza.
     await page.wait_for_selector(config.selectors_navegacion.radio_nuevo_tramite, state="visible", timeout=config.default_timeout)
     
-    await page.wait_for_timeout(500) # Delay
-    await page.click(config.selectors_navegacion.radio_nuevo_tramite)
+    radio_nuevo = page.locator(config.selectors_navegacion.radio_nuevo_tramite).first
+    if not await radio_nuevo.is_checked():
+        await wait_madrid_requests(page, label="antes de seleccionar nueva solicitud")
+        await radio_nuevo.click()
+        await wait_madrid_requests(page, label="seleccion de nueva solicitud")
     await _asegurar_no_tramite_en_curso(page)
 
     # 2) Tras el refresh, aparece el radio de rol (checkboxInteresado)
     await page.wait_for_selector(config.selectors_navegacion.radio_interesado, state="visible", timeout=config.default_timeout)
     
-    await page.wait_for_timeout(500) # Delay
-    await page.click(config.selectors_navegacion.radio_interesado)
+    radio_interesado = page.locator(config.selectors_navegacion.radio_interesado).first
+    if not await radio_interesado.is_checked():
+        await wait_madrid_requests(page, label="antes de seleccionar rol interesado")
+        await radio_interesado.click()
+        await wait_madrid_requests(page, label="seleccion de rol interesado")
     await _asegurar_no_tramite_en_curso(page)
 
     # 3) Continuar
     await page.wait_for_selector(config.selectors_navegacion.continuar_interesado, state="visible", timeout=config.default_timeout)
     
-    await page.wait_for_timeout(500) # Delay
+    await wait_madrid_requests(page, label="antes de continuar como interesado")
     async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
         await page.click(config.selectors_navegacion.continuar_interesado)
+    await wait_madrid_requests(page, label="continuar como interesado")
 
     logger.info(f"  a Navegado a: {page.url}")
     return True
@@ -299,7 +292,10 @@ async def _aceptar_cookies_si_aparece(page: Page) -> None:
             if await boton.count() > 0:
                 await boton.first.click(timeout=1500)
                 logger.info(f"  a Cookies aceptadas (botAn: {patron})")
-                await page.wait_for_timeout(500)
+                try:
+                    await boton.first.wait_for(state="hidden", timeout=2000)
+                except PlaywrightTimeoutError:
+                    pass
                 return
         except Exception:
             continue
@@ -311,7 +307,10 @@ async def _aceptar_cookies_si_aparece(page: Page) -> None:
             if await enlace.count() > 0:
                 await enlace.first.click(timeout=1500)
                 logger.info(f"  a Cookies aceptadas (enlace: {patron})")
-                await page.wait_for_timeout(500)
+                try:
+                    await enlace.first.wait_for(state="hidden", timeout=2000)
+                except PlaywrightTimeoutError:
+                    pass
                 return
         except Exception:
             continue
@@ -337,7 +336,12 @@ async def _esperar_dom_estable(page: Page, timeout_ms: int = 2000) -> None:
         logger.warning("Timeout esperando load completo, continuando...")
     
     # Espera adicional para scripts dinÃ¡micos
-    await page.wait_for_timeout(timeout_ms)
+    await wait_madrid_requests(
+        page,
+        label="estabilizacion de navegacion",
+        timeout_ms=max(10_000, timeout_ms * 5),
+        quiet_ms=500,
+    )
 
 
 async def _cerrar_pestanas_extra(page: Page) -> None:
@@ -441,7 +445,7 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
     """
     
     # Delay entre pasos de navegaciÃ³n (demo)
-    DELAY_ENTRE_PASOS = int(config.delay_ms or config.flow_timeouts.short_delay)
+    install_madrid_request_sync(page)
     
     # ========================================================================
     # CONFIGURACIÃ“N INICIAL: Bloqueo de popups de redes sociales
@@ -489,7 +493,6 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
         await _aceptar_cookies_si_aparece(page)
         
         # Delay adicional para parecer mÃ¡s humano
-        await page.wait_for_timeout(DELAY_ENTRE_PASOS)
         
         # Esperar y clickar el botÃ³n "Tramitar en lÃ­nea"
         await page.wait_for_selector(config.selectors_navegacion.boton_tramitar, state="visible", timeout=config.default_timeout)
@@ -501,7 +504,6 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
         logger.info(f"  a Bloque de tramitaciAn visible ({config.selectors_navegacion.bloque_tramitar})")
         
         # Delay antes del siguiente paso
-        await page.wait_for_timeout(DELAY_ENTRE_PASOS)
         
         # ========================================================================
         # PASO 2: Click "Registro ElectrÃ³nico"
@@ -523,7 +525,6 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
         await _aceptar_cookies_si_aparece(page)
         
         # Delay antes del siguiente paso
-        await page.wait_for_timeout(DELAY_ENTRE_PASOS)
         
         # ========================================================================
         # PASO 3: Click primer "Continuar"
@@ -553,7 +554,6 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
         await _esperar_dom_estable(page, timeout_ms=config.flow_timeouts.dom_stable)
         
         # Delay antes del siguiente paso
-        await page.wait_for_timeout(DELAY_ENTRE_PASOS)
         
         # ========================================================================
         # PASO 4: Click "Iniciar tramitaciÃ³n"
@@ -562,7 +562,6 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
         await page.wait_for_selector(config.selectors_login.iniciar_tramitacion, state="visible", timeout=config.default_timeout)
         
         # Delay antes de la acciÃ³n que llevarÃ¡ a la pasarela de certificados
-        await page.wait_for_timeout(DELAY_ENTRE_PASOS)
         
         async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
             await page.click(config.selectors_login.iniciar_tramitacion)
@@ -610,7 +609,6 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
                 pass
             else:
                 # Delay antes de hacer click en certificado
-                await page.wait_for_timeout(DELAY_ENTRE_PASOS)
 
                 # ========================================================================
                 # PASO 6: Manejar popup de certificado Windows
@@ -625,6 +623,7 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
                 # - se navega directamente a servcla (sesiÃ³n ya guardada)
                 try:
                     await _esperar_auth_o_servcla(page, config, timeout_ms=config.flow_timeouts.auth_wait)
+                    await wait_madrid_requests(page, label="autenticacion por certificado")
                     logger.info("  -> Autenticacion completada (btnContinuar o servcla)")
                 except PlaywrightTimeoutError:
                     if getattr(config.navegador, "headless", False):
@@ -644,7 +643,6 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
         if await _esta_en_servcla(page, config):
             logger.info("  a Ya estamos en servcla; no existe 'Continuar' post-auth. Saltando PASO 7.")
         else:
-            await page.wait_for_timeout(DELAY_ENTRE_PASOS)
 
             try:
                 async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
@@ -654,6 +652,7 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
                 raise
 
             logger.info(f"  a Navegado a: {page.url}")
+            await wait_madrid_requests(page, label="continuar post autenticacion")
             await _recuperar_access_denied_servcla(page, config, paso="PASO 7")
     
     # ========================================================================
@@ -671,8 +670,11 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
             await page.wait_for_selector(config.selectors_navegacion.radio_nuevo_tramite, state="visible", timeout=config.default_timeout)
             
             # Delay
-            await page.wait_for_timeout(DELAY_ENTRE_PASOS)
-            await page.click(config.selectors_navegacion.radio_nuevo_tramite)
+            radio_nuevo = page.locator(config.selectors_navegacion.radio_nuevo_tramite).first
+            if not await radio_nuevo.is_checked():
+                await wait_madrid_requests(page, label="antes de nueva solicitud fallback")
+                await radio_nuevo.click()
+                await wait_madrid_requests(page, label="nueva solicitud fallback")
             logger.info(f"  a Radio seleccionado ({config.selectors_navegacion.radio_nuevo_tramite})")
             
             # Esperar a que cargarOpciones() actualice el DOM
@@ -682,14 +684,16 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
             logger.info("PASO 9: Seleccionando 'Persona o Entidad interesada'")
             
             # Delay
-            await page.wait_for_timeout(DELAY_ENTRE_PASOS)
-            await page.click(config.selectors_navegacion.radio_interesado)
+            radio_interesado = page.locator(config.selectors_navegacion.radio_interesado).first
+            if not await radio_interesado.is_checked():
+                await wait_madrid_requests(page, label="antes de rol interesado fallback")
+                await radio_interesado.click()
+                await wait_madrid_requests(page, label="rol interesado fallback")
             logger.info(f"  a Radio seleccionado ({config.selectors_navegacion.radio_interesado})")
             
             await page.wait_for_selector(config.selectors_navegacion.continuar_interesado, state="visible", timeout=config.default_timeout)
             
             # Delay
-            await page.wait_for_timeout(DELAY_ENTRE_PASOS)
             try:
                 async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
                     await page.click(config.selectors_navegacion.continuar_interesado)
@@ -697,6 +701,7 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
                 await _asegurar_no_tramite_en_curso(page, por_timeout=True, paso="PASO 9")
                 raise
             logger.info(f"  a Navegado a: {page.url}")
+            await wait_madrid_requests(page, label="continuar interesado fallback")
     
     # ========================================================================
     # PASO 10: Condicional - Manejar "Nuevotrámites" si existe
@@ -714,7 +719,6 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
         logger.info("  a Detectado trAmite a medias, clickando 'Nuevo trAmite'")
         
         # Delay
-        await page.wait_for_timeout(DELAY_ENTRE_PASOS)
         
         try:
             async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
@@ -724,6 +728,7 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
             raise
         
         logger.info(f"  a Navegado a nuevo trAmite: {page.url}")
+        await wait_madrid_requests(page, label="nuevo tramite condicional")
         
     except PlaywrightTimeoutError:
         logger.info("  a No hay trAmite a medias, continuando normalmente")
@@ -738,6 +743,7 @@ async def ejecutar_navegacion_madrid(page: Page, config: MadridConfig) -> Page:
     
     # Esperar a que exista un formulario (criterio genÃ©rico por ahora)
     await page.wait_for_selector(config.selectors_navegacion.formulario_llegada, state="attached", timeout=config.default_timeout)
+    await wait_madrid_requests(page, label="formulario Madrid listo", quiet_ms=700)
     
     logger.info("  a Formulario detectado")
     logger.info(f"  a URL final: {page.url}")

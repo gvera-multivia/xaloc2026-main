@@ -6,7 +6,6 @@ Implementa las secciones documentadas en explore-html/llenar formulario-madrid.m
 from __future__ import annotations
 
 import logging
-import random
 import re
 import time
 import unicodedata
@@ -19,6 +18,11 @@ if TYPE_CHECKING:
     from sites.madrid.data_models import MadridFormData
 
 from sites.madrid.data_models import TipoExpediente, NaturalezaEscrito, TipoDocumento
+from sites.madrid.flows.sync import (
+    MadridRequestSyncTimeout,
+    pending_madrid_requests,
+    wait_madrid_requests,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,9 +40,9 @@ class MadridFormularioAccessDenied(RuntimeError):
 
 
 async def _delay_humano(page: Page, min_ms: int = DELAY_ENTRE_CAMPOS_MIN, max_ms: int = DELAY_ENTRE_CAMPOS_MAX) -> None:
-    """Añade un pequeño delay aleatorio para simular comportamiento humano."""
-    delay = random.randint(min_ms, max_ms)
-    await page.wait_for_timeout(delay)
+    """Espera determinista a que termine la actividad WFORS iniciada por el control."""
+    quiet_ms = max(300, min(800, int(min_ms)))
+    await wait_madrid_requests(page, label="estabilizacion de campo", quiet_ms=quiet_ms)
 
 
 async def _rellenar_input(page: Page, selector: str, valor: str, nombre_campo: str = "") -> bool:
@@ -60,13 +64,23 @@ async def _rellenar_input(page: Page, selector: str, valor: str, nombre_campo: s
             if is_disabled:
                 logger.debug(f"  -> Campo {nombre_campo or selector} deshabilitado, saltando")
                 return False
-            
+
+            valor_actual = await elemento.first.input_value()
+            if valor_actual == valor:
+                logger.debug(f"  -> {nombre_campo or selector}: ya contiene el valor esperado")
+                return True
+
+            await wait_madrid_requests(page, label=f"antes de rellenar {nombre_campo or selector}")
+            await elemento.first.click(timeout=ACTION_TIMEOUT_MS)
+            await wait_madrid_requests(page, label=f"foco en {nombre_campo or selector}")
             await elemento.first.fill(valor, timeout=ACTION_TIMEOUT_MS)
             logger.debug(f"  -> {nombre_campo or selector}: {valor}")
             
             # Pequeño delay después de rellenar
             await _delay_humano(page)
             return True
+    except MadridRequestSyncTimeout:
+        raise
     except Exception as e:
         logger.warning(f"  -> Error rellenando {nombre_campo or selector}: {e}")
     
@@ -90,8 +104,14 @@ async def _rellenar_y_validar_text_area(page: Page, selector: str, valor: str, n
         await elemento.scroll_into_view_if_needed()
         await elemento.wait_for(state="visible", timeout=2000)
 
+        if await elemento.input_value() == valor:
+            return True
+
+        await wait_madrid_requests(page, label=f"antes de rellenar {nombre_campo or selector}")
+
         # Limpiar y rellenar inicial
         await elemento.click()
+        await wait_madrid_requests(page, label=f"foco en {nombre_campo or selector}")
         await elemento.fill(valor)
         
         # Delay para que el DOM se asiente antes de validar
@@ -122,6 +142,8 @@ async def _rellenar_y_validar_text_area(page: Page, selector: str, valor: str, n
             logger.error(f"  X Error: {nombre_campo or selector} no pudo ser validado (Actual: {len(valor_actual)}, Esperado: {len(valor)})")
             return False
 
+    except MadridRequestSyncTimeout:
+        raise
     except Exception as e:
         logger.warning(f"  -> Error rellenando/validando {nombre_campo or selector}: {e}")
         return False
@@ -439,10 +461,22 @@ async def _rellenar_input_con_autocomplete(
             logger.debug(f"  -> Campo {nombre_campo or selector} deshabilitado, saltando")
             return False
 
+        if await elemento.first.input_value() == valor:
+            logger.debug(f"  -> {nombre_campo or selector}: ya contiene el valor esperado")
+            return True
+
+        await wait_madrid_requests(page, label=f"antes de autocomplete {nombre_campo or selector}")
         await elemento.first.click(timeout=2000)
-        await elemento.first.press("Control+A")
-        # Es importante "teclear" (no solo fill) para disparar keyup/keydown + debounce (bindWithDelay).
-        await elemento.first.type(valor, delay=80)
+        await wait_madrid_requests(page, label=f"foco en autocomplete {nombre_campo or selector}")
+
+        nombre_norm = _normalizar_texto_autocomplete(nombre_campo)
+        conservative_fill = nombre_norm == "NOMBRE VIA REP"
+        if conservative_fill:
+            await elemento.first.fill(valor)
+        else:
+            await elemento.first.press("Control+A")
+            # Es importante "teclear" (no solo fill) para disparar keyup/keydown + debounce (bindWithDelay).
+            await elemento.first.type(valor, delay=80)
 
         # Esperar a que el widget termine la llamada (ui-autocomplete-loading) y se rellenen items.
         await _esperar_autocomplete_listo(page, selector, timeout_ms=5000)
@@ -454,6 +488,7 @@ async def _rellenar_input_con_autocomplete(
             nombre_campo=nombre_campo,
             sugerencia_objetivo=sugerencia_objetivo,
             tipo_via_preferida=tipo_via_preferida,
+            timeout_ms=1200 if conservative_fill else 2500,
         )
 
         if sugerencia_objetivo and validar_sin_error and not seleccionado:
@@ -471,6 +506,8 @@ async def _rellenar_input_con_autocomplete(
             await _validar_campo_sin_error(page, selector, nombre_campo=nombre_campo)
 
         return seleccionado
+    except MadridRequestSyncTimeout:
+        raise
     except RuntimeError as e:
         logger.error(f"  -> Error critico rellenando (autocomplete) {nombre_campo or selector}: {e}")
         raise
@@ -540,7 +577,7 @@ async def _seleccionar_opcion(page: Page, selector: str, valor: str, nombre_camp
     """
     if not valor:
         return False
-    
+
     try:
         elemento = page.locator(selector)
         if await elemento.count() > 0:
@@ -548,6 +585,8 @@ async def _seleccionar_opcion(page: Page, selector: str, valor: str, nombre_camp
             if is_disabled:
                 logger.debug(f"  -> Select {nombre_campo or selector} deshabilitado, saltando")
                 return False
+
+            await wait_madrid_requests(page, label=f"antes de seleccionar {nombre_campo or selector}")
 
             try:
                 estado = await elemento.first.evaluate(
@@ -589,6 +628,8 @@ async def _seleccionar_opcion(page: Page, selector: str, valor: str, nombre_camp
                         await _delay_humano(page, DELAY_DESPUES_SELECT, DELAY_DESPUES_SELECT + 200)
                         return True
                     raise
+    except MadridRequestSyncTimeout:
+        raise
     except Exception as e:
         logger.warning(f"  -> Error seleccionando {nombre_campo or selector}: {e}")
     
@@ -610,14 +651,18 @@ async def _marcar_checkbox(page: Page, selector: str, marcar: bool, nombre_campo
             
             is_checked = await elemento.first.is_checked()
             if marcar and not is_checked:
+                await wait_madrid_requests(page, label=f"antes de marcar {nombre_campo or selector}")
                 await elemento.first.check(timeout=ACTION_TIMEOUT_MS)
                 logger.debug(f"  -> {nombre_campo or selector}: marcado")
                 await _delay_humano(page)
             elif not marcar and is_checked:
+                await wait_madrid_requests(page, label=f"antes de desmarcar {nombre_campo or selector}")
                 await elemento.first.uncheck(timeout=ACTION_TIMEOUT_MS)
                 logger.debug(f"  -> {nombre_campo or selector}: desmarcado")
                 await _delay_humano(page)
             return True
+    except MadridRequestSyncTimeout:
+        raise
     except Exception as e:
         logger.warning(f"  -> Error con checkbox {nombre_campo or selector}: {e}")
     
@@ -632,10 +677,16 @@ async def _click_radio(page: Page, selector: str, nombre_campo: str = "") -> boo
     try:
         elemento = page.locator(selector)
         if await elemento.count() > 0:
+            if await elemento.first.is_checked():
+                logger.debug(f"  -> Radio {nombre_campo or selector}: ya seleccionado")
+                return True
+            await wait_madrid_requests(page, label=f"antes de radio {nombre_campo or selector}")
             await elemento.first.click(timeout=ACTION_TIMEOUT_MS)
             logger.debug(f"  -> Radio {nombre_campo or selector}: seleccionado")
             await _delay_humano(page)
             return True
+    except MadridRequestSyncTimeout:
+        raise
     except Exception as e:
         logger.warning(f"  -> Error con radio {nombre_campo or selector}: {e}")
     
@@ -646,7 +697,12 @@ async def _esperar_actualizacion_dom(page: Page, timeout_ms: int = 1000) -> None
     """
     Espera a que el DOM se actualice después de un cambio que dispara refresh.
     """
-    await page.wait_for_timeout(timeout_ms)
+    await wait_madrid_requests(
+        page,
+        label="actualizacion dinamica del formulario",
+        timeout_ms=max(10_000, timeout_ms * 5),
+        quiet_ms=500,
+    )
     try:
         await page.wait_for_load_state("domcontentloaded", timeout=3000)
     except PlaywrightTimeoutError:
@@ -692,6 +748,13 @@ async def _esperar_formulario_estable_antes_submit(page: Page, config: "MadridCo
     except PlaywrightTimeoutError:
         pass
 
+    await wait_madrid_requests(
+        page,
+        label="antes de Continuar",
+        timeout_ms=config.default_timeout,
+        quiet_ms=700,
+    )
+
     if await boton.is_disabled():
         raise RuntimeError("Madrid formulario: boton Continuar visible pero deshabilitado antes del submit final")
 
@@ -708,12 +771,13 @@ async def _esperar_formulario_estable_antes_submit(page: Page, config: "MadridCo
         }"""
     )
     logger.info(
-        "Madrid formulario pre-submit estable href=%s action=%s method=%s autocomplete_visible=%s loading=%s",
+        "Madrid formulario pre-submit estable href=%s action=%s method=%s autocomplete_visible=%s loading=%s pending=%s",
         page_state.get("href"),
         page_state.get("form_action"),
         page_state.get("form_method"),
         page_state.get("visible_autocomplete"),
         page_state.get("loading_autocomplete"),
+        pending_madrid_requests(page),
     )
 
     if "WFORS_WBWFORS/servlet" not in str(page_state.get("form_action") or ""):
@@ -726,18 +790,34 @@ async def _click_continuar_formulario_una_vez(page: Page, config: "MadridConfig"
     resumen = await _resumir_boton_submit_final(page, selector)
     logger.info("Madrid formulario Continuar intento=%s boton=%s url=%s", intento, resumen, page.url)
 
+    response = None
     try:
-        async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
-            await boton.click(timeout=ACTION_TIMEOUT_MS)
+        async with page.expect_response(
+            lambda resp: resp.request.method == "POST"
+            and "WFORS_WBWFORS/servlet" in resp.url,
+            timeout=config.navigation_timeout,
+        ) as response_info:
+            try:
+                async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
+                    await boton.click(timeout=ACTION_TIMEOUT_MS)
+            except PlaywrightTimeoutError:
+                logger.warning("Madrid formulario Continuar intento=%s sin navegacion completa dentro del timeout", intento)
+        response = await response_info.value
     except PlaywrightTimeoutError:
-        logger.warning("Madrid formulario Continuar intento=%s sin navegacion completa dentro del timeout", intento)
+        logger.warning("Madrid formulario Continuar intento=%s sin respuesta POST observable", intento)
 
     try:
         await page.wait_for_load_state("domcontentloaded", timeout=5000)
     except PlaywrightTimeoutError:
         pass
 
-    await page.wait_for_timeout(1500)
+    await wait_madrid_requests(page, label="despues de Continuar", timeout_ms=10_000, quiet_ms=500)
+    logger.info(
+        "Madrid formulario Continuar intento=%s status=%s response_url=%s",
+        intento,
+        response.status if response else None,
+        response.url if response else "",
+    )
     if await _detectar_access_denied_formulario(page):
         raise MadridFormularioAccessDenied(f"Madrid formulario: Access Denied tras Continuar intento={intento}")
 
@@ -829,7 +909,7 @@ async def ejecutar_formulario_madrid(
     
     await _rellenar_input(page, config.matricula_selector, datos.matricula, "Matrícula")
     logger.info(f"  -> Matricula: {datos.matricula}")
-    
+
     # =========================================================================
     # SECCIÓN 3: Datos del interesado
     # =========================================================================
