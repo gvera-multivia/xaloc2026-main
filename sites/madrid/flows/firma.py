@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import unicodedata
@@ -72,6 +73,129 @@ async def _detectar_tramite_en_curso(page: Page) -> bool:
         "tramite abierto",
     )
     return any(t in text for t in tokens)
+
+
+async def _entrar_en_signa_desde_prefirma(
+    page: Page,
+    config: "MadridConfig",
+    *,
+    screenshot_dir: Path,
+) -> Page:
+    """Pulsa "Firma y registrar" y localiza SIGNA aunque abra popup o cambie en la misma page."""
+    button = page.locator(config.firma_registrar_selector).first
+    await button.wait_for(state="visible", timeout=config.default_timeout)
+
+    context = page.context
+    pages_before = list(context.pages)
+    new_pages: list[Page] = []
+    network_events: list[str] = []
+    dialogs: list[str] = []
+    signa_url_token = config.url_signa_firma_contains.lower()
+    signa_selector = config.verificar_documento_selector
+
+    def _summarize_url(url: str) -> str:
+        return (url or "")[:240]
+
+    def _on_page(new_page: Page) -> None:
+        new_pages.append(new_page)
+        logger.info("Madrid SIGNA: nueva page/popup detectada url=%s", _summarize_url(new_page.url))
+
+    def _on_dialog(dialog) -> None:
+        dialogs.append(f"{dialog.type}: {dialog.message}")
+        logger.warning("Madrid SIGNA dialog tras Firma y registrar: type=%s text=%s", dialog.type, dialog.message)
+
+    def _on_request(req) -> None:
+        url = req.url or ""
+        if "SIGNA_WBFIRMAR" in url or "WFORS_WBWFORS" in url:
+            network_events.append(f"REQ {req.method} {req.resource_type} {url[:220]}")
+
+    def _on_response(resp) -> None:
+        url = resp.url or ""
+        if "SIGNA_WBFIRMAR" in url or "WFORS_WBWFORS" in url:
+            network_events.append(f"RES {resp.status} {url[:220]}")
+
+    context.on("page", _on_page)
+    page.on("dialog", _on_dialog)
+    page.on("request", _on_request)
+    page.on("response", _on_response)
+
+    url_before = page.url
+    logger.info(
+        "Madrid SIGNA: click Firma y registrar url_before=%s selector=%s pages_before=%s",
+        _summarize_url(url_before),
+        config.firma_registrar_selector,
+        len(pages_before),
+    )
+    try:
+        await button.click()
+        deadline = asyncio.get_running_loop().time() + (config.firma_navigation_timeout / 1000)
+        last_state_log = 0.0
+        while asyncio.get_running_loop().time() < deadline:
+            candidates = [p for p in [page, *new_pages, *context.pages] if not p.is_closed()]
+            seen: set[int] = set()
+            for candidate in candidates:
+                if id(candidate) in seen:
+                    continue
+                seen.add(id(candidate))
+                url = candidate.url or ""
+                if signa_url_token in url.lower():
+                    try:
+                        await candidate.wait_for_load_state("domcontentloaded", timeout=5000)
+                    except TimeoutError:
+                        pass
+                    logger.info("Madrid SIGNA detectada por URL en page url=%s", _summarize_url(candidate.url))
+                    return candidate
+                if await candidate.locator(signa_selector).count() > 0:
+                    logger.info(
+                        "Madrid SIGNA detectada por selector=%s page_url=%s",
+                        signa_selector,
+                        _summarize_url(candidate.url),
+                    )
+                    return candidate
+                for frame in candidate.frames:
+                    frame_url = frame.url or ""
+                    if signa_url_token in frame_url.lower():
+                        logger.info(
+                            "Madrid SIGNA detectada en iframe frame_url=%s page_url=%s",
+                            _summarize_url(frame_url),
+                            _summarize_url(candidate.url),
+                        )
+                        return candidate
+
+            now = asyncio.get_running_loop().time()
+            if now - last_state_log > 10:
+                last_state_log = now
+                logger.info(
+                    "Madrid SIGNA esperando carga: active_url=%s pages=%s network_tail=%s dialogs=%s",
+                    _summarize_url(page.url),
+                    [
+                        _summarize_url(p.url)
+                        for p in context.pages
+                        if not p.is_closed()
+                    ],
+                    network_events[-6:],
+                    dialogs[-3:],
+                )
+            await page.wait_for_timeout(500)
+
+        screenshot_dir.mkdir(parents=True, exist_ok=True)
+        blocked_path = screenshot_dir / "madrid_signa_transition_blocked.png"
+        try:
+            await page.screenshot(path=blocked_path, full_page=True)
+        except Exception:
+            blocked_path = Path("")
+        raise RuntimeError(
+            "Madrid SIGNA: timeout tras 'Firma y registrar'. "
+            f"url_before={url_before!r} url_after={page.url!r} "
+            f"pages={[p.url for p in context.pages if not p.is_closed()]} "
+            f"network_tail={network_events[-10:]} dialogs={dialogs[-5:]} "
+            f"expected_selector={signa_selector!r} screenshot={blocked_path}"
+        )
+    finally:
+        context.remove_listener("page", _on_page)
+        page.remove_listener("dialog", _on_dialog)
+        page.remove_listener("request", _on_request)
+        page.remove_listener("response", _on_response)
 
 
 def _construir_ruta_recursos_telematicos(payload: dict, fase_procedimiento: str | None = None) -> Path:
@@ -415,17 +539,8 @@ async def ejecutar_firma_madrid(
 
     # 1. Ir a pantalla de firma (SIGNA) si no estamos ya.
     if config.url_signa_firma_contains.lower() not in (page.url or "").lower():
-        await page.wait_for_selector(
-            config.firma_registrar_selector,
-            state="visible",
-            timeout=config.default_timeout,
-        )
         logger.info("Pantalla pre-firma detectada. Entrando en SIGNA (Firma y registrar)...")
-        try:
-            async with page.expect_navigation(wait_until="domcontentloaded", timeout=config.navigation_timeout):
-                await page.click(config.firma_registrar_selector)
-        except TimeoutError:
-            logger.warning("No se detecto navegacion tras 'Firma y registrar'; continuando.")
+        page = await _entrar_en_signa_desde_prefirma(page, config, screenshot_dir=tmp_dir)
         if await _detectar_tramite_en_curso(page):
             raise RestartWithProfileResetError(
                 "Madrid: pantalla de 'tramite en curso' detectada tras pulsar 'Firma y registrar'."
