@@ -107,9 +107,9 @@ async def _entrar_en_signa_desde_prefirma(
 
     def _signa_request_name(url: str) -> str | None:
         lowered = (url or "").lower()
-        if "/wfors_wbfors/llamadafirma" in lowered:
+        if "/llamadafirma" in lowered:
             return "llamadaFirma"
-        if "/wfors_wbfors/guardardocumentosigna" in lowered:
+        if "/guardardocumentosigna" in lowered:
             return "guardarDocumentoSigna"
         return None
 
@@ -157,7 +157,6 @@ async def _entrar_en_signa_desde_prefirma(
         await button.click()
         deadline = asyncio.get_running_loop().time() + (config.firma_navigation_timeout / 1000)
         last_state_log = 0.0
-        signa_page: Page | None = None
         while asyncio.get_running_loop().time() < deadline:
             if signa_request_failures:
                 raise RuntimeError(
@@ -173,6 +172,8 @@ async def _entrar_en_signa_desde_prefirma(
                     f"Madrid SIGNA: respuesta HTTP invalida en transicion de firma: {failed_responses}"
                 )
 
+            signa_url_page: Page | None = None
+            signa_selector_page: Page | None = None
             candidates = [p for p in [page, *new_pages, *context.pages] if not p.is_closed()]
             seen: set[int] = set()
             for candidate in candidates:
@@ -186,14 +187,23 @@ async def _entrar_en_signa_desde_prefirma(
                     except TimeoutError:
                         pass
                     logger.info("Madrid SIGNA detectada por URL en page url=%s", _summarize_url(candidate.url))
-                    signa_page = candidate
-                if await candidate.locator(signa_selector).count() > 0:
-                    logger.info(
-                        "Madrid SIGNA detectada por selector=%s page_url=%s",
-                        signa_selector,
-                        _summarize_url(candidate.url),
-                    )
-                    signa_page = candidate
+                    signa_url_page = candidate
+                selector = candidate.locator(signa_selector)
+                if await selector.count() > 0:
+                    try:
+                        await selector.wait_for(
+                            state="visible",
+                            timeout=min(config.default_timeout, 1000),
+                        )
+                    except TimeoutError:
+                        pass
+                    else:
+                        logger.info(
+                            "Madrid SIGNA detectada por selector visible=%s page_url=%s",
+                            signa_selector,
+                            _summarize_url(candidate.url),
+                        )
+                        signa_selector_page = candidate
                 for frame in candidate.frames:
                     frame_url = frame.url or ""
                     if signa_url_token in frame_url.lower():
@@ -202,17 +212,30 @@ async def _entrar_en_signa_desde_prefirma(
                             _summarize_url(frame_url),
                             _summarize_url(candidate.url),
                         )
-                        signa_page = candidate
+                        signa_url_page = candidate
 
-            required_responses_ok = all(
-                signa_responses.get(name) == 200
-                for name in ("llamadaFirma", "guardarDocumentoSigna")
-            )
-            if signa_page is not None and required_responses_ok:
-                await signa_page.locator(signa_selector).wait_for(
-                    state="visible",
-                    timeout=config.default_timeout,
-                )
+            signa_page = signa_selector_page or signa_url_page
+            if signa_page is not None:
+                failed_responses = {
+                    name: status
+                    for name, status in signa_responses.items()
+                    if status >= 400
+                }
+                if failed_responses:
+                    raise RuntimeError(
+                        f"Madrid SIGNA: respuesta HTTP invalida en transicion de firma: {failed_responses}"
+                    )
+                missing_responses = [
+                    name
+                    for name in ("llamadaFirma", "guardarDocumentoSigna")
+                    if name not in signa_responses
+                ]
+                if missing_responses:
+                    logger.info(
+                        "Madrid SIGNA: pantalla lista sin observar respuestas auxiliares=%s; "
+                        "se continua por evidencia de UI/URL",
+                        missing_responses,
+                    )
                 return signa_page
 
             now = asyncio.get_running_loop().time()

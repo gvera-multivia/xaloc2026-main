@@ -22,6 +22,7 @@ from core.xvia_auth import create_authenticated_session_in_place
 from core.xvia_deselect import deselect_resource
 
 from core.worker.processor import process_task, _extraer_n_expediente
+from core.worker.completion_guard import SQLServerCompletionGuard
 from core.worker.utils import int_env, purge_invalid_incidents_if_supported
 
 logger = logging.getLogger("worker")
@@ -43,6 +44,67 @@ def _resolve_incident_resource_id(job) -> Optional[int]:
     except Exception:
         return None
 
+
+async def _ack_if_already_completed(
+    *,
+    job,
+    completion_guard: SQLServerCompletionGuard,
+    queue_gateway,
+    realtime_store,
+    started_at: datetime,
+) -> bool:
+    """Finaliza localmente un job cuyo recurso ya consta completado en SQL Server."""
+    resource_id = _resolve_incident_resource_id(job)
+    if resource_id is None:
+        return False
+
+    status = completion_guard.check(resource_id)
+    if status is None or not status.completed:
+        return False
+
+    completed_at = None if status.completed_at is None else str(status.completed_at)
+    result = {
+        "skipped": True,
+        "reason": "resource_already_completed_in_sqlserver",
+        "source": "worker_sqlserver_completion_guard",
+        "sqlserver_estado": status.estado,
+        "sqlserver_completed_at": completed_at,
+    }
+    await queue_gateway.ack(job, result=result)
+
+    ended_at = datetime.now(timezone.utc)
+    try:
+        realtime_store.record_task_success(
+            payload=job.payload,
+            site_id=job.site_id,
+            resource_id=resource_id,
+            job_id=job.job_id,
+            protocol=job.protocol,
+            result=result,
+            started_at=started_at,
+            ended_at=ended_at,
+        )
+    except Exception as exc:
+        # El ACK de la cola/ledger ya se ha realizado; un fallo de telemetria no
+        # debe devolver el job a Redis y provocar una presentacion duplicada.
+        logger.warning(
+            "Guard SQL completado: no se pudo registrar telemetria job=%s resource=%s: %s",
+            job.job_id,
+            resource_id,
+            exc,
+        )
+
+    logger.warning(
+        "Guard SQL completado: job=%s site=%s resource=%s descartado antes de ejecutar "
+        "(Estado=%r, FUsuarioCompletado=%r); ACK aplicado a cola y ledger.",
+        job.job_id,
+        job.site_id,
+        resource_id,
+        status.estado,
+        completed_at,
+    )
+    return True
+
 async def run_worker_loop():
     global logger
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:8]
@@ -53,6 +115,7 @@ async def run_worker_loop():
     realtime_store = build_realtime_store(logger=logger)
     queue_backend = get_queue_mode()
     queue_gateway = build_queue_gateway(backend=queue_backend, db=db)
+    completion_guard = SQLServerCompletionGuard(logger=logger)
     logger.info("Iniciando Worker Loop. Esperando tareas...")
     logger.info("Run ID: %s", run_id)
     logger.info(f"Backend de cola activo: {queue_backend}")
@@ -237,6 +300,20 @@ async def run_worker_loop():
                     )
                     started = time.perf_counter()
                     started_at = datetime.now(timezone.utc)
+
+                    if await _ack_if_already_completed(
+                        job=job,
+                        completion_guard=completion_guard,
+                        queue_gateway=queue_gateway,
+                        realtime_store=realtime_store,
+                        started_at=started_at,
+                    ):
+                        success_jobs += 1
+                        current_job_finalized = True
+                        current_job = None
+                        runtime_state["current_job_id"] = None
+                        _push_runtime_state_now()
+                        continue
 
                     stopped_from_ui = False
                     process_task_future: Optional[asyncio.Task] = None
@@ -539,6 +616,8 @@ async def run_worker_loop():
 
         if auth_session and not auth_session.closed:
             await auth_session.close()
+
+        completion_guard.close()
 
         db.mark_worker_runtime_offline(worker_id=worker_instance_id)
         if enforce_singleton:

@@ -13,6 +13,24 @@ logger = logging.getLogger("redis_client")
 _redis_client: Optional["redis.Redis"] = None
 _redis_pool: Optional["redis.ConnectionPool"] = None
 
+_DEFAULT_SOCKET_TIMEOUT_SECONDS = 30.0
+_DEFAULT_CONNECT_TIMEOUT_SECONDS = 5.0
+
+
+def _positive_float_env(name: str, default: float) -> float:
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning("%s=%r no es un numero valido; se usara %.1fs.", name, raw, default)
+        return default
+    if value <= 0:
+        logger.warning("%s=%r debe ser mayor que cero; se usara %.1fs.", name, raw, default)
+        return default
+    return value
+
 
 def _normalize_redis_url(redis_url: str) -> str:
     raw = str(redis_url or "").strip()
@@ -60,7 +78,26 @@ def get_redis_client() -> Optional["redis.Redis"]:
     try:
         # Use a connection pool for better performance
         if _redis_pool is None:
-            _redis_pool = redis.ConnectionPool.from_url(redis_url, decode_responses=True)
+            # redis-py 8.x may install a five-second read timeout when none is
+            # supplied.  That races with our blocking XREADGROUP calls (the
+            # validator blocks for five seconds by default), turning an empty
+            # poll into a process-killing TimeoutError.  Keep the read timeout
+            # comfortably above every blocking read currently used by the
+            # services, while retaining a short connection timeout.
+            socket_timeout = _positive_float_env(
+                "REDIS_SOCKET_TIMEOUT_SECONDS",
+                _DEFAULT_SOCKET_TIMEOUT_SECONDS,
+            )
+            socket_connect_timeout = _positive_float_env(
+                "REDIS_CONNECT_TIMEOUT_SECONDS",
+                _DEFAULT_CONNECT_TIMEOUT_SECONDS,
+            )
+            _redis_pool = redis.ConnectionPool.from_url(
+                redis_url,
+                decode_responses=True,
+                socket_timeout=socket_timeout,
+                socket_connect_timeout=socket_connect_timeout,
+            )
 
         _redis_client = redis.Redis(connection_pool=_redis_pool)
         logger.info(f"Redis client initialized with URL: {redis_url}")
