@@ -711,6 +711,29 @@ class BrainClaimService:
 
                     has_active_job = resource_id in active_job_ids
                     if has_active_job:
+                        if prepared_candidate.get("fecpres"):
+                            try:
+                                repaired = self.runtime_store.repair_active_job_submission_date(
+                                    site_id=site_id,
+                                    resource_id=resource_id,
+                                    submission_date_iso=str(prepared_candidate.get("fecpres") or ""),
+                                )
+                                if repaired:
+                                    logger.info(
+                                        "[%s] reparada submission_date de job activo idRecurso=%s fecpres=%s.",
+                                        site_id,
+                                        resource_id,
+                                        prepared_candidate.get("fecpres"),
+                                    )
+                            except AttributeError:
+                                pass
+                            except Exception as exc:
+                                logger.warning(
+                                    "[%s] no se pudo reparar submission_date de job activo idRecurso=%s: %s",
+                                    site_id,
+                                    resource_id,
+                                    exc,
+                                )
                         recovery = self.runtime_store.recover_stale_queued_job_for_resource(
                             site_id=site_id,
                             resource_id=resource_id,

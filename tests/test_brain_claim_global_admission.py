@@ -54,33 +54,40 @@ class _FakeAdminStore:
 
 
 class _FakeRuntimeStore:
-    @staticmethod
-    def purge_completed_resources_from_operational_tables() -> dict[str, int]:
+    def __init__(self, *, active_resource_ids: set[int] | None = None) -> None:
+        self.active_resource_ids = set(active_resource_ids or set())
+        self.repaired_submission_dates: list[tuple[str, int, str]] = []
+
+    def purge_completed_resources_from_operational_tables(self) -> dict[str, int]:
         return {"deleted_total": 0}
 
-    @staticmethod
-    def is_site_processing_paused(**_: Any) -> bool:
+    def is_site_processing_paused(self, **_: Any) -> bool:
         return False
 
-    @staticmethod
-    def get_paused_resource_ids(**_: Any) -> set[int]:
+    def get_paused_resource_ids(self, **_: Any) -> set[int]:
         return set()
 
-    @staticmethod
-    def get_active_job_resource_ids(**_: Any) -> set[int]:
-        return set()
+    def get_active_job_resource_ids(self, **kwargs: Any) -> set[int]:
+        return set(kwargs.get("resource_ids") or set()) & self.active_resource_ids
 
-    @staticmethod
-    def is_resource_processing_paused(**_: Any) -> bool:
+    def is_resource_processing_paused(self, **_: Any) -> bool:
         return False
 
-    @staticmethod
-    def recover_stale_queued_job_for_resource(**_: Any) -> dict[str, Any]:
+    def recover_stale_queued_job_for_resource(self, **_: Any) -> dict[str, Any]:
         return {"recovered": False}
 
-    @staticmethod
-    def has_active_job_for_resource(**_: Any) -> bool:
-        return False
+    def has_active_job_for_resource(self, **kwargs: Any) -> bool:
+        return int(kwargs.get("resource_id") or 0) in self.active_resource_ids
+
+    def repair_active_job_submission_date(self, **kwargs: Any) -> int:
+        self.repaired_submission_dates.append(
+            (
+                str(kwargs.get("site_id") or ""),
+                int(kwargs.get("resource_id") or 0),
+                str(kwargs.get("submission_date_iso") or ""),
+            )
+        )
+        return 1
 
 
 class _FakeStreams:
@@ -108,12 +115,13 @@ def _make_service(
     adapters: list[_FakeAdapter],
     max_claims: int,
     site_limits: dict[str, int] | None = None,
+    active_resource_ids: set[int] | None = None,
 ) -> BrainClaimService:
     service = BrainClaimService.__new__(BrainClaimService)
     service.adapters = {adapter.site_id: adapter for adapter in adapters}
     service.max_claims = max_claims
     service.admin_store = _FakeAdminStore()
-    service.runtime_store = _FakeRuntimeStore()
+    service.runtime_store = _FakeRuntimeStore(active_resource_ids=active_resource_ids)
     service.realtime_store = SimpleNamespace(clear_incident=lambda **_: None)
     service.streams = _FakeStreams()
     service.resource_repo = object()
@@ -250,3 +258,31 @@ def test_run_tick_enforces_site_limit_after_global_sort() -> None:
     assert capped_site.fetch_limits == [3]
     assert [event for event in events if event.startswith("claim:")] == ["claim:31", "claim:40"]
     assert stats["claimed"] == 2
+
+
+def test_run_tick_repairs_submission_date_for_active_job_before_dedup_skip() -> None:
+    today = business_today()
+    events: list[str] = []
+    site = _FakeAdapter(
+        site_id="site_a",
+        priority=0,
+        events=events,
+        candidates=[_candidate(50, None)],
+    )
+    service = _make_service(
+        adapters=[site],
+        max_claims=1,
+        active_resource_ids={50},
+    )
+    service._hydrate_candidates_batch_for_payload = lambda **_: {
+        50: {"fpresentacion": today.isoformat()}
+    }
+
+    stats = asyncio.run(service.run_tick())
+
+    assert stats["claimed"] == 0
+    assert service.streams.published == []
+    assert [event for event in events if event.startswith("claim:")] == []
+    assert service.runtime_store.repaired_submission_dates == [
+        ("site_a", 50, today.isoformat())
+    ]

@@ -402,6 +402,55 @@ class PgRuntimeStore:
                 rows = cur.fetchall()
         return {int(row[0]) for row in rows if row and row[0] is not None}
 
+    def repair_active_job_submission_date(
+        self,
+        *,
+        site_id: str,
+        resource_id: int,
+        submission_date_iso: str,
+    ) -> int:
+        value = str(submission_date_iso or "").strip()
+        if not value:
+            return 0
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE jobs
+                    SET submission_date = %s::date,
+                        payload_json = jsonb_set(
+                            COALESCE(payload_json, '{}'::jsonb),
+                            '{fecpres}',
+                            to_jsonb(%s::text),
+                            true
+                        ),
+                        updated_at = NOW()
+                    WHERE status IN ('queued', 'processing', 'in_progress')
+                      AND submission_date IS NULL
+                      AND COALESCE(payload_json->>'site_id', split_part(dedup_key, ':', 1), '') = %s
+                      AND COALESCE(
+                            CASE
+                                WHEN (payload_json->>'idRecurso') ~ '^[0-9]+$'
+                                    THEN (payload_json->>'idRecurso')::bigint
+                                WHEN (payload_json->>'idRecurso') ~ '^[0-9]+\\.0+$'
+                                    THEN ((payload_json->>'idRecurso')::numeric)::bigint
+                                ELSE NULL
+                            END,
+                            CASE
+                                WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+$'
+                                    THEN split_part(dedup_key, ':', 2)::bigint
+                                WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+\\.0+$'
+                                    THEN (split_part(dedup_key, ':', 2)::numeric)::bigint
+                                ELSE NULL
+                            END
+                      ) = %s
+                    """,
+                    (value, value, str(site_id), int(resource_id)),
+                )
+                updated = int(cur.rowcount or 0)
+            conn.commit()
+        return updated
+
     def recover_stale_queued_job_for_resource(
         self,
         *,
