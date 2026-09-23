@@ -4,7 +4,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Optional
 
 try:
@@ -13,6 +13,7 @@ except Exception:  # pragma: no cover
     psycopg = None
 
 from core.runtime_flags import get_report_pg_dsn
+from core.date_normalization import normalize_date_iso
 
 
 @dataclass
@@ -83,6 +84,8 @@ class PgJobStore:
             payload.setdefault("protocol", protocol)
         if resource_id is not None and "idRecurso" not in payload:
             payload["idRecurso"] = resource_id
+        submission_date_iso = normalize_date_iso(payload.get("fecpres"))
+        submission_date = date.fromisoformat(submission_date_iso) if submission_date_iso else None
         error_message = None
         if state in {"failed", "dead", "cancelled"}:
             error_message = f"state={state}"
@@ -93,12 +96,12 @@ class PgJobStore:
                     cur.execute(
                         """
                         INSERT INTO jobs (
-                            job_id, organism_id, dedup_key, status, priority,
+                            job_id, organism_id, dedup_key, status, priority, submission_date,
                             payload_json, result_json, error_message,
                             queued_at, started_at, finished_at, created_at, updated_at
                         )
                         VALUES (
-                            %s, NULL, %s, %s, 100,
+                            %s, NULL, %s, %s, 100, %s,
                             %s::jsonb, NULL, %s,
                             CASE WHEN %s = 'queued' THEN %s::timestamptz ELSE NULL END,
                             CASE WHEN %s = 'processing' THEN %s::timestamptz ELSE NULL END,
@@ -108,6 +111,7 @@ class PgJobStore:
                         ON CONFLICT (job_id) DO UPDATE SET
                             dedup_key = EXCLUDED.dedup_key,
                             status = EXCLUDED.status,
+                            submission_date = COALESCE(EXCLUDED.submission_date, jobs.submission_date),
                             payload_json = COALESCE(EXCLUDED.payload_json, jobs.payload_json),
                             error_message = CASE
                                 WHEN EXCLUDED.status IN ('queued', 'processing', 'completed') THEN NULL
@@ -132,6 +136,7 @@ class PgJobStore:
                             str(job_id),
                             dedup_key,
                             str(state),
+                            submission_date,
                             json.dumps(payload, ensure_ascii=False),
                             error_message,
                             str(state),

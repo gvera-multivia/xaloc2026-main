@@ -348,7 +348,7 @@ class SQLiteDatabase:
                         AND rpp.resource_id = tramite_queue.resource_id
                         AND (rpp.expires_at IS NULL OR rpp.expires_at > ?)
                   )
-                ORDER BY created_at ASC
+                ORDER BY created_at DESC
                 LIMIT 1
                 """,
                 (now_iso, now_iso),

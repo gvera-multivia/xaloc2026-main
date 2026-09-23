@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 
 from core.client_documentation import check_requires_gesdoc
 from core.contact_defaults import get_default_contact_email
+from core.date_normalization import normalize_date_iso
 from core.pg_control_plane_store import PgControlPlaneStore
 from core.realtime_store import build_realtime_store
 from core.redis_client import get_redis_client
@@ -108,6 +109,7 @@ class PayloadValidatorService:
             "idRecurso": resource.get("id"),
             "idExp": resource.get("exp_id"),
             "numclient": resource.get("numclient"),
+            "fecpres": resource.get("submission_date"),
             "expediente": resource.get("expedient"),
             "Expedient": resource.get("expedient"),
             "expediente_num": resource.get("expedient"),
@@ -172,6 +174,11 @@ class PayloadValidatorService:
 
     def _normalize_payload(self, raw_payload: dict[str, Any]) -> dict[str, Any]:
         payload = self._hydrate_payload_from_canonical(raw_payload)
+        submission_date = normalize_date_iso(
+            payload.get("fecpres") or payload.get("fpresentacion")
+        )
+        if submission_date:
+            payload["fecpres"] = submission_date
         return self._ensure_default_emails(payload)
 
     @staticmethod

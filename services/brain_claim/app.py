@@ -9,8 +9,10 @@ import signal
 import uuid
 import sys
 import time
+from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import aiohttp
 from dotenv import load_dotenv
@@ -20,6 +22,7 @@ from core.pg_admin_store import PgAdminStore
 from core.pg_runtime_store import PgRuntimeStore
 from core.realtime_store import build_realtime_store
 from core.consultor import ConsultorResourceRepositoryAdapter, ConsultorService
+from core.date_normalization import normalize_date_iso, submission_date_priority_key
 from core.repositories import ResourceRepository
 from core.sqlserver_utils import build_sqlserver_connection_string
 from core.xvia_auth import create_authenticated_session_in_place
@@ -42,6 +45,41 @@ from services.brain_claim.processable_validator import validate_candidate
 load_dotenv()
 
 logger = logging.getLogger("brain_claim_service")
+
+
+def _candidate_submission_date(candidate: dict[str, Any]) -> Any:
+    for key in ("fecpres", "fpresentacion", "submission_date"):
+        value = candidate.get(key)
+        if value not in (None, ""):
+            return value
+
+    canonical = candidate.get("__canonical_v1")
+    if isinstance(canonical, dict):
+        resource = canonical.get("resource")
+        if isinstance(resource, dict):
+            value = resource.get("submission_date")
+            if value not in (None, ""):
+                return value
+    return None
+
+
+def _candidate_admission_priority(
+    candidate: dict[str, Any],
+    *,
+    today: date | None = None,
+) -> tuple[int, int]:
+    """Order candidates as today, recent past, near future, then no date."""
+    return submission_date_priority_key(_candidate_submission_date(candidate), today=today)
+
+
+@dataclass(slots=True)
+class _PreparedClaimCandidate:
+    site_id: str
+    adapter: SiteAdapter
+    candidate: dict[str, Any]
+    resource_id: int
+    on_discard: Callable[[dict[str, Any]], None]
+    arrival_order: int
 
 
 def _setup_brain_claim_logging() -> None:
@@ -508,6 +546,8 @@ class BrainClaimService:
             return
 
     async def run_tick(self) -> dict[str, Any]:
+        """Build one cross-site admission snapshot, then claim it by date priority."""
+
         stats = {
             "claimed": 0,
             "published_candidates": 0,
@@ -528,6 +568,7 @@ class BrainClaimService:
                 logger.info("[brain-claim] cleanup completados en tick: %s", cleanup)
         except Exception as exc:
             logger.warning("[brain-claim] fallo en cleanup de completados: %s", exc)
+
         configs = {cfg["site_id"]: cfg for cfg in self.get_active_configs()}
         configured_sites = sorted(configs.keys())
         configured_sig = "|".join(configured_sites)
@@ -540,98 +581,139 @@ class BrainClaimService:
                     missing_cfg,
                 )
             self._last_configured_sites_signature = configured_sig
-        remaining = self.max_claims
 
-        for site_id, adapter in sorted(self.adapters.items(), key=lambda x: x[1].priority):
-            if remaining <= 0:
-                break
+        def _discard_callback(default_site_id: str) -> Callable[[dict[str, Any]], None]:
+            def _on_discard(item: dict[str, Any]) -> None:
+                error_code = str(item.get("tipo_incidencia") or "SITE_RULE_DISCARDED").strip() or "SITE_RULE_DISCARDED"
+                reason = str(item.get("motivo") or "Recurso descartado por regla de negocio/sede.").strip()
+                self._record_incident(
+                    site_id=str(item.get("site_id") or default_site_id),
+                    error_code=error_code,
+                    description=reason,
+                    candidate=item,
+                )
+                stats["incidents_logged"] += 1
+
+            return _on_discard
+
+        # Phase 1: gather and validate every active site before spending a claim
+        # slot. This prevents adapter priority from deciding admission priority.
+        prepared: list[_PreparedClaimCandidate] = []
+        site_claim_limits: dict[str, int | None] = {}
+        arrival_order = 0
+
+        for site_id, adapter in sorted(self.adapters.items(), key=lambda item: item[1].priority):
             config = configs.get(site_id)
             if not config:
                 continue
             site_limit = self._site_claim_limit_from_config(config)
-            site_claimed = 0
+            site_claim_limits[site_id] = site_limit
             if self.runtime_store.is_site_processing_paused(site_id=site_id):
                 continue
+
             try:
                 await self.init_session(config["login_url"])
-                def _on_discard(item: dict[str, Any]) -> None:
-                    error_code = str(item.get("tipo_incidencia") or "SITE_RULE_DISCARDED").strip() or "SITE_RULE_DISCARDED"
-                    reason = str(item.get("motivo") or "Recurso descartado por regla de negocio/sede.").strip()
-                    self._record_incident(
-                        site_id=str(item.get("site_id") or site_id),
-                        error_code=error_code,
-                        description=reason,
-                        candidate=item,
-                    )
-                    stats["incidents_logged"] += 1
-
+                on_discard = _discard_callback(site_id)
+                # The per-site limit caps claims, not discovery. Global admission
+                # still needs enough candidates from every site to compare them.
+                fetch_limit = self.max_claims
                 candidates = adapter.fetch_candidates(
                     config=config,
                     conn_str=self.sqlserver_conn_str,
                     authenticated_user=self.authenticated_user,
-                    limit=min(remaining, site_limit) if site_limit is not None else remaining,
-                    on_discard=_on_discard,
+                    limit=fetch_limit,
+                    on_discard=on_discard,
                     resource_repo=(self.consultor_repo if site_id in self.full_payload_sites else self.consultor_repo_light),
                 )
                 parsed_candidates: list[tuple[int, dict[str, Any]]] = []
-                for cand in candidates:
-                    rid = self._parse_resource_id(cand.get("idRecurso"))
-                    if rid is None:
-                        continue
-                    parsed_candidates.append((rid, cand))
+                for candidate in candidates:
+                    resource_id = self._parse_resource_id(candidate.get("idRecurso"))
+                    if resource_id is not None:
+                        parsed_candidates.append((resource_id, candidate))
 
-                candidate_ids = sorted({rid for rid, _ in parsed_candidates})
+                candidate_ids = sorted({resource_id for resource_id, _ in parsed_candidates})
                 blocked_ids: set[int] = set()
                 paused_ids: set[int] = set()
                 active_job_ids: set[int] = set()
                 if candidate_ids:
                     try:
-                        blocked_ids = self.admin_store.get_blocked_resource_ids(site_id=site_id, resource_ids=candidate_ids)
+                        blocked_ids = self.admin_store.get_blocked_resource_ids(
+                            site_id=site_id,
+                            resource_ids=candidate_ids,
+                        )
                     except Exception as exc:
                         logger.warning("[%s] fallo prefetch blocked ids: %s", site_id, exc)
                     try:
-                        paused_ids = self.runtime_store.get_paused_resource_ids(site_id=site_id, resource_ids=candidate_ids)
+                        paused_ids = self.runtime_store.get_paused_resource_ids(
+                            site_id=site_id,
+                            resource_ids=candidate_ids,
+                        )
                     except Exception as exc:
                         logger.warning("[%s] fallo prefetch paused ids: %s", site_id, exc)
                     try:
-                        active_job_ids = self.runtime_store.get_active_job_resource_ids(site_id=site_id, resource_ids=candidate_ids)
+                        active_job_ids = self.runtime_store.get_active_job_resource_ids(
+                            site_id=site_id,
+                            resource_ids=candidate_ids,
+                        )
                     except Exception as exc:
                         logger.warning("[%s] fallo prefetch active job ids: %s", site_id, exc)
 
-                hydration_prefetch_window = max(
-                    1,
-                    int((os.getenv("BRAIN_PAYLOAD_HYDRATE_PREFETCH_WINDOW") or "25").strip() or "25"),
+                # Full hydration is needed before admission sorting because the
+                # light candidate profile does not contain fpresentacion.
+                hydrated = self._hydrate_candidates_batch_for_payload(
+                    site_id=site_id,
+                    resource_ids=candidate_ids,
                 )
-                hydrated_payload_cache: dict[int, dict[str, Any]] = {}
+                for resource_id, candidate in parsed_candidates:
+                    prepared_candidate = dict(candidate or {})
+                    full_data = hydrated.get(resource_id)
+                    if full_data:
+                        for key, value in full_data.items():
+                            if value not in (None, "", []):
+                                prepared_candidate[key] = value
+                    prepared_candidate["fecpres"] = normalize_date_iso(
+                        _candidate_submission_date(prepared_candidate)
+                    )
 
-                for idx, (rid, cand) in enumerate(parsed_candidates):
-                    if remaining <= 0:
-                        break
-                    if site_limit is not None and site_claimed >= site_limit:
-                        break
-                    if not self.is_still_claimable_in_db(rid):
-                        logger.info("[%s] descartado idRecurso=%s por no estar reclamable en SQL Server (revalidacion).", site_id, rid)
+                    if not self.is_still_claimable_in_db(resource_id):
+                        logger.info(
+                            "[%s] descartado idRecurso=%s por no estar reclamable en SQL Server (preparacion).",
+                            site_id,
+                            resource_id,
+                        )
                         continue
                     validation = validate_candidate(
                         site_id=site_id,
-                        candidate=cand,
+                        candidate=prepared_candidate,
                         runtime_store=self.runtime_store,
                         admin_store=self.admin_store,
-                        is_blocked=(rid in blocked_ids),
-                        is_resource_paused=(rid in paused_ids),
+                        is_blocked=(resource_id in blocked_ids),
+                        is_resource_paused=(resource_id in paused_ids),
                     )
                     if not validation.processable:
                         error_code = str(validation.error_code or "NOT_PROCESSABLE")
-                        reason = str(validation.description or "Recurso no procesable por validación previa.")
-                        self._record_incident(site_id=site_id, error_code=error_code, description=reason, candidate=cand)
+                        reason = str(validation.description or "Recurso no procesable por validacion previa.")
+                        self._record_incident(
+                            site_id=site_id,
+                            error_code=error_code,
+                            description=reason,
+                            candidate=prepared_candidate,
+                        )
                         stats["incidents_logged"] += 1
-                        logger.info("[%s] idRecurso=%s no procesable: %s - %s", site_id, rid, error_code, reason)
+                        logger.info(
+                            "[%s] idRecurso=%s no procesable: %s - %s",
+                            site_id,
+                            resource_id,
+                            error_code,
+                            reason,
+                        )
                         continue
-                    has_active_job = rid in active_job_ids
+
+                    has_active_job = resource_id in active_job_ids
                     if has_active_job:
                         recovery = self.runtime_store.recover_stale_queued_job_for_resource(
                             site_id=site_id,
-                            resource_id=rid,
+                            resource_id=resource_id,
                             stale_seconds=self.active_job_stale_seconds,
                             reason_prefix="brain_claim_stale_queued_guard",
                         )
@@ -639,108 +721,172 @@ class BrainClaimService:
                             logger.warning(
                                 "[%s] stale queued recuperado para idRecurso=%s job_id=%s age=%ss (threshold=%ss).",
                                 site_id,
-                                rid,
+                                resource_id,
                                 recovery.get("job_id"),
                                 recovery.get("age_seconds"),
                                 recovery.get("threshold_seconds"),
                             )
-                            active_job_ids.discard(rid)
                             has_active_job = False
-
                     if has_active_job:
                         logger.info(
                             "[%s] descartado idRecurso=%s por job activo en cola (queued/processing).",
                             site_id,
-                            rid,
+                            resource_id,
                         )
                         continue
-                    if not await self._reserve_claim_slot_with_stale_recovery(site_id=site_id, resource_id=rid):
-                        if await self._recover_claim_slot_for_reopened_resource(site_id=site_id, resource_id=rid):
-                            pass
-                        else:
-                            logger.info(
-                                "[%s] dedupe-claim activo para idRecurso=%s; se omite republicacion.",
-                                site_id,
-                                rid,
-                            )
-                            continue
 
-                    keep_claim_slot = False
-                    try:
-                        expediente = str(cand.get("Expedient") or "").strip()
-                        ok = await adapter.ensure_claimed(self, cand)
-                        if not ok:
-                            stats["errors"] += 1
-                            continue
-                        stats["claimed"] += 1
-                        remaining -= 1
-                        site_claimed += 1
-
-                        if rid not in hydrated_payload_cache:
-                            window_ids: list[int] = []
-                            for future_rid, _future_cand in parsed_candidates[idx : idx + hydration_prefetch_window]:
-                                if future_rid not in hydrated_payload_cache:
-                                    window_ids.append(future_rid)
-                            hydrated_batch = self._hydrate_candidates_batch_for_payload(
-                                site_id=site_id,
-                                resource_ids=window_ids or [rid],
-                            )
-                            hydrated_payload_cache.update(hydrated_batch)
-
-                        candidate_for_payload = dict(cand or {})
-                        full_data = hydrated_payload_cache.get(rid)
-                        if full_data:
-                            # No pisar datos utiles del candidate con vacios durante hidratacion.
-                            for key, value in full_data.items():
-                                if value in (None, "", []):
-                                    continue
-                                candidate_for_payload[key] = value
-                        payloads = await adapter.build_payloads([candidate_for_payload], on_discard=_on_discard)
-                        if not payloads:
-                            logger.warning(
-                                "[%s] idRecurso=%s reclamado pero descartado por adapter.build_payloads (payload invalido).",
-                                site_id,
-                                rid,
-                            )
-                            continue
-
-                        for payload in payloads:
-                            trace_id = str(uuid.uuid4())
-                            rid_payload = payload.get("idRecurso")
-                            try:
-                                rid_payload_int = int(rid_payload) if rid_payload is not None else rid
-                            except Exception:
-                                rid_payload_int = rid
-                            candidate_payload = {
-                                "candidate_id": str(uuid.uuid4()),
-                                "organism_id": site_id,
-                                "external_resource_id": str(rid_payload_int),
-                                "raw_payload": json.loads(json.dumps(payload, default=str)),
-                                "claimed_at": payload.get("claimed_at") or cand.get("claimed_at") or "",
-                                "trace_id": trace_id,
-                                "expediente": str(payload.get("expediente") or expediente),
-                            }
-                            await self.streams.publish_json(
-                                stream=self.candidates_stream,
-                                payload=candidate_payload,
-                                maxlen=int((os.getenv("CANDIDATES_STREAM_MAXLEN") or "200000").strip() or "200000"),
-                            )
-                            stats["published_candidates"] += 1
-                            keep_claim_slot = True
-                            try:
-                                self.realtime_store.clear_incident(
-                                    site_id=site_id,
-                                    resource_id=rid_payload_int,
-                                    incident_type="SITE_RULE_DISCARDED",
-                                )
-                            except Exception:
-                                pass
-                    finally:
-                        if not keep_claim_slot:
-                            await self._release_claim_slot(site_id=site_id, resource_id=rid)
+                    prepared.append(
+                        _PreparedClaimCandidate(
+                            site_id=site_id,
+                            adapter=adapter,
+                            candidate=prepared_candidate,
+                            resource_id=resource_id,
+                            on_discard=on_discard,
+                            arrival_order=arrival_order,
+                        )
+                    )
+                    arrival_order += 1
             except Exception as exc:
-                logger.exception("[%s] fallo en run_tick claim-only: %s", site_id, exc)
+                logger.exception("[%s] fallo preparando admision global: %s", site_id, exc)
                 stats["errors"] += 1
+
+        prepared.sort(
+            key=lambda item: (
+                *_candidate_admission_priority(item.candidate),
+                item.arrival_order,
+            )
+        )
+
+        # Phase 2: claim and publish in the global date order. Site and global
+        # limits count successful claims, matching the previous semantics.
+        remaining = self.max_claims
+        claimed_by_site: dict[str, int] = {}
+        for item in prepared:
+            if remaining <= 0:
+                break
+
+            site_id = item.site_id
+            resource_id = item.resource_id
+            site_claimed = claimed_by_site.get(site_id, 0)
+            site_limit = site_claim_limits.get(site_id)
+            if site_limit is not None and site_claimed >= site_limit:
+                continue
+            if self.runtime_store.is_site_processing_paused(site_id=site_id):
+                continue
+            if not self.is_still_claimable_in_db(resource_id):
+                logger.info(
+                    "[%s] descartado idRecurso=%s por no estar reclamable en SQL Server (pre-claim).",
+                    site_id,
+                    resource_id,
+                )
+                continue
+
+            # Mutable pause/block/deadline state is checked again because phase
+            # 1 may have processed several other organisms in the meantime.
+            validation = validate_candidate(
+                site_id=site_id,
+                candidate=item.candidate,
+                runtime_store=self.runtime_store,
+                admin_store=self.admin_store,
+            )
+            if not validation.processable:
+                error_code = str(validation.error_code or "NOT_PROCESSABLE")
+                reason = str(validation.description or "Recurso no procesable por validacion previa.")
+                self._record_incident(
+                    site_id=site_id,
+                    error_code=error_code,
+                    description=reason,
+                    candidate=item.candidate,
+                )
+                stats["incidents_logged"] += 1
+                continue
+
+            if not await self._reserve_claim_slot_with_stale_recovery(
+                site_id=site_id,
+                resource_id=resource_id,
+            ):
+                recovered = await self._recover_claim_slot_for_reopened_resource(
+                    site_id=site_id,
+                    resource_id=resource_id,
+                )
+                if not recovered:
+                    logger.info(
+                        "[%s] dedupe-claim activo para idRecurso=%s; se omite republicacion.",
+                        site_id,
+                        resource_id,
+                    )
+                    continue
+
+            keep_claim_slot = False
+            try:
+                expediente = str(item.candidate.get("Expedient") or "").strip()
+                claimed = await item.adapter.ensure_claimed(self, item.candidate)
+                if not claimed:
+                    stats["errors"] += 1
+                    continue
+
+                stats["claimed"] += 1
+                remaining -= 1
+                claimed_by_site[site_id] = site_claimed + 1
+                payloads = await item.adapter.build_payloads(
+                    [item.candidate],
+                    on_discard=item.on_discard,
+                )
+                if not payloads:
+                    logger.warning(
+                        "[%s] idRecurso=%s reclamado pero descartado por adapter.build_payloads (payload invalido).",
+                        site_id,
+                        resource_id,
+                    )
+                    continue
+
+                for payload in payloads:
+                    payload["fecpres"] = (
+                        normalize_date_iso(payload.get("fecpres"))
+                        or str(item.candidate.get("fecpres") or "")
+                    )
+                    trace_id = str(uuid.uuid4())
+                    rid_payload = payload.get("idRecurso")
+                    try:
+                        rid_payload_int = int(rid_payload) if rid_payload is not None else resource_id
+                    except Exception:
+                        rid_payload_int = resource_id
+                    candidate_payload = {
+                        "candidate_id": str(uuid.uuid4()),
+                        "organism_id": site_id,
+                        "external_resource_id": str(rid_payload_int),
+                        "raw_payload": json.loads(json.dumps(payload, default=str)),
+                        "claimed_at": payload.get("claimed_at") or item.candidate.get("claimed_at") or "",
+                        "trace_id": trace_id,
+                        "expediente": str(payload.get("expediente") or expediente),
+                    }
+                    await self.streams.publish_json(
+                        stream=self.candidates_stream,
+                        payload=candidate_payload,
+                        maxlen=int((os.getenv("CANDIDATES_STREAM_MAXLEN") or "200000").strip() or "200000"),
+                    )
+                    stats["published_candidates"] += 1
+                    keep_claim_slot = True
+                    try:
+                        self.realtime_store.clear_incident(
+                            site_id=site_id,
+                            resource_id=rid_payload_int,
+                            incident_type="SITE_RULE_DISCARDED",
+                        )
+                    except Exception:
+                        pass
+            except Exception as exc:
+                logger.exception(
+                    "[%s] fallo reclamando idRecurso=%s tras admision global: %s",
+                    site_id,
+                    resource_id,
+                    exc,
+                )
+                stats["errors"] += 1
+            finally:
+                if not keep_claim_slot:
+                    await self._release_claim_slot(site_id=site_id, resource_id=resource_id)
+
         await self.close_session()
         return stats
 

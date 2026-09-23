@@ -161,6 +161,11 @@ class SQLiteQueueGateway(QueueGateway):
 def build_queue_gateway(*, backend: Optional[str], db: Any):
     logger = logging.getLogger("queue_gateway")
     queue_mode = get_queue_mode(backend)
+    if queue_mode == "postgres_priority":
+        from core.pg_priority_queue_gateway import PgPriorityQueueGateway
+
+        logger.info("Queue backend activo: postgres_priority")
+        return PgPriorityQueueGateway(db=db)
     if queue_mode == "redis_streams":
         from core.redis_streams_queue_gateway import RedisStreamsQueueGateway
 

@@ -102,10 +102,26 @@ WHERE {organisme_like_clause}
   AND rs.TExp IN ({texp_list})
   AND rs.Estado IN (0, 1)
   AND rs.Expedient IS NOT NULL
-  AND e.fpresentacion IS NOT NULL
-  AND CAST(e.fpresentacion AS date) <= DATEADD(day, 14, CAST(GETDATE() AS date))
+  AND (
+      e.fpresentacion IS NULL
+      OR CAST(e.fpresentacion AS date) <= DATEADD(day, 14, CAST(GETDATE() AS date))
+  )
 
-ORDER BY rs.Estado ASC, rs.idRecurso ASC
+ORDER BY
+    CASE
+        WHEN e.fpresentacion IS NULL THEN 3
+        WHEN CAST(e.fpresentacion AS date) <= CAST(GETDATE() AS date) THEN 0
+        ELSE 2
+    END ASC,
+    CASE
+        WHEN CAST(e.fpresentacion AS date) <= CAST(GETDATE() AS date)
+            THEN DATEDIFF(day, CAST(e.fpresentacion AS date), CAST(GETDATE() AS date))
+        WHEN CAST(e.fpresentacion AS date) > CAST(GETDATE() AS date)
+            THEN DATEDIFF(day, CAST(GETDATE() AS date), CAST(e.fpresentacion AS date))
+        ELSE 0
+    END ASC,
+    rs.Estado ASC,
+    rs.idRecurso ASC
 """
 
     SQL_CANDIDATE_LIGHT = """
@@ -128,9 +144,25 @@ WHERE {organisme_like_clause}
   AND rs.TExp IN ({texp_list})
   AND rs.Estado IN (0, 1)
   AND rs.Expedient IS NOT NULL
-  AND e.fpresentacion IS NOT NULL
-  AND CAST(e.fpresentacion AS date) <= DATEADD(day, 14, CAST(GETDATE() AS date))
-ORDER BY rs.Estado ASC, rs.idRecurso ASC
+  AND (
+      e.fpresentacion IS NULL
+      OR CAST(e.fpresentacion AS date) <= DATEADD(day, 14, CAST(GETDATE() AS date))
+  )
+ORDER BY
+    CASE
+        WHEN e.fpresentacion IS NULL THEN 3
+        WHEN CAST(e.fpresentacion AS date) <= CAST(GETDATE() AS date) THEN 0
+        ELSE 2
+    END ASC,
+    CASE
+        WHEN CAST(e.fpresentacion AS date) <= CAST(GETDATE() AS date)
+            THEN DATEDIFF(day, CAST(e.fpresentacion AS date), CAST(GETDATE() AS date))
+        WHEN CAST(e.fpresentacion AS date) > CAST(GETDATE() AS date)
+            THEN DATEDIFF(day, CAST(GETDATE() AS date), CAST(e.fpresentacion AS date))
+        ELSE 0
+    END ASC,
+    rs.Estado ASC,
+    rs.idRecurso ASC
 """
 
     def __init__(self, *, conn_str: str, logger: logging.Logger | None = None):

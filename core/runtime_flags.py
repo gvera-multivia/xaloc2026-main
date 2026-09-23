@@ -5,7 +5,7 @@ from typing import Optional
 from urllib.parse import urlsplit, urlunsplit
 
 
-VALID_QUEUE_MODES = {"redis_list", "redis_streams"}
+VALID_QUEUE_MODES = {"postgres_priority", "redis_list", "redis_streams"}
 
 
 def _is_true(value: str) -> bool:
@@ -18,6 +18,8 @@ def is_pg_source_of_truth_enabled() -> bool:
 
 def normalize_queue_mode(value: str) -> str:
     mode = (value or "").strip().lower()
+    if mode in {"postgres", "postgres_priority", "pg_priority"}:
+        return "postgres_priority"
     if mode in {"redis", "redis_list"}:
         return "redis_list"
     if mode == "redis_streams":

@@ -1,3 +1,5 @@
+from datetime import date, timedelta
+
 from services.batcher_dispatcher.app import BatcherDispatcherService, PendingValidated
 from shared.queue.redis_streams import RedisStreamMessage
 
@@ -19,20 +21,32 @@ def _pending(*, fecpres, arrived_at: float, priority: int = 100, rid: str = "1")
     )
 
 
-def test_pending_priority_key_orders_by_fecpres_soonest_first():
+def test_pending_priority_key_orders_today_then_past_then_future():
+    today = date.today()
     items = [
-        _pending(fecpres="2026-03-20", arrived_at=3.0, rid="20"),
-        _pending(fecpres="2026-03-17", arrived_at=2.0, rid="17"),
-        _pending(fecpres="2026-03-18", arrived_at=1.0, rid="18"),
+        _pending(fecpres=(today + timedelta(days=2)).isoformat(), arrived_at=6.0, rid="+2"),
+        _pending(fecpres=(today - timedelta(days=2)).isoformat(), arrived_at=5.0, rid="-2"),
+        _pending(fecpres=today.isoformat(), arrived_at=1.0, rid="today"),
+        _pending(fecpres=(today - timedelta(days=1)).isoformat(), arrived_at=2.0, rid="yesterday"),
+        _pending(fecpres=(today + timedelta(days=1)).isoformat(), arrived_at=3.0, rid="tomorrow"),
+        _pending(fecpres=(today - timedelta(days=3)).isoformat(), arrived_at=4.0, rid="-3"),
     ]
     ordered = sorted(items, key=BatcherDispatcherService._pending_priority_key)
-    assert [it.payload["normalized_payload"]["idRecurso"] for it in ordered] == ["17", "18", "20"]
+    assert [it.payload["normalized_payload"]["idRecurso"] for it in ordered] == [
+        "today",
+        "yesterday",
+        "-2",
+        "-3",
+        "tomorrow",
+        "+2",
+    ]
 
 
 def test_pending_priority_key_places_missing_or_invalid_fecpres_last():
+    today = date.today()
     items = [
         _pending(fecpres="", arrived_at=1.0, rid="no-date"),
-        _pending(fecpres="2026-03-17", arrived_at=2.0, rid="valid-date"),
+        _pending(fecpres=today.isoformat(), arrived_at=2.0, rid="valid-date"),
         _pending(fecpres="17/03/2026", arrived_at=3.0, rid="invalid-date"),
     ]
     ordered = sorted(items, key=BatcherDispatcherService._pending_priority_key)

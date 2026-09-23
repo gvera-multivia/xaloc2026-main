@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Optional
 
 import psycopg
 
+from core.date_normalization import normalize_date_iso
 from core.runtime_flags import get_report_pg_dsn
 
 
@@ -15,6 +16,7 @@ class PgControlPlaneStore:
     def __init__(self, dsn: str, logger: Optional[logging.Logger] = None):
         self.dsn = dsn
         self.logger = logger or logging.getLogger("pg_control_plane_store")
+        self.ensure_priority_queue_schema()
 
     @classmethod
     def from_env(cls, logger: Optional[logging.Logger] = None) -> "PgControlPlaneStore":
@@ -25,6 +27,29 @@ class PgControlPlaneStore:
 
     def _conn(self):
         return psycopg.connect(self.dsn)
+
+    def ensure_priority_queue_schema(self) -> None:
+        """Make the priority column available before any batcher job insert."""
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS submission_date DATE")
+                cur.execute(
+                    """
+                    UPDATE jobs
+                    SET submission_date = (payload_json->>'fecpres')::date
+                    WHERE status = 'queued'
+                      AND submission_date IS NULL
+                      AND NULLIF(BTRIM(payload_json->>'fecpres'), '') IS NOT NULL
+                      AND pg_input_is_valid(payload_json->>'fecpres', 'date')
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_jobs_status_submission_priority
+                    ON jobs(status, submission_date, priority, queued_at, id)
+                    """
+                )
+            conn.commit()
 
     @staticmethod
     def _normalize_resource_id_str(value: Any) -> str:
@@ -131,6 +156,8 @@ class PgControlPlaneStore:
         payload: dict[str, Any],
     ) -> dict[str, Any]:
         now = datetime.now().isoformat()
+        submission_date_iso = normalize_date_iso(payload.get("fecpres"))
+        submission_date = date.fromisoformat(submission_date_iso) if submission_date_iso else None
         site_id = str(payload.get("site_id") or payload.get("organism_id") or "").strip()
         resource_id = self._normalize_resource_id_str(
             payload.get("idRecurso") if payload.get("idRecurso") is not None else payload.get("external_resource_id")
@@ -225,14 +252,15 @@ class PgControlPlaneStore:
                 cur.execute(
                     """
                     INSERT INTO jobs (
-                        job_id, organism_id, dedup_key, status, priority, payload_json,
+                        job_id, organism_id, dedup_key, status, priority, submission_date, payload_json,
                         queued_at, created_at, updated_at
                     )
-                    VALUES (%s, NULL, %s, 'queued', %s, %s::jsonb, %s::timestamptz, %s::timestamptz, %s::timestamptz)
+                    VALUES (%s, NULL, %s, 'queued', %s, %s, %s::jsonb, %s::timestamptz, %s::timestamptz, %s::timestamptz)
                     ON CONFLICT (job_id) DO UPDATE SET
                         dedup_key = EXCLUDED.dedup_key,
                         status = 'queued',
                         priority = EXCLUDED.priority,
+                        submission_date = EXCLUDED.submission_date,
                         payload_json = EXCLUDED.payload_json,
                         queued_at = EXCLUDED.queued_at,
                         started_at = NULL,
@@ -245,6 +273,7 @@ class PgControlPlaneStore:
                         job_id,
                         dedup_key,
                         int(priority),
+                        submission_date,
                         json.dumps(payload, ensure_ascii=False),
                         now,
                         now,

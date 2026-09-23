@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
 import psycopg
@@ -115,6 +115,23 @@ class PgRuntimeStore:
                     )
                     """
                 )
+                cur.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS submission_date DATE")
+                cur.execute(
+                    """
+                    UPDATE jobs
+                    SET submission_date = (payload_json->>'fecpres')::date
+                    WHERE status = 'queued'
+                      AND submission_date IS NULL
+                      AND NULLIF(BTRIM(payload_json->>'fecpres'), '') IS NOT NULL
+                      AND pg_input_is_valid(payload_json->>'fecpres', 'date')
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_jobs_status_submission_priority
+                    ON jobs(status, submission_date, priority, queued_at, id)
+                    """
+                )
             conn.commit()
 
     # Queue/job ledger API
@@ -187,6 +204,121 @@ class PgRuntimeStore:
                 if not row or row[0] is None:
                     return None
                 return str(row[0]).strip().lower()
+
+    def reserve_next_job(
+        self,
+        *,
+        business_today: date,
+        worker_id: str,
+    ) -> Optional[dict[str, Any]]:
+        """Atomically reserve the highest-priority globally eligible queued job."""
+        if not isinstance(business_today, date):
+            raise TypeError("business_today debe ser datetime.date")
+        worker = str(worker_id or "").strip()
+        if not worker:
+            raise ValueError("worker_id es obligatorio")
+
+        site_expr = self._job_site_expr()
+        resource_expr = self._job_resource_expr()
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    WITH next_job AS (
+                        SELECT j.id
+                        FROM jobs j
+                        WHERE j.status = 'queued'
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM organismo_config oc
+                              WHERE oc.site_id = {site_expr.replace('payload_json', 'j.payload_json').replace('dedup_key', 'j.dedup_key')}
+                                AND oc.active = FALSE
+                          )
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM site_processing_pauses spp
+                              WHERE spp.site_id = {site_expr.replace('payload_json', 'j.payload_json').replace('dedup_key', 'j.dedup_key')}
+                                AND (spp.expires_at IS NULL OR spp.expires_at > NOW())
+                          )
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM resource_processing_pauses rpp
+                              WHERE rpp.site_id = {site_expr.replace('payload_json', 'j.payload_json').replace('dedup_key', 'j.dedup_key')}
+                                AND rpp.resource_id = {resource_expr.replace('payload_json', 'j.payload_json').replace('dedup_key', 'j.dedup_key')}
+                                AND (rpp.expires_at IS NULL OR rpp.expires_at > NOW())
+                          )
+                        ORDER BY
+                            CASE
+                                WHEN j.submission_date IS NULL THEN 2
+                                WHEN j.submission_date <= %s THEN 0
+                                ELSE 1
+                            END ASC,
+                            CASE WHEN j.submission_date <= %s THEN j.submission_date END DESC NULLS LAST,
+                            CASE WHEN j.submission_date > %s THEN j.submission_date END ASC NULLS LAST,
+                            j.priority ASC,
+                            COALESCE(j.queued_at, j.created_at) ASC,
+                            j.id ASC
+                        LIMIT 1
+                        FOR UPDATE SKIP LOCKED
+                    )
+                    UPDATE jobs j
+                    SET status = 'processing',
+                        started_at = NOW(),
+                        finished_at = NULL,
+                        error_message = NULL,
+                        updated_at = NOW()
+                    FROM next_job n
+                    WHERE j.id = n.id
+                    RETURNING
+                        j.id,
+                        j.job_id,
+                        {site_expr.replace('payload_json', 'j.payload_json').replace('dedup_key', 'j.dedup_key')} AS site_id,
+                        {resource_expr.replace('payload_json', 'j.payload_json').replace('dedup_key', 'j.dedup_key')} AS resource_id,
+                        j.payload_json,
+                        j.submission_date
+                    """,
+                    (business_today, business_today, business_today),
+                )
+                row = cur.fetchone()
+                if not row:
+                    conn.commit()
+                    return None
+
+                job_row_id = int(row[0])
+                cur.execute(
+                    """
+                    SELECT COALESCE(MAX(attempt_no), 0)
+                    FROM job_attempts
+                    WHERE job_id = %s
+                    """,
+                    (job_row_id,),
+                )
+                attempt_row = cur.fetchone()
+                attempt = int(attempt_row[0] if attempt_row and attempt_row[0] is not None else 0)
+                cur.execute(
+                    """
+                    INSERT INTO job_attempts (
+                        job_id, attempt_no, worker_id, status, started_at, ended_at
+                    ) VALUES (%s, %s, %s, 'processing', NOW(), NULL)
+                    ON CONFLICT (job_id, attempt_no) DO UPDATE SET
+                        worker_id = EXCLUDED.worker_id,
+                        status = 'processing',
+                        started_at = NOW(),
+                        ended_at = NULL
+                    """,
+                    (job_row_id, attempt, worker),
+                )
+            conn.commit()
+
+        payload = row[4] if isinstance(row[4], dict) else {}
+        return {
+            "job_id": str(row[1]),
+            "site_id": str(row[2] or "").strip(),
+            "resource_id": int(row[3]) if row[3] is not None else None,
+            "payload": dict(payload),
+            "submission_date": row[5].isoformat() if row[5] is not None else None,
+            "attempt": attempt,
+        }
 
     def has_active_job_for_resource(self, *, site_id: str, resource_id: int) -> bool:
         with self._conn() as conn:

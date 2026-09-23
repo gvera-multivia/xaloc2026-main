@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 from core.address_defaults import get_default_country_es_ascii
+from core.date_normalization import normalize_date_iso
 from core.validation.validators import normalize_plate_with_fallback
 from .contracts import CanonicalResourceV1
 
@@ -60,6 +61,7 @@ def normalize_resource_row(*, site_id: str, row: dict[str, Any]) -> CanonicalRes
         "state": raw.get("Estado"),
         "assigned_user": _clean(raw.get("UsuarioAsignado")),
         "completed_at": raw.get("FUsuarioCompletado"),
+        "submission_date": normalize_date_iso(raw.get("fpresentacion")),
         "phase": _clean(raw.get("FaseProcedimiento")),
         "numclient": raw.get("numclient"),
         "subject_name": _clean(raw.get("SujetoRecurso")),

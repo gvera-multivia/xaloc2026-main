@@ -19,6 +19,13 @@ class RedisStreamsClient:
         self.redis = redis_client
         self.logger = logger or logging.getLogger("redis_streams")
 
+    @staticmethod
+    def _is_read_timeout(exc: Exception) -> bool:
+        return (
+            exc.__class__.__name__ == "TimeoutError"
+            and exc.__class__.__module__.startswith("redis")
+        )
+
     async def ensure_group(self, *, stream: str, group: str) -> None:
         # IMPORTANT:
         # Default to "0-0" so a newly created consumer-group can consume
@@ -62,16 +69,26 @@ class RedisStreamsClient:
             )
         except Exception as exc:
             text = str(exc).upper()
+            if self._is_read_timeout(exc):
+                # A blocking read timing out is equivalent to an empty poll.
+                # Let the service loop continue instead of making Docker restart
+                # it and creating a new consumer on every idle interval.
+                return None
             if "NOGROUP" in text:
                 # Auto-heal when stream/group was deleted externally.
                 await self.ensure_group(stream=stream, group=group)
-                rows = await self.redis.xreadgroup(
-                    groupname=group,
-                    consumername=consumer,
-                    streams={stream: ">"},
-                    count=max(1, int(count)),
-                    block=max(1, int(block_ms)),
-                )
+                try:
+                    rows = await self.redis.xreadgroup(
+                        groupname=group,
+                        consumername=consumer,
+                        streams={stream: ">"},
+                        count=max(1, int(count)),
+                        block=max(1, int(block_ms)),
+                    )
+                except Exception as retry_exc:
+                    if self._is_read_timeout(retry_exc):
+                        return None
+                    raise
             else:
                 raise
         if not rows:

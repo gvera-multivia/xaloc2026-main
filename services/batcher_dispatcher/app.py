@@ -13,8 +13,10 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from core.date_normalization import business_today, submission_date_priority_key
 from core.pg_control_plane_store import PgControlPlaneStore
 from core.redis_client import get_redis_client
+from core.runtime_flags import get_queue_mode
 from shared.queue import RedisStreamsClient, RedisStreamMessage
 
 load_dotenv()
@@ -45,6 +47,7 @@ class BatcherDispatcherService:
         self.window_seconds = int((os.getenv("BATCH_WINDOW_SECONDS") or "30").strip() or "30")
         self.max_batch_size = int((os.getenv("BATCH_MAX_SIZE") or "200").strip() or "200")
         self.trim_maxlen = int((os.getenv("QUEUE_STREAM_MAXLEN") or "200000").strip() or "200000")
+        self.queue_mode = get_queue_mode()
         self.pending: list[PendingValidated] = []
         self.last_flush = time.monotonic()
 
@@ -78,6 +81,8 @@ class BatcherDispatcherService:
 
     @staticmethod
     def _parse_fecpres(value: Any) -> date | None:
+        """Accept only the canonical ISO date emitted by payload validation."""
+
         if value is None:
             return None
         text = str(value).strip()
@@ -85,18 +90,24 @@ class BatcherDispatcherService:
             return None
         try:
             return datetime.strptime(text, "%Y-%m-%d").date()
-        except Exception:
+        except (TypeError, ValueError):
             return None
 
     @classmethod
-    def _pending_priority_key(cls, item: PendingValidated) -> tuple[int, date, int, float]:
+    def _pending_priority_key(
+        cls,
+        item: PendingValidated,
+        *,
+        today: date | None = None,
+    ) -> tuple[int, int, int, float]:
         payload = item.payload.get("normalized_payload") or {}
+        priority = int(item.payload.get("priority") or 100)
         fecpres = cls._parse_fecpres(payload.get("fecpres"))
-        # 1) con fecpres valido primero, 2) fecha mas proxima primero.
-        # Si no hay fecpres, conserva prioridad declarada y orden de llegada.
-        if fecpres is not None:
-            return (0, fecpres, int(item.payload.get("priority") or 100), item.arrived_at)
-        return (1, date.max, int(item.payload.get("priority") or 100), item.arrived_at)
+        date_bucket, date_distance = submission_date_priority_key(
+            fecpres,
+            today=today or business_today(),
+        )
+        return (date_bucket, date_distance, priority, item.arrived_at)
 
     async def _consume_once(self) -> bool:
         await self.streams.ensure_group(stream=self.validated_stream, group=self.group)
@@ -132,7 +143,8 @@ class BatcherDispatcherService:
     async def _flush(self) -> None:
         if not self.pending:
             return
-        batch = sorted(self.pending, key=self._pending_priority_key)
+        today = business_today()
+        batch = sorted(self.pending, key=lambda item: self._pending_priority_key(item, today=today))
         self.pending = []
         self.last_flush = time.monotonic()
         for item in batch:
@@ -186,11 +198,12 @@ class BatcherDispatcherService:
                     "payload": normalized_payload,
                     "resource_id": id_recurso,
                 }
-                await self.streams.publish_json(
-                    stream=self.jobs_stream,
-                    payload=job_payload,
-                    maxlen=self.trim_maxlen,
-                )
+                if self.queue_mode != "postgres_priority":
+                    await self.streams.publish_json(
+                        stream=self.jobs_stream,
+                        payload=job_payload,
+                        maxlen=self.trim_maxlen,
+                    )
                 await self.streams.ack(stream=self.validated_stream, group=self.group, message_id=msg.message_id)
             except Exception as exc:
                 logger.exception("Error despachando validated %s: %s", msg.message_id, exc)

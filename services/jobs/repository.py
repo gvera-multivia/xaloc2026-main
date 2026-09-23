@@ -2,17 +2,40 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Optional
 
 import psycopg
 
+from core.date_normalization import normalize_date_iso
 from core.runtime_flags import get_report_pg_dsn
 
 
 @dataclass
 class JobsRepository:
     dsn: str
+
+    def __post_init__(self) -> None:
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS submission_date DATE")
+                cur.execute(
+                    """
+                    UPDATE jobs
+                    SET submission_date = (payload_json->>'fecpres')::date
+                    WHERE status = 'queued'
+                      AND submission_date IS NULL
+                      AND NULLIF(BTRIM(payload_json->>'fecpres'), '') IS NOT NULL
+                      AND pg_input_is_valid(payload_json->>'fecpres', 'date')
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_jobs_status_submission_priority
+                    ON jobs(status, submission_date, priority, queued_at, id)
+                    """
+                )
+            conn.commit()
 
     @classmethod
     def from_env(cls) -> "JobsRepository":
@@ -51,19 +74,22 @@ class JobsRepository:
         now = datetime.now().isoformat()
         dedup = self._dedup_key(job_id, dedup_key)
         normalized_status = self._normalize_status(status)
+        submission_date_iso = normalize_date_iso(payload.get("fecpres"))
+        submission_date = date.fromisoformat(submission_date_iso) if submission_date_iso else None
         with self._conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
                     INSERT INTO jobs (
                         job_id, organism_id, dedup_key, status, priority,
-                        payload_json, created_at, updated_at
+                        submission_date, payload_json, created_at, updated_at
                     )
-                    VALUES (%s, NULL, %s, %s, %s, %s::jsonb, %s::timestamptz, %s::timestamptz)
+                    VALUES (%s, NULL, %s, %s, %s, %s, %s::jsonb, %s::timestamptz, %s::timestamptz)
                     ON CONFLICT (job_id) DO UPDATE SET
                         dedup_key = EXCLUDED.dedup_key,
                         status = EXCLUDED.status,
                         priority = EXCLUDED.priority,
+                        submission_date = COALESCE(EXCLUDED.submission_date, jobs.submission_date),
                         payload_json = EXCLUDED.payload_json,
                         updated_at = EXCLUDED.updated_at
                     RETURNING id, job_id, dedup_key, status, priority, payload_json, queued_at, started_at, finished_at, created_at, updated_at
@@ -73,6 +99,7 @@ class JobsRepository:
                         dedup,
                         normalized_status,
                         int(priority),
+                        submission_date,
                         json.dumps(payload, ensure_ascii=False),
                         now,
                         now,
