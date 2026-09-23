@@ -55,6 +55,7 @@ services:
     working_dir: /app
     command: /opt/venv/bin/uvicorn services.jobs.app:app --host 0.0.0.0 --port 8103
     environment:
+      TZ: Europe/Madrid
       USE_PG_SOURCE_OF_TRUTH: "1"
       QUEUE_MODE: redis_streams
       SQLSERVER_CONNECTION_STRING: ${SQLSERVER_CONNECTION_STRING:-}
@@ -86,6 +87,7 @@ services:
     working_dir: /app
     command: /opt/venv/bin/uvicorn services.auth_rbac.app:app --host 0.0.0.0 --port 8101
     environment:
+      TZ: Europe/Madrid
       SQLSERVER_CONNECTION_STRING: ${SQLSERVER_CONNECTION_STRING:-}
       SQLSERVER_DRIVER: ${SQLSERVER_DRIVER:-}
       SQLSERVER_SERVER: ${SQLSERVER_SERVER:-}
@@ -118,6 +120,7 @@ services:
     working_dir: /app
     command: /opt/venv/bin/uvicorn services.dashboard_backend.app:app --host 0.0.0.0 --port 8788
     environment:
+      TZ: Europe/Madrid
       DASHBOARD_ENABLE_FRONTEND_PROXY: "0"
       DASHBOARD_ENABLE_WS: "1"
       DASHBOARD_CORS_ORIGINS: "*"
@@ -189,6 +192,7 @@ services:
              cd /app &&
              /opt/venv/bin/uvicorn services.api_gateway.app:app --host 0.0.0.0 --port 8080"
     environment:
+      TZ: Europe/Madrid
       DASHBOARD_BACKEND_URL: http://dashboard-backend-service:8788
       DASHBOARD_FRONTEND_HOST: 127.0.0.1
       DASHBOARD_FRONTEND_PORT: "3000"
@@ -224,6 +228,7 @@ services:
     working_dir: /app
     command: /opt/venv/bin/python -m services.brain_claim.app
     environment:
+      TZ: Europe/Madrid
       USE_PG_SOURCE_OF_TRUTH: "1"
       REDIS_ENABLED: "1"
       REDIS_URL: redis://redis:6379/0
@@ -270,6 +275,7 @@ services:
     working_dir: /app
     command: /opt/venv/bin/python -m services.payload_validator.app
     environment:
+      TZ: Europe/Madrid
       USE_PG_SOURCE_OF_TRUTH: "1"
       REDIS_ENABLED: "1"
       REDIS_URL: redis://redis:6379/0
@@ -315,6 +321,7 @@ services:
     working_dir: /app
     command: /opt/venv/bin/python -m services.batcher_dispatcher.app
     environment:
+      TZ: Europe/Madrid
       USE_PG_SOURCE_OF_TRUTH: "1"
       REDIS_ENABLED: "1"
       REDIS_URL: redis://redis:6379/0
@@ -361,6 +368,7 @@ services:
     working_dir: /app
     command: /opt/venv/bin/python -m services.worker_orchestrator.app
     environment:
+      TZ: Europe/Madrid
       USE_PG_SOURCE_OF_TRUTH: "1"
       REDIS_ENABLED: "1"
       REDIS_URL: redis://redis:6379/0
@@ -412,6 +420,7 @@ services:
     working_dir: /app
     command: /opt/venv/bin/uvicorn services.playwright_runner.app:app --host 0.0.0.0 --port 8111
     environment:
+      TZ: Europe/Madrid
       HOME: /root
       DISPLAY: ":99"
       XALOC_HEADLESS: ${XALOC_HEADLESS:-0}
@@ -493,6 +502,7 @@ services:
     working_dir: /app
     command: /opt/venv/bin/uvicorn services.signing.app:app --host 0.0.0.0 --port 8112
     environment:
+      TZ: Europe/Madrid
       SQLSERVER_CONNECTION_STRING: ${SQLSERVER_CONNECTION_STRING:-}
       SQLSERVER_DRIVER: ${SQLSERVER_DRIVER:-}
       SQLSERVER_SERVER: ${SQLSERVER_SERVER:-}
