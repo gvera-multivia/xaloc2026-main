@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+from core.pg_schema import acquire_priority_queue_schema_lock
 from core.redis_client import get_redis_client
 from core.runtime_flags import get_report_pg_dsn, is_pg_source_of_truth_enabled
 
@@ -194,6 +195,7 @@ class PostgresRealtimeStore:
     def ensure_schema(self) -> None:
         with self._conn() as conn:
             with conn.cursor() as cur:
+                acquire_priority_queue_schema_lock(cur)
                 cur.execute(
                     """
                     CREATE TABLE IF NOT EXISTS realtime_task_results (
