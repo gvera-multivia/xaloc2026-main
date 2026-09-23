@@ -8,6 +8,7 @@ from typing import Any, Optional
 import psycopg
 
 from core.date_normalization import normalize_date_iso
+from core.pg_schema import acquire_priority_queue_schema_lock
 from core.runtime_flags import get_report_pg_dsn
 
 
@@ -18,6 +19,7 @@ class JobsRepository:
     def __post_init__(self) -> None:
         with self._conn() as conn:
             with conn.cursor() as cur:
+                acquire_priority_queue_schema_lock(cur)
                 cur.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS submission_date DATE")
                 cur.execute(
                     """

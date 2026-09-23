@@ -91,6 +91,7 @@ def test_control_plane_ensures_priority_schema_before_writes() -> None:
     store.ensure_priority_queue_schema()
 
     statements = [sql for sql, _ in connection.cursor_instance.calls]
-    assert "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS submission_date DATE" in statements[0]
-    assert "pg_input_is_valid" in statements[1]
-    assert "ix_jobs_status_submission_priority" in statements[2]
+    assert statements[0] == "SELECT pg_advisory_xact_lock(%s)"
+    assert "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS submission_date DATE" in statements[1]
+    assert "pg_input_is_valid" in statements[2]
+    assert "ix_jobs_status_submission_priority" in statements[3]

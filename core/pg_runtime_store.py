@@ -8,6 +8,7 @@ import psycopg
 
 from core.pg_admin_store import PgAdminStore
 from core.pg_job_store import build_pg_job_store
+from core.pg_schema import acquire_priority_queue_schema_lock
 from core.runtime_flags import get_report_pg_dsn
 
 
@@ -55,6 +56,7 @@ class PgRuntimeStore:
     def ensure_schema(self) -> None:
         with self._conn() as conn:
             with conn.cursor() as cur:
+                acquire_priority_queue_schema_lock(cur)
                 cur.execute(
                     """
                     CREATE TABLE IF NOT EXISTS worker_runtime (
