@@ -164,6 +164,29 @@ def test_terrassa_fetch_candidates_accepts_pc_plus_eight_digits() -> None:
     assert discarded == []
 
 
+def test_terrassa_fetch_candidates_accepts_ec_and_ee_v_shapes() -> None:
+    adapter = TerrassaAdapter()
+    rows = [
+        {**_base_row(), "idRecurso": 109, "Expedient": "EC55V029279"},
+        {**_base_row(), "idRecurso": 110, "Expedient": "EE5V029846"},
+    ]
+    repo = _LegacyRepo(rows)
+    discarded: list[dict[str, Any]] = []
+
+    candidates = adapter.fetch_candidates(
+        config={},
+        conn_str="unused",
+        authenticated_user=None,
+        limit=10,
+        resource_repo=repo,
+        on_discard=lambda item: discarded.append(item),
+    )
+
+    assert [c["idRecurso"] for c in candidates] == [109, 110]
+    assert [c["Expedient"] for c in candidates] == ["EC55V029279", "EE5V029846"]
+    assert discarded == []
+
+
 def test_terrassa_fetch_candidates_accepts_rc_plus_eight_digits() -> None:
     adapter = TerrassaAdapter()
     rows = [

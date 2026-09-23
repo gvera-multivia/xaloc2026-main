@@ -70,6 +70,8 @@ class TerrassaAdapter(SiteAdapter):
         "MURC-###/####",
         "MURC-####/####",
         "ED#V######",
+        "EC##V######",
+        "EE#V######",
         "VD########",
         "###########RC##R######",
         "CC#############",
