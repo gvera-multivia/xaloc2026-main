@@ -1134,6 +1134,10 @@ class DashboardService:
 
     def list_blacklist(self, *, site_id: str | None = None) -> list[dict[str, Any]]:
         items = self.admin_store.list_blocked_resources(site_id=site_id)
+        pruned = self._prune_completed_blacklist_items(items)
+        if pruned:
+            self.logger.info("Bloqueos ya completados en XVIA eliminados al listar blacklist: %s", pruned)
+            items = self.admin_store.list_blocked_resources(site_id=site_id)
         for item in items:
             site = str(item.get("site_id") or "").strip()
             rid = item.get("resource_id")
@@ -1148,6 +1152,87 @@ class DashboardService:
             item["protocol"] = protocol
             item["fase_procedimiento"] = fase
         return items
+
+    def _prune_completed_blacklist_items(self, items: list[dict[str, Any]]) -> int:
+        """
+        Limpieza oportunista para la pantalla de bloqueos.
+
+        Si un recurso bloqueado ya aparece como completado en XVIA/SQL Server
+        (RecursosExp.Estado = 2), el bloqueo operativo ya no aporta valor y
+        puede ocultar ruido antiguo. Ante cualquier fallo de SQL Server o dato
+        ambiguo, no se borra nada.
+        """
+        resource_ids: list[int] = []
+        for item in items or []:
+            try:
+                rid = int(item.get("resource_id"))
+            except Exception:
+                continue
+            resource_ids.append(rid)
+        if not resource_ids or not self.sqlserver_conn_str:
+            return 0
+
+        try:
+            completed_ids = self._get_completed_xvia_resource_ids(resource_ids)
+        except Exception as exc:
+            self.logger.warning("No se pudo limpiar blacklist contra XVIA/SQL Server: %s", exc)
+            return 0
+        if not completed_ids:
+            return 0
+
+        pruned = 0
+        for item in items or []:
+            try:
+                rid = int(item.get("resource_id"))
+            except Exception:
+                continue
+            if rid not in completed_ids:
+                continue
+            site = str(item.get("site_id") or "").strip()
+            if not site:
+                continue
+            try:
+                if self.admin_store.unblock_resource(site_id=site, resource_id=rid):
+                    pruned += 1
+            except Exception as exc:
+                self.logger.warning(
+                    "No se pudo eliminar bloqueo completado site=%s resource_id=%s: %s",
+                    site,
+                    rid,
+                    exc,
+                )
+        return pruned
+
+    def _get_completed_xvia_resource_ids(self, resource_ids: list[int]) -> set[int]:
+        ids = sorted({int(rid) for rid in resource_ids})
+        if not ids:
+            return set()
+
+        import pyodbc
+
+        completed: set[int] = set()
+        batch_size = 500
+        conn = pyodbc.connect(self.sqlserver_conn_str, autocommit=True)
+        try:
+            cur = conn.cursor()
+            for start in range(0, len(ids), batch_size):
+                batch = ids[start : start + batch_size]
+                placeholders = ",".join(["?"] * len(batch))
+                cur.execute(
+                    f"""
+                    SELECT rs.idRecurso
+                    FROM Recursos.RecursosExp rs
+                    WHERE rs.idRecurso IN ({placeholders})
+                      AND rs.Estado = 2
+                    """,
+                    *batch,
+                )
+                for row in cur.fetchall():
+                    if row and row[0] is not None:
+                        completed.add(int(row[0]))
+        finally:
+            conn.close()
+        return completed
 
     def block_blacklist(
         self,
