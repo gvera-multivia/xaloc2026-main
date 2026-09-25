@@ -527,7 +527,7 @@ class PgRuntimeStore:
         superaron ``max_attempts``. Cuando un operador desbloquea manualmente
         un recurso desde el dashboard, esa accion es la señal explicita para
         cerrar cualquier job anterior de ese recurso y permitir que el brain
-        cree un job nuevo con contador de intentos limpio.
+        cree o reutilice un job con contador de intentos limpio.
         """
         site = str(site_id or "").strip()
         rid = int(resource_id)
@@ -536,42 +536,66 @@ class PgRuntimeStore:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    UPDATE jobs
-                    SET status = 'cancelled',
-                        updated_at = NOW(),
-                        error_message = CASE
-                            WHEN COALESCE(error_message, '') = '' THEN %s
-                            ELSE error_message || ' | ' || %s
-                        END
-                    WHERE status IN (
-                        'queued',
-                        'processing',
-                        'in_progress',
-                        'dead',
-                        'failed',
-                        'dead_letter'
-                    )
-                      AND COALESCE(payload_json->>'site_id', split_part(dedup_key, ':', 1), '') = %s
-                      AND COALESCE(
-                            CASE
-                                WHEN (payload_json->>'idRecurso') ~ '^[0-9]+$'
-                                    THEN (payload_json->>'idRecurso')::bigint
-                                WHEN (payload_json->>'idRecurso') ~ '^[0-9]+\\.0+$'
-                                    THEN ((payload_json->>'idRecurso')::numeric)::bigint
-                                ELSE NULL
-                            END,
-                            CASE
-                                WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+$'
-                                    THEN split_part(dedup_key, ':', 2)::bigint
-                                WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+\\.0+$'
-                                    THEN (split_part(dedup_key, ':', 2)::numeric)::bigint
-                                ELSE NULL
+                    WITH target_jobs AS (
+                        SELECT id
+                        FROM jobs
+                        WHERE status IN (
+                            'queued',
+                            'processing',
+                            'in_progress',
+                            'dead',
+                            'failed',
+                            'dead_letter',
+                            'cancelled'
+                        )
+                          AND COALESCE(payload_json->>'site_id', split_part(dedup_key, ':', 1), '') = %s
+                          AND COALESCE(
+                                CASE
+                                    WHEN (payload_json->>'idRecurso') ~ '^[0-9]+$'
+                                        THEN (payload_json->>'idRecurso')::bigint
+                                    WHEN (payload_json->>'idRecurso') ~ '^[0-9]+\\.0+$'
+                                        THEN ((payload_json->>'idRecurso')::numeric)::bigint
+                                    ELSE NULL
+                                END,
+                                CASE
+                                    WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+$'
+                                        THEN split_part(dedup_key, ':', 2)::bigint
+                                    WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+\\.0+$'
+                                        THEN (split_part(dedup_key, ':', 2)::numeric)::bigint
+                                    ELSE NULL
+                                END
+                          ) = %s
+                        FOR UPDATE
+                    ),
+                    deleted_attempts AS (
+                        DELETE FROM job_attempts ja
+                        USING target_jobs tj
+                        WHERE ja.job_id = tj.id
+                        RETURNING 1
+                    ),
+                    updated_jobs AS (
+                        UPDATE jobs j
+                        SET status = 'cancelled',
+                            queued_at = NULL,
+                            started_at = NULL,
+                            finished_at = COALESCE(j.finished_at, NOW()),
+                            updated_at = NOW(),
+                            error_message = CASE
+                                WHEN COALESCE(j.error_message, '') = '' THEN %s
+                                ELSE j.error_message || ' | ' || %s
                             END
-                      ) = %s
+                        FROM target_jobs tj
+                        WHERE j.id = tj.id
+                        RETURNING 1
+                    )
+                    SELECT
+                        (SELECT COUNT(*) FROM updated_jobs) AS jobs_updated,
+                        (SELECT COUNT(*) FROM deleted_attempts) AS attempts_deleted
                     """,
-                    (note, note, site, rid),
+                    (site, rid, note, note),
                 )
-                updated = int(cur.rowcount or 0)
+                row = cur.fetchone()
+                updated = int(row[0] if row and row[0] is not None else 0)
             conn.commit()
         return updated
 
