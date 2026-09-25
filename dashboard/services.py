@@ -1293,14 +1293,14 @@ class DashboardService:
                 )
                 if cleared_terminal:
                     self.logger.info(
-                        "Jobs terminales cancelados tras desbloqueo manual site=%s resource_id=%s count=%s",
+                        "Jobs previos cancelados tras desbloqueo manual site=%s resource_id=%s count=%s",
                         site,
                         rid,
                         cleared_terminal,
                     )
             except Exception as exc:
                 self.logger.warning(
-                    "No se pudieron cancelar jobs terminales tras desbloqueo site=%s resource_id=%s: %s",
+                    "No se pudieron cancelar jobs previos tras desbloqueo site=%s resource_id=%s: %s",
                     site,
                     rid,
                     exc,

@@ -520,11 +520,14 @@ class PgRuntimeStore:
         resource_id: int,
         reason: str = "manual_unblock_allows_retry",
     ) -> int:
-        """Marca fallos terminales como cancelados para permitir un retry manual.
+        """Archiva jobs previos de un recurso para permitir un retry manual limpio.
 
-        La proteccion anti-requeue bloquea recursos con jobs ``dead/failed``.
-        Cuando un operador desbloquea manualmente un recurso desde el dashboard,
-        esa accion es la señal explicita para permitir un nuevo ciclo.
+        La proteccion anti-requeue bloquea recursos con jobs ``dead/failed`` y
+        el guard de intentos agotados bloquea jobs activos cuyos attempts ya
+        superaron ``max_attempts``. Cuando un operador desbloquea manualmente
+        un recurso desde el dashboard, esa accion es la señal explicita para
+        cerrar cualquier job anterior de ese recurso y permitir que el brain
+        cree un job nuevo con contador de intentos limpio.
         """
         site = str(site_id or "").strip()
         rid = int(resource_id)
@@ -540,7 +543,14 @@ class PgRuntimeStore:
                             WHEN COALESCE(error_message, '') = '' THEN %s
                             ELSE error_message || ' | ' || %s
                         END
-                    WHERE status IN ('dead', 'failed', 'dead_letter')
+                    WHERE status IN (
+                        'queued',
+                        'processing',
+                        'in_progress',
+                        'dead',
+                        'failed',
+                        'dead_letter'
+                    )
                       AND COALESCE(payload_json->>'site_id', split_part(dedup_key, ':', 1), '') = %s
                       AND COALESCE(
                             CASE
