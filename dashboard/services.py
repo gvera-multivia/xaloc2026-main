@@ -1286,6 +1286,26 @@ class DashboardService:
 
             self._clear_resource_dedupe_keys(site_id=site, resource_id=rid)
             try:
+                cleared_terminal = self.runtime_store.clear_terminal_failed_jobs_for_resource(
+                    site_id=site,
+                    resource_id=rid,
+                    reason="manual_blacklist_unblock_allows_retry",
+                )
+                if cleared_terminal:
+                    self.logger.info(
+                        "Jobs terminales cancelados tras desbloqueo manual site=%s resource_id=%s count=%s",
+                        site,
+                        rid,
+                        cleared_terminal,
+                    )
+            except Exception as exc:
+                self.logger.warning(
+                    "No se pudieron cancelar jobs terminales tras desbloqueo site=%s resource_id=%s: %s",
+                    site,
+                    rid,
+                    exc,
+                )
+            try:
                 # Al desbloquear, limpiar la incidencia operativa asociada para
                 # evitar que quede pendiente visualmente aunque ya no este bloqueado.
                 self.incidents_history_repo.clear_incident(

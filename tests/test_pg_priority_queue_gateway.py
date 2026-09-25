@@ -12,6 +12,7 @@ class FakeRuntimeStore:
         self.enqueue_calls = []
         self.next_job = None
         self.active = False
+        self.terminal_failed = False
         self.statuses = {}
 
     def reserve_next_job(self, *, business_today, worker_id):
@@ -35,6 +36,9 @@ class FakeRuntimeStore:
 
     def has_active_job_for_resource(self, **kwargs):
         return self.active
+
+    def has_terminal_failed_job_for_resource(self, **kwargs):
+        return self.terminal_failed
 
     def count_job_runs(self, site_id, states):
         return 4
@@ -112,6 +116,23 @@ def test_enqueue_skips_resource_with_active_job():
 def test_enqueue_rejects_resource_with_active_postgres_job():
     db = FakeRuntimeStore()
     db.active = True
+    gateway = PgPriorityQueueGateway(db)
+
+    enqueued, _ = asyncio.run(
+        gateway.enqueue(
+            site_id="madrid",
+            protocol="P1",
+            payload={"idRecurso": 99},
+        )
+    )
+
+    assert enqueued is False
+    assert db.enqueue_calls == []
+
+
+def test_enqueue_skips_resource_with_terminal_failed_job():
+    db = FakeRuntimeStore()
+    db.terminal_failed = True
     gateway = PgPriorityQueueGateway(db)
 
     enqueued, _ = asyncio.run(

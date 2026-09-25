@@ -54,12 +54,21 @@ class _FakeAdminStore:
 
 
 class _FakeRuntimeStore:
-    def __init__(self, *, active_resource_ids: set[int] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        active_resource_ids: set[int] | None = None,
+        terminal_failed_resource_ids: set[int] | None = None,
+    ) -> None:
         self.active_resource_ids = set(active_resource_ids or set())
+        self.terminal_failed_resource_ids = set(terminal_failed_resource_ids or set())
         self.repaired_submission_dates: list[tuple[str, int, str]] = []
 
     def purge_completed_resources_from_operational_tables(self) -> dict[str, int]:
         return {"deleted_total": 0}
+
+    def mark_over_attempt_active_jobs_dead(self, **_: Any) -> dict[str, int]:
+        return {"jobs_marked": 0, "blocks_upserted": 0}
 
     def is_site_processing_paused(self, **_: Any) -> bool:
         return False
@@ -78,6 +87,9 @@ class _FakeRuntimeStore:
 
     def has_active_job_for_resource(self, **kwargs: Any) -> bool:
         return int(kwargs.get("resource_id") or 0) in self.active_resource_ids
+
+    def has_terminal_failed_job_for_resource(self, **kwargs: Any) -> bool:
+        return int(kwargs.get("resource_id") or 0) in self.terminal_failed_resource_ids
 
     def repair_active_job_submission_date(self, **kwargs: Any) -> int:
         self.repaired_submission_dates.append(
@@ -116,12 +128,16 @@ def _make_service(
     max_claims: int,
     site_limits: dict[str, int] | None = None,
     active_resource_ids: set[int] | None = None,
+    terminal_failed_resource_ids: set[int] | None = None,
 ) -> BrainClaimService:
     service = BrainClaimService.__new__(BrainClaimService)
     service.adapters = {adapter.site_id: adapter for adapter in adapters}
     service.max_claims = max_claims
     service.admin_store = _FakeAdminStore()
-    service.runtime_store = _FakeRuntimeStore(active_resource_ids=active_resource_ids)
+    service.runtime_store = _FakeRuntimeStore(
+        active_resource_ids=active_resource_ids,
+        terminal_failed_resource_ids=terminal_failed_resource_ids,
+    )
     service.realtime_store = SimpleNamespace(clear_incident=lambda **_: None)
     service.streams = _FakeStreams()
     service.resource_repo = object()
@@ -286,3 +302,25 @@ def test_run_tick_repairs_submission_date_for_active_job_before_dedup_skip() -> 
     assert service.runtime_store.repaired_submission_dates == [
         ("site_a", 50, today.isoformat())
     ]
+
+
+def test_run_tick_skips_terminal_failed_resource_before_claim() -> None:
+    today = business_today()
+    events: list[str] = []
+    site = _FakeAdapter(
+        site_id="site_a",
+        priority=0,
+        events=events,
+        candidates=[_candidate(60, today.isoformat())],
+    )
+    service = _make_service(
+        adapters=[site],
+        max_claims=1,
+        terminal_failed_resource_ids={60},
+    )
+
+    stats = asyncio.run(service.run_tick())
+
+    assert stats["claimed"] == 0
+    assert service.streams.published == []
+    assert [event for event in events if event.startswith("claim:")] == []

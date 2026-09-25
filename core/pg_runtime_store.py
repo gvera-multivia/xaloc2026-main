@@ -220,16 +220,28 @@ class PgRuntimeStore:
         if not worker:
             raise ValueError("worker_id es obligatorio")
 
+        self.mark_over_attempt_active_jobs_dead(limit=100)
+
         site_expr = self._job_site_expr()
         resource_expr = self._job_resource_expr()
+        max_attempts_expr = (
+            "COALESCE("
+            "CASE WHEN (j.payload_json->>'max_attempts') ~ '^[0-9]+$' "
+            "THEN (j.payload_json->>'max_attempts')::integer END,"
+            "3)"
+        )
+        latest_attempt_expr = (
+            "COALESCE((SELECT MAX(ja.attempt_no) FROM job_attempts ja WHERE ja.job_id = j.id), -1)"
+        )
         with self._conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     f"""
                     WITH next_job AS (
                         SELECT j.id
-                        FROM jobs j
-                        WHERE j.status = 'queued'
+                    FROM jobs j
+                    WHERE j.status = 'queued'
+                          AND {latest_attempt_expr} < {max_attempts_expr}
                           AND NOT EXISTS (
                               SELECT 1
                               FROM organismo_config oc
@@ -322,6 +334,123 @@ class PgRuntimeStore:
             "attempt": attempt,
         }
 
+    def mark_over_attempt_active_jobs_dead(
+        self,
+        *,
+        limit: int = 100,
+        reason_prefix: str = "retry_attempt_guard",
+    ) -> dict[str, int]:
+        """Corta jobs activos que ya superaron el maximo de intentos.
+
+        El worker muestra el intento como ``attempt_no + 1``. Por tanto, si
+        ``MAX(attempt_no) >= max_attempts`` el siguiente procesamiento seria
+        ``(max_attempts + 1) / max_attempts`` y debe bloquearse antes de
+        ejecutar nada mas.
+        """
+        scan_limit = max(1, int(limit))
+        site_expr = self._job_site_expr()
+        resource_expr = self._job_resource_expr()
+        site_expr_j = site_expr.replace("payload_json", "j.payload_json").replace("dedup_key", "j.dedup_key")
+        resource_expr_j = resource_expr.replace("payload_json", "j.payload_json").replace("dedup_key", "j.dedup_key")
+        max_attempts_expr = (
+            "COALESCE("
+            "CASE WHEN (j.payload_json->>'max_attempts') ~ '^[0-9]+$' "
+            "THEN (j.payload_json->>'max_attempts')::integer END,"
+            "3)"
+        )
+        latest_attempt_expr = (
+            "COALESCE((SELECT MAX(ja.attempt_no) FROM job_attempts ja WHERE ja.job_id = j.id), -1)"
+        )
+        reason = (
+            f"{reason_prefix}: job activo con intentos agotados "
+            f"(MAX(attempt_no) >= max_attempts)."
+        )
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    WITH over_attempt AS (
+                        SELECT
+                            j.id,
+                            j.job_id,
+                            {site_expr_j} AS site_id,
+                            {resource_expr_j} AS resource_id,
+                            {latest_attempt_expr} AS latest_attempt,
+                            {max_attempts_expr} AS max_attempts
+                        FROM jobs j
+                        WHERE j.status IN ('queued', 'processing', 'in_progress')
+                          AND {latest_attempt_expr} >= {max_attempts_expr}
+                        ORDER BY j.updated_at ASC, j.id ASC
+                        LIMIT %s
+                        FOR UPDATE SKIP LOCKED
+                    ),
+                    updated_jobs AS (
+                        UPDATE jobs j
+                        SET status = 'dead',
+                            finished_at = COALESCE(j.finished_at, NOW()),
+                            updated_at = NOW(),
+                            error_message = CASE
+                                WHEN COALESCE(j.error_message, '') = '' THEN
+                                    %s || ' latest_attempt=' || oa.latest_attempt::text
+                                    || ' max_attempts=' || oa.max_attempts::text
+                                ELSE j.error_message
+                            END
+                        FROM over_attempt oa
+                        WHERE j.id = oa.id
+                        RETURNING oa.id, oa.site_id, oa.resource_id, oa.latest_attempt, oa.max_attempts
+                    ),
+                    updated_attempts AS (
+                        UPDATE job_attempts ja
+                        SET status = 'dead',
+                            error_message = CASE
+                                WHEN COALESCE(ja.error_message, '') = '' THEN
+                                    %s || ' latest_attempt=' || uj.latest_attempt::text
+                                    || ' max_attempts=' || uj.max_attempts::text
+                                ELSE ja.error_message
+                            END,
+                            ended_at = COALESCE(ja.ended_at, NOW())
+                        FROM updated_jobs uj
+                        WHERE ja.id = (
+                            SELECT ja2.id
+                            FROM job_attempts ja2
+                            WHERE ja2.job_id = uj.id
+                            ORDER BY ja2.attempt_no DESC, ja2.id DESC
+                            LIMIT 1
+                        )
+                        RETURNING 1
+                    ),
+                    inserted_blocks AS (
+                        INSERT INTO blocked_resources (site_id, resource_id, reason, source, created_at, updated_at)
+                        SELECT
+                            uj.site_id,
+                            uj.resource_id,
+                            %s || ' latest_attempt=' || uj.latest_attempt::text
+                                || ' max_attempts=' || uj.max_attempts::text,
+                            %s,
+                            NOW(),
+                            NOW()
+                        FROM updated_jobs uj
+                        WHERE uj.site_id <> ''
+                          AND uj.resource_id IS NOT NULL
+                        ON CONFLICT (site_id, resource_id) DO UPDATE SET
+                            reason = EXCLUDED.reason,
+                            source = EXCLUDED.source,
+                            updated_at = NOW()
+                        RETURNING 1
+                    )
+                    SELECT
+                        (SELECT COUNT(*) FROM updated_jobs) AS jobs_marked,
+                        (SELECT COUNT(*) FROM inserted_blocks) AS blocks_upserted
+                    """,
+                    (scan_limit, reason, reason, reason, str(reason_prefix)),
+                )
+                row = cur.fetchone()
+            conn.commit()
+
+        jobs_marked = int(row[0] if row and row[0] is not None else 0)
+        blocks_upserted = int(row[1] if row and row[1] is not None else 0)
+        return {"jobs_marked": jobs_marked, "blocks_upserted": blocks_upserted}
+
     def has_active_job_for_resource(self, *, site_id: str, resource_id: int) -> bool:
         with self._conn() as conn:
             with conn.cursor() as cur:
@@ -352,6 +481,89 @@ class PgRuntimeStore:
                     (str(site_id), int(resource_id)),
                 )
                 return cur.fetchone() is not None
+
+    def has_terminal_failed_job_for_resource(self, *, site_id: str, resource_id: int) -> bool:
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT 1
+                    FROM jobs
+                    WHERE status IN ('dead', 'failed', 'dead_letter')
+                      AND COALESCE(payload_json->>'site_id', split_part(dedup_key, ':', 1), '') = %s
+                      AND COALESCE(
+                            CASE
+                                WHEN (payload_json->>'idRecurso') ~ '^[0-9]+$'
+                                    THEN (payload_json->>'idRecurso')::bigint
+                                WHEN (payload_json->>'idRecurso') ~ '^[0-9]+\\.0+$'
+                                    THEN ((payload_json->>'idRecurso')::numeric)::bigint
+                                ELSE NULL
+                            END,
+                            CASE
+                                WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+$'
+                                    THEN split_part(dedup_key, ':', 2)::bigint
+                                WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+\\.0+$'
+                                    THEN (split_part(dedup_key, ':', 2)::numeric)::bigint
+                                ELSE NULL
+                            END
+                      ) = %s
+                    LIMIT 1
+                    """,
+                    (str(site_id), int(resource_id)),
+                )
+                return cur.fetchone() is not None
+
+    def clear_terminal_failed_jobs_for_resource(
+        self,
+        *,
+        site_id: str,
+        resource_id: int,
+        reason: str = "manual_unblock_allows_retry",
+    ) -> int:
+        """Marca fallos terminales como cancelados para permitir un retry manual.
+
+        La proteccion anti-requeue bloquea recursos con jobs ``dead/failed``.
+        Cuando un operador desbloquea manualmente un recurso desde el dashboard,
+        esa accion es la señal explicita para permitir un nuevo ciclo.
+        """
+        site = str(site_id or "").strip()
+        rid = int(resource_id)
+        note = str(reason or "manual_unblock_allows_retry").strip()
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE jobs
+                    SET status = 'cancelled',
+                        updated_at = NOW(),
+                        error_message = CASE
+                            WHEN COALESCE(error_message, '') = '' THEN %s
+                            ELSE error_message || ' | ' || %s
+                        END
+                    WHERE status IN ('dead', 'failed', 'dead_letter')
+                      AND COALESCE(payload_json->>'site_id', split_part(dedup_key, ':', 1), '') = %s
+                      AND COALESCE(
+                            CASE
+                                WHEN (payload_json->>'idRecurso') ~ '^[0-9]+$'
+                                    THEN (payload_json->>'idRecurso')::bigint
+                                WHEN (payload_json->>'idRecurso') ~ '^[0-9]+\\.0+$'
+                                    THEN ((payload_json->>'idRecurso')::numeric)::bigint
+                                ELSE NULL
+                            END,
+                            CASE
+                                WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+$'
+                                    THEN split_part(dedup_key, ':', 2)::bigint
+                                WHEN NULLIF(split_part(dedup_key, ':', 2), 'none') ~ '^[0-9]+\\.0+$'
+                                    THEN (split_part(dedup_key, ':', 2)::numeric)::bigint
+                                ELSE NULL
+                            END
+                      ) = %s
+                    """,
+                    (note, note, site, rid),
+                )
+                updated = int(cur.rowcount or 0)
+            conn.commit()
+        return updated
 
     def get_active_job_resource_ids(self, *, site_id: str, resource_ids: list[int]) -> set[int]:
         ids = sorted({int(x) for x in (resource_ids or [])})

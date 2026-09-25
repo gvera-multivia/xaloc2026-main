@@ -559,13 +559,25 @@ class BrainClaimService:
                 "deleted_pending_auth": 0,
                 "deleted_incidents": 0,
                 "deleted_total": 0,
+                "over_attempt_jobs_marked": 0,
+                "over_attempt_blocks_upserted": 0,
             },
         }
         try:
             cleanup = self.runtime_store.purge_completed_resources_from_operational_tables()
+            mark_over_attempt = getattr(self.runtime_store, "mark_over_attempt_active_jobs_dead", None)
+            if callable(mark_over_attempt):
+                over_attempt_cleanup = mark_over_attempt(
+                    limit=100,
+                    reason_prefix="brain_claim_retry_attempt_guard",
+                )
+                cleanup["over_attempt_jobs_marked"] = int(over_attempt_cleanup.get("jobs_marked") or 0)
+                cleanup["over_attempt_blocks_upserted"] = int(over_attempt_cleanup.get("blocks_upserted") or 0)
             stats["cleanup"] = cleanup
             if int(cleanup.get("deleted_total") or 0) > 0:
                 logger.info("[brain-claim] cleanup completados en tick: %s", cleanup)
+            if int(cleanup.get("over_attempt_jobs_marked") or 0) > 0:
+                logger.warning("[brain-claim] cleanup intentos agotados en tick: %s", cleanup)
         except Exception as exc:
             logger.warning("[brain-claim] fallo en cleanup de completados: %s", exc)
 
@@ -678,6 +690,17 @@ class BrainClaimService:
                     if not self.is_still_claimable_in_db(resource_id):
                         logger.info(
                             "[%s] descartado idRecurso=%s por no estar reclamable en SQL Server (preparacion).",
+                            site_id,
+                            resource_id,
+                        )
+                        continue
+                    has_terminal_failed = getattr(self.runtime_store, "has_terminal_failed_job_for_resource", None)
+                    if callable(has_terminal_failed) and has_terminal_failed(
+                        site_id=site_id,
+                        resource_id=resource_id,
+                    ):
+                        logger.info(
+                            "[%s] descartado idRecurso=%s por fallo terminal previo (dead/failed).",
                             site_id,
                             resource_id,
                         )
@@ -799,6 +822,17 @@ class BrainClaimService:
             if not self.is_still_claimable_in_db(resource_id):
                 logger.info(
                     "[%s] descartado idRecurso=%s por no estar reclamable en SQL Server (pre-claim).",
+                    site_id,
+                    resource_id,
+                )
+                continue
+            has_terminal_failed = getattr(self.runtime_store, "has_terminal_failed_job_for_resource", None)
+            if callable(has_terminal_failed) and has_terminal_failed(
+                site_id=site_id,
+                resource_id=resource_id,
+            ):
+                logger.info(
+                    "[%s] descartado idRecurso=%s por fallo terminal previo (dead/failed) antes de claim.",
                     site_id,
                     resource_id,
                 )

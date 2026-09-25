@@ -53,6 +53,12 @@ class PgPriorityQueueGateway(QueueGateway):
             resource_id=resource_id,
         ):
             return False, job_id
+        has_terminal_failed = getattr(self.db, "has_terminal_failed_job_for_resource", None)
+        if resource_id is not None and callable(has_terminal_failed) and has_terminal_failed(
+            site_id=site_id,
+            resource_id=resource_id,
+        ):
+            return False, job_id
         if resource_id is not None and self.db.has_active_job_for_resource(
             site_id=site_id,
             resource_id=resource_id,
