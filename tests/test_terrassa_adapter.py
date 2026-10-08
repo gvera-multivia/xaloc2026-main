@@ -164,6 +164,50 @@ def test_terrassa_fetch_candidates_accepts_pc_plus_eight_digits() -> None:
     assert discarded == []
 
 
+def test_terrassa_fetch_candidates_accepts_reported_pj_and_pa_shapes() -> None:
+    adapter = TerrassaAdapter()
+    rows = [
+        {**_base_row(), "idRecurso": 138940, "Expedient": "PJ6985546"},
+        {**_base_row(), "idRecurso": 138274, "Expedient": "PA2026T68302021"},
+        {**_base_row(), "idRecurso": 138273, "Expedient": "PA2026T68309731"},
+        {**_base_row(), "idRecurso": 138272, "Expedient": "PA2026T68313350"},
+        {**_base_row(), "idRecurso": 138271, "Expedient": "PA2026T68304342"},
+        {**_base_row(), "idRecurso": 138270, "Expedient": "PA2026T68305638"},
+        {**_base_row(), "idRecurso": 138269, "Expedient": "PA2026T68315845"},
+    ]
+    repo = _LegacyRepo(rows)
+    discarded: list[dict[str, Any]] = []
+
+    candidates = adapter.fetch_candidates(
+        config={},
+        conn_str="unused",
+        authenticated_user=None,
+        limit=10,
+        resource_repo=repo,
+        on_discard=lambda item: discarded.append(item),
+    )
+
+    assert [candidate["idRecurso"] for candidate in candidates] == [
+        138940,
+        138274,
+        138273,
+        138272,
+        138271,
+        138270,
+        138269,
+    ]
+    assert [candidate["Expedient"] for candidate in candidates] == [
+        "PJ6985546",
+        "PA2026T68302021",
+        "PA2026T68309731",
+        "PA2026T68313350",
+        "PA2026T68304342",
+        "PA2026T68305638",
+        "PA2026T68315845",
+    ]
+    assert discarded == []
+
+
 def test_terrassa_fetch_candidates_accepts_ec_and_ee_v_shapes() -> None:
     adapter = TerrassaAdapter()
     rows = [
