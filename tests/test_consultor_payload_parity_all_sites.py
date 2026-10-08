@@ -449,6 +449,47 @@ def test_base_online_fetch_candidates_upgrades_legacy_pg_regex_for_short_gim() -
     assert discarded == []
 
 
+def test_base_online_accepts_and_parses_compact_gim_expediente() -> None:
+    adapter = BaseOnlineAdapter()
+    configured_regex = (
+        r"^(\d{5}-\d{4}[/\-]\d{1,5}-GIM|\d{5}-\d{4}/\d{1,5}|\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{7}|\d-\d{4}[/\-]\d{4,6}-(EXE|ECC))$"
+    )
+    row = {
+        "idRecurso": 139838,
+        "idExp": 5003,
+        "Expedient": "43185-202635924-GIM",
+        "Organisme": "BASE GESTION INGRESOS",
+        "TExp": 2,
+        "Estado": 0,
+        "numclient": 12347,
+        "SujetoRecurso": "CLIENTE TEST",
+        "FaseProcedimiento": "Alegaciones",
+        "UsuarioAsignado": "",
+    }
+    legacy_repo = _LegacyRepo([row])
+    discarded: list[dict[str, Any]] = []
+
+    candidates = adapter.fetch_candidates(
+        config={"regex_expediente": configured_regex},
+        conn_str="unused",
+        authenticated_user=None,
+        limit=10,
+        resource_repo=legacy_repo,
+        on_discard=lambda item: discarded.append(item),
+    )
+
+    assert [candidate["idRecurso"] for candidate in candidates] == [139838]
+    assert discarded == []
+    assert adapter._valida_expediente_base("43185-202635924-GIM")
+    assert adapter._valida_expediente_gim("43185-202635924-GIM")
+    assert adapter._parse_expediente_base("43185-202635924-GIM") == {
+        "expediente_id_ens": "43185",
+        "expediente_any": "2026",
+        "expediente_num": "35924",
+        "num_butlleti": "43185-202635924-GIM",
+    }
+
+
 def test_base_online_build_payloads_p1_accepts_no_gim_and_parses_parts(monkeypatch) -> None:
     adapter = BaseOnlineAdapter()
     monkeypatch.setattr(adapter._groq_guardian, "classify_batch", _fake_classify_batch)

@@ -19,10 +19,11 @@ logger = logging.getLogger("brain")
 
 
 class BaseOnlineAdapter(SiteAdapter):
-    DEFAULT_REGEX_EXPEDIENTE = r"^\s*(\d{5}-\d{4}[/\-]\d{1,5}-GIM|\d{5}-\d{4}/\d{1,5}|\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{6,7}|\d-\d{4}[/\-]\d{4,6}-(EXE|ECC))\s*$"
+    DEFAULT_REGEX_EXPEDIENTE = r"^\s*(\d{5}-\d{4}[/\-]\d{1,5}-GIM|\d{5}-\d{9}-GIM|\d{5}-\d{4}/\d{1,5}|\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{6,7}|\d-\d{4}[/\-]\d{4,6}-(EXE|ECC))\s*$"
     _LEGACY_REGEX_EXPEDIENTE_VARIANTS: tuple[str, ...] = (
         r"^\s*(\d{5}-\d{4}[/\-]\d{4,5}-GIM|\d{5}-\d{4}/\d{1,5}|\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{6,7}|\d-\d{4}[/\-]\d{4,6}-(EXE|ECC))\s*$",
         r"^(\d{5}-\d{4}[/\-]\d{4,5}-GIM|\d{5}-\d{4}/\d{1,5}|\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{6,7}|\d-\d{4}[/\-]\d{4,6}-(EXE|ECC))$",
+        r"^(\d{5}-\d{4}[/\-]\d{1,5}-GIM|\d{5}-\d{4}/\d{1,5}|\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{7}|\d-\d{4}[/\-]\d{4,6}-(EXE|ECC))$",
         r"^(\d{5}-\d{4}[/\-]\d{1,5}-GIM|\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{7}|\d-\d{4}[/\-]\d{4,6}-(EXE|ECC))$",
         r"^(\d{5}-\d{4}[/\-]\d{1,5}-GIM|\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{6,7}|\d-\d{4}[/\-]\d{4,6}-(EXE|ECC))$",
         r"^\s*(\d{5}-\d{4}[/\-]\d{1,5}-GIM|\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{7}|\d-\d{4}[/\-]\d{4,6}-(EXE|ECC))\s*$",
@@ -173,6 +174,8 @@ class BaseOnlineAdapter(SiteAdapter):
         exp = cls._clean_str(expediente).upper()
         if re.match(r"^\d{5}-\d{4}[/\-]\d{3,5}-GIM$", exp):
             return True
+        if re.match(r"^\d{5}-\d{9}-GIM$", exp):
+            return True
         if re.match(r"^\d{5}-\d{4}/\d{1,5}$", exp):
             return True
         if re.match(r"^\d{2}-\d{3}-\d{3}-\d{4}-\d{2}-\d{7}$", exp):
@@ -184,7 +187,7 @@ class BaseOnlineAdapter(SiteAdapter):
     @classmethod
     def _valida_expediente_gim(cls, expediente: str) -> bool:
         exp = cls._clean_str(expediente).upper()
-        return bool(re.match(r"^\d{5}-\d{4}[/\-]\d{1,5}(?:-GIM)?$", exp))
+        return bool(re.match(r"^\d{5}-(?:\d{4}[/\-]\d{1,5}(?:-GIM)?|\d{9}-GIM)$", exp))
 
     @classmethod
     def _materialize_from_canonical_if_present(cls, record: dict[str, Any]) -> dict[str, Any]:
@@ -255,6 +258,14 @@ class BaseOnlineAdapter(SiteAdapter):
 
     def _parse_expediente_base(self, expediente: str) -> dict:
         exp = self._clean_str(expediente).upper()
+        m_gim_compact = re.match(r"^(?P<id_ens>\d{5})-(?P<any>\d{4})(?P<num>\d{5})-GIM$", exp)
+        if m_gim_compact:
+            return {
+                "expediente_id_ens": m_gim_compact.group("id_ens"),
+                "expediente_any": m_gim_compact.group("any"),
+                "expediente_num": m_gim_compact.group("num"),
+                "num_butlleti": exp,
+            }
         m_gim = re.match(r"^(?P<id_ens>\d{5})-(?P<any>\d{4})[/\-](?P<num>\d{1,5})-GIM$", exp)
         if m_gim:
             return {
