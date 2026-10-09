@@ -435,7 +435,8 @@ class BaseOnlineAdapter(SiteAdapter):
         payloads: list[dict] = []
         for r in candidates:
             fase_raw = self._clean_str(r.get("FaseProcedimiento"))
-            expediente_raw = self._clean_str(r.get("Expedient"))
+            # Full hydration can restore whitespace removed by fetch_candidates.
+            expediente_raw = re.sub(r"\s+", "", self._clean_str(r.get("Expedient")).upper())
             protocolo = self._determina_protocolo(fase_raw)
 
             exp_parts = self._parse_expediente_base(expediente_raw)
